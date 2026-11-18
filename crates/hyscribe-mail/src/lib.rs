@@ -19,10 +19,12 @@
 //! - the notice of `after_password_reset` (`login/reset.rs`), [`password_reset_to_admin`]
 //! - [`notify_postauthor`], [`notify_moderator`]: `comment_post` of the
 //!   comment form (`comment_post.rs`); hs-admin's replies send none yet
-//! - not sent yet: [`password_changed`] and [`email_changed`]
-//!   (`wp_update_user()` of another user's edit), and the personal data
-//!   requests' [`user_request`], [`request_confirmed`],
-//!   [`erasure_fulfilled`] and [`export_ready`]
+//! - [`password_changed`], [`email_changed`]: `wp_update_user()` of Edit
+//!   User and the profile (`saves/user_edit.rs`) and of the REST API's
+//!   user updates (`rest/writes.rs`)
+//! - not sent yet: the personal data requests' [`user_request`],
+//!   [`request_confirmed`], [`erasure_fulfilled`] and [`export_ready`],
+//!   whose actions are not ported (they answer 501)
 
 mod comments;
 mod decode;

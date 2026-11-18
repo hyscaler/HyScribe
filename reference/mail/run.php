@@ -7,6 +7,7 @@
 // as the write oracle escapes, with random keys, hashes, request IDs and the
 // export's expiry date masked. A case that sends nothing prints `case\t-`.
 //   php run.php                  the cases, one per line
+//   php run.php flows            the saves that send them, one per line
 //   php run.php <case> <blog>    one case, blog `plain`, `odd` or `empty`
 //   php run.php decode           wp_specialchars_decode()'s cases, in hex
 
@@ -343,10 +344,90 @@ require '/var/www/html/wp-load.php';
 			wp_privacy_send_personal_data_export_email( $id );
 		},
 	);
+
+	// The saves that send them, as user-edit.php and profile.php run
+	// edit_user() over $_POST, slashed as wp_magic_quotes() leaves it.
+	$edit = function ( $id, $email, $pass ) {
+		$_POST = wp_slash(
+			array(
+				'user_id'      => $id,
+				'email'        => $email,
+				'nickname'     => 'nick',
+				'display_name' => 'nick',
+				'pass1'        => $pass,
+				'pass2'        => $pass,
+			)
+		);
+		if ( get_current_user_id() === $id ) {
+			send_confirmation_on_profile_email( $id );
+		}
+		edit_user( $id );
+	};
+	// The REST API's update of a user by the admin, with `$params`.
+	$rest = function ( $id, $params ) {
+		wp_set_current_user( 1 );
+		$request = new WP_REST_Request( 'PUT', "/wp/v2/users/$id" );
+		$request->set_body_params( $params );
+		$status = rest_do_request( $request )->get_status();
+		if ( 200 !== $status ) {
+			fwrite( STDERR, "REST answered $status\n" );
+			exit( 1 );
+		}
+	};
+	$flows = array(
+		'edit-user-password' => function () use ( $odd_user, $edit ) {
+			wp_set_current_user( 1 );
+			$edit( $odd_user(), "o'neil@example.test", 'another password' );
+		},
+		'edit-user-email'    => function () use ( $plain_user, $edit ) {
+			wp_set_current_user( 1 );
+			$edit( $plain_user( 'subscriber' ), "new'address@example.test", '' );
+		},
+		'edit-user-nothing'  => function () use ( $plain_user, $edit ) {
+			wp_set_current_user( 1 );
+			$edit( $plain_user( 'subscriber' ), 'subscriber@example.test', '' );
+		},
+		'profile-password'   => function () use ( $odd_user, $edit ) {
+			$id = $odd_user();
+			wp_set_current_user( $id );
+			$edit( $id, "o'neil@example.test", 'another password' );
+		},
+		'profile-admin'      => function () use ( $edit ) {
+			wp_set_current_user( 1 );
+			$edit( 1, 'admin@default-install.test', 'another password' );
+		},
+		'rest-user'          => function () use ( $odd_user, $rest ) {
+			$rest(
+				$odd_user(),
+				array(
+					'password' => 'another password',
+					'email'    => "new'address@example.test",
+					'roles'    => array( 'author' ),
+				)
+			);
+		},
+		'rest-user-same'     => function () use ( $odd_user, $rest ) {
+			$rest(
+				$odd_user(),
+				array(
+					'password' => 'another password',
+					'email'    => "o'neil@example.test",
+				)
+			);
+		},
+		'rest-user-name'     => function () use ( $odd_user, $rest ) {
+			$rest( $odd_user(), array( 'name' => 'Tom' ) );
+		},
+	);
 	if ( count( $args ) < 2 ) {
 		echo implode( "\n", array_keys( $cases ) ), "\n";
 		return;
 	}
+	if ( 'flows' === $args[1] ) {
+		echo implode( "\n", array_keys( $flows ) ), "\n";
+		return;
+	}
+	$cases += $flows;
 	list( , $name, $blog ) = $args;
 
 	// The site title as stored: esc_html() keeps entities as they are, so an

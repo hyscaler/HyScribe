@@ -47,7 +47,7 @@ pub async fn user_request_action_confirmed(
         let none = Value::Null;
         let key = "_wp_user_request_confirmed_timestamp";
         update_metadata(write, Meta::Post, id, key, &at, &none).await?;
-        if request_id > 0 {
+        if request_id.is_positive() {
             let confirm =
                 |args: &mut crate::posts::PostArgs| args.status = "request-confirmed".into();
             wp_update_post(write, ctx, id, &confirm).await?;

@@ -749,6 +749,9 @@ async fn registers_users_as_php_does() {
                 (Ok(key), None) => {
                     assert_eq!((&key.login[..], &key.email[..]), (login, email));
                     assert!(key.key.len() == 20 && key.id > 1);
+                    // A random password, which nobody knows: not the empty one.
+                    let pass = write.user(key.id).await.unwrap().unwrap().1.pass;
+                    assert!(pass.starts_with("$wp$") && !check_password(b"", pass.as_bytes()));
                 }
                 (Err(refused), Some(code)) => assert_eq!(refused[0].code, code),
                 (other, code) => panic!("{other:?} {code:?}"),

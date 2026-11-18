@@ -89,6 +89,8 @@ fn parses_colors() {
         parse_color(b"hsl(120, 100%, 25%)"),
         Some([0.0, 127.5, 0.0, 1.0])
     );
+    // A number may start with its dot, and a dot with no digit after is no number.
+    assert_eq!(parse_color(b"rgb(.5, +2, -3)"), Some([0.5, 2.0, 0.0, 1.0]));
     // A newline may end the pattern, nothing else may follow it.
     assert_eq!(parse_color(b"#fff\n"), Some([255.0, 255.0, 255.0, 1.0]));
     assert_eq!(parse_color(b"rgb(1,2,3)\n"), Some([1.0, 2.0, 3.0, 1.0]));
@@ -106,6 +108,7 @@ fn parses_colors() {
         "rgb(1, , 3)",
         "rgb(1 2,3)",
         "rgb(1 2-3)",
+        "rgb(1.,2,3)",
         "rgbx(1,2,3)",
         "rgb 1,2,3",
         "rgb(1,2,3",

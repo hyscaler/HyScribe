@@ -10,7 +10,7 @@
 //! would be 501.
 
 use hyscribe_model::Post;
-use hyscribe_phpser::{Value, is_empty_string, lookup};
+use hyscribe_phpser::{Key, Value, is_empty_string, lookup};
 use hyscribe_render::attachment::image_downsize;
 use hyscribe_render::date::{Zone, format_unix, stored_unix};
 use hyscribe_render::rest::Rendering;
@@ -103,7 +103,7 @@ pub struct Plan {
 }
 
 /// What a write came to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// The post written: saved, trashed or deleted.
     Written(u64),
@@ -112,6 +112,9 @@ pub enum Outcome {
     /// the validated dates never have), or
     /// `rest_cannot_delete` where trashing or deleting did nothing.
     Refused(&'static str),
+    /// A save `wpdb` refused for text that is not valid UTF-8, with its
+    /// `$last_error`.
+    InvalidText(String),
 }
 
 /// Makes a write's answer once it is written.
@@ -580,6 +583,26 @@ fn finish(
         Outcome::Refused(_) => {
             let message = "The post cannot be deleted.";
             return Err(RestError::status("rest_cannot_delete", message, 500));
+        }
+        // `WP_Error::add_data()` keeps wpdb's error as additional data.
+        Outcome::InvalidText(last_error) => {
+            let (code, message) = match &plan.write {
+                Write::Save(save) if save.id == 0 => (
+                    "db_insert_error",
+                    "Could not insert post into the database.",
+                ),
+                _ => ("db_update_error", "Could not update post in the database."),
+            };
+            let data = object([
+                ("code", text(code)),
+                ("message", text(message)),
+                ("data", object([("status", Value::Int(500))])),
+                (
+                    "additional_data",
+                    Value::Array(vec![(Key::Int(0), text(last_error))]),
+                ),
+            ]);
+            return Ok(Response::new(data, 500));
         }
     };
     let kind = Kind::of(params.route);

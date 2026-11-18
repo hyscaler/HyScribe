@@ -869,6 +869,41 @@ fn refusals_are_php_s() {
     }
 }
 
+/// An `id` in the body overrides the route's, and one below 1 names no
+/// post, not the post of its absolute value.
+#[test]
+fn a_negative_id_is_no_post() {
+    let site = oracle("administrator", &[]);
+    for id in ["-1", "0"] {
+        let body = format!(r#"{{"id":{id},"title":"x"}}"#);
+        let asked = Asked::new("administrator", "PUT", "/wp/v2/posts/1", &body);
+        let (plan, served) = on(&site, &asked, Outcome::Written(1));
+        assert!(plan.is_none(), "{id}");
+        assert!(text_of(&served).contains("rest_post_invalid_id"), "{id}");
+    }
+}
+
+/// Text `wpdb` refuses is answered as PHP answers it, an insert's error or
+/// an update's with wpdb's own as additional data
+/// (`reference/rest/invalid-input.list`).
+#[test]
+fn invalid_text_is_php_s_database_error() {
+    let site = oracle("administrator", &[]);
+    for (target, code, message) in [
+        ("/wp/v2/posts", "db_insert_error", "insert post into"),
+        ("/wp/v2/posts/1", "db_update_error", "update post in"),
+    ] {
+        let asked = Asked::new("administrator", "POST", target, r#"{"title":"x"}"#);
+        let outcome = Outcome::InvalidText("wpdb's".into());
+        let (_, served) = on(&site, &asked, outcome);
+        assert_eq!(served.status, 500, "{target}");
+        let expected = format!(
+            r#"{{"code":"{code}","message":"Could not {message} the database.","data":{{"status":500}},"additional_data":["wpdb's"]}}"#
+        );
+        assert_eq!(text_of(&served), expected, "{target}");
+    }
+}
+
 /// The body read as `get_parameter_order()` reads it: JSON for a JSON type,
 /// a form for a method other than POST, a multipart form not at all; JSON
 /// PHP refuses is answered `rest_invalid_json` before any check.

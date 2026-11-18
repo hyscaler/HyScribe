@@ -454,6 +454,35 @@ async fn upload_plans_are_never_acted() {
     assert!(matches!(outcome, Err(hyscribe_write::Error::Unported(_))));
 }
 
+/// A GET has no `$_POST`: a form or an upload sent with it is not read, so
+/// an invalid `per_page` in its body changes nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn uploads_and_forms_are_read_from_posts_only() {
+    let site = crate::tests::oracle_site().await;
+    let multipart = multipart(
+        ("file", "image/jpeg"),
+        "a.jpg",
+        b"x",
+        &[("per_page".into(), "0".into())],
+    );
+    for (route, kind, body) in [
+        ("media", "multipart/form-data; boundary=BOUNDARY", multipart),
+        (
+            "posts",
+            "application/x-www-form-urlencoded",
+            b"per_page=0".to_vec(),
+        ),
+    ] {
+        let request = axum::http::Request::builder()
+            .uri(format!("/?rest_route=/wp/v2/{route}"))
+            .header(header::CONTENT_TYPE, kind)
+            .body(Body::from(body))
+            .unwrap();
+        let response = router(Arc::clone(&site)).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{route}");
+    }
+}
+
 /// Hooks that lock `0`, the folder of the month, once an attachment is
 /// inserted, so its sizes cannot be written.
 struct Locks(std::path::PathBuf);

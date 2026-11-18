@@ -356,7 +356,8 @@ async fn uploads_are_titled_and_hooked_as_php_s() {
     assert_eq!(form.unwrap().args.title, b"My Photo");
     assert_eq!(*hooks.prefilter.lock().unwrap(), "upload");
     // A threshold of 0 turns scaling off; an image as large as it is kept.
-    let size = getimagesize(&corpus("small.jpg")).unwrap();
+    let small = corpus("small.jpg");
+    let size = getimagesize(&small).unwrap();
     for threshold in [0, i64::from(size.width.max(size.height))] {
         let (_dir, _, uploads) = hooked(threshold);
         let kept = uploads.rest_upload(&site, (sent("small.jpg", "a.jpg"), false), &none, time);

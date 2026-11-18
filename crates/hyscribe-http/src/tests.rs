@@ -46,14 +46,17 @@ async fn request(site: &Arc<Site>, method: &str, uri: &str) -> Reply {
 }
 
 async fn answer(app: Router, method: &str, uri: &str) -> Reply {
+    answer_with(app, method, uri, "").await
+}
+
+/// [`answer`] with a `Cookie` header, none when `cookie` is empty.
+async fn answer_with(app: Router, method: &str, uri: &str, cookie: &str) -> Reply {
+    let mut asked = Request::builder().method(method).uri(uri);
+    if !cookie.is_empty() {
+        asked = asked.header(header::COOKIE, cookie);
+    }
     let response = app
-        .oneshot(
-            Request::builder()
-                .method(method)
-                .uri(uri)
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(asked.body(Body::empty()).unwrap())
         .await
         .unwrap();
     let status = response.status();
@@ -2974,11 +2977,24 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
             (fields.next().unwrap(), fields.next().unwrap())
         })
         .collect();
-    let mut sites: HashMap<&str, Arc<Site>> = HashMap::new();
+    let mut sites: HashMap<String, Arc<Site>> = HashMap::new();
     let (mut failures, mut authors, mut kept) = (Vec::new(), 0, None);
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
-        if !sites.contains_key(fields[0]) {
+        // An option named `_cookie` is the cookies the request sends.
+        let mut cookie = String::new();
+        let mut named = Vec::new();
+        for pair in fields[0].split('&').filter(|pair| !pair.is_empty()) {
+            match pair.strip_prefix("_cookie=") {
+                Some(value) => {
+                    cookie =
+                        String::from_utf8(hyscribe_phpser::urldecode(value.as_bytes())).unwrap();
+                }
+                None => named.push(pair),
+            }
+        }
+        let named = named.join("&");
+        if !sites.contains_key(&named) {
             let config = Database {
                 name: database.into(),
                 ..fixture_config()
@@ -2987,16 +3003,17 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
             let oracle = Some("http://127.0.0.1:8081".to_string());
             let mut site = Site::load(db, oracle.clone(), oracle).await.unwrap();
             // Names from `_` are the golden script's, not options.
-            let options = fields[0].split('&').filter_map(|o| o.split_once('='));
+            let options = named.split('&').filter_map(|o| o.split_once('='));
             for (name, value) in options.filter(|(name, _)| !name.starts_with('_')) {
                 let value = hyscribe_phpser::urldecode(value.as_bytes());
                 site.options.insert(name.into(), value);
             }
             site.build_rewriter();
-            sites.insert(fields[0], Arc::new(site));
+            sites.insert(named.clone(), Arc::new(site));
         }
         let path = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
-        let reply = request(&sites[fields[0]], "GET", &path).await;
+        let app = router(sites[&named].clone());
+        let reply = answer_with(app, "GET", &path, &cookie).await;
         if path.contains("author=") {
             assert_eq!(reply.status, StatusCode::NOT_FOUND, "{path}");
             authors += 1;
@@ -3127,6 +3144,41 @@ async fn edited_site_pages_match_php() {
     let drop = "DROP TABLE broken_options";
     sqlx::raw_sql(drop).execute(&mut conn).await.unwrap();
     assert!(site.is_err());
+}
+
+/// The pages of `reference/pages/comments.list` over the comments of
+/// `reference/pages/comments.sql`: paged comments, comment pages and their
+/// redirects, and the held comments, comment form and links the commenter
+/// cookies change, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn commenter_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let comments = include_str!("../../../reference/pages/comments.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(comments))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-comments.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 95);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

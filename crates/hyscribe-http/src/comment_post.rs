@@ -16,11 +16,11 @@ use hyscribe_admin::assets::Urls;
 use hyscribe_admin::die::{page, page_with_back_link};
 use hyscribe_admin::login::READ_ONLY;
 use hyscribe_auth::caps::{CapPost, User as Capabilities, post_status};
-use hyscribe_db::{DbError, Write};
+use hyscribe_db::{DbError, Unapproved, Write};
 use hyscribe_kses::esc_url;
 use hyscribe_phpser::{Value, add_query_arg, addslashes, is_empty_string};
 use hyscribe_render::site::Site as RenderSite;
-use hyscribe_write::comments::{Commenter, Context};
+use hyscribe_write::comments::{CommentCookie, Commenter, Context, sanitize_comment_cookie};
 use tokio::runtime::Handle;
 
 use crate::login::{
@@ -44,18 +44,46 @@ pub(crate) struct Asked {
     pub(crate) peer: Option<IpAddr>,
 }
 
-/// `$_POST` from a form body, `None` for a body only PHP reads (multipart).
+/// `$_POST` from a form body, URL-encoded or multipart; `None` for a body
+/// only PHP reads (a multipart one this reader cannot take).
 pub fn read_form(content_type: &[u8], body: &[u8]) -> Option<Value> {
-    let mut headers = HeaderMap::new();
-    if let Ok(kind) = HeaderValue::from_bytes(content_type) {
-        headers.insert(header::CONTENT_TYPE, kind);
-    }
-    let form = trackback::form(&headers, body);
-    let read = body.is_empty() || form.as_array().is_some_and(|form| !form.is_empty());
+    let form = match crate::multipart::boundary(content_type) {
+        Some(boundary) => crate::multipart::read(body, boundary)?.post(),
+        None => {
+            let mut headers = HeaderMap::new();
+            if let Ok(kind) = HeaderValue::from_bytes(content_type) {
+                headers.insert(header::CONTENT_TYPE, kind);
+            }
+            let form = trackback::form(&headers, body);
+            let read = body.is_empty() || form.as_array().is_some_and(|form| !form.is_empty());
+            read.then_some(form)?
+        }
+    };
     // `$_POST['redirect_to'] . '#comment-'` of an array warns before PHP redirects.
     let array = |value: &Value| matches!(value, Value::Array(entries) if !entries.is_empty());
     let redirect = form.get_str("redirect_to").is_some_and(array);
-    (read && !redirect).then_some(form)
+    (!redirect).then_some(form)
+}
+
+/// `wp_get_current_commenter()`: the commenter cookies of a request, as
+/// `sanitize_comment_cookies()` leaves them.
+pub(crate) fn commenter(site: &Site, headers: &HeaderMap) -> hyscribe_render::site::Commenter {
+    let values = headers.get_all(header::COOKIE).iter();
+    let jar = cookies(values.map(HeaderValue::as_bytes));
+    commenter_in(&jar, &Names::new(site).hash)
+}
+
+/// [`commenter`] of the cookies `jar` holds, under the cookie hash `hash`.
+fn commenter_in(jar: &[(Vec<u8>, Vec<u8>)], hash: &str) -> hyscribe_render::site::Commenter {
+    let read = |kind, name: &str| {
+        cookie(jar, &format!("{name}_{hash}"))
+            .map_or_else(Vec::new, |value| sanitize_comment_cookie(kind, value))
+    };
+    hyscribe_render::site::Commenter {
+        author: read(CommentCookie::Author, "comment_author"),
+        email: read(CommentCookie::Email, "comment_author_email"),
+        url: read(CommentCookie::Url, "comment_author_url"),
+    }
 }
 
 /// The answer to a request for `wp-comments-post.php`.
@@ -142,6 +170,7 @@ fn answer<'w>(
         asked,
         user: id,
         commenter,
+        commenter_email: commenter_in(&jar, &names.hash).email,
     };
     let saved = save(&mut reads, &caps, saving, (&handle, begin));
     let answer = match saved {
@@ -172,6 +201,8 @@ struct Saving<'a> {
     asked: &'a Asked,
     user: u64,
     commenter: Commenter,
+    /// `wp_get_current_commenter()`'s email, from the cookies.
+    commenter_email: Vec<u8>,
 }
 
 /// A saved comment: what its cookies and redirect show.
@@ -240,9 +271,15 @@ fn save<'w>(
         };
         // Its row as saved, which the action has just written.
         let comment = write.comment(id).await?.unwrap_or_default();
-        let link = comment_link(&mut write, permalink.clone(), id).await?;
-        let mail_site = MailSite::read(&mut write, &reads.site.home).await?;
+        let email = &saving.commenter_email;
+        let who = match (saving.user, email.is_empty()) {
+            (0, true) => None,
+            (0, false) => Some(Unapproved::Email(email)),
+            (user, _) => Some(Unapproved::User(user)),
+        };
         let permalink = permalink.unwrap_or_default();
+        let link = comment_link(&mut write, &permalink, id, who).await?;
+        let mail_site = MailSite::read(&mut write, &reads.site.home).await?;
         let commented = Commented {
             id,
             user: saving.user,
@@ -270,32 +307,71 @@ fn save<'w>(
     })
 }
 
-/// `get_comment_link()` of comment `id` on the post at `permalink`, while
-/// comments are not paged: their page is not ported.
+/// `get_comment_link()` of comment `id` on the post at `permalink`, from the
+/// action's own options and comments. On paged comments it names the page
+/// from `get_page_of_comment()`, which counts the held comments of `who`.
 async fn comment_link(
     write: &mut Write<'_>,
-    permalink: Option<Vec<u8>>,
+    permalink: &[u8],
     id: u64,
+    who: Option<Unapproved<'_>>,
 ) -> Result<String, hyscribe_write::Error> {
-    let names = ["page_comments", "comments_per_page", "permalink_structure"];
-    let [page_comments, per_page, structure] = submit::options(write, names).await?;
-    let paged = !is_empty_string(&page_comments) && !is_empty_string(&per_page);
-    // Unpaged, the link reads only the permalink structure.
+    let names = [
+        "page_comments",
+        "comments_per_page",
+        "permalink_structure",
+        "default_comments_page",
+        "thread_comments",
+        "thread_comments_depth",
+    ];
+    let [paged, per_page, structure, default_page, threaded, depth] =
+        submit::options(write, names).await?;
     let option = |name: &str| match name {
         "permalink_structure" => structure.clone(),
+        "default_comments_page" => default_page.clone(),
         _ => Vec::new(),
     };
-    let Some(permalink) = permalink.filter(|_| !paged) else {
-        return Err(hyscribe_write::Error::Unported("the page of a comment"));
-    };
-    let comment = hyscribe_model::Comment {
-        id,
-        ..hyscribe_model::Comment::default()
-    };
-    let permalink = String::from_utf8_lossy(&permalink);
+    // `empty( $per_page )` leaves the page 0.
+    let mut page = None;
+    if !is_empty_string(&paged) && !is_empty_string(&per_page) {
+        let per_page = Value::String(per_page).to_int();
+        // A `max_depth` over 1, -1 without threading.
+        let threaded = !is_empty_string(&threaded) && Value::String(depth).to_int() > 1;
+        page = page_of_comment(write, id, (per_page, threaded), who).await?;
+    }
+    let permalink = String::from_utf8_lossy(permalink);
     let link =
-        hyscribe_admin::comments::comment_link(&option, Some(&permalink), "", &[], &comment, 0);
+        hyscribe_admin::comments::comment_page_link(&option, Some(&permalink), "", (page, id));
     Ok(link)
+}
+
+/// `get_page_of_comment()` of comment `id`: its top level comment's place
+/// among the post's approved comments and the held ones of `who`.
+async fn page_of_comment(
+    write: &mut Write<'_>,
+    id: u64,
+    (per_page, threaded): (i64, bool),
+    who: Option<Unapproved<'_>>,
+) -> Result<Option<i64>, hyscribe_write::Error> {
+    if per_page < 1 {
+        return Ok(Some(1));
+    }
+    let Some(mut top) = write.comment(id).await? else {
+        return Ok(None);
+    };
+    while threaded && top.parent != 0 {
+        match write.comment(top.parent).await? {
+            Some(parent) => top = parent,
+            None => return Ok(None),
+        }
+    }
+    let older = write
+        .comments_before(top.post_id, &top.date_gmt, who)
+        .await?;
+    // `ceil( ( $older + 1 ) / $per_page )`.
+    Ok(Some(
+        i64::try_from(older).unwrap_or(i64::MAX) / per_page + 1,
+    ))
 }
 
 /// `$_SERVER['REMOTE_ADDR']`: the connection's address, or behind a proxy

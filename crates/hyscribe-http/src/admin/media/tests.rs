@@ -228,6 +228,97 @@ async fn media_writes_match_php() {
     assert_eq!(kept, [&"binned.png"]);
 }
 
+/// The site icon's and logo's states, a size read from the file where the
+/// metadata has none, and what is not ported: a file by its absolute path,
+/// a parent edited on a screen other than `post.php`.
+#[tokio::test(flavor = "multi_thread")]
+async fn states_and_file_sizes() {
+    let _saves = SAVES.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = loaded().await;
+    let mut conn = connect(&db).await;
+    for sql in [
+        "UPDATE wp_options SET option_value = '801' WHERE option_name = 'site_icon'",
+        "INSERT INTO wp_options (option_name, option_value) VALUES \
+         ('theme_mods_twentytwentyfive', 'a:1:{s:11:\"custom_logo\";i:807;}') \
+         ON DUPLICATE KEY UPDATE option_value = VALUES(option_value)",
+        "UPDATE wp_postmeta SET meta_value = 'a:0:{}' WHERE meta_id IN (805, 807)",
+        "UPDATE wp_postmeta SET meta_value = '/srv/notes' WHERE meta_id = 806",
+        "UPDATE wp_posts SET post_type = 'wp_template' WHERE ID = 806",
+    ] {
+        conn.execute(sql).await.unwrap();
+    }
+    let folder = dir.path().join("uploads/2025/12");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("report.pdf"), b"pdf").unwrap();
+    let (site, cookies) = site(&db, dir.path(), false).await;
+    let answer = async |id: u64| {
+        let response = sent(&site, &cookies, &format!("action=get-attachment&id={id}")).await;
+        (response.status().as_u16(), page_of(response).await)
+    };
+    let (_, icon) = answer(801).await;
+    assert!(icon.ends_with("\"mediaStates\":\"Site Icon\"}}"), "{icon}");
+    let (_, logo) = answer(807).await;
+    assert!(logo.ends_with("\"mediaStates\":\"Logo\"}}"), "{logo}");
+    let (_, report) = answer(802).await;
+    assert!(report.contains("\"filesizeInBytes\":3,"), "{report}");
+    assert_eq!(answer(803).await.0, 501);
+    assert_eq!(answer(805).await.0, 501);
+}
+
+/// `upload.php`'s bulk actions in list mode: checked as PHP checks them,
+/// refused before the first write, written, or not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn bulk_actions_are_checked() {
+    let _saves = SAVES.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = loaded().await;
+    let mut conn = connect(&db).await;
+    let mode = "INSERT INTO wp_usermeta (user_id, meta_key, meta_value) \
+                VALUES (1, 'wp_media_library_mode', 'list')";
+    conn.execute(mode).await.unwrap();
+    let (site, cookies) = site(&db, dir.path(), false).await;
+    let nonce = session_nonce(&site, &cookies, "bulk-media").await;
+    let asked = async |query: &str| {
+        let uri = format!("/hs-admin/upload?{query}&_wpnonce={nonce}");
+        send(&site, "GET", &uri, &cookies, None).await
+    };
+    let status = async |query: &str| asked(query).await.status().as_u16();
+    assert_eq!(status("action=trash&media[]=810").await, 500);
+    assert_eq!(status("action=untrash&media[]=801").await, 500);
+    assert_eq!(status("action=delete&media[]=1").await, 500);
+    assert_eq!(status("action=delete&ids=1,2").await, 500);
+    assert_eq!(
+        status("action=attach&found_post_id=1&media[]=801").await,
+        501
+    );
+    assert_eq!(
+        status("action=detach&parent_post_id=1&media[]=801").await,
+        501
+    );
+    assert_eq!(status("mode=list&action=delete&media[]=801").await, 501);
+    assert_eq!(status("action=bogus&media[]=801").await, 302);
+    assert_eq!(status("action=delete&media=").await, 500);
+    let deleted = asked("action=delete&media[]=802").await;
+    assert_eq!(deleted.headers()["location"], "upload?deleted=1");
+    let bad = "/hs-admin/upload?action=delete&media[]=801&_wpnonce=bad";
+    let refused = send(&site, "GET", bad, &cookies, None).await;
+    assert_eq!(refused.status().as_u16(), 403);
+    let emptied = asked("action=-1&delete_all=Empty").await;
+    assert_eq!(emptied.headers()["location"], "upload?deleted=1");
+    as_role(&db, "author").await;
+    let (site, cookies) = site(&db, dir.path(), false).await;
+    let nonce = session_nonce(&site, &cookies, "bulk-media").await;
+    let uri = format!("/hs-admin/upload?action=delete&media[]=803&_wpnonce={nonce}");
+    let denied = send(&site, "GET", &uri, &cookies, None).await;
+    assert_eq!(denied.status().as_u16(), 500);
+    as_role(&db, "subscriber").await;
+    let (site, cookies) = site(&db, dir.path(), false).await;
+    let uri = "/hs-admin/upload?action=delete&media[]=803";
+    let denied = send(&site, "GET", uri, &cookies, None).await;
+    assert_eq!(denied.status().as_u16(), 403);
+}
+
 /// Each role's attachment queries and single attachments answer as PHP's,
 /// with their counts, with `MEDIA_TRASH` off and on.
 #[tokio::test(flavor = "multi_thread")]

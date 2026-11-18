@@ -1262,12 +1262,8 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
         "delete-post" => {
             let id = post_int(asked, "id");
             ajax_referer(site, asked, &format!("delete-post_{id}"), None)?;
-            allowed(can_for(site, "delete_post", id))?;
-            // `wp_die( 1 )` for a post already gone.
-            match u64::try_from(id).ok().and_then(|id| site.post(id)) {
-                Some(_) => Ok(()),
-                None => Err(ajax(200, "1")),
-            }
+            // No one may delete a post that is not there, which PHP checks next.
+            allowed(can_for(site, "delete_post", id))
         }
         // `wp_send_json_error()` without a nonce.
         "heartbeat" if asked.post("_nonce").is_none_or(Value::is_empty) => Err(Refusal {

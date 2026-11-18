@@ -397,3 +397,6 @@ pub async fn wp_delete_attachment(
     write.delete_post(id).await?;
     Ok(Some(AttachmentDeleted::Deleted(files)))
 }
+
+#[cfg(test)]
+mod tests;

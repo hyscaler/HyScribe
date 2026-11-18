@@ -80,11 +80,8 @@ fn query_attachments(admin: &Admin, asked: &Asked) -> Option<Response> {
         .map(|(post, n)| Some((Key::Int(n), prepare_for_js(admin, post)?)))
         .collect::<Option<Vec<_>>>()?;
     let total = i64::try_from(total).ok()?;
-    let pages = match per_page {
-        0 => 0,
-        // `(int) ceil( $total / $per_page )`, which -1 makes negative.
-        per_page => -(-total).div_euclid(per_page),
-    };
+    // `(int) ceil( $total / $per_page )`, which -1 makes negative.
+    let pages = -(-total).div_euclid(per_page);
     let mut response = json(success(Value::Array(posts))?);
     let headers = response.headers_mut();
     headers.insert("x-wp-total", HeaderValue::from(total));

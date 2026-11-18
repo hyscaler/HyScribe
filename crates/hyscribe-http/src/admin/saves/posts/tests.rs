@@ -580,7 +580,8 @@ async fn post_php_stops_as_php_stops() {
         "SELECT post_status FROM wp_posts WHERE ID = 2",
     )
     .await;
-    assert!(unported(&answer));
+    // An attachment goes with its files, which the test site deletes none of.
+    assert_eq!(answer, redirect("/hs-admin/upload?deleted=1"));
     let (answer, _) = tried(
         1,
         &[],

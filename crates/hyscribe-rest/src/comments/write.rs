@@ -191,8 +191,8 @@ const NOTE_STATUSES: [&[u8]; 2] = [b"resolved", b"reopen"];
 
 /// The `_wp_note_status` of the request's `meta`, as given.
 fn note_status(params: &Params) -> Option<&Value> {
-    let meta = params.get("meta")?.as_array()?;
-    lookup(meta, "_wp_note_status")
+    let meta = params.get("meta").and_then(Value::as_array);
+    meta.and_then(|meta| lookup(meta, "_wp_note_status"))
 }
 
 /// A `_wp_note_status` that resolves or reopens a note.

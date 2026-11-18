@@ -290,6 +290,80 @@ async fn actions_stop_whole() {
     assert!(saved(refused, id, &generated).await.is_err());
 }
 
+/// Hooks that record the prefilter run and give their own scaling threshold.
+struct Recorded {
+    threshold: i64,
+    prefilter: std::sync::Mutex<&'static str>,
+}
+
+impl hyscribe_image::hooks::Hooks for Recorded {
+    fn big_image_size_threshold(&self, _: i64, _: (u32, u32), _: &str, _: u64) -> i64 {
+        self.threshold
+    }
+}
+
+impl crate::uploads::UploadHooks for Recorded {
+    fn wp_handle_upload_prefilter(&self, file: Sent) -> Sent {
+        *self.prefilter.lock().unwrap() = "upload";
+        file
+    }
+
+    fn wp_handle_sideload_prefilter(&self, file: Sent) -> Sent {
+        *self.prefilter.lock().unwrap() = "sideload";
+        file
+    }
+}
+
+/// Uploads into a new folder with [`Recorded`] hooks of `threshold`.
+fn hooked(threshold: i64) -> (tempfile::TempDir, std::sync::Arc<Recorded>, Uploads) {
+    let dir = tempfile::tempdir().unwrap();
+    let prefilter = std::sync::Mutex::new("");
+    let hooks = std::sync::Arc::new(Recorded {
+        threshold,
+        prefilter,
+    });
+    let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+    let uploads = uploads.with_hooks(std::sync::Arc::clone(&hooks) as _);
+    (dir, hooks, uploads)
+}
+
+/// The titles PHP gives a name that is all extension, a body and a form,
+/// the prefilter each runs, and the scaling threshold as hooks give it.
+#[tokio::test(flavor = "multi_thread")]
+async fn uploads_are_titled_and_hooked_as_php_s() {
+    let site = crate::tests::oracle_site().await;
+    let time = ("2026-11-17 00:00:00", WHO);
+    let (_dir, hooks, uploads) = hooked(2560);
+    // `basename()` keeps a name that is its whole suffix.
+    let dotted = uploads.media_handle_upload(&site, sent("small.jpg", ".jpg"), 0, time);
+    assert_eq!(dotted.unwrap().args.title, b".jpg");
+    // A body is titled by its file, a form by the name it was sent as.
+    let none = Upload::default();
+    let raw = uploads.rest_upload(
+        &site,
+        (sent("small.jpg", "My Photo.jpg"), false),
+        &none,
+        time,
+    );
+    assert_eq!(raw.unwrap().args.title, b"My-Photo");
+    assert_eq!(*hooks.prefilter.lock().unwrap(), "sideload");
+    let form = uploads.rest_upload(
+        &site,
+        (sent("small.jpg", "My Photo.jpg"), true),
+        &none,
+        time,
+    );
+    assert_eq!(form.unwrap().args.title, b"My Photo");
+    assert_eq!(*hooks.prefilter.lock().unwrap(), "upload");
+    // A threshold of 0 turns scaling off; an image as large as it is kept.
+    let size = getimagesize(&corpus("small.jpg")).unwrap();
+    for threshold in [0, i64::from(size.width.max(size.height))] {
+        let (_dir, _, uploads) = hooked(threshold);
+        let kept = uploads.rest_upload(&site, (sent("small.jpg", "a.jpg"), false), &none, time);
+        assert!(kept.is_ok(), "{threshold}");
+    }
+}
+
 /// Whether `err` is the test's statement budget running out: only that may
 /// stop a write a budget loop retries, so one that always fails ends it.
 fn spent(err: &hyscribe_write::Error) -> bool {

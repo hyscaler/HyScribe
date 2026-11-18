@@ -38,6 +38,8 @@ async fn uploads_are_served_never_run() {
         ("2026/11/a b+c.jpg", &b"JPEG"[..]),
         ("2026/11/page.html", b"<script>x()</script>"),
         ("2026/11/notes.txt", b"notes"),
+        ("2026/11/doc.pdf", b"%PDF-"),
+        ("2026/11/archive.zip", b"PK"),
         ("2026/11/run.php", b"<?php"),
         ("2026/11/image.svg", b"<svg/>"),
         ("2026/11/.hidden.jpg", b"secret"),
@@ -63,7 +65,10 @@ async fn uploads_are_served_never_run() {
     assert!(!again.headers().contains_key(header::CONTENT_TYPE));
     let text = get(&site, "/wp-content/uploads/2026/11/notes.txt", None).await;
     assert_eq!(text.headers()[header::CONTENT_TYPE], "text/plain");
-    for download in ["page.html", "run.php", "image.svg"] {
+    let pdf = get(&site, "/wp-content/uploads/2026/11/doc.pdf", None).await;
+    assert_eq!(pdf.headers()[header::CONTENT_TYPE], "application/pdf");
+    assert!(!pdf.headers().contains_key(header::CONTENT_DISPOSITION));
+    for download in ["page.html", "run.php", "image.svg", "archive.zip"] {
         let path = format!("/wp-content/uploads/2026/11/{download}");
         let response = get(&site, &path, None).await;
         assert_eq!(response.status(), StatusCode::OK, "{download}");

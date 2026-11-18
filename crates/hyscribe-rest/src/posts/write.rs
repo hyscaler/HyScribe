@@ -83,6 +83,23 @@ pub enum Write {
     Trash(u64),
     /// `wp_delete_post( $id, true )`.
     Delete(u64),
+    /// Creates or updates a term.
+    Term(Box<crate::terms::write::TermSave>),
+    /// `wp_delete_term( $id, $taxonomy )`.
+    DeleteTerm(&'static str, u64),
+    /// Creates or updates a comment.
+    Comment(Box<crate::comments::write::CommentSave>),
+    /// `wp_trash_comment( $id )`.
+    TrashComment(u64),
+    /// `wp_delete_comment( $id, true )`.
+    DeleteComment(u64),
+    /// Creates or updates a user.
+    User(Box<crate::users::write::UserSave>),
+    /// `wp_delete_user( $id, $reassign )`.
+    DeleteUser(u64, Option<u64>),
+    /// `update_option()` of each setting's option, `delete_option()` for
+    /// none.
+    Settings(Box<crate::settings::SettingsSave>),
 }
 
 /// A write whose checks passed.
@@ -98,8 +115,35 @@ pub struct Plan {
     pub unfiltered_html: bool,
     /// What to write.
     pub write: Write,
-    /// A deleted post and its answer, prepared before it is deleted.
-    previous: Option<(Post, Value)>,
+    /// A deleted item's answer, prepared before it is deleted.
+    pub(crate) previous: Value,
+    /// A deleted post, which the post type's hooks are given.
+    deleted: Option<Post>,
+}
+
+impl Plan {
+    /// The plan of `write` for the current user, `previous` its answer.
+    pub(crate) fn new(context: &Context, write: Write, previous: Value) -> Plan {
+        Plan {
+            user: context.user,
+            can_publish: false,
+            unfiltered_html: context.can("unfiltered_html"),
+            write,
+            previous,
+            deleted: None,
+        }
+    }
+
+    /// A delete's answer: `deleted`, and the item as it was.
+    pub(crate) fn deleted(self) -> Response {
+        let deleted = object([("deleted", Value::Bool(true)), ("previous", self.previous)]);
+        Response::new(deleted, 200)
+    }
+
+    /// Whether the plan writes nothing: an update giving no setting.
+    pub(crate) fn writes_nothing(&self) -> bool {
+        matches!(&self.write, Write::Settings(save) if save.options.is_empty())
+    }
 }
 
 /// What a write came to.
@@ -112,6 +156,13 @@ pub enum Outcome {
     /// the validated dates never have), or
     /// `rest_cannot_delete` where trashing or deleting did nothing.
     Refused(&'static str),
+    /// `wp_insert_term()`'s `term_exists`, with the term that has the name.
+    Exists(u64),
+    /// `wp_update_term()`'s `duplicate_term_slug`, with the slug.
+    Duplicate(Vec<u8>),
+    /// The settings written, with each option whose row changed and its
+    /// value as PHP's options cache holds it for the rest of the request.
+    Cached(Vec<(String, Value)>),
     /// A save `wpdb` refused for text that is not valid UTF-8, with its
     /// `$last_error`.
     InvalidText(String),
@@ -127,6 +178,21 @@ pub(crate) struct Writing {
     pub(crate) args: fn(&Context, &Params, Vec<Arg>) -> Vec<Arg>,
     pub(crate) plan: fn(&Context, &Params) -> Result<Plan, RestError>,
     pub(crate) finish: Finish,
+}
+
+impl Writing {
+    /// A write without arguments of its own to leave out or check.
+    pub(crate) fn plain(
+        plan: fn(&Context, &Params) -> Result<Plan, RestError>,
+        finish: Finish,
+    ) -> Writing {
+        Writing {
+            unported: |_| false,
+            args: |_, _, args| args,
+            plan,
+            finish,
+        }
+    }
 }
 
 /// The ported write of the route `regex`'s endpoint `index`, if any.
@@ -151,12 +217,7 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
     // Only writes ask: the second endpoint saves, an item's third deletes.
     Some(match index {
         1 => save,
-        _ => Writing {
-            unported: |_| false,
-            args: |_, _, args| args,
-            plan: plan_delete,
-            finish,
-        },
+        _ => Writing::plain(plan_delete, finish),
     })
 }
 
@@ -192,7 +253,7 @@ fn wrapper(kind: Kind) -> &'static [u8] {
 }
 
 /// `WP_Error( $code, $message, array( 'status' => 400 ) )`.
-fn invalid(code: &'static str, message: &str) -> RestError {
+pub(crate) fn invalid(code: &'static str, message: &str) -> RestError {
     RestError::status(code, message, 400)
 }
 
@@ -214,7 +275,7 @@ fn raw(params: &Params, name: &str) -> Result<Option<Vec<u8>>, RestError> {
 }
 
 /// `rest_get_date_with_gmt( $date, $is_utc )`: the local and UTC dates.
-fn date_with_gmt(date: &[u8], utc: bool, zone: Zone) -> (String, String) {
+pub(crate) fn date_with_gmt(date: &[u8], utc: bool, zone: Zone) -> (String, String) {
     const MYSQL: &str = "Y-m-d H:i:s";
     let sign = |b: &u8| matches!(b, b'+' | b'-');
     let digits = |digits: &[&u8]| digits.iter().all(|b| b.is_ascii_digit());
@@ -344,7 +405,8 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         can_publish,
         unfiltered_html,
         write: Write::Save(Box::new(save)),
-        previous: None,
+        previous: Value::Null,
+        deleted: None,
     })
 }
 
@@ -543,12 +605,14 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     } else {
         (Write::Trash(post.id), None)
     };
+    let (deleted, previous) = previous.unzip();
     Ok(Plan {
         user: context.user,
         can_publish: false,
         unfiltered_html: false,
         write,
-        previous,
+        previous: previous.unwrap_or_default(),
+        deleted,
     })
 }
 
@@ -580,10 +644,6 @@ fn finish(
             let message = "Content, title, and excerpt are empty.";
             return Err(invalid("empty_content", message));
         }
-        Outcome::Refused(_) => {
-            let message = "The post cannot be deleted.";
-            return Err(RestError::status("rest_cannot_delete", message, 500));
-        }
         // `WP_Error::add_data()` keeps wpdb's error as additional data.
         Outcome::InvalidText(last_error) => {
             let (code, message) = match &plan.write {
@@ -604,14 +664,17 @@ fn finish(
             ]);
             return Ok(Response::new(data, 500));
         }
+        _ => {
+            let message = "The post cannot be deleted.";
+            return Err(RestError::status("rest_cannot_delete", message, 500));
+        }
     };
     let kind = Kind::of(params.route);
     let action = |name: &str, args: &[&dyn std::any::Any]| {
         crate::hooks::do_action(&format!("{name}_{}", kind.name()), args);
     };
-    if let (Write::Delete(_), Some((post, previous))) = (&plan.write, plan.previous) {
-        let deleted = object([("deleted", Value::Bool(true)), ("previous", previous)]);
-        let response = Response::new(deleted, 200);
+    if let (Write::Delete(_), Some(post)) = (&plan.write, plan.deleted.clone()) {
+        let response = plan.deleted();
         action("rest_delete", &[&post, &response, params]);
         return Ok(response);
     }

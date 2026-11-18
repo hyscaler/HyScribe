@@ -5,7 +5,9 @@ use hyscribe_phpser::Key;
 
 use super::*;
 use crate::options::delete_option;
-use crate::tests::{admin, check, connection, fails_at_each_step, rolled_back, text, writer};
+use crate::tests::{
+    admin, check, connection, fails_at_each_step, nothing, rolled_back, text, writer,
+};
 
 fn some(text: &str) -> Option<Vec<u8>> {
     Some(text.as_bytes().to_vec())
@@ -221,6 +223,28 @@ async fn sets_a_role() {
     .await;
 }
 
+/// The REST API's create: no role, then each role added, the second time
+/// as one the user has.
+#[tokio::test]
+async fn adds_roles() {
+    check("rest-users-create", nothing, async |write, ()| {
+        let data = UserData {
+            display_name: some("New Bie"),
+            first_name: some("New"),
+            description: some("<b>Hi</b><script>x()</script>"),
+            user_nicename: some("New Bie"),
+            user_pass: some("secret-pass"),
+            role: some(""),
+            ..new_user("newbie")
+        };
+        let id = insert_ok(write, data).await;
+        for role in ["editor", "author", "editor", ""] {
+            add_role(write, id, role.as_bytes()).await.unwrap();
+        }
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn keeps_an_unknown_role_as_a_capability() {
     let setup = async |write: &mut Write<'_>| setup_user(write, new_user("oracle-ghost")).await;
@@ -422,7 +446,8 @@ async fn new_users_return_each_database_error() {
             ..new_user("jane.doe")
         };
         wp_insert_user(write, &jane).await?;
-        wp_insert_user(write, &new_user("oracle-default")).await?;
+        let id = wp_insert_user(write, &new_user("oracle-default")).await?;
+        add_role(write, id, b"author").await?;
         Ok(())
     })
     .await;

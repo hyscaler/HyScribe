@@ -186,6 +186,8 @@ impl Asked {
             cookie_user: self.user,
             origin: None,
             nonce: (self.user != 0).then_some(b"%nonce%"),
+            remote_addr: b"",
+            user_agent: None,
             method_override: None,
             content_type: self.kind,
             body: &self.body,
@@ -960,19 +962,14 @@ fn bodies_are_read_as_php_reads_them() {
     );
     // A body "0" is empty: a write not ported is checked without arguments,
     // not refused as given some.
-    let mut asked = Asked::new("", "PUT", "/wp/v2/categories/1", "0");
+    let mut asked = Asked::new("", "PUT", "/wp/v2/menus/1", "0");
     asked.kind = None;
     assert_ne!(
         on(&oracle("", &[]), &asked, Outcome::Written(1)).1.status,
         501
     );
     // A write not ported is not answered with a body either.
-    let mut asked = Asked::new(
-        "administrator",
-        "POST",
-        "/wp/v2/categories",
-        r#"{"name":"x"}"#,
-    );
+    let mut asked = Asked::new("administrator", "POST", "/wp/v2/menus", r#"{"name":"x"}"#);
     asked.kind = Some(b"application/json");
     assert_eq!(
         on(&oracle("administrator", &[]), &asked, Outcome::Written(1))

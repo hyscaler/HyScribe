@@ -682,6 +682,7 @@ async fn comment_notes_match_php() {
 /// `reference/rest/comment-notes.sql`.
 #[tokio::test(flavor = "multi_thread")]
 async fn comment_notes_are_php_s() {
+    let _rows = crate::admin::tests::COMMENT_ROWS.lock().await;
     let state = include_str!("../../../../../reference/rest/comment-notes.sql");
     let setup = state.split("\n-- cleanup\n").next().unwrap();
     let comments = "/?rest_route=/wp/v2/comments";
@@ -811,6 +812,7 @@ async fn settings_writes_match_php() {
 /// The comments' writes leave the rows PHP's leave.
 #[tokio::test(flavor = "multi_thread")]
 async fn comment_writes_are_php_s() {
+    let _rows = crate::admin::tests::COMMENT_ROWS.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let site = site(false, dir.path()).await;
     let writes = [

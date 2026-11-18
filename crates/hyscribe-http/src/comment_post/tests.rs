@@ -161,6 +161,7 @@ async fn comment_count(conn: &mut Connection) -> i64 {
 /// the page of a comment on paged comments, which is not ported.
 #[tokio::test(flavor = "multi_thread")]
 async fn posts_answer_and_write_as_php() {
+    let _rows = crate::admin::tests::COMMENT_ROWS.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let (site, logged_in) = logged_in("wordpress", dir.path()).await;
     let nonce = session_nonce(&site, &logged_in, "unfiltered-html-comment_1").await;

@@ -834,6 +834,16 @@ async fn written_answers_past_the_goldens() {
             Outcome::Refused("rest_cannot_delete"),
             (500, "rest_cannot_delete"),
         ),
+        // Text `wpdb` refuses, which PHP answers as no template found.
+        (
+            (
+                "POST",
+                templates("/twentytwentyfive//my-custom"),
+                r#"{"title":"x"}"#,
+            ),
+            Outcome::InvalidText(String::new()),
+            (501, ""),
+        ),
         (
             ("DELETE", templates("/twentytwentyfive//my-custom"), ""),
             Outcome::Refused("rest_cannot_delete"),
@@ -1046,6 +1056,16 @@ async fn autosaves_past_the_goldens() {
         let (found, text) = sent_as(&site, &login, ("POST", autosaves, body)).await;
         assert_eq!(found.as_u16(), status, "{body}: {text}");
     }
+    // A form's text that is not UTF-8, which `wpdb` refuses.
+    let (cookie, nonce) = &login;
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri(autosaves)
+        .header(header::COOKIE, cookie)
+        .header("x-wp-nonce", nonce)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    let response = send(&site, request, "title=a%FFb").await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     fresh().await;
 }
 

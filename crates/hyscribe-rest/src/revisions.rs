@@ -610,8 +610,9 @@ fn plan_autosave(context: &Context, params: &Params) -> Result<Plan, RestError> 
         // What the controller does after the save.
         Write::Autosave(Box::new(Save {
             sticky: None,
-            unset_thumbnail: false,
-            clear_template: false,
+            thumbnail: None,
+            format: None,
+            template: None,
             categories: None,
             tags: None,
             pattern_categories: None,

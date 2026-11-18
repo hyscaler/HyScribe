@@ -315,7 +315,9 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     Ok(plan(context, Write::Trash(id), Some(template)))
 }
 
-/// `empty_content`, as `wp_insert_post()` refuses a template with none.
+/// `empty_content`, as `wp_insert_post()` refuses a template with none;
+/// text `wpdb` refuses, which PHP answers as no template found, is not
+/// ported.
 fn refused(outcome: Outcome) -> Result<u64, RestError> {
     match outcome {
         Outcome::Written(id) => Ok(id),
@@ -327,6 +329,7 @@ fn refused(outcome: Outcome) -> Result<u64, RestError> {
             let message = "The template cannot be deleted.";
             Err(RestError::status("rest_cannot_delete", message, 500))
         }
+        Outcome::InvalidText(_) => Err(RestError::not_ported()),
     }
 }
 

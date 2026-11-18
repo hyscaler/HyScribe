@@ -359,7 +359,7 @@ pub(crate) fn planned_save(
     if slug && matches!(slugged, Some("draft" | "pending")) {
         save.unique_slug = Some(save.parent.unwrap_or_default());
     }
-    after_save(context, params, kind, &mut save);
+    after_save(context, params, kind, &mut save)?;
     let hook = format!("rest_pre_insert_{}", kind.name());
     let save = crate::hooks::apply_filters(&hook, save, &[params]);
     let unfiltered_html = context.can("unfiltered_html");

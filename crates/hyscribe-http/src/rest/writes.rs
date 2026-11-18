@@ -208,6 +208,7 @@ async fn autosaved(
     match wp_create_post_autosave(write, ctx, save.id, &revisioned, &change).await {
         Ok(id) => Ok(Outcome::Written(id)),
         Err(Error::Refused("empty_content")) => Ok(Outcome::Refused("empty_content")),
+        Err(Error::InvalidText(last_error)) => Ok(Outcome::InvalidText(last_error)),
         Err(err) => Err(err),
     }
 }

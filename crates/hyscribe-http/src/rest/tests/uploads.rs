@@ -542,6 +542,7 @@ async fn uploads_stop_short() {
             "{async_upload}\tform,nonce\tsmall.jpg\taction=upload-attachment&post_data[context]=x"
         ),
         format!("{async_upload}\tform,nonce\tsmall.jpg\tattachment_id=1&fetch=3"),
+        format!("{async_upload}\tform,nonce\tsmall.jpg\tshort=1&attachment_id=1&fetch=3"),
         format!("{async_upload}\tform,nonce\tsmall.jpg\tpost_id=0"),
         format!("{async_upload}\tform,nonce,part=other\tsmall.jpg\tshort=1"),
         format!("{media_new}\tform\tsmall.jpg\t-"),
@@ -579,6 +580,9 @@ async fn uploads_stop_short() {
     let (status, json) = sent_case(&site, &tall, admin).await;
     assert_eq!(status, StatusCode::OK);
     assert!(json.contains("\"orientation\":\"portrait\""), "{json}");
+    // No attachment named, `fetch` asks for nothing: the short answer.
+    let unnamed = format!("{async_upload}\tform,nonce\tsmall.jpg\tshort=1&attachment_id=0&fetch=3");
+    assert_eq!(sent_case(&site, &unnamed, admin).await.0, StatusCode::OK);
     emptied(uploads.path());
     reset().await;
     let small = format!("{async_upload}\tform,nonce\tsmall.jpg\taction=upload-attachment");

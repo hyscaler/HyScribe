@@ -362,10 +362,10 @@ fn prepare_for_js(admin: &Admin, id: u64) -> Value {
         data.push(("uploadedToTitle", text(title)));
         data.push(("uploadedToLink", edit_link(parent.id)));
     }
+    // An upload's metadata always has its size, never 0: an empty file is refused.
     let bytes = meta
         .as_ref()
         .and_then(|meta| meta.get_str("filesize"))
-        .filter(|size| size.is_numeric() && size.to_int() > 0)
         .map(Value::to_int);
     data.extend(bytes.into_iter().flat_map(|bytes| {
         let readable = text(hyscribe_admin::media::size_format(bytes));

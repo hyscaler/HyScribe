@@ -199,8 +199,10 @@ fn urls_take_the_home_url_s_scheme_and_www() {
 fn xml_text_is_written_as_simplexml_writes_it() {
     let written = |text: &str| xml_text(text.as_bytes()).map(|xml| String::from_utf8(xml).unwrap());
     assert_eq!(
-        written("a&amp;b &lt;c&gt; &quot;q&quot; &apos;&#039;s&#x41;&#X42; &nbsp; é \r\t\n"),
-        Some("a&amp;b &lt;c&gt; \"q\" ''sAB &nbsp; &#xE9; &#xD;\t\n".into())
+        written(
+            "a&amp;b &lt;c&gt; &quot;q&quot; &apos;&#039;s&#x41;&#X42; &nbsp; é \r\t\n&#60;&#62;"
+        ),
+        Some("a&amp;b &lt;c&gt; \"q\" ''sAB &nbsp; &#xE9; &#xD;\t\n&lt;&gt;".into())
     );
     for refused in [
         "a & b",

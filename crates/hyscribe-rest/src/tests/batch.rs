@@ -83,3 +83,43 @@ fn requests_not_ported_answer_the_batch_501() {
     let body = String::from_utf8_lossy(&refused.body).into_owned();
     assert!(body.contains("rest_cannot_create") && body.contains("rest_cannot_manage_widgets"));
 }
+
+/// A batch's writes are planned one at a time, each resumed with what the
+/// write before it came to, and the batch answered once the last is written.
+#[test]
+fn a_batch_resumes_write_after_write() {
+    let body = r#"{"requests":[{"path":"/wp/v2/posts","body":{"title":"a"}},{"path":"/wp/v2/posts","body":{"title":"b"}}]}"#;
+    let request = Request {
+        method: "POST",
+        route: b"/batch/v1",
+        uri: b"/",
+        get: &[],
+        post: &[],
+        cookie_user: 1,
+        origin: None,
+        nonce: Some(b"%nonce%"),
+        method_override: None,
+        content_type: Some(b"application/json"),
+        body: body.as_bytes(),
+        remote_addr: b"",
+        user_agent: None,
+        host: None,
+        now: 0,
+    };
+    let oracle = Oracle::over(content::default_install(), false);
+    let mut answered = answer(&oracle, &request);
+    let mut writes = 0;
+    let served = loop {
+        match answered {
+            Answer::Served(served) => break served,
+            Answer::Write(pending) => {
+                writes += 1;
+                let refused = Outcome::Refused("empty_content");
+                answered = written(&oracle, &request, *pending, refused);
+            }
+        }
+    };
+    assert_eq!((writes, served.status), (2, 207));
+    let body = String::from_utf8_lossy(&served.body).into_owned();
+    assert_eq!(body.matches("empty_content").count(), 2, "{body}");
+}

@@ -33,7 +33,7 @@ pub(super) fn admin<'a>(site: &'a crate::Site, reads: &'a LoginReads<'a>) -> Adm
 static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The turn of a test that writes users.
-pub(super) async fn turn() -> tokio::sync::MutexGuard<'static, ()> {
+pub(crate) async fn turn() -> tokio::sync::MutexGuard<'static, ()> {
     SERIAL.lock().await
 }
 

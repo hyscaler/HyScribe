@@ -34,7 +34,7 @@ async fn answered(
         media_trash: trash,
         ..Constants::default()
     };
-    let site = Unread(constants);
+    let site = Unread(constants, false);
     let answer = match screen {
         "admin-ajax" => {
             let handler = ajax_handler(action).unwrap();
@@ -272,14 +272,8 @@ async fn edits_write_as_php() {
     }
 }
 
-/// What `handler( screen, action )` answers `user`'s `query` and `body` sent
-/// from `referer`, after `sql` on the oracle's content, all rolled back.
-async fn tried(
-    user: u64,
-    sql: &[&str],
-    (screen, action, query, body): (&str, &[u8], &str, &str),
-    referer: Option<&str>,
-) -> Result<Answer, String> {
+/// What `run` answers on the oracle's content after `sql`, all rolled back.
+async fn in_content<T>(sql: &[&str], run: impl AsyncFnOnce(&mut Connection) -> T) -> T {
     use sqlx::Acquire as _;
     let fixture = fixture_database();
     let options = sqlx::mysql::MySqlConnectOptions::new()
@@ -298,20 +292,52 @@ async fn tried(
         let statement = sqlx::raw_sql(sqlx::AssertSqlSafe(statement.to_string()));
         conn.execute(statement).await.unwrap();
     }
-    let (get, post) = (fields(query), fields(body));
-    let uri = format!("/hs-admin/{screen}?{query}");
-    let asked = Asked {
-        user,
-        referer: referer.map(str::as_bytes),
-        ..asked(&uri, &get, &post)
-    };
-    let handler = handler(screen, action).unwrap();
-    let site = Unread::default();
-    let answer = acted(&writer().await, conn, (handler, &site), &asked).await;
-    answer.map_err(|err| format!("{err:?}"))
+    run(conn).await
 }
 
-fn unported(answer: &Result<Answer, String>) -> bool {
+/// What `handler( screen, action )` answers `user`'s `query` and `body` sent
+/// from `referer`, after `sql` on the oracle's content, all rolled back.
+async fn tried(
+    user: u64,
+    sql: &[&str],
+    (screen, action, query, body): (&str, &[u8], &str, &str),
+    referer: Option<&str>,
+) -> Result<Answer, String> {
+    in_content(sql, async |conn| {
+        let (get, post) = (fields(query), fields(body));
+        let uri = format!("/hs-admin/{screen}?{query}");
+        let asked = Asked {
+            user,
+            referer: referer.map(str::as_bytes),
+            ..asked(&uri, &get, &post)
+        };
+        let handler = handler(screen, action).unwrap();
+        let site = Unread::default();
+        let answer = acted(&writer().await, conn, (handler, &site), &asked).await;
+        answer.map_err(|err| format!("{err:?}"))
+    })
+    .await
+}
+
+/// What the Ajax action `action` answers `body` of user 1 on `site`, after
+/// `sql` on the oracle's content, all rolled back.
+async fn tried_ajax(
+    site: &Unread,
+    sql: &[&str],
+    action: &[u8],
+    body: &str,
+) -> Result<Ajax, String> {
+    in_content(sql, async |conn| {
+        let post = fields(body);
+        let asked = asked("/hs-admin/admin-ajax", &[], &post);
+        let handler = ajax_handler(action).unwrap();
+        let answer = acted(&writer().await, conn, (handler, site), &asked).await;
+        answer.map_err(|err| format!("{err:?}"))
+    })
+    .await
+}
+
+fn unported<T>(answer: &Result<T, String>) -> bool {
     matches!(answer, Err(err) if err.contains("Unported"))
 }
 
@@ -390,14 +416,22 @@ async fn edits_are_answered_by_status() {
         Ok(Answer::Redirect(format!("{edit}&message={message}")))
     };
     let parent = |id: u64| format!("UPDATE wp_posts SET post_parent = {id} WHERE ID = 801");
-    let future = "UPDATE wp_posts SET post_status = 'future' WHERE ID = 1";
-    let draft = "UPDATE wp_posts SET post_status = 'draft' WHERE ID = 1";
-    assert_eq!(saved(801, &[future]).await, to(801, "9"));
-    assert_eq!(saved(801, &[draft]).await, to(801, "10"));
+    // The parent is a post of the oracle's content, so no other test's row is locked.
+    let under = |status: &str| {
+        let update = format!("UPDATE wp_posts SET post_status = '{status}' WHERE ID = 804");
+        (parent(804), update)
+    };
+    for (status, message) in [("future", "9"), ("draft", "10")] {
+        let (adopted, update) = under(status);
+        assert_eq!(saved(801, &[&adopted, &update]).await, to(801, message));
+    }
     for id in [0, 801, 99999] {
         assert_eq!(saved(801, &[&parent(id)]).await, to(801, "1"), "{id}");
     }
     assert!(unported(&saved(801, &[&parent(802)]).await));
+    // A status of its own that is none of the kept ones is published.
+    let draft = "UPDATE wp_posts SET post_status = 'draft' WHERE ID = 801";
+    assert_eq!(saved(801, &[draft]).await, to(801, "1"));
     // A trashed parent without its status kept is taken as published.
     assert_eq!(saved(815, &[]).await, to(815, "1"));
 }
@@ -454,5 +488,84 @@ async fn attaching_stops_as_php_stops() {
     assert_eq!(
         answer,
         to("http://127.0.0.1:8081/hs-admin/upload?mode=list&detach=1")
+    );
+}
+
+/// The grid's saves and deletes that PHP dies on, or this port cannot take.
+#[tokio::test]
+async fn saves_stop_as_php_stops() {
+    let _turn = turn().await;
+    let site = Unread::default();
+    let save = async |sql: &[&str], body: &str| {
+        let body = format!("action=save-attachment&{body}");
+        tried_ajax(&site, sql, b"save-attachment", &body).await
+    };
+    let song = "id=817&changes";
+    for changes in [
+        "id=801&changes[alt][]=x",
+        "id=801&changes[title][]=x",
+        "id=801&changes[caption][]=x",
+        "id=801&changes[description][]=x",
+        "id=801&changes[status][]=x",
+        "id=801&changes[parent][]=1",
+        "id=801&changes[parent]=-5",
+        "id=817&changes[artist][]=x",
+    ] {
+        let answer = save(&[], changes).await;
+        assert!(unported(&answer), "{changes}: {answer:?}");
+    }
+    let imported = "UPDATE wp_posts SET post_mime_type = 'import' WHERE ID = 817";
+    let answer = save(&[imported], &format!("{song}[title]=x")).await;
+    assert!(unported(&answer), "{answer:?}");
+    // A song's tags are kept as they are, made, or made again.
+    let kept = save(&[], &format!("{song}[title]=Kept")).await;
+    assert_eq!(kept, Ok(Ajax::Json("{\"success\":true}".into())));
+    let metadata = "post_id = 817 AND meta_key = '_wp_attachment_metadata'";
+    let removed = format!("DELETE FROM wp_postmeta WHERE {metadata}");
+    let text = format!("UPDATE wp_postmeta SET meta_value = 'x' WHERE {metadata}");
+    for sql in [&removed, &text] {
+        for changes in ["[title]=Kept", "[artist]=New"] {
+            let answer = save(&[sql], &format!("{song}{changes}")).await;
+            assert!(answer.is_ok(), "{sql} {changes}: {answer:?}");
+        }
+    }
+    // Files are deleted once their rows are, in the uploads folder only.
+    let bare = Unread(Constants::default(), true);
+    let body = "action=delete-post&id=801";
+    let answer = tried_ajax(&bare, &[], b"delete-post", body).await;
+    assert!(unported(&answer), "{answer:?}");
+    let answer = tried_ajax(&site, &[], b"delete-post", "action=delete-post&id=1").await;
+    assert_eq!(answer, Ok(Ajax::Text("1".into())));
+}
+
+/// `upload.php`'s bulk actions PHP dies on, or has nothing to do for.
+#[tokio::test]
+async fn bulk_actions_die_as_php_dies() {
+    let _turn = turn().await;
+    let list = async |user: u64, query: &str| {
+        let action = query.split(['=', '&']).nth(1).unwrap().as_bytes().to_vec();
+        tried(user, &[], ("upload", &action, query, ""), None).await
+    };
+    let to = |location: &str| Ok(Answer::Redirect(location.into()));
+    assert_eq!(list(1, "action=trash").await, to("upload"));
+    assert_eq!(
+        list(1, "action=delete&ids=801,802").await,
+        to("upload?deleted=2")
+    );
+    assert_eq!(
+        list(1, "action=-1&delete_all=1").await,
+        to("upload?deleted=1")
+    );
+    let answer = list(1, "action=delete&ids[]=801").await;
+    assert!(unported(&answer), "{answer:?}");
+    let message = "Sorry, you are not allowed to delete this item.";
+    assert_eq!(
+        list(3, "action=delete&media[]=801").await,
+        Ok(Answer::Died(message))
+    );
+    let message = "Error in moving the item to Trash.";
+    assert_eq!(
+        list(1, "action=trash&media[]=810").await,
+        Ok(Answer::Died(message))
     );
 }

@@ -14,10 +14,16 @@ struct Oracle {
     role: &'static str,
     /// A fresh edit lock of user 801's on every post.
     lock: bool,
+    /// The user's `media_library_mode`.
+    mode: Option<&'static str>,
 }
 
 fn role(role: &'static str) -> Oracle {
-    Oracle { role, lock: false }
+    Oracle {
+        role,
+        lock: false,
+        mode: Some("list"),
+    }
 }
 
 fn cap_post(id: u64, author: u64, status: &str, post_type: &str) -> CapPost {
@@ -59,6 +65,7 @@ impl CapabilityData for Oracle {
             801 => Some(cap_post(801, 801, "publish", "post")),
             802 => Some(cap_post(802, 1, "trash", "post")),
             803 => Some(cap_post(803, 1, "publish", "unregistered")),
+            804 => Some(cap_post(804, 1, "inherit", "attachment")),
             _ => None,
         }
     }
@@ -114,6 +121,9 @@ impl ActionSite for Oracle {
     }
     fn lock_holder(&self, _: u64) -> Option<String> {
         self.lock.then(|| "<b>other</b>".to_string())
+    }
+    fn user_option(&self, _: &str) -> Option<Vec<u8>> {
+        self.mode.map(|mode| mode.as_bytes().to_vec())
     }
 }
 
@@ -400,7 +410,7 @@ fn what_is_not_ported_goes_on() {
         (
             format!("post.php?{}", nonce("update-post_1")),
             Some("action=editpost&post_ID=1".to_string()),
-            None,
+            Some(501),
         ),
         (
             format!("post.php?action=trash&post=-1&{}", nonce("trash-post_-1")),
@@ -607,8 +617,8 @@ fn what_is_not_ported_goes_on() {
 #[test]
 fn locks_and_roles() {
     let locked = Oracle {
-        role: "administrator",
         lock: true,
+        ..role("administrator")
     };
     let bulk = nonce("bulk-posts");
     let trash = format!("edit.php?action=trash&post[]=1&{bulk}");
@@ -906,4 +916,91 @@ fn quick_drafts_and_screen_options() {
         };
         assert_eq!(action(screen, &asked), expected.as_bytes(), "{screen}");
     }
+}
+
+/// `upload.php`'s bulk actions in list mode: the grid, a screen of its own
+/// and no action are not actions; who may not upload, or has no valid
+/// nonce, is refused; what `wp_trash_post()`, `wp_untrash_post()` and
+/// `wp_delete_attachment()` fail on dies, and the rest goes on.
+#[test]
+fn media_bulk_actions_are_checked_as_php_checks_them() {
+    let bulk = nonce("bulk-media");
+    let upload = |query: &str| format!("upload.php?{query}&{bulk}");
+    let delete = upload("action=delete&media[]=804");
+    for mode in [Some("grid"), Some(""), None] {
+        let site = Oracle {
+            mode,
+            ..role("administrator")
+        };
+        assert_eq!(outcome(&site, &delete, None), None, "{mode:?}");
+    }
+    let site = role("administrator");
+    assert_eq!(
+        outcome(&site, &upload("mode=list&action=trash"), None),
+        None
+    );
+    assert_eq!(outcome(&site, "upload.php", None), None);
+    assert_eq!(outcome(&role("subscriber"), &delete, None), Some(403));
+    let unsigned = "upload.php?action=delete&media[]=804";
+    assert_eq!(outcome(&site, unsigned, None), Some(403));
+    for (query, expected) in [
+        ("action=trash&media[]=802", 500),
+        ("action=trash&media[]=801", 501),
+        ("action=untrash&media[]=801", 500),
+        ("action=untrash&media[]=802", 501),
+        ("action=delete&media[]=801", 500),
+        ("action=delete&media[]=804", 501),
+        ("action=delete&media[]=999", 500),
+        ("action=delete&ids=804,801", 501),
+        ("action=delete&ids[]=804", 501),
+        ("action=attach&found_post_id=1&media[]=804", 501),
+    ] {
+        let status = outcome(&site, &upload(query), None);
+        assert_eq!(status, Some(expected), "{query}");
+    }
+    // Who may not delete the post is refused.
+    let author = role("author");
+    let status = outcome(&author, &upload("action=delete&media[]=801"), None);
+    assert_eq!(status, Some(500));
+    // Nothing to check without an attachment, which a parsed request never lacks.
+    let none = [(Key::String(b"media".to_vec()), Value::Array(Vec::new()))];
+    let asked = Asked {
+        get: &[],
+        post: &none,
+        referer: None,
+        uri: b"/wp-admin/upload.php",
+        home: HOME,
+        user: 1,
+        now: 0,
+        ip: b"",
+        agent: b"",
+    };
+    let trash = Value::String(b"trash".to_vec());
+    assert_eq!(media_bulk(&site, &asked, &trash), Ok(()));
+}
+
+/// `wp_ajax_save_attachment_compat()` does not read fields that are no list.
+#[test]
+fn attachment_fields_that_are_no_list_are_not_ported() {
+    let site = role("administrator");
+    let nonce = "nonce=%nonce:update-post_804%";
+    let sent = |fields: &str| {
+        let body = format!("action=save-attachment-compat&id=804&{nonce}{fields}");
+        outcome(&site, "admin-ajax.php", Some(&body))
+    };
+    assert_eq!(sent("&attachments=x"), Some(501));
+    assert_eq!(sent("&attachments[804][a]=b"), Some(501));
+}
+
+/// `wp_ajax_delete_post()`: its nonce, and a post the user may delete.
+#[test]
+fn deleting_a_post_by_ajax_is_checked_as_php_checks_it() {
+    let site = role("administrator");
+    let sent = |id: u64, nonce: &str| {
+        let body = format!("action=delete-post&id={id}&{nonce}");
+        outcome(&site, "admin-ajax.php", Some(&body))
+    };
+    assert_eq!(sent(804, "_ajax_nonce=%nonce:delete-post_804%"), Some(501));
+    assert_eq!(sent(804, "_ajax_nonce=wrong"), Some(403));
+    assert_eq!(sent(999, "_ajax_nonce=%nonce:delete-post_999%"), Some(200));
 }

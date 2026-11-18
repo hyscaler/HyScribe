@@ -500,6 +500,9 @@ pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> R
     }
     // Only categories have a default term on a default install.
     let kind = Kind::of(&post.post_type)?;
+    if kind == Kind::Attachment {
+        return Err(Error::Unported("publishing an attachment"));
+    }
     if kind == Kind::Post && write.object_terms(id, "category").await?.is_empty() {
         let default = site::option_int(write, "default_category").await?;
         if default != 0 {
@@ -628,6 +631,9 @@ async fn insert(
         Some(_) => Kind::Attachment,
         None => Kind::of(&post_type)?,
     };
+    if kind == Kind::Attachment && before.is_none() && file.is_none() {
+        return Err(Error::Unported("a new attachment but by an upload"));
+    }
     // The types that support the editor, a title and an excerpt.
     if matches!(kind, Kind::Post | Kind::Block)
         && !truthy(&args.content)

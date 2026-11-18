@@ -317,7 +317,7 @@ pub(super) fn delete_post<'a>(
             "attachment" => delete_attachment(write, (&ctx, site), id, false).await?,
             _ => wp_delete_post(write, &ctx, id, false).await?,
         };
-        Ok(Ajax::Text(if done { "1" } else { "0" }.into()))
+        Ok(Ajax::Text(u8::from(done).to_string()))
     })
 }
 

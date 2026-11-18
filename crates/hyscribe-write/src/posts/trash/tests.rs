@@ -21,7 +21,7 @@ fn pair(file: &str, folder: &str) -> (String, String) {
 /// file, its backups beside the metadata's file, and the file itself.
 #[test]
 fn every_file_of_the_attachment() {
-    let meta = "a:6:{s:4:\"file\";s:12:\"2026/05/a.gif\";s:5:\"sizes\";a:1:{s:5:\"thumb\";a:1:{s:4:\"file\";s:9:\"a-1x1.gif\";}}s:14:\"original_image\";s:5:\"o.gif\";s:12:\"source_image\";a:0:{}s:14:\"animated_video\";s:5:\"v.mp4\";s:21:\"animated_video_poster\";s:0:\"\";}";
+    let meta = "a:6:{s:4:\"file\";s:13:\"2026/05/a.gif\";s:5:\"sizes\";a:1:{s:5:\"thumb\";a:1:{s:4:\"file\";s:9:\"a-1x1.gif\";}}s:14:\"original_image\";s:5:\"o.gif\";s:12:\"source_image\";a:0:{}s:14:\"animated_video\";s:5:\"v.mp4\";s:21:\"animated_video_poster\";s:0:\"\";}";
     let backups = "a:1:{s:9:\"full-orig\";a:1:{s:4:\"file\";s:5:\"b.gif\";}}";
     assert_eq!(
         files("2026/05/a.gif", meta, backups),

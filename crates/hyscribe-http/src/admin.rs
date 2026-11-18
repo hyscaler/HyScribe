@@ -59,7 +59,7 @@ use crate::redirect::wp_sanitize_redirect;
 use crate::{Site, now};
 
 mod media;
-mod saves;
+pub(crate) mod saves;
 mod uploads;
 mod views;
 

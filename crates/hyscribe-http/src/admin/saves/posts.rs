@@ -993,14 +993,12 @@ const ATTACHMENT_TEXTS: [&str; 9] = [
 /// `get_post_status( $attachment )`.
 async fn attachment_status(write: &mut Write<'_>, id: u64) -> Result<String, Error> {
     let post = existing(write, id).await?;
-    match post.status.as_str() {
-        "private" | "trash" | "auto-draft" => return Ok(post.status),
-        "inherit" => {}
-        _ => return Ok("publish".into()),
+    // `wp_insert_post()` leaves an attachment `inherit`, `private`, `trash` or `auto-draft`.
+    if post.status != "inherit" {
+        return Ok(post.status);
     }
     let parent = match post.parent {
         0 => None,
-        parent if parent == id => None,
         parent => write.post(parent).await?,
     };
     match parent {

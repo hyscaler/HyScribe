@@ -29,9 +29,7 @@ pub trait ActionSite: CapabilityData {
     /// whose edit lock on the post is fresh.
     fn lock_holder(&self, post: u64) -> Option<String>;
     /// `get_user_option( $name )` of the current user.
-    fn user_option(&self, _name: &str) -> Option<Vec<u8>> {
-        None
-    }
+    fn user_option(&self, name: &str) -> Option<Vec<u8>>;
 }
 
 /// The request an action is read from.

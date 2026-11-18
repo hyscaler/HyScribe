@@ -245,6 +245,15 @@ async fn states_and_file_sizes() {
         "UPDATE wp_postmeta SET meta_value = 'a:0:{}' WHERE meta_id IN (805, 807)",
         "UPDATE wp_postmeta SET meta_value = '/srv/notes' WHERE meta_id = 806",
         "UPDATE wp_posts SET post_type = 'wp_template' WHERE ID = 806",
+        // The logo has no file, so no size; a song's featured image is gone.
+        "UPDATE wp_postmeta SET meta_value = '' WHERE meta_id = 810",
+        "UPDATE wp_postmeta SET meta_value = 'a:0:{}' WHERE meta_id = 811",
+        "UPDATE wp_postmeta SET meta_value = '-5' WHERE post_id = 817 AND meta_key = '_thumbnail_id'",
+        // Full sizes: whole, without a height, a width, or a file.
+        r#"UPDATE wp_postmeta SET meta_value = 'a:2:{s:9:"mime_type";s:9:"video/mp4";s:5:"sizes";a:1:{s:4:"full";a:3:{s:4:"file";s:5:"f.png";s:5:"width";i:10;s:6:"height";i:20;}}}' WHERE post_id = 818 AND meta_key = '_wp_attachment_metadata'"#,
+        r#"UPDATE wp_postmeta SET meta_value = 'a:1:{s:5:"sizes";a:1:{s:4:"full";a:2:{s:4:"file";s:5:"g.png";s:5:"width";i:5;}}}' WHERE post_id = 819 AND meta_key = '_wp_attachment_metadata'"#,
+        r#"UPDATE wp_postmeta SET meta_value = 'a:1:{s:5:"sizes";a:1:{s:4:"full";a:1:{s:4:"file";s:5:"h.png";}}}' WHERE post_id = 817 AND meta_key = '_wp_attachment_metadata'"#,
+        r#"UPDATE wp_postmeta SET meta_value = 'a:1:{s:5:"sizes";a:1:{s:4:"full";a:3:{s:4:"file";s:0:"";s:5:"width";i:1;s:6:"height";i:2;}}}' WHERE post_id = 820 AND meta_key = '_wp_attachment_metadata'"#,
     ] {
         conn.execute(sql).await.unwrap();
     }
@@ -264,6 +273,31 @@ async fn states_and_file_sizes() {
     assert!(report.contains("\"filesizeInBytes\":3,"), "{report}");
     assert_eq!(answer(803).await.0, 501);
     assert_eq!(answer(805).await.0, 501);
+    assert!(!logo.contains("filesizeInBytes"), "{logo}");
+    let (_, song) = answer(817).await;
+    assert!(!song.contains("\"thumb\""), "{song}");
+    let (_, video) = answer(818).await;
+    let full = "\\/2026\\/06\\/f.png\",\"height\":20,\"width\":10,\"orientation\":\"portrait\"}}";
+    assert!(video.contains(full), "{video}");
+    for id in [817, 819, 820] {
+        let (_, bare) = answer(id).await;
+        assert!(bare.contains("\"sizes\":[]"), "{bare}");
+    }
+    // What cannot be shown is not ported, in a query and a save too, as is
+    // a query PHP's own arguments make of it.
+    let query = "action=query-attachments&query[post__in][]=803&query[posts_per_page]=5";
+    assert_eq!(sent(&site, &cookies, query).await.status().as_u16(), 501);
+    let odd = "action=query-attachments&query[author][]=1";
+    assert_eq!(sent(&site, &cookies, odd).await.status().as_u16(), 501);
+    let nonce = "nonce=%nonce:update-post_803%";
+    let save = format!("action=save-attachment-compat&id=803&{nonce}&attachments[803][a]=b");
+    assert_eq!(sent(&site, &cookies, &save).await.status().as_u16(), 501);
+    let scalar = format!("action=save-attachment-compat&id=803&{nonce}&attachments=x");
+    assert_eq!(sent(&site, &cookies, &scalar).await.status().as_u16(), 501);
+    // Without an uploads folder a file's size is not known.
+    let (bare, bare_cookies) = logged_in("wordpress_saves", dir.path()).await;
+    let read = sent(&bare, &bare_cookies, "action=get-attachment&id=802").await;
+    assert_eq!(read.status().as_u16(), 501);
 }
 
 /// `upload.php`'s bulk actions in list mode: checked as PHP checks them,
@@ -288,14 +322,11 @@ async fn bulk_actions_are_checked() {
     assert_eq!(status("action=untrash&media[]=801").await, 500);
     assert_eq!(status("action=delete&media[]=1").await, 500);
     assert_eq!(status("action=delete&ids=1,2").await, 500);
-    assert_eq!(
-        status("action=attach&found_post_id=1&media[]=801").await,
-        501
-    );
-    assert_eq!(
-        status("action=detach&parent_post_id=1&media[]=801").await,
-        501
-    );
+    // Attaching to the parent a file has, and detaching what is not there, change nothing.
+    let attach = "action=attach&found_post_id=1&media[]=801";
+    assert_eq!(status(attach).await, 302);
+    let detach = "action=detach&parent_post_id=1&media[]=99999";
+    assert_eq!(status(detach).await, 302);
     assert_eq!(status("mode=list&action=delete&media[]=801").await, 501);
     assert_eq!(status("action=bogus&media[]=801").await, 302);
     assert_eq!(status("action=delete&media=").await, 500);

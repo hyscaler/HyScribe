@@ -65,6 +65,9 @@ impl ActionSite for Unfiltered {
     fn lock_holder(&self, _: u64) -> Option<String> {
         unreachable!()
     }
+    fn user_option(&self, _: &str) -> Option<Vec<u8>> {
+        unreachable!()
+    }
 }
 
 impl Acting for Unfiltered {
@@ -90,6 +93,9 @@ impl Acting for Unfiltered {
         unreachable!()
     }
     fn logged_in(&self) -> bool {
+        unreachable!()
+    }
+    fn delete_files(&self, _: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
         unreachable!()
     }
     fn outbox(&self) -> &crate::mail::Outbox {

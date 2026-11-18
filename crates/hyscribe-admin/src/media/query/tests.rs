@@ -57,6 +57,15 @@ fn posts_per_page_as_wp_query_reads_it() {
     assert_eq!(paged.unwrap().0.offset, 9);
     let listed = asked("administrator", &[("paged", list(&[text("4")]))]);
     assert_eq!(listed.unwrap().0.offset, 0);
+    // What a page of this size or offset cannot hold is not ported.
+    let big = |per_page: &str, paged: &str| {
+        let entries = [("posts_per_page", text(per_page)), ("paged", text(paged))];
+        asked("administrator", &entries)
+    };
+    assert_eq!(per_page(text("-9223372036854775808")), None);
+    assert_eq!(big("5000000000", "1"), None);
+    assert_eq!(big("4294967295", "9223372036854775807"), None);
+    assert_eq!(big("3", "4294967296"), None);
 }
 
 /// Private attachments for who may read them, the Trash only with
@@ -82,6 +91,8 @@ fn filters_as_wp_query_reads_them() {
     let one = |key: &str, value: Value| asked("administrator", &[(key, value)]);
     let mime = one("post_mime_type", list(&[text("image"), text("video/mp4")]));
     assert_eq!(mime.unwrap().0.mime_types, ["image/%", "video/mp4"]);
+    let pdf = one("post_mime_type", text("application/pdf"));
+    assert_eq!(pdf.unwrap().0.mime_types, ["application/pdf"]);
     assert_eq!(one("post_mime_type", list(&[text("a,b")])), None);
     assert_eq!(one("post_mime_type", list(&[list(&[])])), None);
     let any = one("post_mime_type", text(""));

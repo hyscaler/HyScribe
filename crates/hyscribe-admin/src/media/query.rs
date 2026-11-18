@@ -109,8 +109,7 @@ fn per_page(site: &dyn PostsSite, given: Option<&Value>) -> Option<i64> {
     let number = text.parse::<i64>().ok()?;
     Some(match number {
         -1 => -1,
-        0 => 1,
-        n => n.checked_abs()?,
+        n => n.saturating_abs().max(1),
     })
 }
 

@@ -30,8 +30,8 @@ const ERROR: &[u8] = b"{\"success\":false}";
 /// The answer to the media read `asked` names, once `admin-ajax.php`'s
 /// checks pass; `None` for another action.
 pub(super) fn read(admin: &Admin, asked: &Asked) -> Option<Response> {
-    let action = asked.request("action").and_then(Value::as_bytes)?;
-    let answer = match action {
+    let action = asked.request("action").and_then(Value::as_bytes);
+    let answer = match action.unwrap_or_default() {
         b"query-attachments" => query_attachments(admin, asked),
         b"get-attachment" => get_attachment(admin, asked),
         _ => return None,
@@ -57,7 +57,7 @@ fn get_attachment(admin: &Admin, asked: &Asked) -> Option<Response> {
     let Some(post) = post else {
         return Some(json(ERROR.to_vec()));
     };
-    Some(json(success(prepare_for_js(admin, &post)?)?))
+    prepare_for_js(admin, &post).and_then(success).map(json)
 }
 
 /// `wp_ajax_query_attachments()`: the attachments, and their count and
@@ -77,16 +77,19 @@ fn query_attachments(admin: &Admin, asked: &Asked) -> Option<Response> {
     let posts = posts
         .iter()
         .zip(0..)
-        .map(|(post, n)| Some((Key::Int(n), prepare_for_js(admin, post)?)))
-        .collect::<Option<Vec<_>>>()?;
-    let total = i64::try_from(total).ok()?;
+        .map(|(post, n)| prepare_for_js(admin, post).map(|data| (Key::Int(n), data)))
+        .collect::<Option<Vec<_>>>();
+    let total = i64::try_from(total).unwrap_or(i64::MAX);
     // `(int) ceil( $total / $per_page )`, which -1 makes negative.
     let pages = -(-total).div_euclid(per_page);
-    let mut response = json(success(Value::Array(posts))?);
-    let headers = response.headers_mut();
-    headers.insert("x-wp-total", HeaderValue::from(total));
-    headers.insert("x-wp-totalpages", HeaderValue::from(pages));
-    Some(response)
+    let body = posts.and_then(|posts| success(Value::Array(posts)));
+    body.map(|body| {
+        let mut response = json(body);
+        let headers = response.headers_mut();
+        headers.insert("x-wp-total", HeaderValue::from(total));
+        headers.insert("x-wp-totalpages", HeaderValue::from(pages));
+        response
+    })
 }
 
 /// A PHP array with string keys.
@@ -245,7 +248,7 @@ pub(super) fn prepare_for_js(admin: &Admin, post: &Post) -> Option<Value> {
             ),
         ]),
     ));
-    let edit = edit_link(admin, post)?;
+    let edit = edit_link(admin, post).unwrap_or(Value::Null);
     data.push(("editLink", if editable { edit } else { Value::Bool(false) }));
     data.push(("meta", Value::Bool(false)));
     match PostsSite::userdata(admin, post.author) {
@@ -296,7 +299,7 @@ pub(super) fn prepare_for_js(admin: &Admin, post: &Post) -> Option<Value> {
     }
     let player = matches!(kind, "audio" | "video");
     if let Some(meta) = meta.as_ref().filter(|_| player) {
-        player_fields(admin, &mut data, post, meta, icon)?;
+        player_fields(admin, &mut data, post, meta, icon);
     }
     data.push((
         Key::String(b"compat".to_vec()),
@@ -324,7 +327,7 @@ fn player_fields(
     post: &Post,
     meta: &Value,
     icon: String,
-) -> Option<()> {
+) {
     if let Some(length) = meta.get_str("length_formatted") {
         put(data, "fileLength", length.clone());
         // False where the length is not `[H:]M:S`.
@@ -350,15 +353,15 @@ fn player_fields(
         ]);
         put(data, "image", icon.clone());
         put(data, "thumb", icon);
-        return Some(());
+        return;
     }
-    let thumbnail = u64::try_from(thumbnail).ok()?;
+    // A negative ID names no image.
+    let thumbnail = u64::try_from(thumbnail).unwrap_or_default();
     for (key, size) in [("image", "full"), ("thumb", "thumbnail")] {
         if let Some(image) = featured_image(admin, thumbnail, size) {
             put(data, key, image);
         }
     }
-    Some(())
 }
 
 /// `$response[ $key ] = $value`: in place when the key is there.

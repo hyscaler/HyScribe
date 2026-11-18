@@ -38,7 +38,7 @@ async fn answered(
         // Quick Edit's answers as pages: its text, or nothing for its row.
         "admin-ajax" => {
             let handler = ajax_handler(&action).unwrap();
-            let saved = acted(writer, conn, (handler, &Unread(constants)), &asked).await;
+            let saved = acted(writer, conn, (handler, &Unread(constants, false)), &asked).await;
             saved.map(|saved| match saved {
                 Ajax::Text(text) => Answer::Page(text),
                 _ => Answer::Page(String::new()),
@@ -46,7 +46,7 @@ async fn answered(
         }
         _ => {
             let handler = handler(screen, &action).unwrap();
-            acted(writer, conn, (handler, &Unread(constants)), &asked).await
+            acted(writer, conn, (handler, &Unread(constants, false)), &asked).await
         }
     };
     answer.map_err(|err| format!("{err:?}"))

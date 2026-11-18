@@ -85,9 +85,7 @@ pub(super) trait Acting: ActionSite {
     /// Keeps `files` (each with the folder it must be within, under the
     /// uploads folder) to delete once the action is committed; false
     /// without an uploads folder.
-    fn delete_files(&self, _files: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
-        true
-    }
+    fn delete_files(&self, files: Vec<(Vec<u8>, Vec<u8>)>) -> bool;
     /// Deletes the files kept, once the action is `committed`, or forgets them.
     fn settle_files(&self, _committed: bool) {}
 }
@@ -320,4 +318,4 @@ pub(super) async fn act<'w, T: Mailed>(
 }
 
 #[cfg(test)]
-pub(super) mod tests;
+pub(crate) mod tests;

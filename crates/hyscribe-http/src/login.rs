@@ -21,6 +21,7 @@ use hyscribe_auth::{create_nonce, nonce_tick};
 use hyscribe_model::{Credentials, UserField};
 use hyscribe_phpser::{Value, addslashes, md5, parse_str, rawurlencode, urldecode, urlencode};
 use hyscribe_render::site::Site as RenderSite;
+use hyscribe_write::users::{UserData, wp_set_password, wp_update_user};
 use tokio::runtime::Handle;
 
 use crate::reads::Reads;
@@ -177,6 +178,9 @@ pub(crate) struct LoginReads<'a> {
     client: Result<Option<IpAddr>, crate::comment_post::Unnamed>,
     /// The accounts whose password was checked, and whether it matched.
     checked: RefCell<Vec<(u64, bool)>>,
+    /// The account and password of a match whose hash is in an old format,
+    /// which `wp_authenticate_username_password()` hashes again.
+    rehash: RefCell<Option<(u64, Vec<u8>)>>,
     /// The request guesses a password: a non-blank one.
     guess: Cell<bool>,
     /// The guess's turn to check passwords, which the login limits give.
@@ -203,6 +207,7 @@ impl<'a> LoginReads<'a> {
             action_post: None,
             client: Ok(None),
             checked: RefCell::default(),
+            rehash: RefCell::default(),
             guess: Cell::default(),
             turn: RefCell::default(),
             capped: Cell::default(),
@@ -416,6 +421,9 @@ impl LoginSite for LoginReads<'_> {
         };
         let matched = hyscribe_auth::check_password(password, &user.pass);
         self.checked.borrow_mut().push((user.id, matched));
+        if matched && hyscribe_auth::password_needs_rehash(&user.pass) {
+            *self.rehash.borrow_mut() = Some((user.id, password.to_vec()));
+        }
         matched
     }
 
@@ -874,6 +882,39 @@ pub(crate) fn renewed_cookies(
     renewed.unwrap_or_default()
 }
 
+/// `wp_signon()`'s writes for `user`, who logged in: a password whose hash
+/// is in an old format hashed again (`wp_authenticate_username_password()`)
+/// and a pending reset key cleared. The user as written, for the cookies.
+fn signon_writes(
+    reads: &LoginReads,
+    mut user: Credentials,
+) -> Result<Credentials, hyscribe_write::Error> {
+    let rehash = reads.rehash.take().filter(|(id, _)| *id == user.id);
+    let writer = reads.site.writer.as_ref();
+    let Some(writer) = writer.filter(|_| rehash.is_some() || !user.activation_key.is_empty())
+    else {
+        return Ok(user);
+    };
+    reads.reads.block_on(async {
+        let mut write = writer.begin().await?;
+        if let Some((id, password)) = rehash {
+            user.pass = wp_set_password(&mut write, &password, id)
+                .await?
+                .into_bytes();
+        } else {
+            let cleared = UserData {
+                id: user.id,
+                user_activation_key: Some(Vec::new()),
+                ..UserData::default()
+            };
+            wp_update_user(&mut write, &cleared).await?;
+        }
+        user.activation_key.clear();
+        write.commit().await?;
+        Ok(user)
+    })
+}
+
 /// `wp_set_auth_cookie()` and the redirect after a login: the cookies and
 /// where to go, or `None` when the session cannot be kept.
 fn logged_in(
@@ -891,6 +932,7 @@ fn logged_in(
     ) else {
         return None;
     };
+    let user = signon_writes(reads, user).ok()?;
     let expiration = expiration(reads.now, remember);
     let agent = headers
         .get(header::USER_AGENT)

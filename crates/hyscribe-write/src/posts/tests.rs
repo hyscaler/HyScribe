@@ -970,6 +970,42 @@ async fn insert_rolled_back(args: PostArgs) -> Result<u64> {
     rolled_back(async |w, ctx| wp_insert_post(w, ctx, args).await).await
 }
 
+/// `wp_delete_attachment()` refuses what is no attachment, and an
+/// attachment the theme's or site's logo uses, or with a header or
+/// background image set, is not ported, nor through `wp_delete_post()`.
+#[tokio::test]
+async fn attachment_deletes_stop_as_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let post = rolled_back(async |w, ctx| wp_delete_attachment(w, ctx, 1, true).await);
+    assert_eq!(post.await.unwrap(), None);
+    let missing = rolled_back(async |w, ctx| wp_delete_attachment(w, ctx, MISSING, true).await);
+    assert_eq!(missing.await.unwrap(), None);
+    let mods = "theme_mods_twentytwentyfive";
+    for (name, raw) in [
+        (mods, "a:1:{s:11:\"custom_logo\";i:%id%;}"),
+        (mods, "a:1:{s:12:\"header_image\";s:1:\"x\";}"),
+        (mods, "a:1:{s:16:\"background_image\";s:1:\"x\";}"),
+        ("site_logo", "%id%"),
+        ("", ""),
+    ] {
+        let deleted = rolled_back(async |w, ctx| {
+            let args = PostArgs {
+                title: b"A file".to_vec(),
+                mime_type: "image/png".into(),
+                ..PostArgs::default()
+            };
+            let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+            if name.is_empty() {
+                return wp_delete_post(w, ctx, id, true).await.map(|_| None);
+            }
+            set(w, name, raw.replace("%id%", &id.to_string()).as_bytes()).await?;
+            wp_delete_attachment(w, ctx, id, true).await
+        })
+        .await;
+        assert!(unported(deleted), "{name} {raw}");
+    }
+}
+
 #[tokio::test]
 async fn what_php_refuses_is_refused() {
     let _one = ONE_AT_A_TIME.lock().await;

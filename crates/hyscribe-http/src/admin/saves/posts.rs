@@ -113,7 +113,7 @@ const FORMATS: [&str; 9] = [
 type QueryArgs<'a> = [(&'a [u8], Option<&'a [u8]>)];
 
 /// `str_contains( $url, $file )`, for hs-admin's path of `file` too.
-fn mentions(url: &[u8], file: &str) -> bool {
+pub(super) fn mentions(url: &[u8], file: &str) -> bool {
     let has = |part: &[u8]| url.windows(part.len()).any(|window| window == part);
     let path = format!("/hs-admin/{}", file.trim_end_matches(".php"));
     let at = url
@@ -162,7 +162,11 @@ pub(super) async fn unfiltered_html(
 }
 
 /// The action's context for posts of `post_type`.
-fn context(asked: &Asked, site: &dyn Acting, (caps, post_type): (&Caps, &str)) -> Context {
+pub(super) fn context(
+    asked: &Asked,
+    site: &dyn Acting,
+    (caps, post_type): (&Caps, &str),
+) -> Context {
     Context {
         can_publish: caps.can_type("publish_posts", post_type),
         unfiltered_html: caps.can("unfiltered_html", &[]),
@@ -190,13 +194,12 @@ async fn post_php(
     let id = lookup(asked.get, "post").or_else(|| lookup(asked.post, "post_ID"));
     let id = id_of(id);
     let post = existing(write, id).await?;
-    if post.post_type == "attachment" {
-        return Err(Error::Unported("an attachment, which the media library handles").into());
-    }
+    let attachment = post.post_type == "attachment";
     let sendback = match referer(asked) {
         Some(referer) if !mentions(&referer, "post.php") && !mentions(&referer, "post-new.php") => {
             remove_query_arg(&[b"trashed", b"untrashed", b"deleted", b"ids"], &referer)
         }
+        _ if attachment => site.admin_url("upload.php").into_bytes(),
         _ => add_query_arg(
             &[(b"post_type", Some(post.post_type.as_bytes()))],
             site.admin_url("edit.php").as_bytes(),
@@ -216,6 +219,13 @@ async fn post_php(
             wp_untrash_post(write, &ctx, id, false).await?,
             "Error in restoring the item from Trash.",
             &[(b"untrashed", Some(b"1")), ids],
+        ),
+        // An attachment goes to the trash with `MEDIA_TRASH`.
+        _ if attachment => (
+            super::media::delete_attachment(write, (&ctx, site), id, !ctx.constants.media_trash)
+                .await?,
+            "Error in deleting the attachment.",
+            &[(b"deleted", Some(b"1"))],
         ),
         _ => (
             wp_delete_post(write, &ctx, id, true).await?,

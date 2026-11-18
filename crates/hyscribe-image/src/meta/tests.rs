@@ -21,7 +21,7 @@ fn matches_wp_read_image_metadata() {
         assert_eq!(ours.as_deref(), Ok(php.as_slice()), "{name}");
         read += 1;
     }
-    assert_eq!(read, 44);
+    assert_eq!(read, 51);
 }
 
 /// A big endian TIFF block with one IFD of `entries`: tag, type, count and

@@ -158,6 +158,12 @@ pub trait Site {
     /// What `get_site_transient( $name )` writes for a transient past its
     /// timeout, where the site writes: both its options deleted.
     fn expire_site_transient(&self, _name: &str) {}
+    /// `wp_getimagesize()` of the uploads file `file` (a path within the
+    /// uploads folder): `Some(None)` for what is missing or not an image,
+    /// `None` where the site does not read its uploads.
+    fn image_size(&self, _file: &str) -> Option<Option<(u32, u32)>> {
+        None
+    }
     /// `wp_hash( $data )`, `None` without the salts it signs with.
     fn wp_hash(&self, data: &[u8]) -> Option<String>;
     /// `wp_generate_password( 10, false )`, an oEmbed answer's secret.

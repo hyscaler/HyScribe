@@ -8,7 +8,7 @@
 //! makes the sizes.
 
 use hyscribe_db::{DbError, Meta, Write, Writer};
-use hyscribe_image::header::{ImageType, getimagesize};
+use hyscribe_image::header::getimagesize;
 use hyscribe_image::meta::wp_read_image_metadata;
 use hyscribe_image::subsizes::Generated;
 use hyscribe_model::Post;
@@ -139,10 +139,6 @@ impl Uploads {
     ) -> Result<Prepared, Refused> {
         let name = sent.name.clone();
         let (handled, meta) = self.written(site, sent, (time, who), !form)?;
-        if makes_copy(self, &handled, meta.as_deref()) {
-            self.discard(&handled);
-            return Err(Refused::Unported);
-        }
         let given = |value: &Option<Vec<u8>>| value.clone().filter(|value| !is_empty_string(value));
         let [meta_title, meta_caption, alt] = image_fields(meta.as_deref());
         // A form's name as sent without its extension, else the file's.
@@ -202,23 +198,6 @@ impl Uploads {
         saved.map_err(Refused::from)?;
         Ok(id)
     }
-}
-
-/// Whether `wp_create_image_subsizes()` makes a `-scaled` or `-rotated`
-/// copy of an upload with `meta`: an image over the
-/// `big_image_size_threshold`, or a JPEG its EXIF turns.
-fn makes_copy(uploads: &Uploads, handled: &Handled, meta: Option<&[(Key, Value)]>) -> bool {
-    let orientation = meta.and_then(|meta| lookup(meta, "orientation"));
-    let turned = orientation.is_some_and(|o| (2..=8).contains(&o.to_int()));
-    // The type check found the upload an image.
-    getimagesize(&handled.bytes).is_some_and(|size| {
-        let dimensions = (size.width, size.height);
-        let threshold = uploads
-            .hooks
-            .big_image_size_threshold(2560, dimensions, &handled.file, 0);
-        let over = threshold > 0 && i64::from(size.width.max(size.height)) > threshold;
-        over || size.kind == ImageType::Jpeg && turned
-    })
 }
 
 /// The attachment of `prepared` inserted as one action, once begun.

@@ -254,6 +254,7 @@ async fn database_errors_show_no_details() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+        uploads: None,
         install: unconfigured(),
         fetch: None,
     });
@@ -950,6 +951,7 @@ async fn the_front_page_links_to_home() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+        uploads: None,
         install: unconfigured(),
         fetch: None,
     });
@@ -1085,6 +1087,7 @@ async fn failed_reads_answer_defaults() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+        uploads: None,
         install: unconfigured(),
         fetch: None,
     });

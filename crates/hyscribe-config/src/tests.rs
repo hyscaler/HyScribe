@@ -70,8 +70,46 @@ fn defaults_are_safe() {
             disable_wp_cron: false,
             alternate_wp_cron: false,
             upload_max_size: 64 << 20,
+            image_limits: ImageLimits {
+                bytes: 64 << 20,
+                width: 32_000,
+                height: 32_000,
+                area: 256_000_000,
+                memory: 1 << 30,
+            },
         }
     );
+}
+
+/// The image limits as set, each a size or a whole number.
+#[test]
+fn reads_image_limits() {
+    let limits = |pairs: &[(&str, &str)]| from_map(&with(pairs)).map(|c| c.image_limits);
+    let set = limits(&[
+        ("IMAGE_MAX_BYTES", "1M"),
+        ("IMAGE_MAX_WIDTH", "100"),
+        ("IMAGE_MAX_HEIGHT", "4294967295"),
+        ("IMAGE_MAX_AREA", "5000"),
+        ("IMAGE_MAX_MEMORY", "2G"),
+    ]);
+    let expected = ImageLimits {
+        bytes: 1 << 20,
+        width: 100,
+        height: u32::MAX,
+        area: 5000,
+        memory: 2 << 30,
+    };
+    assert_eq!(set, Ok(expected));
+    for key in ["IMAGE_MAX_BYTES", "IMAGE_MAX_AREA", "IMAGE_MAX_MEMORY"] {
+        let refused = limits(&[(key, "0")]).unwrap_err().to_string();
+        assert!(refused.starts_with(&format!("{key} is invalid: must be a size")));
+    }
+    for key in ["IMAGE_MAX_WIDTH", "IMAGE_MAX_HEIGHT"] {
+        assert_eq!(
+            limits(&[(key, "0")]).unwrap_err().to_string(),
+            format!("{key} is invalid: must be a whole number from 1 to 4294967295")
+        );
+    }
 }
 
 /// The cron constants read as every yes or no key, false by default.

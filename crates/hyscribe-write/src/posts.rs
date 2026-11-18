@@ -101,6 +101,8 @@ pub struct PostArgs {
     /// `page_template`: `default`, or empty for none given; the theme's own
     /// templates are not ported.
     pub page_template: Vec<u8>,
+    /// `guid`: a new attachment's URL; other posts' is their permalink.
+    pub guid: Vec<u8>,
 }
 
 impl From<TermError> for Error {
@@ -136,6 +138,8 @@ enum Kind {
     Navigation,
     /// `wp_block`, a synced pattern.
     Block,
+    /// A new attachment, which only [`wp_insert_attachment`] makes.
+    Attachment,
 }
 
 impl Kind {
@@ -162,7 +166,11 @@ impl Kind {
             Kind::Post => &["category", "post_tag", "post_format"],
             Kind::GlobalStyles => &["wp_theme"],
             Kind::Block => &["wp_pattern_category"],
-            Kind::Page | Kind::Revision | Kind::UserRequest | Kind::Navigation => &[],
+            Kind::Page
+            | Kind::Revision
+            | Kind::UserRequest
+            | Kind::Navigation
+            | Kind::Attachment => &[],
         }
     }
 }
@@ -180,7 +188,7 @@ async fn existing(write: &mut Write<'_>, id: u64) -> Result<PostFields> {
 
 /// `wp_insert_post( $postarr )`: the post's ID.
 pub async fn wp_insert_post(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<u64> {
-    let (id, kind, update) = insert(write, ctx, args).await?;
+    let (id, kind, update) = insert(write, ctx, args, None).await?;
     // wp_after_insert_post: wp_save_post_revision_on_insert().
     if update {
         hooks::save_revision(write, ctx, kind, id).await?;
@@ -228,6 +236,7 @@ pub async fn wp_update_post(
         import_id: 0,
         edit_date: false,
         page_template: Vec::new(),
+        guid: Vec::new(),
     };
     change(&mut args);
     // Passed categories replace the post's only when there are some.
@@ -240,6 +249,24 @@ pub async fn wp_update_post(
         args.date_gmt = String::new();
     }
     wp_insert_post(write, ctx, args).await
+}
+
+/// `wp_insert_attachment( $args, $file )` of a new attachment for the file
+/// at `file` within the uploads folder: its ID, before the `add_attachment`
+/// action the caller fires.
+pub async fn wp_insert_attachment(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    args: PostArgs,
+    file: &str,
+) -> Result<u64> {
+    let args = PostArgs {
+        id: 0,
+        post_type: "attachment".into(),
+        ..args
+    };
+    let (id, ..) = insert(write, ctx, args, Some(file)).await?;
+    Ok(id)
 }
 
 /// `wp_unique_post_slug( $slug, $id, $status, $post_type, $parent )`.
@@ -556,9 +583,15 @@ fn valid_text(fields: &PostFields) -> Result<()> {
     Err(Error::InvalidText(last_error))
 }
 
-/// `wp_insert_post()` up to its `wp_insert_post` action: the post's ID and
-/// kind, and whether it was an update.
-async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<(u64, Kind, bool)> {
+/// `wp_insert_post()` up to its `wp_insert_post` action, or for the upload
+/// at `file` up to `add_attachment`: the post's ID and kind, and whether it
+/// was an update.
+async fn insert(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    args: PostArgs,
+    file: Option<&str>,
+) -> Result<(u64, Kind, bool)> {
     let args = sanitize(args, ctx)?;
     let before = match args.id {
         0 => None,
@@ -574,7 +607,10 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
     } else {
         args.post_type.clone()
     };
-    let kind = Kind::of(&post_type)?;
+    let kind = match file {
+        Some(_) => Kind::Attachment,
+        None => Kind::of(&post_type)?,
+    };
     // The types that support the editor, a title and an excerpt.
     if matches!(kind, Kind::Post | Kind::Block)
         && !truthy(&args.content)
@@ -588,6 +624,10 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
     } else {
         args.status.clone()
     };
+    let kept = ["inherit", "private", "trash", "auto-draft"];
+    if kind == Kind::Attachment && !kept.contains(&status.as_str()) {
+        status = "inherit".into();
+    }
     // An update keeps its categories, a new post (ID 0) has none; with
     // none, wp_set_post_categories() gives the default one.
     let category: Vec<u64> = match &args.category {
@@ -629,7 +669,7 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
     } else {
         (post_date.clone(), post_date_gmt.clone())
     };
-    if status == "publish" || status == "future" {
+    if kind != Kind::Attachment && (status == "publish" || status == "future") {
         let future = date::Dates::unix_gmt(&post_date_gmt) - ctx.now >= 60;
         status = if future { "future" } else { "publish" }.into();
     }
@@ -685,10 +725,7 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
         parent,
         menu_order: args.menu_order,
         mime_type: args.mime_type,
-        guid: before
-            .as_ref()
-            .map(|post| post.guid.clone())
-            .unwrap_or_default(),
+        guid: before.as_ref().map_or(args.guid, |post| post.guid.clone()),
     };
     valid_text(&fields)?;
     let id = if before.is_some() {
@@ -711,9 +748,16 @@ async fn insert(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<
         let terms: Vec<TermRef<'_>> = category.iter().map(|&term| TermRef::Id(term)).collect();
         wp_set_post_categories(write, id, &terms, false).await?;
     }
-    if before.is_none() {
+    if before.is_none() && fields.guid.is_empty() {
         let guid = link::permalink(write, ctx, id, &fields).await?;
         write.set_post_guid(id, &guid).await?;
+    }
+    if let Some(file) = file {
+        // update_attached_file(); an attachment fires `add_attachment` alone.
+        let file = Value::String(file.as_bytes().to_vec());
+        let any = Value::String(Vec::new());
+        update_metadata(write, Meta::Post, id, "_wp_attached_file", &file, &any).await?;
+        return Ok((id, kind, false));
     }
     if truthy(&args.page_template) {
         if args.page_template != b"default" {

@@ -59,6 +59,7 @@ use crate::redirect::wp_sanitize_redirect;
 use crate::{Site, now};
 
 mod saves;
+mod uploads;
 mod views;
 
 /// Whether `path` is an hs-admin screen: its files have an extension and
@@ -72,13 +73,14 @@ pub(crate) fn is_admin(path: &str) -> bool {
 }
 
 /// The answer to a request for an admin screen, a POST or not, from the
-/// connection's `peer`; `form` is `$_POST`, `None` for a body only PHP reads.
+/// connection's `peer`; `form` is `$_POST`, `None` for a body only PHP
+/// reads, and `files` `$_FILES`.
 pub(crate) async fn respond(
     site: &Arc<Site>,
     uri: Uri,
     headers: HeaderMap,
     (post, peer): (bool, Option<std::net::IpAddr>),
-    form: Option<Value>,
+    (form, files): (Option<Value>, crate::uploads::Files),
 ) -> Response {
     let site = Arc::clone(site);
     let (now, handle) = (now(), Handle::current());
@@ -90,6 +92,7 @@ pub(crate) async fn respond(
                 headers: &headers,
                 post,
                 form: form.as_ref(),
+                files: &files,
                 ip,
             };
             answer(&site, &asked, now, handle)
@@ -104,6 +107,8 @@ struct Asking<'a> {
     headers: &'a HeaderMap,
     post: bool,
     form: Option<&'a Value>,
+    /// `$_FILES`, by field.
+    files: &'a [(Vec<u8>, crate::uploads::Sent)],
     /// `$_SERVER['REMOTE_ADDR']`.
     ip: Vec<u8>,
 }
@@ -1708,6 +1713,12 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 let get = parse_str(uri.query().unwrap_or_default().as_bytes());
                 let asked = action_request(site, asking, &get, raw_uri.as_bytes(), (id, now));
                 let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();
+                let logged_in = cookie(&cookies, &names.logged_in());
+                if post && uploads::SCREENS.contains(&name) {
+                    let answer = uploads::upload(&admin, name, &asked, asking.files);
+                    let renewed = renewed_cookies(&reads, &names, logged_in, https);
+                    return with_cookies(answer, renewed);
+                }
                 match hyscribe_admin::actions::admin(&admin, name, &asked, post) {
                     Some(Err(refusal)) => return refused(reads.public(), refusal),
                     // The deletion's confirmation page, a screen.
@@ -1717,7 +1728,6 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                             && is_deletion(uri.query().unwrap_or_default()) => {}
                     Some(Ok(())) => {
                         let saved = save(&mut admin, name, &asked);
-                        let logged_in = cookie(&cookies, &names.logged_in());
                         let renewed = renewed_cookies(&reads, &names, logged_in, https);
                         return with_cookies(saved, renewed);
                     }
@@ -1768,7 +1778,9 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 reads.site_url(),
                 String::from_utf8_lossy(&back)
             );
-            redirect(nocache(), login.as_bytes())
+            let mut headers = nocache();
+            headers.push((header::CONTENT_TYPE, HTML.to_string()));
+            redirect(headers, login.as_bytes())
         }
     };
     match reads.reads.finish() {

@@ -21,18 +21,22 @@ pub(super) async fn default_status(
     kind: Kind,
     option: &str,
 ) -> Result<String> {
-    Ok(match kind {
-        Kind::Post => {
-            let value = write.option_value(option).await?.unwrap_or_default();
-            String::from_utf8_lossy(&value).into_owned()
-        }
+    // Attachments support comments but not trackbacks.
+    let supported = match kind {
+        Kind::Post => true,
+        Kind::Attachment => option == "default_comment_status",
         Kind::Page
         | Kind::Revision
         | Kind::GlobalStyles
         | Kind::UserRequest
         | Kind::Navigation
-        | Kind::Block => "closed".into(),
-    })
+        | Kind::Block => false,
+    };
+    if !supported {
+        return Ok("closed".into());
+    }
+    let value = write.option_value(option).await?.unwrap_or_default();
+    Ok(String::from_utf8_lossy(&value).into_owned())
 }
 
 /// `wp_delete_object_term_relationships( $object, $taxonomies )`. The

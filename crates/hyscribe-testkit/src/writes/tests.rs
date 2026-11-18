@@ -519,3 +519,31 @@ fn ids_are_masked_as_whole_numbers() {
     assert_eq!(mask(&guid("1")), guid("%wp_posts:2%").into_bytes());
     assert_eq!(mask("1.127 127. .1"), b"1.127 %wp_posts:1%. .%wp_posts:2%");
 }
+
+/// An upload's folder of the month and its sizes in bytes are masked in
+/// posts' GUIDs and meta values, and nowhere else.
+#[test]
+fn masks_upload_folders_and_sizes() {
+    let masks = Masks {
+        start: (0, b"2026-11-17 01:02:03".to_vec()),
+        end: (0, b"2026-11-17 01:02:04".to_vec()),
+        new: NewIds::new(),
+    };
+    let (posts, meta, options) = (&TABLES[0], &TABLES[1], &TABLES[8]);
+    let guid = b"http://example.test/wp-content/uploads/2026/11/a.jpg";
+    assert_eq!(
+        masks.mask(posts, "guid", guid),
+        b"http://example.test/wp-content/uploads/%ym%/a.jpg"
+    );
+    let stored =
+        b"a:2:{s:4:\"file\";s:13:\"2026/11/a.jpg\";s:8:\"filesize\";i:4096;}s:8:\"filesize\";i:";
+    assert_eq!(
+        masks.mask(meta, "meta_value", stored),
+        b"a:2:{s:4:\"file\";s:13:\"%ym%/a.jpg\";s:8:\"filesize\";i:%filesize%;}s:8:\"filesize\";i:%filesize%"
+    );
+    assert_eq!(masks.mask(posts, "post_name", b"2026/11/"), b"2026/11/");
+    assert_eq!(
+        masks.mask(options, "option_value", b"2026/11/"),
+        b"2026/11/"
+    );
+}

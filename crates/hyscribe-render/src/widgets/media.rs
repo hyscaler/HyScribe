@@ -45,7 +45,7 @@ impl Renderer<'_> {
     /// a URL; the wrapper and title alone for an attachment that is no
     /// image and no URL; else the title and the image, linked and
     /// captioned as the instance asks.
-    pub(super) fn media_image_widget(&self, args: &Args, instance: &Value) -> Vec<u8> {
+    pub(super) fn media_image_widget(&mut self, args: &Args, instance: &Value) -> Vec<u8> {
         let site = self.context.site;
         // `wp_parse_args()` of the schema's defaults: a key given keeps
         // its value, even null.
@@ -174,9 +174,9 @@ impl Renderer<'_> {
             html = link;
         }
         if !caption.is_empty() {
-            let upload_host = self.context.upload_host();
-            html =
-                img_caption_shortcode(&upload_host, caption_width, &caption.to_php_string(), html);
+            let attr = [("width", Value::Int(caption_width)), ("caption", caption)]
+                .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value));
+            html = self.img_caption_shortcode(&attr, Some(&html));
         }
         out.extend(html);
         out.extend_from_slice(&args.after_widget);
@@ -350,33 +350,6 @@ fn url_image(
     }
     image.extend_from_slice(b" />");
     image
-}
-
-/// `img_caption_shortcode( array( 'width' => $width, 'caption' => $caption ),
-/// $content )` under the `html5` caption support block themes have: the
-/// content as given, as shortcodes are not run.
-fn img_caption_shortcode(
-    upload_host: &[u8],
-    width: i64,
-    caption: &[u8],
-    content: Vec<u8>,
-) -> Vec<u8> {
-    let caption = if caption.contains(&b'<') {
-        wp_kses_post(caption, upload_host)
-    } else {
-        caption.to_vec()
-    };
-    if width < 1 || is_empty_string(&caption) {
-        return content;
-    }
-    [
-        format!("<figure style=\"width: {width}px\" class=\"wp-caption alignnone\">").as_bytes(),
-        &content,
-        b"<figcaption class=\"wp-caption-text\">",
-        &caption,
-        b"</figcaption></figure>",
-    ]
-    .concat()
 }
 
 /// `WP_Widget_Media_Gallery::render_media()`'s `$shortcode_atts`: the

@@ -125,7 +125,11 @@ impl Renderer<'_> {
     }
 
     /// `img_caption_shortcode( $attr, $content )` under `html5` support.
-    fn img_caption_shortcode(&mut self, attr: &[(Key, Value)], content: Option<&[u8]>) -> Vec<u8> {
+    pub(crate) fn img_caption_shortcode(
+        &mut self,
+        attr: &[(Key, Value)],
+        content: Option<&[u8]>,
+    ) -> Vec<u8> {
         let site = self.context.site;
         let hooks = site.hooks();
         let mut content = content.unwrap_or_default().to_vec();

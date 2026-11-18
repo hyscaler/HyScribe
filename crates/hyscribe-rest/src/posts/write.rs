@@ -168,7 +168,8 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
     // The media collection's create uploads.
     if regex == "/wp/v2/media" && index == 1 {
         return Some(Writing {
-            unported: |params| UNPORTED_UPLOAD.iter().any(|name| given(params, name)),
+            // The fields an upload does not port are the route's own unported arguments.
+            unported: |_| false,
             args: |_, _, args| args,
             plan: plan_upload,
             finish,
@@ -187,32 +188,6 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
             finish,
         },
     })
-}
-
-/// The arguments of an upload not ported: what the post's own fields would
-/// set beyond its texts and parent, and the block editor's own processing.
-const UNPORTED_UPLOAD: [&str; 13] = [
-    "date",
-    "date_gmt",
-    "slug",
-    "status",
-    "author",
-    "comment_status",
-    "ping_status",
-    "meta",
-    "template",
-    "featured_media",
-    "generate_sub_sizes",
-    "convert_format",
-    "url",
-];
-
-/// Whether the request itself gives `name`, not its default.
-fn given(params: &Params, name: &str) -> bool {
-    let name = Key::String(name.as_bytes().to_vec());
-    [&params.json, &params.post, &params.get]
-        .iter()
-        .any(|source| source.iter().any(|(key, _)| *key == name))
 }
 
 /// `create_item()` of the media collection up to its upload: the parent

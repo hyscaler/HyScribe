@@ -610,6 +610,7 @@ async fn a_comment_without_a_thread_top_has_no_page() {
     let orphan = hyscribe_db::CommentFields {
         post_id: 1,
         parent: 999_999,
+        date: "2026-10-27 09:00:00".into(),
         date_gmt: "2026-10-27 09:00:00".into(),
         approved: "1".into(),
         comment_type: "comment".into(),

@@ -1,24 +1,26 @@
 # The rows PHP WordPress writes for the action rest-notes-named (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-18 19:49:27 to 2026-11-18 19:49:27 UTC.
+# %now% and %unix% stand for times from 2026-11-18 22:26:57 to 2026-11-18 22:26:57 UTC.
+# %wp_posts:1% is 20.
 # %wp_comments:1% is 10.
 # %wp_comments:2% is 11.
 # %wp_comments:3% is 12.
 # %wp_comments:4% is 13.
-# %wp_comments:5% is 18.
+# %wp_comments:5% is 14.
+# %wp_comments:6% is 19.
 # %wp_commentmeta:1% is 10.
-wp_comments	%wp_comments:5%	+	comment_ID	%wp_comments:5%
-wp_comments	%wp_comments:5%	+	comment_agent	
-wp_comments	%wp_comments:5%	+	comment_approved	1
-wp_comments	%wp_comments:5%	+	comment_author	Noter x
-wp_comments	%wp_comments:5%	+	comment_author_IP	10.0.0.9
-wp_comments	%wp_comments:5%	+	comment_author_email	noter@example.test
-wp_comments	%wp_comments:5%	+	comment_author_url	https://noter.example.test/
-wp_comments	%wp_comments:5%	+	comment_content	Named <b>one</b>
-wp_comments	%wp_comments:5%	+	comment_date	2026-01-02 03:04:05
-wp_comments	%wp_comments:5%	+	comment_date_gmt	2026-01-02 03:04:05
-wp_comments	%wp_comments:5%	+	comment_karma	0
-wp_comments	%wp_comments:5%	+	comment_parent	0
-wp_comments	%wp_comments:5%	+	comment_post_ID	1
-wp_comments	%wp_comments:5%	+	comment_type	note
-wp_comments	%wp_comments:5%	+	user_id	0
+wp_comments	%wp_comments:6%	+	comment_ID	%wp_comments:6%
+wp_comments	%wp_comments:6%	+	comment_agent	
+wp_comments	%wp_comments:6%	+	comment_approved	1
+wp_comments	%wp_comments:6%	+	comment_author	Noter x
+wp_comments	%wp_comments:6%	+	comment_author_IP	10.0.0.9
+wp_comments	%wp_comments:6%	+	comment_author_email	noter@example.test
+wp_comments	%wp_comments:6%	+	comment_author_url	https://noter.example.test/
+wp_comments	%wp_comments:6%	+	comment_content	Named <b>one</b>
+wp_comments	%wp_comments:6%	+	comment_date	2026-01-02 03:04:05
+wp_comments	%wp_comments:6%	+	comment_date_gmt	2026-01-02 03:04:05
+wp_comments	%wp_comments:6%	+	comment_karma	0
+wp_comments	%wp_comments:6%	+	comment_parent	0
+wp_comments	%wp_comments:6%	+	comment_post_ID	1
+wp_comments	%wp_comments:6%	+	comment_type	note
+wp_comments	%wp_comments:6%	+	user_id	0
 wp_posts	1	~	comment_count	1	2

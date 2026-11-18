@@ -53,6 +53,8 @@ POST	/?rest_route=/wp/v2/comments/10	json,restore	{"meta":{"_wp_note_status":"re
 POST	/?rest_route=/wp/v2/comments/10	json,restore	{"meta":{"_wp_note_status":null}}
 POST	/?rest_route=/wp/v2/comments/10	json,restore	{"type":"note"}
 POST	/?rest_route=/wp/v2/comments/11	json,restore	{"type":"comment"}
+POST	/?rest_route=/wp/v2/comments/14	json,restore	{"author_ip":"10.0.0.7","content":"Edited by whoever may"}
+POST	/?rest_route=/wp/v2/comments/14	json,restore	{"author_ip":"127.0.0.1","content":"Same address"}
 DELETE	/?rest_route=/wp/v2/comments/11	restore
 DELETE	/?rest_route=/wp/v2/comments/11&force=true	restore
 DELETE	/?rest_route=/wp/v2/comments/12&force=1	restore

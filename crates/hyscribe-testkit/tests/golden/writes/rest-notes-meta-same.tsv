@@ -1,8 +1,10 @@
 # The rows PHP WordPress writes for the action rest-notes-meta-same (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-18 19:49:29 to 2026-11-18 19:49:29 UTC.
+# %now% and %unix% stand for times from 2026-11-18 22:26:59 to 2026-11-18 22:26:59 UTC.
+# %wp_posts:1% is 20.
 # %wp_comments:1% is 10.
 # %wp_comments:2% is 11.
 # %wp_comments:3% is 12.
 # %wp_comments:4% is 13.
+# %wp_comments:5% is 14.
 # %wp_commentmeta:1% is 10.
 wp_posts	1	~	comment_count	1	2

@@ -673,7 +673,7 @@ async fn comment_notes_match_php() {
     ];
     assert_eq!(
         writes_match_php(golden, state, &unported).await,
-        (6 * 49, 3 * 2 + 3 + 5 + 5 + 3 * 2)
+        (6 * 51, 3 * 2 + 3 + 5 + 5 + 3 * 2)
     );
 }
 

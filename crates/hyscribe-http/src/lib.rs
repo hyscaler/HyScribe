@@ -795,6 +795,7 @@ async fn page(
                 headers,
                 body,
                 route,
+                peer,
             };
             return rest::respond(&site, asked).await;
         }

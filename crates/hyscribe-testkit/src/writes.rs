@@ -315,7 +315,7 @@ impl Masks {
         let token = |id: &[u8]| self.new.get(&(*of, id.to_vec())).cloned();
         match held {
             Whole => token(&value).unwrap_or(value),
-            Digits => digit_runs(&value, token),
+            Digits => id_runs(&value, token),
             TermMap => term_map(&value, token).unwrap_or(value),
         }
     }
@@ -397,6 +397,35 @@ fn digit_runs(value: &[u8], replace: impl Fn(&[u8]) -> Option<Vec<u8>>) -> Vec<u
         rest = tail;
     }
     out.extend_from_slice(rest);
+    out
+}
+
+/// `value` with each whole number replaced as `replace` says: a run of
+/// digits in a dotted number, such as an IP address's, is left as it is.
+fn id_runs(value: &[u8], replace: impl Fn(&[u8]) -> Option<Vec<u8>>) -> Vec<u8> {
+    let digit = |at: Option<usize>| {
+        at.and_then(|at| value.get(at))
+            .is_some_and(u8::is_ascii_digit)
+    };
+    let dot = |at: Option<usize>| at.and_then(|at| value.get(at)) == Some(&b'.');
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(&b) = value.get(at) {
+        let tail = value.get(at..).unwrap_or_default();
+        let len = tail.iter().take_while(|b| b.is_ascii_digit()).count();
+        if len == 0 {
+            out.push(b);
+            at += 1;
+            continue;
+        }
+        let run = tail.get(..len).unwrap_or_default();
+        let end = at + len;
+        let before = dot(at.checked_sub(1)) && digit(at.checked_sub(2));
+        let after = dot(Some(end)) && digit(Some(end + 1));
+        let token = replace(run).filter(|_| !before && !after);
+        out.extend(token.unwrap_or_else(|| run.to_vec()));
+        at = end;
+    }
     out
 }
 

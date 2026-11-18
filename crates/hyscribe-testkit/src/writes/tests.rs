@@ -526,3 +526,24 @@ fn masks_upload_folders_and_sizes() {
         b"2026/11/"
     );
 }
+
+/// A new ID is masked as a whole number only: the same digits in a dotted
+/// number, such as the site's address, are left.
+#[test]
+fn ids_are_masked_as_whole_numbers() {
+    let new = NewIds::from([
+        (("wp_posts", b"127".to_vec()), b"%wp_posts:1%".to_vec()),
+        (("wp_posts", b"1".to_vec()), b"%wp_posts:2%".to_vec()),
+    ]);
+    let masks = Masks {
+        start: (0, Vec::new()),
+        end: (0, Vec::new()),
+        new,
+    };
+    let posts = &TABLES[0];
+    let guid = |id: &str| format!("http://127.0.0.1:8081/?p={id}");
+    let mask = |value: &str| masks.mask(posts, "guid", value.as_bytes());
+    assert_eq!(mask(&guid("127")), guid("%wp_posts:1%").into_bytes());
+    assert_eq!(mask(&guid("1")), guid("%wp_posts:2%").into_bytes());
+    assert_eq!(mask("1.127 127. .1"), b"1.127 %wp_posts:1%. .%wp_posts:2%");
+}

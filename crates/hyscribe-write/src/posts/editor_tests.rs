@@ -70,6 +70,26 @@ async fn editor_views_match_php() {
     let edit =
         async |conn: &mut Connection, ()| view(conn, &admin(), Edited::Existing(1)).await.map(drop);
     check("admin-editor-edit", viewed, edit).await;
+    // `reference/writes/actions-site-editor.php`: the site editor's first view.
+    let site = async |conn: &mut Connection, ()| {
+        let writer = writer().await;
+        let mut write = writer.begin_on(conn).await.map_err(|e| format!("{e:?}"))?;
+        let id = site_editor_view(&mut write, &admin(), THEME).await;
+        let id = id.map_err(|e| format!("{e:?}"))?;
+        assert_eq!(
+            write.post(id).await.unwrap().unwrap().post_type,
+            "wp_global_styles"
+        );
+        write.commit().await.map_err(|e| format!("{e:?}"))
+    };
+    check("admin-site-editor", nothing, site).await;
+}
+
+/// A database error at any statement of the site editor's first view ends it.
+#[tokio::test]
+async fn database_errors_end_site_editor_views() {
+    let first = async |w: &mut Write<'_>, ()| site_editor_view(w, &admin(), THEME).await.map(drop);
+    crate::tests::fails_at_each_step(async |_: &mut Write<'_>| (), first).await;
 }
 
 /// Runs `f` in a transaction that is rolled back.

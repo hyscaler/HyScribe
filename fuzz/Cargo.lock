@@ -644,6 +644,7 @@ dependencies = [
  "hyscribe-http",
  "hyscribe-phpser",
  "hyscribe-service",
+ "hyscribe-write",
  "rustix",
  "tokio",
 ]
@@ -652,11 +653,13 @@ dependencies = [
 name = "hyscribe-admin"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-assets",
  "hyscribe-auth",
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",
+ "hyscribe-theme-json",
 ]
 
 [[package]]

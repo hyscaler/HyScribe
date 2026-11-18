@@ -46,6 +46,8 @@ pub(crate) struct Asked {
     pub(crate) headers: HeaderMap,
     pub(crate) body: Bytes,
     pub(crate) route: Vec<u8>,
+    /// The connection's address.
+    pub(crate) peer: Option<std::net::IpAddr>,
 }
 
 /// The answer to a REST request, read on a blocking thread.
@@ -87,6 +89,11 @@ impl hyscribe_rest::Site for Rest<'_> {
     }
 
     fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
+        // Another user's, such as a comment's author.
+        if user != self.user && user != 0 {
+            let caps = Capabilities::load(&self.reads, self.site.db.prefix(), user);
+            return caps.has_cap(&self.reads, cap, args);
+        }
         let caps = || {
             self.caps
                 .get_or_init(|| Capabilities::load(&self.reads, self.site.db.prefix(), self.user))
@@ -270,6 +277,7 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         true => header("content-type"),
         false => Some(&b"application/x-www-form-urlencoded"[..]),
     };
+    let remote = crate::comment_post::client_addr(site, &asked.headers, asked.peer);
     let request = hyscribe_rest::Request {
         method: asked.method.as_str(),
         route: &asked.route,
@@ -282,6 +290,8 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
         cookie_user: user,
         origin: header("origin"),
         nonce: header("x-wp-nonce"),
+        remote_addr: &remote,
+        user_agent: header("user-agent"),
         method_override: header("x-http-method-override"),
         content_type,
         body: &asked.body,

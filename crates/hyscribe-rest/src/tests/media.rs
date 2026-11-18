@@ -32,6 +32,8 @@ fn context(oracle: &Oracle) -> Context<'_> {
         head: false,
         uri: b"/",
         parameters: false,
+        remote_addr: b"",
+        user_agent: None,
         host: b"",
         now: 0,
     }
@@ -130,6 +132,8 @@ fn embedding_what_is_not_ported() {
             cookie_user: user,
             origin: None,
             nonce: (user != 0).then_some(b"%nonce%"),
+            remote_addr: b"",
+            user_agent: None,
             method_override: None,
             content_type: None,
             body: b"",

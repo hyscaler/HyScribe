@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The settings' writes (MVP 4.3) that reference/rest/golden.sh records as
+# settings-writes.tsv over the default install: each request sent with its
+# body as every identity, the database put back after each. Each setting's
+# schema, sanitize_option(), null deleting an option, and settings that are
+# not stored.
+POST	/?rest_route=/wp/v2/settings	json,restore	{"title":"New <b>title</b> & co","description":"Tag & line","posts_per_page":5,"use_smilies":false,"start_of_week":"3"}
+PUT	/?rest_route=/wp/v2/settings	json,restore	{"email":"not-an-email"}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"email":"new@example.test","url":"http://127.0.0.1:8081"}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"timezone":"Europe/Paris","date_format":"j F Y <script>x()</script>","time_format":"H:i"}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"timezone":"Nowhere/City","title":"Kept"}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"default_ping_status":"maybe"}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"posts_per_page":null,"title":null}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"site_logo":5,"site_icon":"7","default_comment_status":"closed","default_ping_status":"closed"}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"language":""}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"language":"fr_FR"}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"show_on_front":"page","page_on_front":2,"page_for_posts":"1","default_category":1,"default_post_format":"aside"}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"title":["array"],"start_of_week":"x"}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"unknown":"x","title":"Only","start_of_week":-3,"posts_per_page":-5}
+POST	/?rest_route=/wp/v2/settings	form,restore	title=Form+title&use_smilies=0
+POST	/?rest_route=/wp/v2/settings	json,restore	{}
+POST	/?rest_route=/wp/v2/settings	json,restore	{"site_logo":null,"use_smilies":null}
+PATCH	/?rest_route=/wp/v2/settings&_fields=title	json,restore	{"title":"Fields"}

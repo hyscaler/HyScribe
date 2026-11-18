@@ -237,6 +237,33 @@ pub async fn new_comment(
     steps.finish(Ok(Ok(id)))
 }
 
+/// The REST API's create: `wp_allow_comment()`, then `wp_insert_comment(
+/// wp_filter_comment() )`, without `wp_new_comment()`'s other checks.
+pub async fn allow_and_insert_comment(
+    write: &mut Write<'_>,
+    context: Context<'_>,
+    mut comment: NewComment,
+    commenter: Commenter,
+) -> Result<Result<u64, Refused>, DbError> {
+    let mut steps = Steps::new(write);
+    let approved = allow::allow_comment(&mut steps, context, &comment, commenter).await;
+    let approved = match approved {
+        Ok(approved) => approved,
+        Err(refused) => return steps.finish(Ok(Err(refused))),
+    };
+    let balance = balance_tags(&mut steps).await;
+    filter::Fields {
+        author: &mut comment.author,
+        email: &mut comment.author_email,
+        url: &mut comment.author_url,
+        content: &mut comment.content,
+    }
+    .filter(!commenter.unfiltered_html, context.home, balance);
+    comment.approved = Some(approved);
+    let id = insert(&mut steps, context, &comment).await;
+    steps.finish(Ok(Ok(id)))
+}
+
 /// `wp_update_comment()`: `None` when there is no such comment or no such
 /// new post, else whether the row changed. Every field is filtered again,
 /// through kses when `kses` (the current user or the comment's author may

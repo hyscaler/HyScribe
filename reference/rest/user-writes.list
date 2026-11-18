@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The users' writes (MVP 4.3) that reference/rest/golden.sh records as
+# user-writes.tsv over the default install: each request sent with its
+# body as every identity, the database put back after each. Creates,
+# updates of a user and of oneself (`me`), deletes with `reassign`, with
+# the checks of the permission checks, the arguments' own checks,
+# check_role_update(), update_item() and wp_insert_user(), and what
+# HyScribe does not port (meta, one's own password, which logs one in
+# again).
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"newbie","email":"newbie@example.test","password":"secret-pass","name":"New Bie","first_name":"New","last_name":"Bie","url":"https://newbie.example.test","description":"<b>Hi</b><script>x()</script>","nickname":"nb","slug":"New Bie","locale":"en_US"}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"roled","email":"roled@example.test","password":"pw","roles":["editor","author"]}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"admin","email":"other@example.test","password":"pw"}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"dupe","email":"editor@example.test","password":"pw"}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"bad<name>","email":"bad@example.test","password":"pw"}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"slashed","email":"slashed@example.test","password":"back\\slash"}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"empty","email":"empty@example.test","password":""}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"nope","email":"nope@example.test","password":"pw","roles":["nope"]}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"locale","email":"locale@example.test","password":"pw","locale":"fr_FR"}
+POST	/?rest_route=/wp/v2/users	json,restore	{}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"meta","email":"meta@example.test","password":"pw","meta":{}}
+POST	/?rest_route=/wp/v2/users	form,restore	username=formed&email=formed%40example.test&password=pw&name=Formed
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"exists","email":"exists@example.test","password":"pw","id":1}
+POST	/?rest_route=/wp/v2/users/702	json,restore	{"name":"Author Renamed","first_name":"Au","email":"author2@example.test","url":"https://a.example.test","description":"Bio <em>here</em>"}
+PUT	/?rest_route=/wp/v2/users/702	json,restore	{"email":"editor@example.test"}
+PATCH	/?rest_route=/wp/v2/users/702	json,restore	{"username":"other"}
+PATCH	/?rest_route=/wp/v2/users/702	json,restore	{"username":"author","slug":"editor"}
+POST	/?rest_route=/wp/v2/users/702	json,restore	{"roles":["editor"]}
+POST	/?rest_route=/wp/v2/users/702	json,restore	{"roles":["subscriber"],"nickname":"Demoted"}
+POST	/?rest_route=/wp/v2/users/1	json,restore	{"roles":["subscriber"]}
+POST	/?rest_route=/wp/v2/users/702	json,restore	{"password":"new-secret"}
+POST	/?rest_route=/wp/v2/users/999	json,restore	{"name":"Gone"}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"nickname":"Me","last_name":"Myself"}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"password":"my-new-secret"}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{}}}
+DELETE	/?rest_route=/wp/v2/users/704&force=true	restore
+DELETE	/?rest_route=/wp/v2/users/704&reassign=1	restore
+DELETE	/?rest_route=/wp/v2/users/704&force=true&reassign=1	restore
+DELETE	/?rest_route=/wp/v2/users/702&force=true&reassign=false	restore
+DELETE	/?rest_route=/wp/v2/users/704&force=true&reassign=704	restore
+DELETE	/?rest_route=/wp/v2/users/703&force=true&reassign=x	restore
+DELETE	/?rest_route=/wp/v2/users/me&force=true&reassign=1	restore
+DELETE	/?rest_route=/wp/v2/users/999&force=true&reassign=1	restore

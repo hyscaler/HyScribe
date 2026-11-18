@@ -321,6 +321,22 @@ async fn rendering_fetches_and_caches_through_the_site() {
     .unwrap();
 }
 
+/// A feed's 10 seconds, a discovery's size limit and the user agent reach
+/// the client as WordPress's arguments.
+#[test]
+fn rendering_asks_with_its_own_arguments() {
+    let get = hyscribe_render::outbound::Get {
+        timeout: 10,
+        limit: Some(153_600),
+        user_agent: b"WordPress/7.1.3; http://a.test".to_vec(),
+    };
+    let args = crate::outbound::args(&get);
+    assert_eq!(args.timeout, std::time::Duration::from_secs(10));
+    assert_eq!(args.limit_response_size, Some(153_600));
+    assert_eq!(args.user_agent, "WordPress/7.1.3; http://a.test");
+    assert_eq!(args.redirection, 5);
+}
+
 #[test]
 fn failures_read_as_wordpress_words_them() {
     use hyscribe_fetch::Kind;

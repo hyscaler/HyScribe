@@ -29,6 +29,15 @@ pub(crate) fn message(kind: Kind) -> &'static [u8] {
     }
 }
 
+/// The client's arguments for what rendering asks.
+pub(crate) fn args(get: &Get) -> Args {
+    Args {
+        timeout: Duration::from_secs(get.timeout),
+        limit_response_size: get.limit,
+        ..Args::new(String::from_utf8_lossy(&get.user_agent).into_owned())
+    }
+}
+
 /// `wp_safe_remote_get()` through `site`'s client; `None` without one.
 pub(crate) fn remote_get(
     site: &Site,
@@ -37,12 +46,7 @@ pub(crate) fn remote_get(
     get: &Get,
 ) -> Option<Result<Response, Vec<u8>>> {
     let client = site.fetch.as_ref()?;
-    let args = Args {
-        timeout: Duration::from_secs(get.timeout),
-        limit_response_size: get.limit,
-        ..Args::new(String::from_utf8_lossy(&get.user_agent).into_owned())
-    };
-    let fetched = reads.block_on(client.get(url, site.home.as_bytes(), args));
+    let fetched = reads.block_on(client.get(url, site.home.as_bytes(), args(get)));
     Some(match fetched {
         Ok(fetched) => Ok(Response {
             status: fetched.status,

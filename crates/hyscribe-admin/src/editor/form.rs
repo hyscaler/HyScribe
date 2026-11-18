@@ -5,12 +5,13 @@
 
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value};
+use hyscribe_render::template_types::PART_AREAS;
 
 use super::EditorSite;
 use super::settings::Settings;
 use crate::admin_bar::{BarSite, Browser};
 use crate::list_table::wp_referer_field;
-use crate::page::{object, text};
+use crate::page::{json, object, text};
 
 /// The post being edited, as the view found it.
 pub struct Editing<'a> {
@@ -24,37 +25,20 @@ pub struct Editing<'a> {
     pub uri: &'a str,
 }
 
-/// `get_allowed_block_template_part_areas()`.
-const AREAS: [(&str, &str, &str, &str, &str); 4] = [
-    (
-        "uncategorized",
-        "General",
-        "General templates often perform a specific role like displaying post content, and are not tied to any particular area.",
-        "layout",
-        "div",
-    ),
-    (
-        "header",
-        "Header",
-        "The Header template defines a page area that typically contains a title, logo, and main navigation.",
-        "header",
-        "header",
-    ),
-    (
-        "footer",
-        "Footer",
-        "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
-        "footer",
-        "footer",
-    ),
-    (
-        "navigation-overlay",
-        "Navigation Overlay",
-        "The Navigation Overlay template defines an overlay area that typically contains navigation links and can be toggled open and closed.",
-        "navigation-overlay",
-        "div",
-    ),
-];
+/// `get_allowed_block_template_part_areas()` as PHP lists it.
+pub(crate) fn part_areas() -> Value {
+    let areas = PART_AREAS.iter().zip(0..).map(|(area, i)| {
+        let area = object(vec![
+            ("area", text(area.area)),
+            ("label", text(area.label)),
+            ("description", text(area.description)),
+            ("icon", text(area.icon)),
+            ("area_tag", text(area.tag)),
+        ]);
+        (Key::Int(i), area)
+    });
+    Value::Array(areas.collect())
+}
 
 /// `user_can_richedit()` in `browser`, for a user whose `rich_editing` is
 /// as stored; the browser as `vars.php` tells it.
@@ -116,19 +100,6 @@ pub fn custom_settings(site: &dyn EditorSite, editing: &Editing) -> Settings {
         ("ajaxUrl", text(&BarSite::admin_url(site, "admin-ajax.php"))),
     ]);
     let custom_fields = site.user_option("enable_custom_fields");
-    let areas = AREAS
-        .iter()
-        .zip(0..)
-        .map(|((area, label, description, icon, tag), i)| {
-            let area = object(vec![
-                ("area", text(area)),
-                ("label", text(label)),
-                ("description", text(description)),
-                ("icon", text(icon)),
-                ("area_tag", text(tag)),
-            ]);
-            (Key::Int(i), area)
-        });
     let rich = rich_editing(site, editing.browser);
     let mut settings = Settings::default();
     for (key, value) in [
@@ -154,7 +125,7 @@ pub fn custom_settings(site: &dyn EditorSite, editing: &Editing) -> Settings {
             "__experimentalAdditionalBlockPatternCategories",
             Value::Array(Vec::new()),
         ),
-        ("defaultTemplatePartAreas", Value::Array(areas.collect())),
+        ("defaultTemplatePartAreas", part_areas()),
     ] {
         settings.set(key, value);
     }
@@ -192,13 +163,10 @@ pub const SCRIPTS: [&str; 15] = [
     "wp-format-library",
 ];
 
-/// The inline scripts the page adds after registered scripts', by handle.
-pub fn scripts_after(settings: &Value, edits: &Value, post: &Post) -> Vec<(&'static str, String)> {
-    let json = |value: &Value| {
-        String::from_utf8_lossy(&hyscribe_render::head::json_hex_tag(value)).into_owned()
-    };
-    let sources = super::blocks::bindings_sources();
-    let blocks = [
+/// The editors' inline scripts of `wp-blocks`: the block categories, the
+/// server's block definitions and the bindings sources.
+pub(crate) fn block_scripts() -> [String; 3] {
+    [
         format!(
             "wp.blocks.setCategories( {} );",
             json(&super::blocks::block_categories())
@@ -209,11 +177,15 @@ pub fn scripts_after(settings: &Value, edits: &Value, post: &Post) -> Vec<(&'sta
         ),
         format!(
             "for ( const source of {} ) {{ wp.blocks.registerBlockBindingsSource( source ); }}",
-            json(&sources)
+            json(&super::blocks::bindings_sources())
         ),
-    ];
+    ]
+}
+
+/// The inline scripts the page adds after registered scripts', by handle.
+pub fn scripts_after(settings: &Value, edits: &Value, post: &Post) -> Vec<(&'static str, String)> {
     vec![
-        ("wp-blocks", blocks.join("\n")),
+        ("wp-blocks", block_scripts().join("\n")),
         (
             "heartbeat",
             "jQuery( function() {\n\t\twp.heartbeat.interval( 10 );\n\t} );".into(),

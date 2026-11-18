@@ -14,7 +14,7 @@ use crate::admin_bar::BarSite;
 use crate::list_table::wp_referer_field;
 use crate::list_table::{Column, Order, column_headers, fill, screen_options};
 use crate::menu::{Screen, link};
-use crate::page::{HelpTab, Page, Request, THEME, admin_page, json, text};
+use crate::page::{HelpTab, Page, Request, THEME, admin_page, json, text, wp_admin_notice};
 use crate::posts::{Answer, PostsSite, hidden_columns, per_page};
 use crate::tools::NOTICES;
 
@@ -274,8 +274,59 @@ pub(crate) fn updates_settings(site: &dyn PostsSite, items: Option<&str>) -> Str
     }
 }
 
+/// `validate_file()`: a path that climbs out of its folder or names a drive.
+fn invalid_path(file: &str) -> bool {
+    let file = file.replace('\\', "/");
+    let climbs = file.matches("../").count();
+    climbs > 1
+        || file == "../"
+        || (climbs == 1 && !file.ends_with("../"))
+        || file.as_bytes().get(1) == Some(&b':')
+}
+
+/// `validate_active_plugins()`'s notices, without the write that
+/// deactivates the plugins: HyScribe has no plugin files, so every
+/// plugin the site names is missing. `None` where PHP would write the
+/// option back or find a file.
+pub(crate) fn missing_plugins(stored: Option<Vec<u8>>) -> Option<String> {
+    // `get_option( 'active_plugins', array() )`.
+    let Some(stored) = stored else {
+        return Some(String::new());
+    };
+    let Maybe::Value(Value::Array(listed)) = maybe_unserialize(&stored) else {
+        return None;
+    };
+    let mut files: Vec<String> = Vec::new();
+    for (_, plugin) in &listed {
+        let Value::String(bytes) = plugin else {
+            return None;
+        };
+        if bytes.is_empty() {
+            return None;
+        }
+        let file = crate::text(bytes);
+        if !files.contains(&file) {
+            files.push(file);
+        }
+    }
+    let notices = files.iter().map(|file| {
+        let error = if invalid_path(file) {
+            "Invalid plugin path."
+        } else {
+            "Plugin file does not exist."
+        };
+        let message = format!(
+            "The plugin <code>{}</code> has been deactivated due to an error: {error}",
+            esc_html(file.as_bytes())
+        );
+        wp_admin_notice(&message, "message", "error", true, "")
+    });
+    Some(notices.collect())
+}
+
 /// `plugins.php` with no plugin installed, its help naming `plugin_dir`.
-pub fn plugins(site: &dyn PostsSite, plugin_dir: &str, request: &Request) -> Answer {
+pub fn plugins(site: &dyn PostsSite, plugin_dir: &str, request: &Request) -> Option<Answer> {
+    let missing = missing_plugins(site.option("active_plugins"))?;
     let hidden = hidden_columns(site, "plugins");
     let hidden: Vec<&str> = hidden.iter().map(String::as_str).collect();
     let columns = [
@@ -309,16 +360,18 @@ pub fn plugins(site: &dyn PostsSite, plugin_dir: &str, request: &Request) -> Ans
         )
     };
     let shown = columns.iter().filter(|c| !hidden.contains(&c.key)).count();
-    let content = fill(
-        PLUGINS,
-        &[
-            ("nonce", site.nonce("bulk-plugins")),
-            ("referer", wp_referer_field(request.uri)),
-            ("head", headers(1, true)),
-            ("foot", headers(2, false)),
-            ("colspan", shown.to_string()),
-        ],
-    ) + NOTICES
+    let content = missing
+        + &fill(
+            PLUGINS,
+            &[
+                ("nonce", site.nonce("bulk-plugins")),
+                ("referer", wp_referer_field(request.uri)),
+                ("head", headers(1, true)),
+                ("foot", headers(2, false)),
+                ("colspan", shown.to_string()),
+            ],
+        )
+        + NOTICES
         + UPDATE_ROWS;
     let options = screen_options(
         &columns,
@@ -370,7 +423,7 @@ pub fn plugins(site: &dyn PostsSite, plugin_dir: &str, request: &Request) -> Ans
         origin: request.origin,
         view: None,
     };
-    Answer::from_page(admin_page(site, &page, request.browser))
+    Some(Answer::from_page(admin_page(site, &page, request.browser)))
 }
 
 /// `_wpUpdatesItemCounts`' plugins, with none installed.

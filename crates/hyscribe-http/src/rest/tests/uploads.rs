@@ -450,7 +450,8 @@ async fn upload_plans_are_never_acted() {
     let upload = planned(&site, "POST", "/?rest_route=/wp/v2/media", "{}").await;
     let ctx = crate::rest::writes::context(&site, &upload.plan, now());
     let writer = site.writer.as_ref().unwrap();
-    let outcome = crate::rest::writes::act(writer.begin().await, &upload.plan, &ctx).await;
+    let outbox = crate::mail::Outbox::new(std::sync::Arc::clone(&site.mailer));
+    let outcome = crate::rest::writes::act(writer.begin().await, &upload.plan, &ctx, &outbox).await;
     assert!(matches!(outcome, Err(hyscribe_write::Error::Unported(_))));
 }
 

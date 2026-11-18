@@ -92,6 +92,20 @@ fn files_are_placed_whole_and_only_in_their_folder() {
 }
 
 #[test]
+fn image_sizes_come_from_the_files_in_the_uploads() {
+    let dir = tempfile::tempdir().unwrap();
+    let uploads = uploads(dir.path());
+    std::fs::write(dir.path().join("big.jpg"), corpus("big.jpg")).unwrap();
+    std::fs::write(dir.path().join("notes.txt"), b"Plain notes.").unwrap();
+    std::fs::create_dir(dir.path().join("folder.jpg")).unwrap();
+    assert_eq!(uploads.image_size("big.jpg"), Some((2600, 260)));
+    // Missing, not an image, and unreadable files give no size.
+    for file in ["missing.jpg", "notes.txt", "folder.jpg"] {
+        assert_eq!(uploads.image_size(file), None, "{file}");
+    }
+}
+
+#[test]
 fn folders_stay_inside_the_uploads() {
     let dir = tempfile::tempdir().unwrap();
     let base = dir.path().join("uploads");

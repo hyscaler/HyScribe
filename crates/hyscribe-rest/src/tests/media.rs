@@ -214,6 +214,13 @@ fn theme_test_data_media_match_php() {
     );
 }
 
+/// A site that does not say it reads its uploads has no image sizes.
+#[test]
+fn a_site_without_uploads_reads_no_image_sizes() {
+    let oracle = crate::tests::Oracle::over(super::content::default_install(), false);
+    assert_eq!(Site::image_size(&oracle, "2026/10/big.jpg"), None);
+}
+
 /// The scaled image 9139's `missing_image_sizes` as the administrator
 /// gets them over an uploads folder as `deny` names it.
 fn missing_of_scaled(deny: &'static [&'static str]) -> (u16, String) {

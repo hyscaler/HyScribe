@@ -9,7 +9,7 @@ use hyscribe_db::{CommentFields, Connection, Writer};
 use hyscribe_testkit::{fixture_database, writes::check_writes};
 use std::result::Result as StdResult;
 
-use crate::terms::Taxonomy;
+use crate::terms::{Taxonomy, wp_set_object_terms};
 use crate::tests::{MISSING, ONE_AT_A_TIME, admin, connection, writer};
 
 pub(crate) fn shown(err: impl std::fmt::Debug) -> String {
@@ -1071,6 +1071,34 @@ async fn templates_are_written() {
             wp_insert_post(w, ctx, template("wp_template", "twentytwentyfive", None)).await?;
         let second =
             wp_insert_post(w, ctx, template("wp_template", "twentytwentyfive", None)).await?;
+        let third =
+            wp_insert_post(w, ctx, template("wp_template", "twentytwentyfive", None)).await?;
+        // A long slug taken is cut to leave room for its suffix.
+        let long = PostArgs {
+            name: Some(b"a".repeat(200)),
+            ..template("wp_template", "twentytwentyfive", None)
+        };
+        wp_insert_post(w, ctx, long.clone()).await?;
+        let cut = wp_insert_post(w, ctx, long).await?;
+        let cut = w.post(cut).await?.map(|post| post.name).unwrap_or_default();
+        // A pattern's category counts published patterns.
+        let pattern = PostArgs {
+            post_type: "wp_block".into(),
+            ..oracle_post("publish")
+        };
+        let pattern = wp_insert_post(w, ctx, pattern).await?;
+        let terms = [TermRef::Text(b"Headers")];
+        wp_set_object_terms(w, pattern, &terms, Taxonomy::PatternCategory, false).await?;
+        let (category, _) = w.object_terms(pattern, "wp_pattern_category").await?[0];
+        let category = w.term_in("wp_pattern_category", category).await?;
+        let third = w
+            .post(third)
+            .await?
+            .map(|post| post.name)
+            .unwrap_or_default();
+        let counted = category.map(|term| term.count);
+        assert_eq!((third, counted), (b"index-3".to_vec(), Some(1)));
+        assert_eq!(cut, [b"a".repeat(198), b"-2".to_vec()].concat());
         let other = wp_insert_post(w, ctx, template("wp_template", "other", None)).await?;
         // Updated, its slug is unique within its own theme.
         let renamed = |args: &mut PostArgs| args.name = Some(b"index".to_vec());
@@ -1123,7 +1151,7 @@ async fn templates_are_written() {
     let names: Vec<&[u8]> = names.iter().map(Vec::as_slice).collect();
     assert_eq!(names, [&b"index"[..], b"index-2", b"index", b"index"]);
     assert_eq!(origin, vec![Value::String(b"theme".to_vec())]);
-    assert_eq!(counts, (b"header".to_vec(), 1, 3));
+    assert_eq!(counts, (b"header".to_vec(), 1, 6));
     assert!(invalid(refused.0, "empty_content") && unported(refused.1));
     assert!(deleted && left.is_empty());
 }

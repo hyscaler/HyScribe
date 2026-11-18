@@ -73,7 +73,7 @@ async fn locked(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<bool> {
     let user = std::str::from_utf8(&user)
         .ok()
         .and_then(|u| u.parse::<u64>().ok());
-    let Some(user) = user.filter(|&user| user > 0) else {
+    let Some(user) = user else {
         return Ok(false);
     };
     if write.user(user).await?.is_none() || !super::truthy(&time) {

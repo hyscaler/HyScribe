@@ -6,7 +6,7 @@
 //! theme register is exported by `reference/rest/registered.php`.
 
 mod block_types;
-mod global_styles;
+pub(crate) mod global_styles;
 mod patterns;
 mod themes;
 

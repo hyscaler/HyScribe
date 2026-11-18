@@ -23,6 +23,7 @@ use crate::layout::{LayoutBlock, render_layout};
 use crate::media::Loading;
 use crate::registry::block_type;
 use crate::site::{Request, Site};
+use crate::site_templates::template_part;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template_types::PART_AREAS;
 use crate::theme::Theme;
@@ -55,6 +56,13 @@ pub fn render_template(
     request: &Request,
     template: &[u8],
 ) -> (Vec<u8>, Assets) {
+    if is_empty_string(template) {
+        let assets = Assets {
+            no_template: true,
+            ..Assets::default()
+        };
+        return (Vec::new(), assets);
+    }
     let mut renderer = Renderer::new(theme, site, request);
     // `get_the_block_template_html()` autoembeds before `do_blocks()`.
     let embedded = renderer.autoembed(template);
@@ -561,9 +569,10 @@ impl Renderer<'_> {
     fn template_part(&mut self, block: &Block) -> Vec<u8> {
         let theme = self.context.theme;
         let other_theme = attr(block, "theme").is_some_and(|t| t != theme.slug().as_bytes());
+        let site = self.context.site;
         let found = attr(block, "slug")
             .filter(|_| !other_theme)
-            .and_then(|slug| Some((slug, theme.part(slug)?)));
+            .and_then(|slug| Some((slug, template_part(theme, site, slug)?)));
         let Some((slug, (content, area))) = found else {
             return Vec::new();
         };
@@ -571,12 +580,12 @@ impl Renderer<'_> {
             return Vec::new();
         }
         self.open_parts.push(slug.to_vec());
-        let html = self.render_top_level(content);
+        let html = self.render_top_level(&content);
         self.open_parts.pop();
         // A valid `tagName` wins; otherwise the area's tag.
         let tag = match attr(block, "tagName").filter(|t| is_tag_name(t)) {
             Some(tag) => tag,
-            None => area_tag(area),
+            None => area_tag(&area),
         };
         let wrapper = get_block_wrapper_attributes(
             "core/template-part",

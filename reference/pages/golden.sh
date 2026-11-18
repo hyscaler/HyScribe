@@ -11,11 +11,14 @@
 # target/pages/ttd.tsv for reading differences.
 #   default: reference/default-install/php.sh up
 #   ttd:     HYSCRIBE_PHP_DB=wordpress_ttd reference/default-install/php.sh up
+#   site-edits: reference/default-install/php.sh up, over the site editor's
+#   saves in reference/site-edits/content.sql, which it adds
 # Page views write: the wp_navigation post php.sh up wrote is
-# deleted first, so start from a fresh db.sh up and reset it after.
+# deleted first (site-edits: replaced), so start from a fresh db.sh up and
+# reset it after.
 set -euo pipefail
 
-LIST="${1:?usage: $0 default|ttd}"
+LIST="${1:?usage: $0 default|ttd|site-edits}"
 DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
@@ -35,7 +38,11 @@ cleanup() {
 trap cleanup EXIT
 "$DOCKER" exec "$NAME" mkdir -p "$MU"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-options.php" < "$ROOT/reference/pages/options.php"
-"$DOCKER" exec "$DB" mariadb -uroot -preference-only "$DATABASE" -e "DELETE FROM wp_posts WHERE post_type = 'wp_navigation'"
+if [ "$LIST" = site-edits ]; then
+  "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "$DATABASE" < "$ROOT/reference/site-edits/content.sql"
+else
+  "$DOCKER" exec "$DB" mariadb -uroot -preference-only "$DATABASE" -e "DELETE FROM wp_posts WHERE post_type = 'wp_navigation'"
+fi
 # The first page view writes caches the later ones read.
 curl -s -o /dev/null "$BASE/"
 mkdir -p "$(dirname "$RAW")"

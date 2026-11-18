@@ -881,6 +881,7 @@ dependencies = [
 name = "hyscribe-theme-json"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-kses",
  "hyscribe-phpser",
 ]
 

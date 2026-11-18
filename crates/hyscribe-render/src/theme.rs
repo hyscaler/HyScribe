@@ -134,7 +134,13 @@ pub struct Theme {
 
 /// Twenty Twenty-Five, as bundled with WordPress 7.1.3.
 pub fn twentytwentyfive() -> Theme {
-    with_user_styles(None, &[])
+    twentytwentyfive_for(None)
+}
+
+/// Twenty Twenty-Five with the site's global styles, `user` the content
+/// of its `wp_global_styles` post if it has one.
+pub fn twentytwentyfive_for(user: Option<&[u8]>) -> Theme {
+    with_user_styles(user, &[])
 }
 
 /// Twenty Twenty-Five with `user` as the site's global styles and `styles`

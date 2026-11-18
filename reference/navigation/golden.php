@@ -187,12 +187,27 @@ $add( nav( array( 'overlayMenu' => 'never', 'rgbTextColor' => '#777' ), '<!-- wp
 
 // Menu posts the fallback finds, given in memory through posts_pre_query.
 $menus = array(
-	'menu-links' => "\n\n" . link_block( array( 'label' => 'Menu link', 'url' => '/m' ) ) . "\n\n",
-	'menu-blank' => "\n\n",
+	'menu-links'  => "\n\n" . link_block( array( 'label' => 'Menu link', 'url' => '/m' ) ) . "\n\n",
+	'menu-blank'  => "\n\n",
+	'menu-global' => "\n\n" . link_block( array( 'label' => 'Menu link', 'url' => '/m' ) ) . "\n\n",
 );
 foreach ( array_keys( $menus ) as $menu ) {
 	$add( $fallback, '', $menu );
 }
+// Menus named by `ref` (or `navigationMenuId`, as older blocks are saved):
+// the post 900, a draft 901, which falls back, and a missing 999 or -1.
+foreach ( array( 'ref', 'navigationMenuId' ) as $key ) {
+	$add( nav( $never + array( $key => 900 ) ), '', 'menu-links' );
+}
+$add( nav( $never + array( 'ref' => 900 ) ) . nav( $never + array( 'ref' => 900 ) ), '', 'menu-links' );
+$add( nav( $never + array( 'ref' => 900, 'ariaLabel' => 'Named' ) ), '', 'menu-links' );
+$add( nav( $never + array( 'ref' => 900 ) ), '', 'menu-blank' );
+$add( nav( $never + array( 'ref' => 901 ) ), '', 'menu-links' );
+$add( nav( $never + array( 'ref' => 999 ) ), '', 'menu-links' );
+$add( nav( $never + array( 'ref' => -1 ) ), '', 'menu-links' );
+// get_post( 0 ) is the global post: none, or the menu 900 (menu-global).
+$add( nav( $never + array( 'ref' => 0 ) ), '', 'menu-links' );
+$add( nav( $never + array( 'ref' => 0 ) ), '', 'menu-global' );
 
 $renderer = new ReflectionClass( 'WP_Navigation_Block_Renderer' );
 foreach ( $cases as list( $markup, $queried, $pages ) ) {
@@ -210,6 +225,10 @@ foreach ( $cases as list( $markup, $queried, $pages ) ) {
 			)
 		);
 		wp_cache_set( 900, $menu_post, 'posts' );
+		$draft = clone $menu_post;
+		$draft->ID          = 901;
+		$draft->post_status = 'draft';
+		wp_cache_set( 901, $draft, 'posts' );
 		add_filter(
 			'posts_pre_query',
 			function ( $posts, $query ) use ( $menu_post ) {
@@ -224,6 +243,7 @@ foreach ( $cases as list( $markup, $queried, $pages ) ) {
 		add_filter( 'get_pages', $tree_pages );
 		add_filter( 'pre_option_page_on_front', fn() => '101' );
 	}
+	$GLOBALS['post'] = 'menu-global' === $pages ? get_post( 900 ) : null;
 	$renderer->getProperty( 'seen_menu_names' )->setValue( null, array() );
 	$renderer->getProperty( 'has_submenus' )->setValue( null, false );
 	$GLOBALS['wp_query'] = new WP_Query();

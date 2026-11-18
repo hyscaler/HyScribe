@@ -3,11 +3,11 @@
 //! The navigation block (`WP_Navigation_Block_Renderer`) and the navigation
 //! link and submenu blocks.
 //!
-//! Ported: menus from inner blocks, the fallback (the latest published
-//! `wp_navigation` post, else a page list), the page list block and
-//! submenus with their directives, the responsive overlay and unique
-//! `aria-label`s. Not yet: menus from a `ref` post, creating the fallback's
-//! post, custom overlay template parts and the viewport layout classes.
+//! Ported: menus from inner blocks or a `wp_navigation` post (`ref`), the
+//! fallback (the latest published `wp_navigation` post, else a page list),
+//! the page list block and submenus with their directives, the responsive
+//! overlay and unique `aria-label`s. Not yet: creating the fallback's post,
+//! custom overlay template parts and the viewport layout classes.
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::{esc_attr, esc_url, safecss_filter_attr, wp_strip_all_tags};
@@ -71,17 +71,22 @@ impl Renderer<'_> {
                 .filter(|(k, _)| *k != key);
             attributes = Value::Array(kept.cloned().collect());
         }
-        // Inner blocks get the block's own attributes as context, the
-        // fallback the attributes as render() changed them.
-        let fallback;
-        let (inner_blocks, context): (&[Block], &Value) = if attributes.get_str("ref").is_some() {
-            // Menus from a `wp_navigation` post are not ported yet.
-            (&[], &attributes)
-        } else if block.inner_blocks.is_empty() {
-            fallback = self.fallback_blocks();
-            (&fallback, &attributes)
-        } else {
-            (&block.inner_blocks, &block_attributes)
+        // `navigationMenuId`, the older name, wins over `ref`.
+        let menu = ["navigationMenuId", "ref"]
+            .into_iter()
+            .find_map(|key| attributes.get_str(key))
+            .map(|id| self.ref_blocks(id));
+        let found;
+        let (inner_blocks, context): (&[Block], &Value) = match menu {
+            Some(Some(blocks)) => {
+                found = blocks;
+                (&found, &attributes)
+            }
+            None if !block.inner_blocks.is_empty() => (&block.inner_blocks, &block_attributes),
+            _ => {
+                found = self.fallback_blocks();
+                (&found, &attributes)
+            }
         };
         if has_block_type(inner_blocks, "core/navigation") {
             return Vec::new();
@@ -122,10 +127,16 @@ impl Renderer<'_> {
         parsed: &[(Key, Value)],
         within_overlay: bool,
     ) -> Vec<u8> {
-        let name = attributes
+        // get_navigation_name()
+        let label = attributes
             .get_str("ariaLabel")
             .map(Value::to_php_string)
             .unwrap_or_default();
+        let menu = attributes.get_str("ref").and_then(|id| self.menu(id));
+        let name = match menu {
+            Some(menu) if is_empty_string(&label) => menu.title,
+            _ => label,
+        };
         let name = if within_overlay {
             name
         } else {
@@ -656,6 +667,28 @@ impl Renderer<'_> {
             && kind_matches
     }
 
+    /// `get_post( $ref )`: 0 is the global post.
+    fn menu_post(&self, id: &Value) -> Option<Post> {
+        match u64::try_from(id.to_int()).ok()? {
+            0 => self.context.global_post(),
+            id => self.context.site.post(id),
+        }
+    }
+
+    /// The menu `id` names, if it is published.
+    fn menu(&self, id: &Value) -> Option<Post> {
+        self.menu_post(id).filter(|post| post.status == "publish")
+    }
+
+    /// `get_inner_blocks_from_navigation_post()`: none for a missing post,
+    /// `None` (the fallback) for one not published.
+    fn ref_blocks(&self, id: &Value) -> Option<Vec<Block>> {
+        match self.menu_post(id) {
+            None => Some(Vec::new()),
+            Some(post) => (post.status == "publish").then(|| menu_blocks(&post.content)),
+        }
+    }
+
     /// `block_core_navigation_get_fallback_blocks()`: the blocks of the most
     /// recently published menu, or a page list.
     fn fallback_blocks(&self) -> Vec<Block> {
@@ -674,14 +707,11 @@ impl Renderer<'_> {
         let Some(menu) = latest.first() else {
             return page_list;
         };
-        let blocks: Vec<Block> = parse_blocks(&menu.content)
-            .into_iter()
-            .filter(|block| block.name.is_some())
-            .collect();
+        let blocks = menu_blocks(&menu.content);
         if blocks.is_empty() {
             return page_list;
         }
-        parse_blocks(&serialize_blocks(&blocks))
+        blocks
     }
 
     /// `render_block_core_page_list()`.
@@ -1267,6 +1297,16 @@ pub(crate) fn post_ancestors(site: &dyn Site, post: &Post) -> Vec<u64> {
         parent = site.post(parent).map_or(0, |post| post.parent);
     }
     ancestors
+}
+
+/// A navigation post's blocks: `block_core_navigation_filter_out_empty_blocks()`
+/// of its parsed content, serialized and parsed again.
+fn menu_blocks(content: &[u8]) -> Vec<Block> {
+    let blocks: Vec<Block> = parse_blocks(content)
+        .into_iter()
+        .filter(|block| block.name.is_some())
+        .collect();
+    parse_blocks(&serialize_blocks(&blocks))
 }
 
 #[cfg(test)]

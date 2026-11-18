@@ -567,6 +567,9 @@ async fn every_query() -> Vec<DbError> {
         db.post_authors("post").await.unwrap_err(),
         db.owns_content(1).await.unwrap_err(),
         db.posts_of_type("page").await.unwrap_err(),
+        db.theme_posts("wp_template", "twentytwentyfive")
+            .await
+            .unwrap_err(),
         db.revisions(1).await.unwrap_err(),
         db.user_post_counts(&[1], true, 1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),

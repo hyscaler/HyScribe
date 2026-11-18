@@ -16,6 +16,7 @@
 
 mod blocks;
 mod css;
+mod insecure;
 mod kebab;
 mod php;
 mod resolver;
@@ -102,6 +103,32 @@ impl GlobalStyles {
     /// the site's global styles post is read.
     pub fn user_theme_json(&self, config: Value) -> Value {
         theme_json::new(config, theme_json::Origin::Custom, &self.blocks)
+    }
+
+    /// `WP_Theme_JSON::remove_insecure_properties( $config, 'custom' )`
+    /// for a user without `edit_css`.
+    pub(crate) fn remove_insecure_properties(&self, config: Value) -> Value {
+        insecure::remove_insecure_properties(config, &self.blocks, self.settings())
+    }
+
+    /// `wp_filter_global_styles_post( $data )` of unslashed content: a user
+    /// theme.json without its insecure values, `None` for other content,
+    /// which it leaves as it is.
+    pub fn filter_global_styles_post(&self, content: &[u8]) -> Option<Vec<u8>> {
+        let mut config = hyscribe_phpser::json_decode(content)?;
+        let flag = php::get(&config, &["isGlobalStylesUserThemeJSON"]);
+        if !matches!(config, Value::Array(_)) || php::empty(flag) {
+            return None;
+        }
+        php::unset(&mut config, &["isGlobalStylesUserThemeJSON"]);
+        let mut config = self.remove_insecure_properties(config);
+        php::set(
+            &mut config,
+            &["isGlobalStylesUserThemeJSON"],
+            Value::Bool(true),
+        );
+        // A failed wp_json_encode() leaves wp_slash( false ): nothing.
+        Some(hyscribe_phpser::json_encode_hex_amp(&config).unwrap_or_default())
     }
 
     /// A global setting, e.g. `["layout", "contentSize"]`; `None` where it

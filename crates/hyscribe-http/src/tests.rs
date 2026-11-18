@@ -244,6 +244,10 @@ async fn database_errors_show_no_details() {
         ]),
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        styled: Arc::new(tokio::sync::Mutex::new((
+            None,
+            Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        ))),
         rewriter: Arc::default(),
         compiled: Arc::default(),
         salts: Vec::new(),
@@ -983,6 +987,10 @@ async fn the_front_page_links_to_home() {
         options,
         home: base.home.clone(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        styled: Arc::new(tokio::sync::Mutex::new((
+            None,
+            Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        ))),
         rewriter: Arc::default(),
         compiled: Arc::default(),
         salts: Vec::new(),
@@ -1110,7 +1118,8 @@ async fn routes_give_the_request_state() {
     assert!(missing.request.not_found && missing.request.now > recent);
 }
 
-/// A read that fails answers its type's default and keeps the error.
+/// A read that fails answers its type's default and keeps the error; the
+/// site's global styles fail to load.
 #[tokio::test(flavor = "multi_thread")]
 async fn failed_reads_answer_defaults() {
     use hyscribe_render::site::Site as _;
@@ -1121,6 +1130,10 @@ async fn failed_reads_answer_defaults() {
         options: HashMap::new(),
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        styled: Arc::new(tokio::sync::Mutex::new((
+            None,
+            Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        ))),
         rewriter: Arc::default(),
         compiled: Arc::default(),
         salts: Vec::new(),
@@ -1137,6 +1150,8 @@ async fn failed_reads_answer_defaults() {
         feed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
+    // The site's global styles, read on each reload.
+    assert!(site.styled_theme().await.is_err());
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let reads = Reads::new(&site, handle);
@@ -3045,7 +3060,7 @@ async fn listed_pages_match_php() {
         assert_listed_pages("wordpress", golden, false, known).await,
         0
     );
-    assert_eq!(golden.lines().count(), 98);
+    assert_eq!(golden.lines().count(), 99);
 }
 
 /// The Theme Test Data fixture's requests of `reference/pages/ttd.list`,
@@ -3066,6 +3081,52 @@ async fn theme_test_data_pages_match_php() {
         10
     );
     assert_eq!(golden.lines().count(), 747);
+}
+
+/// The pages of `reference/pages/site-edits.list` over the site editor's
+/// saves as PHP wrote them (`reference/site-edits/content.sql`): edited
+/// templates and template parts, a custom template, global styles and a
+/// navigation menu, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn edited_site_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let edits = include_str!("../../../reference/site-edits/content.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(edits))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-site-edits.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 12);
+    // Options without posts: the global styles post cannot be read.
+    let broken = "CREATE TABLE broken_options AS SELECT * FROM wp_options";
+    sqlx::raw_sql(broken).execute(&mut conn).await.unwrap();
+    let config = Database {
+        prefix: hyscribe_config::Prefix::new("broken_").unwrap(),
+        ..db
+    };
+    let site = Site::load(Db::connect(&config).await.unwrap(), None, None).await;
+    let drop = "DROP TABLE broken_options";
+    sqlx::raw_sql(drop).execute(&mut conn).await.unwrap();
+    assert!(site.is_err());
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

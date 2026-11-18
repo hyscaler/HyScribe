@@ -68,6 +68,8 @@ pub struct Assets {
     pub(crate) scripts: Vec<String>,
     /// The Interactivity API's server state, by store namespace.
     pub(crate) state: Vec<(Key, Value)>,
+    /// The template was empty, so no skip link is enqueued.
+    pub(crate) no_template: bool,
 }
 
 impl Assets {
@@ -346,12 +348,14 @@ impl Head<'_> {
             "core-block-supports",
             &stylesheet(&assets.rules),
         ));
-        queue.push(Style::file(
-            "wp-block-template-skip-link",
-            "/wp-includes/css/wp-block-template-skip-link.min.css",
-            SKIP_LINK_CSS,
-            None,
-        ));
+        if !assets.no_template {
+            queue.push(Style::file(
+                "wp-block-template-skip-link",
+                "/wp-includes/css/wp-block-template-skip-link.min.css",
+                SKIP_LINK_CSS,
+                None,
+            ));
+        }
         queue.push(Style::file(
             &format!("{}-style", self.theme.slug),
             &format!(

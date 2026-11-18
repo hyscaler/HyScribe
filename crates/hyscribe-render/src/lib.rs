@@ -56,6 +56,7 @@ pub mod rest;
 mod rss;
 mod search;
 pub mod site;
+pub mod site_templates;
 pub mod sitemap;
 mod social_link;
 pub mod style;

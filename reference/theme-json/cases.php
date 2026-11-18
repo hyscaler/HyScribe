@@ -57,6 +57,8 @@ $kinds = array(
 		return $tree->get_raw_data();
 	},
 	'stylesheet'    => static fn( $a ) => stylesheet_of( new WP_Theme_JSON( $a[0] ) ),
+	'insecure'      => static fn( $a ) => WP_Theme_JSON::remove_insecure_properties( $a[0], 'custom' ),
+	'filter_styles' => static fn( $a ) => wp_filter_global_styles_post( $a[0] ),
 	// Registers a block, so these cases come last.
 	'block_meta'    => static function ( $a ) {
 		register_block_type( $a[0], $a[1] );

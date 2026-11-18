@@ -81,9 +81,51 @@ pub fn sanitize_key(key: &[u8]) -> String {
         .collect()
 }
 
+/// `sanitize_html_class( $class, $fallback )`.
+pub fn sanitize_html_class(class: &[u8], fallback: &[u8]) -> Vec<u8> {
+    let mut kept = Vec::with_capacity(class.len());
+    let mut rest = class;
+    for _ in 0..=class.len() {
+        match rest {
+            [b'%', a, b, after @ ..] if a.is_ascii_hexdigit() && b.is_ascii_hexdigit() => {
+                rest = after
+            }
+            [first, after @ ..] => {
+                if first.is_ascii_alphanumeric() || matches!(first, b'_' | b'-') {
+                    kept.push(*first);
+                }
+                rest = after;
+            }
+            [] => break,
+        }
+    }
+    if kept.is_empty() && !fallback.is_empty() {
+        return sanitize_html_class(fallback, b"");
+    }
+    kept
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_html_class_like_php() {
+        // sanitize_html_class() in PHP WordPress 7.1.3.
+        for (class, fallback, php) in [
+            ("a%zzb", "", "azzb"),
+            ("%2gx", "", "2gx"),
+            ("!!", "x y", "xy"),
+            ("%41b", "", "b"),
+            ("", "", ""),
+        ] {
+            assert_eq!(
+                sanitize_html_class(class.as_bytes(), fallback.as_bytes()),
+                php.as_bytes(),
+                "{class:?}"
+            );
+        }
+    }
 
     /// Recorded from PHP's `esc_textarea()`.
     #[test]

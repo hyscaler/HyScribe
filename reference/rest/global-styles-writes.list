@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The site editor's global styles saves (MVP 7.3) that reference/rest/golden.sh
+# records as global-styles-writes.tsv, over templates-custom.sql
+# (global-styles-writes.sql links to it): each request sent with its body
+# as every identity, the database put back after each. Styles and settings
+# with values safecss_filter_attr() refuses, custom CSS, a title alone, a
+# post of another theme, one that is no user theme.json, and the checks
+# PHP makes first.
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"id":741,"settings":{"color":{"palette":{"custom":[{"color":"#a1b2c3","name":"Brand","slug":"custom-brand"},{"color":"red;x:y","name":"Bad","slug":"bad"}]}},"lightbox":{"enabled":true}},"styles":{"color":{"background":"var:preset|color|accent-2","text":"expression(alert(1))"},"typography":{"lineHeight":"1.7"},"elements":{"link":{"color":{"text":"var:preset|color|custom-brand"},":hover":{"color":{"text":"red"}}}},"blocks":{"core/paragraph":{"typography":{"fontSize":"var:preset|font-size|large"}}},"css":"body{letter-spacing:0.01em}"}}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"styles":{"color":{"text":"red <&> \"q\""}}}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"settings":{"typography":{"fontSizes":{"custom":[{"slug":"big","size":"3rem","name":"Big"}]}}}}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"title":"Renamed"}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"title":{"raw":"Raw title"},"styles":{}}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"title":{"raw":""}}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"styles":{"css":"p{color:red}</style><script>x</script>"}}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"styles":{"css":"p{color:red}</sty"}}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"styles":{"css":["x"]}}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"styles":"red"}
+POST	/?rest_route=/wp/v2/global-styles/742	json,restore	{"styles":{"color":{"text":"blue"}}}
+POST	/?rest_route=/wp/v2/global-styles/743	json,restore	{"settings":{"color":{"custom":false}}}
+POST	/?rest_route=/wp/v2/global-styles/1	json,restore	{"styles":{"color":{"text":"blue"}}}
+POST	/?rest_route=/wp/v2/global-styles/999	json,restore	{"styles":{"color":{"text":"blue"}}}
+PUT	/?rest_route=/wp/v2/global-styles/741	json,restore	{"styles":{"spacing":{"blockGap":"2rem","padding":{"top":"url(javascript:x)"}}}}
+POST	/?rest_route=/wp/v2/global-styles/741	json,restore	{"styles":{"color":{"text":"red"},"css":"a<b{c:d}</styles"}}

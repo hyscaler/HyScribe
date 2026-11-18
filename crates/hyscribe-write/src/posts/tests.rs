@@ -1216,6 +1216,30 @@ async fn navigation_menus_and_patterns() {
     assert_eq!(categorised.unwrap(), (true, 0, Vec::new()));
 }
 
+/// A user theme.json saved without `unfiltered_html` loses its insecure
+/// values, as `wp_filter_global_styles_post()` leaves it; other content
+/// only goes through kses.
+#[tokio::test]
+async fn global_styles_content_is_filtered() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let styles = br#"{"version":3,"isGlobalStylesUserThemeJSON":true,"styles":{"color":{"text":"red","background":"expression(1)"},"css":"x"}}"#;
+    let stored = rolled_back(async |w, ctx| {
+        let args = PostArgs {
+            content: styles.to_vec(),
+            content_filtered: b"<script>x</script>".to_vec(),
+            ..oracle_post("publish")
+        };
+        let id = wp_insert_post(w, ctx, args).await?;
+        existing(w, id).await
+    })
+    .await
+    .unwrap();
+    let kept =
+        br#"{"version":3,"styles":{"color":{"text":"red"}},"isGlobalStylesUserThemeJSON":true}"#;
+    assert_eq!(stored.content, kept);
+    assert_eq!(stored.content_filtered, b"x");
+}
+
 #[tokio::test]
 async fn what_hyscribe_does_not_port_is_refused() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -1231,17 +1255,6 @@ async fn what_hyscribe_does_not_port_is_refused() {
             ..oracle_post("publish")
         };
         assert!(unported(insert_rolled_back(gmt).await));
-    }
-    for (content, filtered) in [
-        (&b"{\"isGlobalStylesUserThemeJSON\":true}"[..], &b""[..]),
-        (b"x", b"isGlobalStylesUserThemeJSON"),
-    ] {
-        let styles = PostArgs {
-            content: content.to_vec(),
-            content_filtered: filtered.to_vec(),
-            ..oracle_post("publish")
-        };
-        assert!(unported(insert_rolled_back(styles).await));
     }
     let page = || PostArgs {
         post_type: "page".into(),

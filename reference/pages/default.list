@@ -96,3 +96,4 @@ permalink_structure=%2Farchives%2F%25post_id%25	/Archives/1
 permalink_structure=%2Farchives%2F%25post_id%25	/sample-page
 permalink_structure=%2Farchives%2F%25post_id%25	/sample-page/
 permalink_structure=%2Farchives%2F%25post_id%25	/category/uncategorized
+wp_page_for_privacy_policy=2	/?page_id=2

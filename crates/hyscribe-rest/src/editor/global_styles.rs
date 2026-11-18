@@ -8,13 +8,15 @@
 
 use std::sync::OnceLock;
 
+use hyscribe_kses::esc_html;
 use hyscribe_model::Post;
-use hyscribe_phpser::{Key, Value, json_decode};
+use hyscribe_phpser::{Key, Value, json_decode, json_encode_hex_amp};
 use hyscribe_render::post::admin_title;
 use hyscribe_render::theme::{Theme, twentytwentyfive};
 
 use crate::fields::{Properties, fields_for_response, is_field_included, links_wanted};
-use crate::request::{Arg, Params, Sanitize};
+use crate::posts::write::{Outcome, Plan, Save, Write, Writing};
+use crate::request::{Arg, Params, Sanitize, arg};
 use crate::response::{Response, RestError, list, object, text};
 use crate::types::can_edit_any;
 use crate::{Context, Endpoint};
@@ -75,7 +77,7 @@ pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 callback: Some(post_item),
             },
             Endpoint {
-                args: Vec::new(),
+                args: update_args(),
                 permission: update_permission,
                 callback: None,
             },
@@ -261,4 +263,139 @@ fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
 fn variations(context: &Context, params: &Params) -> Result<Response, RestError> {
     active(context, params)?;
     Ok(Response::new(list(theme().style_variations()), 200))
+}
+
+/// The route of a global styles post.
+const POST_ROUTE: &str = r"/wp/v2/global-styles/(?P<id>[\/\d+]+)";
+
+/// `get_endpoint_args_for_item_schema( WP_REST_Server::EDITABLE )`.
+fn update_args() -> Vec<Arg> {
+    let value = |name, schema| arg(name, schema, true, Sanitize::Value);
+    vec![
+        value("styles", r#"{"type":["object"]}"#),
+        value("settings", r#"{"type":["object"]}"#),
+        value(
+            "title",
+            r#"{"type":["object","string"],"properties":{"raw":{"type":"string"},"rendered":{"type":"string","readonly":true}}}"#,
+        ),
+    ]
+}
+
+/// The update of a global styles post, the route's one endpoint without a
+/// callback, which [`endpoints`] leaves to the writer.
+pub(crate) fn writing(regex: &str, _: usize) -> Option<Writing> {
+    (regex == POST_ROUTE).then_some(Writing {
+        unported: |_| false,
+        args: |_, _, args| args,
+        plan: plan_update,
+        finish: finish_update,
+    })
+}
+
+/// `validate_custom_css( $css )`: a string with no `</style` that ends a
+/// STYLE element, or could once more CSS follows.
+fn validate_custom_css(css: &Value) -> Result<(), RestError> {
+    let Value::String(css) = css else {
+        let message = "CSS must be a string.";
+        return Err(RestError::status(
+            "rest_custom_css_invalid_type",
+            message,
+            400,
+        ));
+    };
+    let starts = css.iter().enumerate().filter(|(_, byte)| **byte == b'<');
+    for rest in starts.filter_map(|(at, _)| css.get(at..)) {
+        let head = rest.get(..7).unwrap_or(rest);
+        let close = b"</style".get(..head.len()).unwrap_or_default();
+        if !head.eq_ignore_ascii_case(close) {
+            continue;
+        }
+        let (code, message) = match rest.get(7) {
+            None => ("end in", rest),
+            Some(next) if b" \t\x0c\r\n/>".contains(next) => {
+                ("contain", rest.get(..8).unwrap_or(rest))
+            }
+            Some(_) => continue,
+        };
+        let message = format!("The CSS must not {code} \"{}\".", esc_html(message));
+        return Err(RestError::status(
+            "rest_custom_css_illegal_markup",
+            &message,
+            400,
+        ));
+    }
+    Ok(())
+}
+
+/// `update_item()` up to its write: `prepare_item_for_database()`'s
+/// user theme.json of the styles and settings given or kept, and title.
+fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
+    // The permission check found the post.
+    let post = styles_post(context, params).unwrap_or_default();
+    let flag = |config: &Value| {
+        !config
+            .get_str("isGlobalStylesUserThemeJSON")
+            .is_none_or(Value::is_empty)
+    };
+    let existing = json_decode(&post.content).filter(flag);
+    let given = |name| params.get(name).filter(|value| **value != Value::Null);
+    let mut save = Save {
+        id: post.id,
+        ..Save::default()
+    };
+    if given("styles").is_some() || given("settings").is_some() {
+        let css = given("styles").and_then(|styles| styles.get_str("css"));
+        if let Some(css) = css.filter(|css| **css != Value::Null) {
+            validate_custom_css(css)?;
+        }
+        let mut config = Vec::new();
+        for name in ["styles", "settings"] {
+            let kept = || {
+                existing
+                    .as_ref()
+                    .and_then(|config| config.get_str(name))
+                    .cloned()
+            };
+            let part = given(name).cloned().or_else(kept);
+            if let Some(part) = part.filter(|part| *part != Value::Null) {
+                config.push((Key::String(name.as_bytes().to_vec()), part));
+            }
+        }
+        config.push((
+            Key::String(b"isGlobalStylesUserThemeJSON".to_vec()),
+            Value::Bool(true),
+        ));
+        config.push((Key::String(b"version".to_vec()), Value::Int(3)));
+        save.content = json_encode_hex_amp(&Value::Array(config));
+    }
+    save.title = match given("title") {
+        Some(Value::String(title)) => Some(title.clone()),
+        Some(title) => title
+            .get_str("raw")
+            .filter(|raw| !raw.is_empty())
+            .map(Value::to_php_string),
+        None => None,
+    };
+    Ok(Plan::new(context, Write::Save(Box::new(save)), Value::Null))
+}
+
+/// The post as updated, in the `edit` context.
+fn finish_update(
+    context: &Context,
+    params: &mut Params,
+    _: Plan,
+    outcome: Outcome,
+) -> Result<Response, RestError> {
+    let Outcome::Written(id) = outcome else {
+        return Err(RestError::not_ported());
+    };
+    params.set("context", text("edit"));
+    let post = context.site.post(id).unwrap_or_default();
+    for hook in [
+        "rest_insert_wp_global_styles",
+        "rest_after_insert_wp_global_styles",
+    ] {
+        crate::hooks::do_action(hook, &[&post, params, &false]);
+    }
+    post_response(context, params, &post)
 }

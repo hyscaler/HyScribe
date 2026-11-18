@@ -1222,9 +1222,19 @@ fn uploads_plan_their_fields() {
         );
     }
     for body in [
+        r#"{"date":"2026-01-02T03:04:05"}"#,
+        r#"{"date_gmt":"2026-01-02T03:04:05"}"#,
+        r#"{"slug":"a"}"#,
         r#"{"status":"private"}"#,
+        r#"{"author":1}"#,
         r#"{"comment_status":"closed"}"#,
+        r#"{"ping_status":"closed"}"#,
+        r#"{"meta":{}}"#,
+        r#"{"template":""}"#,
+        r#"{"featured_media":0}"#,
         r#"{"generate_sub_sizes":false}"#,
+        r#"{"convert_format":false}"#,
+        r#"{"url":"http://example.test/a.jpg"}"#,
         r#"{"title":{"raw":5}}"#,
         r#"{"caption":{"raw":5}}"#,
         r#"{"description":{"raw":5}}"#,

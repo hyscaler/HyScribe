@@ -105,22 +105,14 @@ async fn is_audio(
 }
 
 /// `wp_update_attachment_metadata()` of the song's `tags`, sanitized and set
-/// in the metadata stored; `always` for a caller that updates it even when
-/// no tag is given.
-async fn save_tags(
-    write: &mut Write<'_>,
-    id: u64,
-    (tags, always): (&[(&str, Vec<u8>)], bool),
-) -> Result<(), Error> {
+/// in the metadata stored: PHP removes metadata left empty, which it does for
+/// an empty array it found as well.
+async fn save_tags(write: &mut Write<'_>, id: u64, tags: &[(&str, Vec<u8>)]) -> Result<(), Error> {
     let stored = get_metadata(write, Meta::Post, id, "_wp_attachment_metadata").await?;
-    let stored = stored.into_iter().next();
-    let (stored, mut data) = match stored {
-        Some(Value::Array(data)) => (true, data),
-        _ => (false, Vec::new()),
+    let mut data = match stored.into_iter().next() {
+        Some(Value::Array(data)) => data,
+        _ => Vec::new(),
     };
-    if stored && !always && tags.is_empty() {
-        return Ok(());
-    }
     for (key, tag) in tags {
         let tag = Value::String(sanitize_text_field(tag));
         let key = hyscribe_phpser::Key::String(key.as_bytes().to_vec());
@@ -169,7 +161,7 @@ pub(super) async fn edit_fields(
                 None => {}
             }
         }
-        save_tags(write, id, (&tags, true)).await?;
+        save_tags(write, id, &tags).await?;
     }
     if let Some(alt) = data.get("_wp_attachment_image_alt") {
         save_alt(write, id, &alt.to_php_string()).await?;
@@ -252,7 +244,7 @@ pub(super) fn save_attachment<'a>(
             for key in ["artist", "album"] {
                 tags.extend(change(changes, key)?.map(|tag| (key, tag)));
             }
-            save_tags(write, id, (&tags, false)).await?;
+            save_tags(write, id, &tags).await?;
         }
         let media_trash = site.constants().media_trash;
         let status = change(changes, "status")?.filter(|_| media_trash);

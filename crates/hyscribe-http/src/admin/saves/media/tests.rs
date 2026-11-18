@@ -63,16 +63,38 @@ async fn content(conn: &mut Connection) -> Result<(), String> {
     done.map(|_| ()).map_err(|err| err.to_string())
 }
 
+/// What the oracle's case `name` runs after the content: a song with no tags
+/// left in its metadata.
+fn after(name: &str) -> &'static str {
+    match name.ends_with("-empty-metadata") {
+        true => {
+            "UPDATE wp_postmeta SET meta_value = 'a:0:{}' \
+             WHERE post_id = 817 AND meta_key = '_wp_attachment_metadata'"
+        }
+        false => "",
+    }
+}
+
 /// The golden `name` of the request, with the answer it must give.
 async fn check(writer: &Writer, name: &str, asked: (&str, &[u8], &str, &str), expected: &str) {
     let (screen, action, query, body) = asked;
     let trash = name.ends_with("-media-trash");
+    let setup = async |conn: &mut Connection| {
+        content(conn).await?;
+        let sql = after(name);
+        if sql.is_empty() {
+            return Ok(());
+        }
+        let sql = sqlx::AssertSqlSafe(sql.to_string());
+        let done = conn.execute(sqlx::raw_sql(sql)).await;
+        done.map(|_| ()).map_err(|err| err.to_string())
+    };
     let act = async |conn: &mut Connection, ()| {
         let answer = answered(writer, conn, (screen, action, trash), (query, body)).await?;
         assert_eq!(answer, expected, "{name}");
         Ok(())
     };
-    let checked = check_writes(&fixture_database(), name, content, act).await;
+    let checked = check_writes(&fixture_database(), name, setup, act).await;
     checked.unwrap_or_else(|differences| panic!("{differences}"));
 }
 
@@ -123,6 +145,10 @@ async fn saves_write_as_php() {
         (
             "media-save-attachment-private-media-trash",
             "id=802&changes[status]=private",
+        ),
+        (
+            "media-save-attachment-audio-empty-metadata",
+            "id=817&changes[title]=Song",
         ),
     ] {
         let (screen, action, query) = ajax("save-attachment");
@@ -211,6 +237,12 @@ async fn deletes_write_as_php() {
             "trashed=1&ids=801",
         ),
         (
+            "media-post-delete-live-media-trash",
+            "801",
+            "delete",
+            "deleted=1",
+        ),
+        (
             "media-post-untrash-media-trash",
             "810",
             "untrash",
@@ -263,6 +295,7 @@ async fn edits_write_as_php() {
         ("media-edit-song", "817", song, "1"),
         ("media-edit-song-untouched", "817", untouched, "1"),
         ("media-edit-video", "818", video, "1"),
+        ("media-edit-song-empty-metadata", "817", untouched, "1"),
         ("media-edit-no-save-button", "802", "post_author=1", "4"),
     ] {
         let body = format!("post_ID={id}&post_type=attachment&action=editpost&{body}");

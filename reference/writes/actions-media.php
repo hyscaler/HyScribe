@@ -27,10 +27,21 @@ $media_ajax = function ( $action, $fields ) use ( $admin_run ) {
 	$admin_run( fn() => $handler( '' ), true );
 };
 
-// save-attachment of the attachment `$id` with `$changes`.
-$media_save = function ( $id, $changes ) use ( $media_content, $media_ajax ) {
+// The content, then the statement `$sql` when there is one.
+$media_content_with = function ( $sql ) use ( $media_content ) {
+	return function () use ( $media_content, $sql ) {
+		global $wpdb;
+		$media_content();
+		if ( $sql ) {
+			$wpdb->query( $sql );
+		}
+	};
+};
+
+// save-attachment of the attachment `$id` with `$changes`, after `$sql`.
+$media_save = function ( $id, $changes, $sql = '' ) use ( $media_content_with, $media_ajax ) {
 	return array(
-		'setup'  => $media_content,
+		'setup'  => $media_content_with( $sql ),
 		'action' => function () use ( $media_ajax, $id, $changes ) {
 			$media_ajax(
 				'save-attachment',
@@ -130,9 +141,9 @@ $media_post = function ( $id, $action ) use ( $media_content, $admin_block, $adm
 
 // post.php's case editpost on the attachment `$id` over `$fields`, as its
 // edit screen posts them (the nonce, the Update button and the ID are added).
-$media_edit = function ( $id, $fields ) use ( $media_content, $admin_block, $admin_run ) {
+$media_edit = function ( $id, $fields, $sql = '' ) use ( $media_content_with, $admin_block, $admin_run ) {
 	return array(
-		'setup'  => $media_content,
+		'setup'  => $media_content_with( $sql ),
 		'action' => function () use ( $admin_block, $admin_run, $id, $fields ) {
 			$_GET     = array();
 			$_POST    = wp_slash(
@@ -287,6 +298,19 @@ return array(
 			'_thumbnail_id' => '801',
 		)
 	),
+	'media-edit-song-empty-metadata'           => $media_edit(
+		817,
+		array(
+			'post_author'   => '2',
+			'_thumbnail_id' => '801',
+		),
+		"UPDATE wp_postmeta SET meta_value = 'a:0:{}' WHERE post_id = 817 AND meta_key = '_wp_attachment_metadata'"
+	),
+	'media-save-attachment-audio-empty-metadata' => $media_save(
+		817,
+		array( 'title' => 'Song' ),
+		"UPDATE wp_postmeta SET meta_value = 'a:0:{}' WHERE post_id = 817 AND meta_key = '_wp_attachment_metadata'"
+	),
 	'media-edit-video'                         => $media_edit(
 		818,
 		array(
@@ -304,6 +328,7 @@ return array(
 	),
 	'media-post-delete'                        => $media_post( 801, 'delete' ),
 	'media-post-delete-media-trash'            => $media_post( 810, 'delete' ),
+	'media-post-delete-live-media-trash'       => $media_post( 801, 'delete' ),
 	'media-post-trash-media-trash'             => $media_post( 801, 'trash' ),
 	'media-post-untrash-media-trash'           => $media_post( 810, 'untrash' ),
 );

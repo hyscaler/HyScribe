@@ -242,7 +242,8 @@ async fn states_and_file_sizes() {
         "INSERT INTO wp_options (option_name, option_value) VALUES \
          ('theme_mods_twentytwentyfive', 'a:1:{s:11:\"custom_logo\";i:807;}') \
          ON DUPLICATE KEY UPDATE option_value = VALUES(option_value)",
-        "UPDATE wp_postmeta SET meta_value = 'a:0:{}' WHERE meta_id IN (805, 807)",
+        r#"UPDATE wp_postmeta SET meta_value = 'a:1:{s:8:"filesize";i:0;}' WHERE meta_id = 805"#,
+        "UPDATE wp_postmeta SET meta_value = 'a:0:{}' WHERE meta_id = 807",
         "UPDATE wp_postmeta SET meta_value = '/srv/notes' WHERE meta_id = 806",
         "UPDATE wp_posts SET post_type = 'wp_template' WHERE ID = 806",
         // The logo has no file, so no size; a song's featured image is gone.
@@ -337,6 +338,19 @@ async fn bulk_actions_are_checked() {
     assert_eq!(refused.status().as_u16(), 403);
     let emptied = asked("action=-1&delete_all=Empty").await;
     assert_eq!(emptied.headers()["location"], "upload?deleted=1");
+    // In the grid the same arguments are the screen's, not an action.
+    let mode = |mode: &str| {
+        format!(
+            "UPDATE wp_usermeta SET meta_value = '{mode}' WHERE meta_key = 'wp_media_library_mode'"
+        )
+    };
+    conn.execute(sqlx::AssertSqlSafe(mode("grid")))
+        .await
+        .unwrap();
+    assert_ne!(status("action=delete&media[]=803").await, 302);
+    conn.execute(sqlx::AssertSqlSafe(mode("list")))
+        .await
+        .unwrap();
     as_role(&db, "author").await;
     let (as_user, cookies) = site(&db, dir.path(), false).await;
     let nonce = session_nonce(&as_user, &cookies, "bulk-media").await;

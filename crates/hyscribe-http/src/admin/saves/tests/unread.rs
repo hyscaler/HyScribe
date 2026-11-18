@@ -86,4 +86,7 @@ impl Acting for Unread {
     fn logged_in(&self) -> bool {
         unreachable!()
     }
+    fn outbox(&self) -> &crate::mail::Outbox {
+        crate::mail::tests::outbox()
+    }
 }

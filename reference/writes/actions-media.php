@@ -77,12 +77,12 @@ $media_delete = function ( $id ) use ( $media_content, $media_ajax ) {
 	);
 };
 
-// upload.php's bulk action `$doaction` on `$ids`.
-$media_bulk = function ( $doaction, $ids ) use ( $media_content, $admin_code, $admin_run ) {
+// upload.php's bulk action `$doaction` on `$ids`, with the request's `$more`.
+$media_bulk = function ( $doaction, $ids, $more = array() ) use ( $media_content, $admin_code, $admin_run ) {
 	return array(
 		'setup'  => $media_content,
-		'action' => function () use ( $admin_code, $admin_run, $doaction, $ids ) {
-			$_GET     = array(
+		'action' => function () use ( $admin_code, $admin_run, $doaction, $ids, $more ) {
+			$_GET     = $more + array(
 				'action'   => $doaction,
 				'media'    => array_map( 'strval', $ids ),
 				'_wpnonce' => wp_create_nonce( 'bulk-media' ),
@@ -113,6 +113,42 @@ $media_post = function ( $id, $action ) use ( $media_content, $admin_block, $adm
 			$_POST    = array();
 			$_REQUEST = $_GET;
 			$code     = $admin_block( 'post.php', "\n\tcase '$action':\n", "\n\tcase '" );
+			$admin_run(
+				function () use ( $id, $code ) {
+					global $post_type, $post_type_object, $post;
+					$post_id          = $id;
+					$post             = get_post( $id );
+					$post_type        = $post->post_type;
+					$post_type_object = get_post_type_object( $post_type );
+					$sendback         = admin_url( 'upload.php' );
+					eval( $code );
+				}
+			);
+		},
+	);
+};
+
+// post.php's case editpost on the attachment `$id` over `$fields`, as its
+// edit screen posts them (the nonce, the Update button and the ID are added).
+$media_edit = function ( $id, $fields ) use ( $media_content, $admin_block, $admin_run ) {
+	return array(
+		'setup'  => $media_content,
+		'action' => function () use ( $admin_block, $admin_run, $id, $fields ) {
+			$_GET     = array();
+			$_POST    = wp_slash(
+				array_filter(
+					$fields + array(
+						'_wpnonce'  => wp_create_nonce( "update-post_$id" ),
+						'action'    => 'editpost',
+						'post_ID'   => (string) $id,
+						'post_type' => 'attachment',
+						'save'      => 'Update',
+					),
+					fn( $value ) => null !== $value
+				)
+			);
+			$_REQUEST = $_POST;
+			$code     = $admin_block( 'post.php', "\n\tcase 'editpost':\n", "\n\tcase '" );
 			$admin_run(
 				function () use ( $id, $code ) {
 					global $post_type, $post_type_object, $post;
@@ -184,6 +220,88 @@ return array(
 	'media-bulk-delete-media-trash'            => $media_bulk( 'delete', array( 801, 810 ) ),
 	'media-bulk-trash-media-trash'             => $media_bulk( 'trash', array( 801, 802 ) ),
 	'media-bulk-untrash-media-trash'           => $media_bulk( 'untrash', array( 810 ) ),
+	'media-bulk-attach'                        => $media_bulk( 'attach', array( 802, 803, 99999 ), array( 'found_post_id' => '2' ) ),
+	'media-bulk-attach-same-parent'            => $media_bulk( 'attach', array( 801, 803 ), array( 'found_post_id' => '1' ) ),
+	'media-bulk-detach'                        => $media_bulk( 'detach', array( 801, 802, 807 ), array( 'parent_post_id' => '1' ) ),
+	'media-edit-image'                         => $media_edit(
+		801,
+		array(
+			'post_author'              => '2',
+			'post_author_override'     => '1',
+			'post_title'               => 'New "title" \\ & more',
+			'excerpt'                  => 'A <em>caption</em>',
+			'content'                  => 'Some <b>description</b> with a \\ backslash',
+			'_wp_attachment_image_alt' => '<b>Alt</b> text',
+			'comment_status'           => 'open',
+			'post_name'                => 'new-slug',
+			'advanced_view'            => '1',
+		)
+	),
+	'media-edit-same-alt'                      => $media_edit(
+		801,
+		array(
+			'post_author'              => '2',
+			'post_title'               => 'Sunset "dusk" &amp; sea',
+			'_wp_attachment_image_alt' => 'Alt "text" &amp; more',
+			'post_name'                => 'sunset-dusk-sea',
+		)
+	),
+	'media-edit-pdf'                           => $media_edit(
+		802,
+		array(
+			'post_author'    => '1',
+			'post_title'     => 'Report 2026',
+			'comment_status' => 'open',
+			'ping_status'    => 'open',
+			'post_name'      => 'report',
+		)
+	),
+	'media-edit-gone-author'                   => $media_edit( 805, array( 'post_author' => '99' ) ),
+	'media-edit-private-parent'                => $media_edit(
+		803,
+		array(
+			'post_author' => '3',
+			'post_title'  => 'Notes',
+		)
+	),
+	'media-edit-pending-parent'                => $media_edit( 808, array( 'post_author' => '1' ) ),
+	'media-edit-trashed-parent'                => $media_edit( 813, array( 'post_author' => '1' ) ),
+	'media-edit-private-attachment'            => $media_edit( 811, array( 'post_author' => '1' ) ),
+	'media-edit-trashed'                       => $media_edit( 810, array( 'post_author' => '1' ) ),
+	'media-edit-song'                          => $media_edit(
+		817,
+		array(
+			'post_author'    => '2',
+			'post_title'     => 'Song',
+			'id3_artist'     => 'New <b>artist</b>',
+			'id3_album'      => 'Second',
+			'id3_genre'      => 'Ignored',
+			'_thumbnail_id'  => '-1',
+			'comment_status' => 'open',
+		)
+	),
+	'media-edit-song-untouched'                => $media_edit(
+		817,
+		array(
+			'post_author'   => '2',
+			'_thumbnail_id' => '801',
+		)
+	),
+	'media-edit-video'                         => $media_edit(
+		818,
+		array(
+			'post_author'   => '1',
+			'id3_artist'    => 'Director',
+			'_thumbnail_id' => '-1',
+		)
+	),
+	'media-edit-no-save-button'                => $media_edit(
+		802,
+		array(
+			'post_author' => '1',
+			'save'        => null,
+		)
+	),
 	'media-post-delete'                        => $media_post( 801, 'delete' ),
 	'media-post-delete-media-trash'            => $media_post( 810, 'delete' ),
 	'media-post-trash-media-trash'             => $media_post( 801, 'trash' ),

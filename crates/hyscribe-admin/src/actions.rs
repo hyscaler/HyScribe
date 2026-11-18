@@ -565,6 +565,7 @@ fn post_action(site: &dyn ActionSite, asked: &Asked, post: bool) -> Option<Check
             "Sorry, you are not allowed to delete this item.",
             None,
         ),
+        b"editpost" => return Some(referer(site, asked, &format!("update-post_{id}"))),
         b"post-quickdraft-save" if post => return Some(quickdraft(site, asked, found, id)),
         _ => return post.then_some(Ok(())),
     };

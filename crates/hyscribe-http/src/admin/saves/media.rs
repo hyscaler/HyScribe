@@ -18,7 +18,7 @@ use hyscribe_write::posts::{
     wp_untrash_post, wp_update_post,
 };
 
-use super::posts::{context, mentions};
+use super::posts::{Data, context, mentions};
 use super::{Acting, Ajax, Saving, Stop, referer, text};
 
 /// The attachment the request names, which its checks found.
@@ -104,39 +104,133 @@ async fn is_audio(
     Ok(file.is_some_and(|file| !file.is_empty()) && post.mime_type.starts_with("audio/"))
 }
 
-/// The song's artist and album of `changes`, as `wp_update_attachment_metadata()`
-/// stores them.
-async fn save_tags(write: &mut Write<'_>, id: u64, changes: Option<&Value>) -> Result<(), Error> {
+/// `wp_update_attachment_metadata()` of the song's `tags`, sanitized and set
+/// in the metadata stored; `always` for a caller that updates it even when
+/// no tag is given.
+async fn save_tags(
+    write: &mut Write<'_>,
+    id: u64,
+    (tags, always): (&[(&str, Vec<u8>)], bool),
+) -> Result<(), Error> {
     let stored = get_metadata(write, Meta::Post, id, "_wp_attachment_metadata").await?;
     let stored = stored.into_iter().next();
-    let (mut changed, mut data) = match stored {
-        Some(Value::Array(data)) => (false, data),
-        _ => (true, Vec::new()),
+    let (stored, mut data) = match stored {
+        Some(Value::Array(data)) => (true, data),
+        _ => (false, Vec::new()),
     };
-    for key in ["artist", "album"] {
-        let Some(tag) = change(changes, key)? else {
-            continue;
-        };
-        changed = true;
-        let tag = Value::String(sanitize_text_field(&tag));
-        let key = hyscribe_phpser::Key::String(key.into());
+    if stored && !always && tags.is_empty() {
+        return Ok(());
+    }
+    for (key, tag) in tags {
+        let tag = Value::String(sanitize_text_field(tag));
+        let key = hyscribe_phpser::Key::String(key.as_bytes().to_vec());
         match data.iter_mut().find(|(existing, _)| *existing == key) {
             Some((_, existing)) => *existing = tag,
             None => data.push((key, tag)),
         }
     }
-    if !changed {
-        return Ok(());
-    }
     let key = "_wp_attachment_metadata";
+    let any = Value::String(Vec::new());
     if data.is_empty() {
-        let any = Value::String(Vec::new());
         delete_metadata(write, Meta::Post, id, key, &any, false).await?;
     } else {
-        let any = Value::String(Vec::new());
         update_metadata(write, Meta::Post, id, key, &Value::Array(data), &any).await?;
     }
     Ok(())
+}
+
+/// `update_post_meta( $id, '_wp_attachment_image_alt', wp_slash( $alt ) )` of
+/// the unslashed `alt`, tags stripped, when it is not the one stored.
+async fn save_alt(write: &mut Write<'_>, id: u64, alt: &[u8]) -> Result<(), Error> {
+    let key = "_wp_attachment_image_alt";
+    let stored = get_metadata(write, Meta::Post, id, key).await?;
+    if stored.first().and_then(Value::as_bytes).unwrap_or_default() != alt {
+        let alt = hyscribe_kses::wp_strip_all_tags(alt, true);
+        let alt = Value::String(addslashes(&alt));
+        let any = Value::String(Vec::new());
+        update_metadata(write, Meta::Post, id, key, &alt, &any).await?;
+    }
+    Ok(())
+}
+
+/// `edit_post()`'s steps for an attachment, from the `data` of the edit
+/// screen: a song's or a video's tags, then the image's alternative text.
+pub(super) async fn edit_fields(
+    write: &mut Write<'_>,
+    (id, post): (u64, &hyscribe_db::PostFields),
+    data: &Data,
+) -> Result<(), Error> {
+    if post.mime_type.starts_with("audio/") || post.mime_type.starts_with("video/") {
+        let mut tags = Vec::new();
+        for key in ["artist", "album"] {
+            match data.get(&format!("id3_{key}")) {
+                Some(Value::Array(_)) => return Err(Error::Unported("a list of a tag")),
+                Some(tag) => tags.push((key, tag.to_php_string())),
+                None => {}
+            }
+        }
+        save_tags(write, id, (&tags, true)).await?;
+    }
+    if let Some(alt) = data.get("_wp_attachment_image_alt") {
+        save_alt(write, id, &alt.to_php_string()).await?;
+    }
+    Ok(())
+}
+
+/// `wp_insert_post()`'s featured image of an attachment saved: a song's or
+/// video's, removed with `-1`, or set to the image it has already.
+async fn save_thumbnail(
+    write: &mut Write<'_>,
+    (id, post): (u64, &hyscribe_db::PostFields),
+    thumbnail: &Value,
+) -> Result<(), Error> {
+    let key = "_thumbnail_id";
+    let file = write
+        .meta_value(Meta::Post, id, "_wp_attached_file")
+        .await?;
+    let played = post.mime_type.starts_with("audio/") || post.mime_type.starts_with("video/");
+    if !played || file.is_none_or(|file| file.is_empty()) {
+        return Err(Error::Unported(
+            "a featured image of a file but a song or video",
+        ));
+    }
+    let stored = write.meta_value(Meta::Post, id, key).await?;
+    let wanted = thumbnail.to_int();
+    if wanted == -1 {
+        let any = Value::String(Vec::new());
+        delete_metadata(write, Meta::Post, id, key, &any, false).await?;
+        return Ok(());
+    }
+    let image = u64::try_from(wanted)
+        .ok()
+        .filter(|_| stored.as_deref() == Some(wanted.to_string().as_bytes()));
+    let image = match image {
+        Some(image) => write.post(image).await?,
+        None => None,
+    };
+    match image {
+        Some(image) if image.mime_type.starts_with("image/") => Ok(()),
+        _ => Err(Error::Unported("a featured image to set")),
+    }
+}
+
+/// What `wp_update_post()` and `edit_post()` do for an attachment once it
+/// is updated: its featured image from `data`, then `_fix_attachment_links( $id )`,
+/// which acts on a published, scheduled or private attachment whose
+/// description links to attachment pages by ID.
+pub(super) async fn edit_done(write: &mut Write<'_>, id: u64, data: &Data) -> Result<(), Error> {
+    let post = existing(write, id).await?;
+    if let Some(thumbnail) = data.get("_thumbnail_id") {
+        save_thumbnail(write, (id, &post), thumbnail).await?;
+    }
+    let links = post
+        .content
+        .windows(15)
+        .any(|window| window == b"?attachment_id=");
+    match ["publish", "future", "private"].contains(&post.status.as_str()) && links {
+        true => Err(Error::Unported("links to attachment pages")),
+        false => Ok(()),
+    }
 }
 
 /// `wp_ajax_save_attachment()`, past its checks.
@@ -151,17 +245,14 @@ pub(super) fn save_attachment<'a>(
         let changes = asked.request("changes");
         let ctx = attachments_context(write, asked, site).await?;
         if let Some(alt) = change(changes, "alt")? {
-            let key = "_wp_attachment_image_alt";
-            let stored = get_metadata(write, Meta::Post, id, key).await?;
-            if stored.first().and_then(Value::as_bytes).unwrap_or_default() != alt {
-                let alt = hyscribe_kses::wp_strip_all_tags(&alt, true);
-                let alt = Value::String(addslashes(&alt));
-                let any = Value::String(Vec::new());
-                update_metadata(write, Meta::Post, id, key, &alt, &any).await?;
-            }
+            save_alt(write, id, &alt).await?;
         }
         if is_audio(write, (id, &post)).await? {
-            save_tags(write, id, changes).await?;
+            let mut tags = Vec::new();
+            for key in ["artist", "album"] {
+                tags.extend(change(changes, key)?.map(|tag| (key, tag)));
+            }
+            save_tags(write, id, (&tags, false)).await?;
         }
         let media_trash = site.constants().media_trash;
         let status = change(changes, "status")?.filter(|_| media_trash);
@@ -252,6 +343,68 @@ async fn bulk_ids(
     Ok(ids.iter().map(Value::to_int).collect())
 }
 
+/// `upload.php` as the bulk actions send the user back: the referer without
+/// the `notices` when it is the list's, else the list.
+fn upload_location(asked: &Asked<'_>, notices: &[&[u8]]) -> Vec<u8> {
+    match referer(asked).filter(|referer| mentions(referer, "upload.php")) {
+        Some(referer) => remove_query_arg(notices, &referer),
+        None => hyscribe_admin::menu::link("upload.php").into_bytes(),
+    }
+}
+
+/// `wp_media_attach_action()`: where it sends the user once it attached the
+/// media to the post of `found_post_id`, or detached it (`detach`), none when
+/// it did nothing.
+async fn attach(
+    write: &mut Write<'_>,
+    asked: &Asked<'_>,
+    site: &dyn Acting,
+    detach: bool,
+) -> Result<Option<String>, Stop> {
+    let name = if detach {
+        "parent_post_id"
+    } else {
+        "found_post_id"
+    };
+    let Some(parent) = asked.request(name).filter(|parent| !parent.is_empty()) else {
+        return Ok(None);
+    };
+    if matches!(parent, Value::Array(_)) {
+        return Err(Error::Unported("a list for a parent").into());
+    }
+    let can = async |write: &mut Write<'_>, id: i64| -> Result<bool, Error> {
+        let user = asked.user;
+        let caps = Caps::load(write, user, u64::try_from(id).ok(), site.constants()).await?;
+        Ok(caps.can("edit_post", &[Value::Int(id)]))
+    };
+    let parent = parent.to_int();
+    if !can(write, parent).await? {
+        let message = "Sorry, you are not allowed to edit this post.";
+        return Err(Stop::Died(Answer::Died(message)));
+    }
+    let mut ids = Vec::new();
+    let media = asked.request("media");
+    for id in media
+        .map(hyscribe_admin::actions::items)
+        .unwrap_or_default()
+    {
+        let id = id.to_int();
+        if can(write, id).await? {
+            ids.push(id.unsigned_abs());
+        }
+    }
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    let parent = if detach { 0 } else { parent.unsigned_abs() };
+    let changed = write.set_attachments_parent(&ids, parent).await?;
+    let location = upload_location(asked, &[b"attached", b"detach"]);
+    let key: &[u8] = if detach { b"detach" } else { b"attached" };
+    let changed = changed.to_string();
+    let args: [(&[u8], Option<&[u8]>); 1] = [(key, Some(changed.as_bytes()))];
+    Ok(Some(text(&add_query_arg(&args, &location))))
+}
+
 /// `upload.php`'s bulk actions in list mode.
 pub(super) fn bulk<'a>(
     write: &'a mut Write<'_>,
@@ -262,21 +415,24 @@ pub(super) fn bulk<'a>(
         let doaction = media_action(asked).map(|action| action.to_php_string());
         let doaction = doaction.unwrap_or_default();
         let ids = bulk_ids(write, asked, &doaction).await?;
-        let mut location = b"upload.php".to_vec();
-        if let Some(referer) = referer(asked).filter(|referer| mentions(referer, "upload.php")) {
-            let notices: [&[u8]; 6] = [
-                b"trashed",
-                b"untrashed",
-                b"deleted",
-                b"message",
-                b"ids",
-                b"posted",
-            ];
-            location = remove_query_arg(&notices, &referer);
-        }
+        let notices: [&[u8]; 6] = [
+            b"trashed",
+            b"untrashed",
+            b"deleted",
+            b"message",
+            b"ids",
+            b"posted",
+        ];
+        let location = upload_location(asked, &notices);
         let ctx = attachments_context(write, asked, site).await?;
         let (denied, failed, done): (&str, &str, &[u8]) = match &doaction[..] {
-            b"attach" | b"detach" => return Err(Error::Unported("attaching media").into()),
+            b"attach" | b"detach" => {
+                let detach = &doaction[..] == b"detach";
+                let attached = attach(write, asked, site, detach).await?;
+                return Ok(Answer::Redirect(
+                    attached.unwrap_or_else(|| text(&location)),
+                ));
+            }
             _ if ids.is_empty() => return Ok(Answer::Redirect(text(&location))),
             b"trash" => (
                 "Sorry, you are not allowed to move this item to the Trash.",

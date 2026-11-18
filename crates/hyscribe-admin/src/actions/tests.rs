@@ -395,7 +395,12 @@ fn what_is_not_ported_goes_on() {
         (
             "post.php".into(),
             Some("action=editpost&post_ID=1".to_string()),
-            Some(501),
+            Some(403),
+        ),
+        (
+            format!("post.php?{}", nonce("update-post_1")),
+            Some("action=editpost&post_ID=1".to_string()),
+            None,
         ),
         (
             format!("post.php?action=trash&post=-1&{}", nonce("trash-post_-1")),

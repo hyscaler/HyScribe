@@ -175,6 +175,7 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         // Checked by its own nonce alone, so no screen's action may take it.
         (_, b"screen-options") => Some(screen::options),
         ("users", b"promote") => Some(users::promote),
+        ("post", b"editpost") => Some(posts::editpost),
         ("post", b"trash") => Some(posts::trash),
         ("post", b"untrash") => Some(posts::untrash),
         ("post", b"delete") => Some(posts::delete),

@@ -2964,14 +2964,17 @@ const TTD_PAGES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/pages
 /// Each request of a `reference/pages/golden.sh` list over `database`,
 /// served with the options it names, against PHP's status, location and
 /// page, or with `hashed` the page's hash, the page itself in `TTD_PAGES`.
-/// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ.
+/// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ;
+/// those whose `why` says `rand` show a gallery in random order, which may
+/// match by chance and which no golden can pin.
 /// Author archives are off (docs/SECURITY_MODEL.md): their count is returned.
 async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: &str) -> usize {
-    let known: Vec<(&str, &str)> = known
+    let known: Vec<(&str, &str, &str)> = known
         .lines()
         .map(|line| {
             let mut fields = line.split('\t');
-            (fields.next().unwrap(), fields.next().unwrap())
+            let (options, path) = (fields.next().unwrap(), fields.next().unwrap());
+            (options, path, fields.next().unwrap_or_default())
         })
         .collect();
     let mut sites: HashMap<&str, Arc<Site>> = HashMap::new();
@@ -3013,8 +3016,11 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
             php(fields[4]) == reply.body
         };
         let same = same && reply.status.as_str() == fields[2] && location == fields[3];
-        if known.contains(&(fields[0], path.as_str())) {
-            if same {
+        let listed = known
+            .iter()
+            .find(|(options, listed, _)| *options == fields[0] && *listed == path);
+        if let Some((.., why)) = listed {
+            if same && !why.contains("rand") {
                 failures.push(format!("{} {path} matches: no longer known", fields[0]));
             }
         } else if !same {

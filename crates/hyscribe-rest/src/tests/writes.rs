@@ -1190,3 +1190,16 @@ fn other_types_plan_no_delete() {
     let (plan, served) = on(&site, &asked, Outcome::Written(1));
     assert_eq!((plan, served.status), (None, 501));
 }
+
+/// A role given twice is added once, as `add_role()` skips a role the user
+/// has.
+#[test]
+fn roles_are_added_once_each() {
+    let roles = r#"{"roles":["administrator","administrator"]}"#;
+    let asked = Asked::new("administrator", "POST", "/wp/v2/users/1", roles);
+    let (plan, _) = on(&oracle("administrator", &[]), &asked, Outcome::Written(1));
+    let Some(Write::User(save)) = plan.map(|plan| plan.write) else {
+        panic!("not planned");
+    };
+    assert_eq!(save.roles, Some(vec![b"administrator".to_vec()]));
+}

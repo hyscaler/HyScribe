@@ -666,3 +666,17 @@ async fn an_email_change_waits_for_its_confirmation() {
     })
     .await;
 }
+
+/// `wp_set_password()` stores the password's hash, which it answers, and
+/// clears the reset key.
+#[tokio::test]
+async fn a_set_password_stores_its_hash() {
+    rolled_back(async |write| {
+        let hash = wp_set_password(write, b"new", 1).await.unwrap();
+        let (_, user) = write.user(1).await.unwrap().unwrap();
+        assert_eq!(user.pass, hash);
+        assert!(check_password(b"new", hash.as_bytes()));
+        assert!(user.activation_key.is_empty());
+    })
+    .await;
+}

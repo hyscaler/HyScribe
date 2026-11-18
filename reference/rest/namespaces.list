@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The namespace indexes for reference/rest/golden.sh (method, target, flags):
+# each namespace's routes as get_namespace_index() describes them, in the
+# view and help contexts, the namespace argument, _fields, _embed and the
+# other global parameters, under plain and pretty permalinks.
+GET	/?rest_route=/wp/v2	hash
+GET	/?rest_route=/wp/v2&context=help	hash
+GET	/wp-json/wp/v2/	pretty,hash
+GET	/?rest_route=/oembed/1.0
+GET	/?rest_route=/oembed/1.0&context=help
+GET	/?rest_route=/oembed/1.0&context=edit
+GET	/?rest_route=/oembed/1.0&context[]=help
+GET	/?rest_route=/wp-site-health/v1
+GET	/?rest_route=/wp-site-health/v1&context=help
+GET	/?rest_route=/wp-block-editor/v1
+GET	/?rest_route=/wp-block-editor/v1&context=help
+GET	/?rest_route=/wp-abilities/v1
+GET	/?rest_route=/wp-abilities/v1&context=help
+GET	/wp-json/wp-abilities/v1	pretty
+GET	/?rest_route=/wp/v2&_fields=namespace
+GET	/?rest_route=/wp/v2&_fields=namespace,_links
+GET	/?rest_route=/wp/v2&_fields=routes./wp/v2/types
+GET	/?rest_route=/oembed/1.0&namespace=wp-site-health/v1
+GET	/?rest_route=/oembed/1.0&namespace=wp-block-editor/v1&context=help
+GET	/?rest_route=/oembed/1.0&namespace=nope
+GET	/?rest_route=/oembed/1.0&namespace=
+GET	/?rest_route=/oembed/1.0&namespace=1
+GET	/?rest_route=/oembed/1.0&namespace[]=wp/v2
+GET	/?rest_route=/oembed/1.0&_embed
+GET	/?rest_route=/oembed/1.0&_embed=up
+GET	/?rest_route=/oembed/1.0&_envelope
+GET	/?rest_route=/oembed/1.0&_jsonp=cb
+GET	/?rest_route=/oembed/1.0&_pretty
+GET	/?rest_route=/OEMBED/1.0
+GET	/?rest_route=/oembed/1.0/
+HEAD	/?rest_route=/oembed/1.0
+OPTIONS	/?rest_route=/oembed/1.0
+OPTIONS	/?rest_route=/wp/v2	hash
+POST	/?rest_route=/oembed/1.0

@@ -26,7 +26,7 @@ mod embed;
 mod footer;
 
 use block_styles::BLOCK_STYLES;
-pub use embed::{Share, embed_page};
+pub use embed::{Share, embed_page, embed_secret, post_embed_html};
 pub use footer::{emoji_detection_script, wp_footer};
 
 /// The WordPress version the bundled assets come from.

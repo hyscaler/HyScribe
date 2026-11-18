@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Sidebars, widgets and widget types for reference/rest/golden.sh (method,
+# target, flags) on the default install, whose widgets are a classic
+# theme's: retrieve_widgets() moves them to the inactive widgets and
+# stores them, so PHP writes on the first sidebars or widgets request, even
+# a refused one (restore), which HyScribe answers 501 (refused). The widget
+# types read no widgets.
+GET	/?rest_route=/wp/v2/sidebars	restore,refused
+GET	/?rest_route=/wp/v2/sidebars/wp_inactive_widgets	restore,refused
+GET	/?rest_route=/wp/v2/widgets	restore,refused
+GET	/?rest_route=/wp/v2/widgets/block-2	restore,refused
+GET	/?rest_route=/wp/v2/widget-types
+GET	/?rest_route=/wp/v2/widget-types/block

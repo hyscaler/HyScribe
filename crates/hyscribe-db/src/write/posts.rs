@@ -114,6 +114,13 @@ impl Write<'_> {
         Ok(self.count(query).await? > 0)
     }
 
+    /// `wp_unique_post_slug()` for an attachment: whether another post of
+    /// any type has the name.
+    pub async fn any_post_name_used(&mut self, name: &[u8], id: u64) -> Result<bool, DbError> {
+        let query = self.sql("SELECT COUNT(*) FROM {prefix}posts WHERE post_name = ? AND ID != ?");
+        Ok(self.count(query.bind(name).bind(id)).await? > 0)
+    }
+
     /// `wp_unique_post_slug()` for a hierarchical type: whether another
     /// post of `post_type`, or an attachment, under `parent` has the name.
     pub async fn sibling_name_used(

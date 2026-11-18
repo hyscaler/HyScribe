@@ -245,7 +245,7 @@ fn admin_referer(site: &dyn ActionSite, asked: &Asked, action: &str, field: &str
 }
 
 /// `check_admin_referer( $action )`.
-fn referer(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
+pub fn referer(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
     admin_referer(site, asked, action, "_wpnonce")
 }
 
@@ -706,6 +706,8 @@ pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
             b"adminhash".to_vec()
         }
         "options" if dismissed(asked) => b"dismiss".to_vec(),
+        // Those two handlers' checks run only for their own arguments.
+        "options" if [&b"adminhash"[..], b"dismiss"].contains(&&asked.action()[..]) => Vec::new(),
         "options-privacy" => privacy_action(asked).unwrap_or_default(),
         "edit-tags" => terms_action(asked).unwrap_or_default(),
         "post" if asked.post("deletepost").is_some() => b"delete".to_vec(),

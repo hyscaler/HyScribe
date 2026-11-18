@@ -7,14 +7,15 @@
 //! reloaded, as PHP prepares the post it has just written.
 
 use std::cell::OnceCell;
+use std::sync::Arc;
 
 use hyscribe_db::{DbError, Meta, Write};
 use hyscribe_phpser::Value;
 use hyscribe_phpser::addslashes;
 use hyscribe_render::date::Zone;
 use hyscribe_rest::{
-    CommentSave, Outcome, Pending, Plan, Request, Save, Served, Setting, SettingsSave, TermSave,
-    UserSave,
+    Answer, CommentSave, Outcome, Pending, Plan, Request, Save, Served, Setting, SettingsSave,
+    TermSave, UserSave,
 };
 use hyscribe_write::Error;
 use hyscribe_write::comments::{
@@ -41,6 +42,7 @@ use axum::response::Response;
 use super::{Rest, sent};
 use crate::Site;
 use crate::login::LoginReads;
+use crate::mail::{Outbox, queue_changes};
 
 /// The current user, their session's token, the time and the runtime.
 pub(super) type Asker = (u64, Vec<u8>, i64, Handle);
@@ -58,32 +60,73 @@ pub(super) fn answer(
     let Some(writer) = &site.writer else {
         return sent(read_only());
     };
-    let plan = &pending.plan;
+    let outcome = made(site, writer, &pending.plan, now, &handle);
+    finished(
+        site,
+        writer,
+        request,
+        pending,
+        outcome,
+        (user, token, now, handle),
+    )
+}
+
+/// `plan` written with `writer` in one action, the mail it queues sent once
+/// it commits.
+fn made(
+    site: &Site,
+    writer: &hyscribe_db::Writer,
+    plan: &Plan,
+    now: i64,
+    handle: &Handle,
+) -> Result<Outcome, Error> {
     let ctx = context(site, plan, now);
-    let outcome = handle.block_on(async { act(writer.begin().await, plan, &ctx).await });
-    let served = match outcome {
-        // What PHP refuses past the checks only as another write gets in.
-        Err(Error::Unported(_) | Error::Refused(_)) => Ok(Served::not_ported()),
-        Err(err) => Err(err),
-        Ok(outcome) => {
-            let reloaded = handle.block_on(site.reloaded());
-            let fresh = reloaded.as_ref().unwrap_or(site);
-            let mut reads = LoginReads::new(fresh, handle, now);
-            reads.act_as(user, token);
-            let rest = Rest {
-                reads,
-                site: fresh,
-                user,
-                caps: OnceCell::new(),
-            };
-            let served = hyscribe_rest::written(&rest, request, pending, outcome);
-            let Rest { reads, .. } = rest;
-            reads.reads.finish().map(|()| served).map_err(Error::Db)
+    let outbox = Outbox::new(Arc::clone(&site.mailer));
+    handle.block_on(async { act(writer.begin().await, plan, &ctx, &outbox).await })
+}
+
+/// The answer to a write that came to `outcome`: made from the site
+/// reloaded, 501 for what `hyscribe-write` does not port, and the database
+/// error page for an error, the write rolled back. A batch's next write is
+/// made with `writer` in its own action, one after the other.
+pub(super) fn finished(
+    site: &Site,
+    writer: &hyscribe_db::Writer,
+    request: &Request,
+    pending: Pending,
+    outcome: Result<Outcome, Error>,
+    (user, token, now, handle): Asker,
+) -> Response {
+    let (mut pending, mut outcome) = (pending, outcome);
+    loop {
+        let answered = match outcome {
+            // What PHP refuses past the checks only as another write gets in.
+            Err(Error::Unported(_) | Error::Refused(_)) => Ok(Answer::Served(Served::not_ported())),
+            Err(err) => Err(err),
+            Ok(outcome) => {
+                let reloaded = handle.block_on(site.reloaded());
+                let fresh = reloaded.as_ref().unwrap_or(site);
+                let mut reads = LoginReads::new(fresh, handle.clone(), now);
+                reads.act_as(user, token.clone());
+                let rest = Rest {
+                    reads,
+                    site: fresh,
+                    user,
+                    caps: OnceCell::new(),
+                };
+                let answered = hyscribe_rest::written(&rest, request, pending, outcome);
+                let Rest { reads, .. } = rest;
+                reads.reads.finish().map(|()| answered).map_err(Error::Db)
+            }
+        };
+        match answered {
+            Ok(Answer::Served(served)) => return sent(served),
+            Ok(Answer::Write(next)) => {
+                pending = *next;
+                outcome = made(site, writer, &pending.plan, now, &handle);
+            }
+            Err(err) => return crate::html(crate::database_error(site, &format!("{err:?}"))),
         }
-    };
-    match served {
-        Ok(served) => sent(served),
-        Err(err) => crate::html(crate::database_error(site, &format!("{err:?}"))),
     }
 }
 
@@ -102,7 +145,7 @@ pub(super) fn context(site: &Site, plan: &Plan, now: i64) -> Context {
 }
 
 /// Shadow mode's refusal, `wp_die()`'s JSON as a REST request gets it.
-fn read_only() -> Served {
+pub(super) fn read_only() -> Served {
     let error = format!(
         r#"{{"code":"wp_die","message":"{}","data":{{"status":403}},"additional_errors":[]}}"#,
         hyscribe_admin::login::READ_ONLY
@@ -118,25 +161,38 @@ fn read_only() -> Served {
 }
 
 /// Writes `plan` as one action in `write`, once begun: committed when it
-/// is written, rolled back when PHP refuses it or an error stops it.
+/// is written, then the mails it queued in `outbox` sent; rolled back,
+/// its mails dropped, when PHP refuses it or an error stops it.
 pub(super) async fn act(
     write: Result<Write<'_>, DbError>,
     plan: &Plan,
     ctx: &Context,
+    outbox: &Outbox,
 ) -> Result<Outcome, Error> {
     let mut write = write?;
-    let outcome = written(&mut write, plan, ctx).await?;
-    match outcome {
-        Outcome::Written(_) | Outcome::Cached(_) => {
+    let outcome = match written(&mut write, plan, ctx, outbox).await {
+        Ok(outcome @ (Outcome::Written(_) | Outcome::Cached(_))) => {
             write.commit().await.map(|()| outcome).map_err(Into::into)
         }
-        _ => Ok(outcome),
+        outcome => outcome,
+    };
+    match outcome {
+        Ok(Outcome::Written(_) | Outcome::Cached(_)) => {
+            outbox.send().await;
+        }
+        _ => outbox.clear(),
     }
+    outcome
 }
 
 /// Writes `plan` in `write`: what the write came to, or the error that
 /// stopped it.
-async fn written(write: &mut Write<'_>, plan: &Plan, ctx: &Context) -> Result<Outcome, Error> {
+async fn written(
+    write: &mut Write<'_>,
+    plan: &Plan,
+    ctx: &Context,
+    outbox: &Outbox,
+) -> Result<Outcome, Error> {
     let done = |written: bool, id: u64| match written {
         true => Outcome::Written(id),
         false => Outcome::Refused("rest_cannot_delete"),
@@ -153,6 +209,8 @@ async fn written(write: &mut Write<'_>, plan: &Plan, ctx: &Context) -> Result<Ou
         hyscribe_rest::Write::Delete(id) => {
             Ok(done(wp_delete_post(write, ctx, *id, true).await?, *id))
         }
+        // Its file is written first, by `rest::uploads`.
+        hyscribe_rest::Write::Upload(_) => Err(Error::Unported("an upload's file")),
         hyscribe_rest::Write::Term(save) => term_saved(write, save).await,
         hyscribe_rest::Write::DeleteTerm(taxonomy, id) => {
             let deleted = wp_delete_term(write, taxonomy_of(taxonomy), *id).await;
@@ -168,7 +226,7 @@ async fn written(write: &mut Write<'_>, plan: &Plan, ctx: &Context) -> Result<Ou
             let deleted = delete_comment(write, comments_context(ctx), *id, true).await?;
             Ok(done(deleted, *id))
         }
-        hyscribe_rest::Write::User(save) => user_saved(write, save).await,
+        hyscribe_rest::Write::User(save) => user_saved(write, save, ctx, outbox).await,
         hyscribe_rest::Write::DeleteUser(id, reassign) => {
             Ok(done(wp_delete_user(write, *id, *reassign, ctx).await?, *id))
         }
@@ -176,8 +234,14 @@ async fn written(write: &mut Write<'_>, plan: &Plan, ctx: &Context) -> Result<Ou
 }
 
 /// A user's create or update from `wp_insert_user()` or `wp_update_user()`
-/// on, its fields slashed, then each role added.
-async fn user_saved(write: &mut Write<'_>, save: &UserSave) -> Result<Outcome, Error> {
+/// on, its fields slashed, an update's notices to the user queued in
+/// `outbox`, then each role added.
+async fn user_saved(
+    write: &mut Write<'_>,
+    save: &UserSave,
+    ctx: &Context,
+    outbox: &Outbox,
+) -> Result<Outcome, Error> {
     let slashed = |field: &Option<Vec<u8>>| field.as_deref().map(addslashes);
     let data = UserData {
         id: save.id,
@@ -197,7 +261,14 @@ async fn user_saved(write: &mut Write<'_>, save: &UserSave) -> Result<Outcome, E
     };
     let saved = match save.id {
         0 => wp_insert_user(write, &data).await,
-        _ => wp_update_user(write, &data).await,
+        _ => match wp_update_user(write, &data).await {
+            Ok(updated) => {
+                let home = String::from_utf8_lossy(&ctx.home);
+                queue_changes(write, &home, &updated, outbox).await?;
+                Ok(updated.id)
+            }
+            Err(err) => Err(err),
+        },
     };
     let id = match saved {
         Ok(id) => id,

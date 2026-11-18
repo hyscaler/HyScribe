@@ -9,14 +9,15 @@
 //! attachment filters.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_textarea, esc_url, esc_url_raw};
-use hyscribe_model::Post;
+use hyscribe_model::{Post, PostQuery, StatusFilter};
 use hyscribe_phpser::add_query_arg;
 
 use super::footer::emoji_detection_script;
 use super::{EMOJI_CSS, Head, Style, block_style, inline_script, script_source, tag};
 use crate::autop::wpautop;
 use crate::core_blocks::{comments_open, number_format};
-use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, wptexturize};
+use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, untrailingslashit, wptexturize};
+use crate::permalinks::{self, Permalinks};
 use crate::post::{body_class, post_class, the_title};
 use crate::site::{Request, Site};
 use crate::template::Renderer;
@@ -38,6 +39,26 @@ pub struct Share {
     pub suffix: String,
 }
 
+/// `wp_generate_password( 10, false )` for an embed's secret: ten letters
+/// and digits drawn from the standard library's randomly keyed hasher, as
+/// the secret only pairs a frame with its page.
+pub fn embed_secret() -> String {
+    use std::hash::{BuildHasher, RandomState};
+    let mut draw = RandomState::new().hash_one(0_u8);
+    let mut secret = String::new();
+    for _ in 0..10 {
+        // Base 62: digits and lower case letters, then upper case ones.
+        let digit = u32::try_from(draw % 62).unwrap_or_default();
+        secret.push(char::from_digit(digit, 36).unwrap_or_else(|| {
+            char::from_digit(digit - 26, 36)
+                .unwrap_or_default()
+                .to_ascii_uppercase()
+        }));
+        draw /= 62;
+    }
+    secret
+}
+
 /// The site as the embed page names and links it.
 struct Blog {
     siteurl: String,
@@ -45,6 +66,17 @@ struct Blog {
     home: Vec<u8>,
     /// `get_bloginfo( 'name' )`.
     name: Vec<u8>,
+}
+
+impl Blog {
+    fn of(site: &dyn Site) -> Blog {
+        Blog {
+            siteurl: String::from_utf8_lossy(&site.option("siteurl").unwrap_or_default())
+                .into_owned(),
+            home: esc_url(&site.home_url()),
+            name: site.option("blogname").unwrap_or_default(),
+        }
+    }
 }
 
 /// The whole embed page for `request`, whose document title is `title`.
@@ -56,11 +88,7 @@ pub fn embed_page(
     share: &Share,
 ) -> Vec<u8> {
     let mut renderer = Renderer::new(theme, site, request);
-    let blog = Blog {
-        siteurl: String::from_utf8_lossy(&site.option("siteurl").unwrap_or_default()).into_owned(),
-        home: esc_url(&site.home_url()),
-        name: site.option("blogname").unwrap_or_default(),
-    };
+    let blog = Blog::of(site);
     let post = request.posts.first().filter(|_| request.singular);
     let body = match post {
         Some(post) => content(&mut renderer, &blog, post),
@@ -200,18 +228,83 @@ fn sharing_dialog(renderer: &Renderer, blog: &Blog, post: &Post, share: &Share) 
     format!(
         "\t<div class=\"wp-embed-share-dialog hidden\" role=\"dialog\" aria-label=\"Sharing options\">\n\t\t<div class=\"wp-embed-share-dialog-content\">\n\t\t\t<div class=\"wp-embed-share-dialog-text\">\n\t\t\t\t<ul class=\"wp-embed-share-tabs\" role=\"tablist\">\n\t\t\t\t\t<li class=\"wp-embed-share-tab-button wp-embed-share-tab-button-wordpress\" role=\"presentation\">\n\t\t\t\t\t\t<button type=\"button\" role=\"tab\" aria-controls=\"wp-embed-share-tab-wordpress-{suffix}\" aria-selected=\"true\" tabindex=\"0\">WordPress Embed</button>\n\t\t\t\t\t</li>\n\t\t\t\t\t<li class=\"wp-embed-share-tab-button wp-embed-share-tab-button-html\" role=\"presentation\">\n\t\t\t\t\t\t<button type=\"button\" role=\"tab\" aria-controls=\"wp-embed-share-tab-html-{suffix}\" aria-selected=\"false\" tabindex=\"-1\">HTML Embed</button>\n\t\t\t\t\t</li>\n\t\t\t\t</ul>\n\t\t\t\t<div id=\"wp-embed-share-tab-wordpress-{suffix}\" class=\"wp-embed-share-tab\" role=\"tabpanel\" aria-hidden=\"false\">\n\t\t\t\t\t<input type=\"text\" value=\"{}\" class=\"wp-embed-share-input\" aria-label=\"URL\" aria-describedby=\"wp-embed-share-description-wordpress-{suffix}\" tabindex=\"0\" readonly/>\n\n\t\t\t\t\t<p class=\"wp-embed-share-description\" id=\"wp-embed-share-description-wordpress-{suffix}\">\n\t\t\t\t\t\tCopy and paste this URL into your WordPress site to embed\t\t\t\t\t</p>\n\t\t\t\t</div>\n\t\t\t\t<div id=\"wp-embed-share-tab-html-{suffix}\" class=\"wp-embed-share-tab\" role=\"tabpanel\" aria-hidden=\"true\">\n\t\t\t\t\t<textarea class=\"wp-embed-share-input\" aria-label=\"HTML\" aria-describedby=\"wp-embed-share-description-html-{suffix}\" tabindex=\"0\" readonly>{}</textarea>\n\n\t\t\t\t\t<p class=\"wp-embed-share-description\" id=\"wp-embed-share-description-html-{suffix}\">\n\t\t\t\t\t\tCopy and paste this code into your site to embed\t\t\t\t\t</p>\n\t\t\t\t</div>\n\t\t\t</div>\n\n\t\t\t<button type=\"button\" class=\"wp-embed-share-dialog-close\" aria-label=\"Close sharing dialog\">\n\t\t\t\t<span class=\"dashicons dashicons-no\"></span>\n\t\t\t</button>\n\t\t</div>\n\t</div>\n\t",
         String::from_utf8_lossy(&esc_url(&permalink)),
-        String::from_utf8_lossy(&esc_textarea(&embed_html(blog, post, &permalink, &share.secret))),
+        String::from_utf8_lossy(&esc_textarea(&embed_html(
+            blog,
+            post,
+            // get_post_embed_url() with plain permalinks.
+            (&permalink, &esc_url_raw(&add_query_arg(&[(b"embed", Some(b"true"))], &permalink))),
+            (600, 400),
+            &share.secret
+        ))),
     )
     .into_bytes()
 }
 
-/// `get_post_embed_html( 600, 400 )`: the blockquote and frame another
-/// site embeds the post with, and the script that sizes the frame.
-fn embed_html(blog: &Blog, post: &Post, permalink: &[u8], secret: &str) -> Vec<u8> {
+/// `get_post_embed_html( $width, $height, $post )` with `secret` as its
+/// random secret, `None` where a post or page could sit at the embed URL,
+/// which `get_page_by_path()` would look for.
+pub fn post_embed_html(
+    site: &dyn Site,
+    post: &Post,
+    size: (u64, u64),
+    secret: &str,
+) -> Option<Vec<u8>> {
+    let permalink = permalinks::permalink(site, post);
+    let links = Permalinks::of(site);
+    let url = if links.pretty() {
+        let named = PostQuery {
+            post_types: ["post", "page", "attachment"].map(String::from).to_vec(),
+            statuses: STATUSES
+                .map(|status| StatusFilter {
+                    status: status.into(),
+                    author: None,
+                })
+                .to_vec(),
+            names: vec!["embed".into()],
+            limit: 1,
+            ..PostQuery::default()
+        };
+        if !site.query(&named).is_empty() {
+            return None;
+        }
+        let embed = links.trailing("embed");
+        [untrailingslashit(&permalink), b"/", embed.as_bytes()].concat()
+    } else {
+        add_query_arg(&[(b"embed", Some(b"true"))], &permalink)
+    };
+    Some(embed_html(
+        &Blog::of(site),
+        post,
+        (&permalink, &esc_url_raw(&url)),
+        size,
+        secret,
+    ))
+}
+
+/// Every status a row can have, which `get_page_by_path()` reads.
+const STATUSES: [&str; 8] = [
+    "publish",
+    "future",
+    "draft",
+    "pending",
+    "private",
+    "trash",
+    "auto-draft",
+    "inherit",
+];
+
+/// `get_post_embed_html( $width, $height )`: the blockquote and frame
+/// another site embeds the post with, linking to `permalink` and framing
+/// `url`, and the script that sizes the frame.
+fn embed_html(
+    blog: &Blog,
+    post: &Post,
+    (permalink, url): (&[u8], &[u8]),
+    (width, height): (u64, u64),
+    secret: &str,
+) -> Vec<u8> {
     let title = the_title(post);
-    // get_post_embed_url() with plain permalinks.
-    let url = esc_url_raw(&add_query_arg(&[(b"embed", Some(b"true"))], permalink));
-    let src = esc_url(&[&url[..], b"#?secret=", secret.as_bytes()].concat());
+    let src = esc_url(&[url, b"#?secret=", secret.as_bytes()].concat());
     let frame_title =
         esc_attr(&[&b"&#8220;"[..], &title, b"&#8221; &#8212; ", &blog.name].concat());
     let secret = esc_attr(secret.as_bytes());
@@ -220,7 +313,7 @@ fn embed_html(blog: &Blog, post: &Post, permalink: &[u8], secret: &str) -> Vec<u
         &esc_url(permalink),
         b"\">",
         &title,
-        format!("</a></blockquote><iframe sandbox=\"allow-scripts\" security=\"restricted\" src=\"{}\" width=\"600\" height=\"400\" title=\"{frame_title}\" data-secret=\"{secret}\" frameborder=\"0\" marginwidth=\"0\" marginheight=\"0\" scrolling=\"no\" class=\"wp-embedded-content\"></iframe>", String::from_utf8_lossy(&src)).as_bytes(),
+        format!("</a></blockquote><iframe sandbox=\"allow-scripts\" security=\"restricted\" src=\"{}\" width=\"{width}\" height=\"{height}\" title=\"{frame_title}\" data-secret=\"{secret}\" frameborder=\"0\" marginwidth=\"0\" marginheight=\"0\" scrolling=\"no\" class=\"wp-embedded-content\"></iframe>", String::from_utf8_lossy(&src)).as_bytes(),
         &file_script(&blog.siteurl, "wp-embed", HOST_JS),
     ]
     .concat()

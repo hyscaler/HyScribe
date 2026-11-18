@@ -15,6 +15,7 @@ use tower::ServiceExt;
 use super::*;
 
 mod golden;
+mod uploads;
 mod url_details;
 mod writes;
 use crate::router;
@@ -164,7 +165,7 @@ async fn answers_match_php() {
     let dir = tempfile::tempdir().unwrap();
     let sites = (site(false, dir.path()).await, site(true, dir.path()).await);
     let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 68, 2 * 5));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 69, 2 * 4));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/content.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 89 + 6, 0));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/templates.tsv");
@@ -175,6 +176,34 @@ async fn answers_match_php() {
     assert_eq!(replay(&sites, &golden, false).await, (64, 0));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/search.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 49, 2));
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/namespaces.tsv");
+    assert_eq!(replay(&sites, golden, false).await, (2 * 33, 2));
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/widgets-default.tsv");
+    assert_eq!(replay(&sites, golden, false).await, (2 * 2, 2 * 4));
+}
+
+/// The API signs with the site's `wp_hash()` and draws an embed's secret
+/// as the embed page does.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_api_signs_and_draws_as_the_site_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let handle = Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let rest = Rest {
+            reads: LoginReads::new(&site, handle, now()),
+            site: &site,
+            user: 0,
+            caps: OnceCell::new(),
+        };
+        let signed = RenderSite::wp_hash(&rest.reads.reads, b"x");
+        assert!(signed.is_some());
+        assert_eq!(hyscribe_rest::Site::wp_hash(&rest, b"x"), signed);
+        let secret = hyscribe_rest::Site::embed_secret(&rest);
+        assert!(secret.len() == 10 && secret.bytes().all(|b| b.is_ascii_alphanumeric()));
+    })
+    .await
+    .unwrap();
 }
 
 /// With `REST_PUBLIC_USERS=off`, a visitor sees no user as having
@@ -361,7 +390,7 @@ async fn replay(sites: &(Arc<Site>, Arc<Site>), golden: &str, hashed: bool) -> (
         php.sort();
         assert_eq!(kept(response.headers(), nonce), php, "{what}");
         let mut ours = body(response).await.replace(nonce, "%nonce%");
-        if hashed {
+        if hashed || flag("hash") {
             let digest = sha2::Sha256::digest(ours.as_bytes());
             ours = digest.iter().map(|b| format!("{b:02x}")).collect();
         }

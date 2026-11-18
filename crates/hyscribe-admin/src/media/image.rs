@@ -184,7 +184,7 @@ pub fn site_icon_url(site: &dyn PostsSite, size: i64) -> Option<Vec<u8>> {
 
 /// `wp_mime_type_icon( $id, '.svg' )`'s icon name: the type of the file's
 /// extension or of its MIME type that has an icon, else the default one.
-fn icon_name(file: &[u8], mime: &str) -> &'static str {
+pub fn icon_name(file: &[u8], mime: &str) -> &'static str {
     let name = wp_basename(file);
     let extension = name
         .rsplit(|b| *b == b'.')

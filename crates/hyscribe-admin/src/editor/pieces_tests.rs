@@ -275,9 +275,20 @@ fn editor_targets() {
         "post_type=attachment",
         "post_type=nope",
         "x=1",
+        "x=page",
+        "post_type=page&x=post",
         "post_type[]=x",
     ] {
         assert_eq!(target(&site, "post-new.php", refused), None, "{refused}");
+    }
+    // An argument not ported never stands for the type, past the checks.
+    let subscriber = Role("default:subscriber");
+    for refused in ["", "x=post", "x=page"] {
+        assert_eq!(
+            target(&subscriber, "post-new.php", refused),
+            None,
+            "{refused}"
+        );
     }
     let edit = target(&site, "post.php", "post=1&action=edit");
     assert!(matches!(edit, Some(Target::Edit(post)) if post.id == 1));
@@ -288,12 +299,16 @@ fn editor_targets() {
     ] {
         assert_eq!(target(&site, "post.php", refused), None, "{refused}");
     }
-    let subscriber = Role("default:subscriber");
     assert_eq!(target(&subscriber, "post.php", "post=1&action=edit"), None);
     let locks = Role("a8lock:administrator");
     for refused in ["post=816&action=edit", "post=801&action=edit"] {
         assert_eq!(target(&locks, "post.php", refused), None, "{refused}");
     }
+    // Another user's fresh lock: PHP's locked dialog, which takes no lock,
+    // is not ported; a stale lock is taken over.
+    assert_eq!(target(&locks, "post.php", "post=1&action=edit"), None);
+    let stale = Role("a8lockold:administrator");
+    assert!(target(&stale, "post.php", "post=1&action=edit").is_some());
 }
 
 /// A draft's page: its preview in the admin bar, no original referer in

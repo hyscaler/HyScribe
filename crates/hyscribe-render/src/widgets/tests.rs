@@ -899,3 +899,12 @@ fn text_widget_matches_php() {
     );
     assert_eq!(golden.lines().count(), 28);
 }
+
+/// The core widgets in the order `wp_widgets_init()` registers them.
+#[test]
+fn core_widgets_are_registered_in_order() {
+    let widgets: Vec<&str> = crate::core_widgets().collect();
+    assert_eq!(widgets.len(), 18);
+    assert_eq!(widgets.first(), Some(&"pages"));
+    assert_eq!(widgets.last(), Some(&"block"));
+}

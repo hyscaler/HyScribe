@@ -258,6 +258,7 @@ async fn database_errors_show_no_details() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+        uploads: None,
         install: unconfigured(),
         fetch: None,
         mailer: Arc::new(crate::mail_off()),
@@ -369,6 +370,46 @@ async fn unfinished_headers_time_out() {
     let read = tokio::time::timeout(2 * HEADER_READ_TIMEOUT, stream.read_to_end(&mut rest)).await;
     assert!(read.is_ok(), "still open");
     assert!(started.elapsed() >= HEADER_READ_TIMEOUT);
+}
+
+/// A client that leaves a request's body unfinished gets a 408 after
+/// [`BODY_READ_TIMEOUT`] and its connection closes, as Apache's
+/// `RequestReadTimeout` answers; a body over [`MAX_BODY`] gets a 413.
+#[tokio::test]
+async fn unfinished_bodies_time_out() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let echo = |body: axum::body::Bytes| async move { body };
+    let app = Router::new().route("/", axum::routing::post(echo));
+    tokio::spawn(serve_connections(listener, app, 2, std::future::pending()));
+    let started = tokio::time::Instant::now();
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    let head = "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\n";
+    stream.write_all(head.as_bytes()).await.unwrap();
+    stream.write_all(b"0123456789").await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::time::pause();
+    let mut answer = Vec::new();
+    let read = tokio::time::timeout(2 * BODY_READ_TIMEOUT, stream.read_to_end(&mut answer));
+    assert!(read.await.is_ok(), "still open");
+    assert!(started.elapsed() >= BODY_READ_TIMEOUT);
+    assert!(answer.starts_with(b"HTTP/1.1 408 Request Timeout"));
+    tokio::time::resume();
+    // A whole body is served, and one too large is refused.
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    let head =
+        "POST / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 2\r\n\r\nok";
+    stream.write_all(head.as_bytes()).await.unwrap();
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).await.unwrap();
+    assert!(answer.starts_with(b"HTTP/1.1 200 OK") && answer.ends_with(b"\r\n\r\nok"));
+    let app = Router::new()
+        .route("/", axum::routing::post(echo))
+        .layer(axum::middleware::from_fn(body_deadline));
+    let large = axum::http::Request::post("/").body(Body::from(vec![b'x'; MAX_BODY + 1]));
+    let response = app.oneshot(large.unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }
 
 /// Past the connection limit a client waits until a connection closes.
@@ -959,6 +1000,7 @@ async fn the_front_page_links_to_home() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+        uploads: None,
         install: unconfigured(),
         fetch: None,
         mailer: Arc::new(crate::mail_off()),
@@ -1100,6 +1142,7 @@ async fn failed_reads_answer_defaults() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+        uploads: None,
         install: unconfigured(),
         fetch: None,
         mailer: Arc::new(crate::mail_off()),
@@ -1291,7 +1334,7 @@ async fn feeds_match_php() {
             "{path} {sent:?}"
         );
     }
-    assert_eq!(golden.lines().count(), 71);
+    assert_eq!(golden.lines().count(), 76);
 }
 
 /// Every page of `reference/head/golden.sh`, status and HTML, against

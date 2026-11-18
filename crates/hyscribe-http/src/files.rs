@@ -31,17 +31,34 @@ pub(crate) fn static_file(path: &str, headers: &HeaderMap, now: u64) -> Option<R
     };
     let (modified, sha) = release_file(&release).unwrap_or_default();
     let etag = format!("\"{sha}\"");
+    Some(conditional(
+        headers,
+        (content_type, bytes),
+        (modified, etag),
+        now,
+    ))
+}
+
+/// A file of `content_type` (none if empty) last modified at Unix time
+/// `modified` with the entity tag `etag`, answering `headers`'
+/// preconditions at `now`.
+pub(crate) fn conditional(
+    headers: &HeaderMap,
+    (content_type, bytes): (&str, impl IntoResponse),
+    (modified, etag): (u64, String),
+    now: u64,
+) -> Response {
     let status = precondition(headers, &etag, modified, now);
     let mut response = match status {
         StatusCode::OK => bytes.into_response(),
         status => status.into_response(),
     };
     let set = response.headers_mut();
-    if !content_type.is_empty() && status != StatusCode::NOT_MODIFIED {
-        set.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-    } else {
-        set.remove(header::CONTENT_TYPE);
-    }
+    let content_type = HeaderValue::try_from(content_type).ok();
+    match content_type.filter(|kind| !kind.is_empty() && status != StatusCode::NOT_MODIFIED) {
+        Some(kind) => set.insert(header::CONTENT_TYPE, kind),
+        None => set.remove(header::CONTENT_TYPE),
+    };
     let last_modified = httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(modified));
     let values = [(header::LAST_MODIFIED, last_modified), (header::ETAG, etag)];
     for (name, value) in values
@@ -50,7 +67,7 @@ pub(crate) fn static_file(path: &str, headers: &HeaderMap, now: u64) -> Option<R
     {
         set.insert(name, value);
     }
-    Some(response)
+    response
 }
 
 /// Apache's `ap_meets_conditions()` for a GET or HEAD: 412 when `If-Match`

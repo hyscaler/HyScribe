@@ -57,7 +57,8 @@ pub(super) async fn allow_comment(
 
 /// `wp_check_comment_data()`: the post's author and moderators are
 /// approved; anyone else's comment is checked against the discussion
-/// options, and goes to the trash if it has a disallowed word.
+/// options, and goes to the trash if it has a disallowed word, or to spam
+/// with the trash off.
 pub(super) async fn check_comment_data(
     steps: &mut Steps<'_, '_, DbError>,
     context: Context<'_>,
@@ -93,7 +94,12 @@ pub(super) async fn check_comment_data(
             &fields.agent,
         ];
         if has_word(words, &subjects) {
-            return "trash".into();
+            let to = if context.empty_trash_days == 0 {
+                "spam"
+            } else {
+                "trash"
+            };
+            return to.into();
         }
     }
     if approved { "1" } else { "0" }.into()

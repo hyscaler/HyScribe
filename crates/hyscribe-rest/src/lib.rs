@@ -8,6 +8,7 @@
 //! ported write is answered in two steps: [`answer`] checks it and gives
 //! the [`Plan`] to write, and [`written`] answers once it is written.
 
+mod batch;
 mod block_renderer;
 mod comments;
 mod editor;
@@ -17,6 +18,7 @@ mod hooks;
 mod index;
 mod media;
 mod navigation;
+mod oembed;
 pub(crate) mod posts;
 mod request;
 mod response;
@@ -32,6 +34,7 @@ mod terms;
 mod types;
 mod url_details;
 mod users;
+mod widgets;
 
 /// What the fuzz targets reach.
 pub mod fuzzing {
@@ -53,7 +56,7 @@ use request::{Arg, Params, Sanitize, defaults, has_valid_params, sanitize_params
 use response::{Response, RestError, object, text};
 
 pub use comments::write::CommentSave;
-pub use posts::write::{Outcome, Plan, Save, Write};
+pub use posts::write::{Outcome, Plan, Save, Upload, Write};
 pub use settings::{Setting, SettingsSave};
 pub use terms::write::TermSave;
 pub use users::write::UserSave;
@@ -150,6 +153,10 @@ pub trait Site {
     /// What `get_site_transient( $name )` writes for a transient past its
     /// timeout, where the site writes: both its options deleted.
     fn expire_site_transient(&self, _name: &str) {}
+    /// `wp_hash( $data )`, `None` without the salts it signs with.
+    fn wp_hash(&self, data: &[u8]) -> Option<String>;
+    /// `wp_generate_password( 10, false )`, an oEmbed answer's secret.
+    fn embed_secret(&self) -> String;
 }
 
 /// A request for the API.
@@ -212,6 +219,8 @@ pub struct Pending {
     pub plan: Plan,
     params: Params,
     finish: posts::write::Finish,
+    /// The batch the write is one request of, and the request.
+    batch: Option<Box<batch::Suspended>>,
 }
 
 /// The answer: its status, headers and body.
@@ -333,6 +342,7 @@ pub(crate) type Callback = fn(&Context, &Params) -> Result<Response, RestError>;
 
 /// A ported endpoint: its arguments, permission check and callback, none
 /// for a write, whose permission check alone is ported.
+#[derive(Clone)]
 pub(crate) struct Endpoint {
     args: Vec<Arg>,
     permission: Permission,
@@ -358,6 +368,9 @@ fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| revisions::endpoints(regex))
         .or_else(|| block_renderer::endpoints(regex))
         .or_else(|| url_details::endpoints(regex))
+        .or_else(|| oembed::endpoints(regex))
+        .or_else(|| widgets::endpoints(regex))
+        .or_else(|| batch::endpoints(regex))
 }
 
 /// The ported write of the route `regex`'s endpoint `index`, if any.
@@ -425,12 +438,11 @@ pub fn answer(site: &dyn Site, request: &Request) -> Answer {
     run(site, request, None)
 }
 
-/// The answer to `request` once `pending`, which [`answer`] gave for it,
-/// is written: `site` is the site as it is after the write.
-pub fn written(site: &dyn Site, request: &Request, pending: Pending, outcome: Outcome) -> Served {
+/// The answer to `request` once `pending`, which [`answer`] or this gave
+/// for it, is written, or a batch's next write: `site` is the site as it
+/// is after the write.
+pub fn written(site: &dyn Site, request: &Request, pending: Pending, outcome: Outcome) -> Answer {
     run(site, request, Some((pending, outcome)))
-        .served()
-        .unwrap_or_else(Served::not_ported)
 }
 
 /// What `rest_preload_api_request()` keeps of one path.
@@ -606,15 +618,11 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
             .as_bytes()
             .is_some_and(|nonce| site.verify_nonce(nonce))
     });
-    let given = |source: &[(Key, Value)]| {
-        let names = source.iter().map(|(key, _)| key.to_php_string());
-        names.into_iter().any(|name| {
-            !GLOBAL_PARAMETERS
-                .iter()
-                .any(|known| known.as_bytes() == name)
-        })
-    };
     let (json, post) = body_params(request, &method);
+    // `_oembed_rest_pre_serve_request()` serves an oEmbed GET for XML.
+    let format = json.as_ref().ok().and_then(|json| lookup(json, "format"));
+    let format = format.or_else(|| get("format"));
+    let xml = method == "GET" && route == oembed::EMBED.as_bytes() && format == Some(&text("xml"));
     let params = Params {
         json: json.clone().unwrap_or_default(),
         post: if body_method(&method) {
@@ -632,7 +640,7 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
         uri: request.uri,
         parameters: [&params.json, &params.post, &params.get]
             .into_iter()
-            .any(|source| given(source)),
+            .any(|source| gives_parameters(source)),
         remote_addr: request.remote_addr,
         user_agent: request.user_agent,
         host: request.host.unwrap_or_default(),
@@ -686,6 +694,15 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
             "Cache-Control",
             "no-cache, must-revalidate, max-age=0, no-store, private",
         );
+    }
+    // The XML is sent before the CORS headers, which come too late for it.
+    if xml {
+        let Some(body) = oembed::create_xml(&response.into_data()) else {
+            return Answer::Served(Served::not_ported());
+        };
+        served.send("Content-Type", format!("text/xml; charset={charset}"));
+        served.body = body;
+        return Answer::Served(served);
     }
     // `rest_send_cors_headers()`.
     let origin = request
@@ -848,6 +865,9 @@ fn dispatch(
             .iter()
             .map(|endpoint| endpoint.permission)
             .collect();
+        if widgets::would_write(context, matched.regex) {
+            return Err(Halt::NotPorted);
+        }
         let params = Params {
             route: matched.regex,
             url: matched.params,
@@ -867,17 +887,39 @@ fn dispatch(
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
     let (permissions, endpoint) = ported(&matched).ok_or(Halt::NotPorted)?;
+    if widgets::would_write(context, matched.regex) {
+        return Err(Halt::NotPorted);
+    }
     // The link previews fetch, which waits on ADR 0019.
     if matched.regex == url_details::ROUTE && !context.site.outbound() {
         return Err(Halt::NotPorted);
     }
     let (answered, params) = match resumed {
-        Some((pending, outcome)) => {
-            let mut params = pending.params;
-            let answered = (pending.finish)(context, &mut params, pending.plan, outcome);
-            (answered, params)
+        Some((pending, outcome)) => match pending.batch {
+            Some(suspended) => {
+                let written = (pending.plan, pending.finish, outcome);
+                let answered = batch::resumed(context, *suspended, written)?;
+                (Ok(answered), pending.params)
+            }
+            None => {
+                let mut params = pending.params;
+                let answered = (pending.finish)(context, &mut params, pending.plan, outcome);
+                (answered, params)
+            }
+        },
+        None => {
+            let checked = checked(context, &matched, &endpoint, params, refused)?;
+            if matched.regex == batch::ROUTE {
+                let (params, _, passed) = checked;
+                let answered = match passed {
+                    Ok(()) => Ok(batch::serve(context, &params)?),
+                    Err(error) => Err(error),
+                };
+                (answered, params)
+            } else {
+                responded(context, &endpoint, checked)?
+            }
         }
-        None => checked(context, &matched, endpoint, params, refused)?,
     };
     if answered
         .as_ref()
@@ -915,13 +957,29 @@ fn finish(
 
 /// The description of the route `regex`, as `get_data_for_route()` gives
 /// it in the `help` context, exported by `reference/wordpress/export.sh`.
-fn describe(context: &Context, regex: &str) -> Value {
+pub(crate) fn describe(context: &Context, regex: &str) -> Value {
+    let description = descriptions().get_str(regex).cloned().unwrap_or_default();
+    placed(description, b"%rest_url%", &|path| context.rest_url(path))
+}
+
+/// Every route's description by its regex, with `%rest_url%` before its
+/// links.
+pub(crate) fn descriptions() -> &'static Value {
     const DESCRIPTIONS: &[u8] =
         include_bytes!("../../../wordpress/wp-includes/rest-descriptions.json");
     static DATA: OnceLock<Value> = OnceLock::new();
-    let data = DATA.get_or_init(|| json_decode(DESCRIPTIONS).unwrap_or_default());
-    let description = data.get_str(regex).cloned().unwrap_or_default();
-    placed(description, b"%rest_url%", &|path| context.rest_url(path))
+    DATA.get_or_init(|| json_decode(DESCRIPTIONS).unwrap_or_default())
+}
+
+/// Whether `source` gives a parameter other than those `serve_request()`
+/// reads itself, which a write's arguments would check.
+pub(crate) fn gives_parameters(source: &[(Key, Value)]) -> bool {
+    source.iter().any(|(key, _)| {
+        let name = key.to_php_string();
+        !GLOBAL_PARAMETERS
+            .iter()
+            .any(|known| known.as_bytes() == name)
+    })
 }
 
 /// `value` with each string that starts with `placeholder` given the URL
@@ -954,38 +1012,64 @@ fn invalid_json(error: JsonError) -> RestError {
     }
 }
 
-/// The request checked by the matched endpoint's arguments and permission,
-/// then its callback's answer, or the write a ported write plans. A body
-/// `refused`, JSON PHP refuses, is answered `rest_invalid_json` before any
-/// check; a multipart form is not ported.
+/// The request checked by the matched endpoint's arguments and permission:
+/// its parameters, the write a ported write endpoint makes, and whether
+/// they pass. A body `refused`, JSON PHP refuses, is answered
+/// `rest_invalid_json` before any check; a multipart form is not ported.
 fn checked(
     context: &Context,
     matched: &routes::Matched,
-    endpoint: Endpoint,
+    endpoint: &Endpoint,
     params: Params,
     refused: Option<Option<JsonError>>,
-) -> Result<(Result<Response, RestError>, Params), Halt> {
-    let mut params = Params {
+) -> Result<Checked, Halt> {
+    let params = with_route(matched, endpoint, params);
+    match refused {
+        Some(Some(error)) => return Ok((params, None, Err(invalid_json(error)))),
+        Some(None) => return Err(Halt::NotPorted),
+        None => {}
+    }
+    let (params, writing, checked) = validated(context, matched, endpoint, params)?;
+    let checked = checked.and_then(|()| (endpoint.permission)(context, &params));
+    Ok((params, writing, checked))
+}
+
+/// `params` with the matched route's own: its URL parameters, and its
+/// endpoint's arguments' defaults.
+pub(crate) fn with_route(matched: &routes::Matched, endpoint: &Endpoint, params: Params) -> Params {
+    Params {
         route: matched.regex,
         url: matched.params.clone(),
         defaults: defaults(&endpoint.args),
         ..params
-    };
-    match refused {
-        Some(Some(error)) => return Ok((Err(invalid_json(error)), params)),
-        Some(None) => return Err(Halt::NotPorted),
-        None => {}
     }
+}
+
+/// A request's parameters, the write its endpoint makes, and whether its
+/// checks pass.
+pub(crate) type Checked = (Params, Option<posts::write::Writing>, Result<(), RestError>);
+
+/// `has_valid_params()` and `sanitize_params()` of `params`, which hold the
+/// matched route's own, by the endpoint's arguments, those of a write
+/// included; what they do not port is answered 501.
+pub(crate) fn validated(
+    context: &Context,
+    matched: &routes::Matched,
+    endpoint: &Endpoint,
+    mut params: Params,
+) -> Result<Checked, Halt> {
     let writing = match endpoint.callback {
         Some(_) => None,
         None => writing(matched.regex, matched.endpoint),
     };
     // The arguments of a write not ported are not ported either: one given
     // any is not answered, and one given none is checked, then answered 501.
-    if endpoint.callback.is_none() && writing.is_none() && context.parameters {
+    // A batch's requests are checked by their own routes.
+    let batch = matched.regex == batch::ROUTE;
+    if endpoint.callback.is_none() && writing.is_none() && context.parameters && !batch {
         return Err(Halt::NotPorted);
     }
-    let mut args = endpoint.args;
+    let mut args = endpoint.args.clone();
     let unported = |arg: &Arg| matches!(arg.sanitize, Sanitize::NotPorted) && params.has(arg.name);
     if args.iter().any(unported) {
         return Err(Halt::NotPorted);
@@ -997,8 +1081,17 @@ fn checked(
         args = (writing.args)(context, &params, args);
     }
     let checked = has_valid_params(context, &params, &args)
-        .and_then(|()| sanitize_params(context, &mut params, &args))
-        .and_then(|()| (endpoint.permission)(context, &params));
+        .and_then(|()| sanitize_params(context, &mut params, &args));
+    Ok((params, writing, checked))
+}
+
+/// The answer of a request whose checks came to `checked`: its callback's,
+/// the write a ported write plans, or 501 for a write not ported.
+pub(crate) fn responded(
+    context: &Context,
+    endpoint: &Endpoint,
+    (mut params, writing, checked): Checked,
+) -> Result<(Result<Response, RestError>, Params), Halt> {
     let answered = match (endpoint.callback, writing) {
         (Some(callback), _) => checked.and_then(|()| callback(context, &params)),
         (None, Some(writing)) => match checked.and_then(|()| (writing.plan)(context, &params)) {
@@ -1011,6 +1104,7 @@ fn checked(
                     plan,
                     params,
                     finish,
+                    batch: None,
                 };
                 return Err(Halt::Write(Box::new(pending)));
             }

@@ -270,7 +270,42 @@ impl Masks {
                 .all(|b| b.is_ascii_alphanumeric() || b"./".contains(b))
     }
 
+    /// An upload's folder of the month as `%ym%`, and its sizes in bytes,
+    /// which differ by image encoder (ADR 0015), as `%filesize%`.
+    fn uploaded(&self, value: &[u8]) -> Vec<u8> {
+        // No folder without a date to read its year and month from.
+        let date = &self.start.1;
+        let folder = date
+            .get(..4)
+            .zip(date.get(5..7))
+            .map(|(year, month)| [year, b"/", month, b"/"].concat());
+        let filesize = b"s:8:\"filesize\";i:";
+        let mut out = Vec::new();
+        let mut rest = value;
+        while let Some((&first, tail)) = rest.split_first() {
+            if let Some(after) = folder.as_deref().and_then(|f| rest.strip_prefix(f)) {
+                out.extend_from_slice(b"%ym%/");
+                rest = after;
+            } else if let Some(after) = rest.strip_prefix(&filesize[..]) {
+                let digits = after.iter().take_while(|b| b.is_ascii_digit()).count();
+                out.extend_from_slice(filesize);
+                out.extend_from_slice(b"%filesize%");
+                rest = after.get(digits..).unwrap_or_default();
+            } else {
+                out.push(first);
+                rest = tail;
+            }
+        }
+        out
+    }
+
     fn mask(&self, table: &Table, column: &str, value: &[u8]) -> Vec<u8> {
+        let upload = matches!(
+            (table.name, column),
+            ("wp_posts", "guid") | ("wp_postmeta", "meta_value")
+        );
+        let uploaded = upload.then(|| self.uploaded(value));
+        let value = uploaded.as_deref().unwrap_or(value);
         if Self::is_password(value) {
             return b"%password%".to_vec();
         }

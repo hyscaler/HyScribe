@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 hyscribe-fetch.workspace = true
+hyscribe-image.workspace = true
 hyscribe-kses.workspace = true
 hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true

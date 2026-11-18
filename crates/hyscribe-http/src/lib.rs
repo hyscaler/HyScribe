@@ -52,6 +52,7 @@ mod files;
 mod loaders;
 mod login;
 mod mail;
+mod multipart;
 mod outbound;
 pub mod query;
 mod reads;
@@ -60,6 +61,9 @@ mod rest;
 mod rewrite;
 mod sitemaps;
 mod trackback;
+mod uploads;
+
+pub use uploads::Uploads;
 
 pub use hyscribe_admin::site_health::Install;
 
@@ -67,9 +71,12 @@ pub use hyscribe_admin::site_health::Install;
 /// from outside.
 #[doc(hidden)]
 pub mod fuzzing {
-    pub use crate::comment_post::read_form;
+    pub use crate::comment_post::{address as forwarded_address, read_form};
     pub use crate::files::http_date;
     pub use crate::login::cookies;
+    pub use crate::multipart::{
+        boundary as multipart_boundary, disposition_filename, read as multipart_form,
+    };
     pub use crate::redirect::{wp_sanitize_redirect, wp_validate_redirect};
 }
 
@@ -115,6 +122,8 @@ pub struct Site {
     constants: hyscribe_config::Constants,
     /// The login rate limits and their counts, kept across reloads.
     limiter: Arc<login::limits::Limiter>,
+    /// The uploads folder, where uploads are written and served from.
+    uploads: Option<Arc<Uploads>>,
     /// The installation as configured, which the admin shows.
     install: Arc<Install>,
     /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
@@ -170,6 +179,7 @@ impl Site {
             behind_proxy: false,
             constants: hyscribe_config::Constants::default(),
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
+            uploads: None,
             install: unconfigured(),
             fetch: None,
             feed_hosts: Arc::default(),
@@ -214,6 +224,7 @@ impl Site {
             behind_proxy: self.behind_proxy,
             constants: self.constants,
             limiter: Arc::clone(&self.limiter),
+            uploads: self.uploads.clone(),
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
             feed_hosts: Arc::clone(&self.feed_hosts),
@@ -249,12 +260,27 @@ impl Site {
         }
     }
 
+    /// The site with its uploads folder.
+    pub fn with_uploads(self, uploads: Uploads) -> Site {
+        Site {
+            uploads: Some(Arc::new(uploads)),
+            ..self
+        }
+    }
+
     /// The site of the installation `install` describes.
     pub fn with_install(self, install: Install) -> Site {
         Site {
             install: Arc::new(install),
             ..self
         }
+    }
+
+    /// `UPLOAD_MAX_SIZE`, 0 without an uploads folder.
+    fn upload_max(&self) -> u64 {
+        self.uploads
+            .as_ref()
+            .map_or(0, |uploads| uploads.max_size())
     }
 
     /// The site behind a proxy or not.
@@ -466,19 +492,67 @@ impl Site {
 /// The router [`serve`] runs: each request sees the site as the database
 /// has it now (ADR 0012).
 fn live(site: Arc<Site>) -> Router {
-    layered(Router::new().fallback(current).with_state(site))
+    let limit = upload_limit(&site);
+    layered(Router::new().fallback(current).with_state(site), limit)
 }
 
 /// The router for `site` as it is, whatever the database holds now.
 #[cfg(test)]
 fn router(site: Arc<Site>) -> Router {
-    layered(Router::new().fallback(page).with_state(site))
+    let limit = upload_limit(&site);
+    layered(Router::new().fallback(page).with_state(site), limit)
 }
 
-fn layered(router: Router) -> Router {
+/// The body an upload may send: `UPLOAD_MAX_SIZE` and its form around it.
+fn upload_limit(site: &Site) -> usize {
+    let max = site.upload_max();
+    usize::try_from(max)
+        .unwrap_or(usize::MAX)
+        .saturating_add(FORM_ALLOWANCE)
+}
+
+fn layered(router: Router, upload_limit: usize) -> Router {
+    let bodies = (upload_limit, Arc::new(Semaphore::new(UPLOADS_AT_ONCE)));
     router
+        .layer(axum::middleware::from_fn_with_state(bodies, body_limit))
+        .layer(axum::extract::DefaultBodyLimit::disable())
         .layer(axum::middleware::from_fn(request_line_limit))
         .layer(axum::middleware::map_response(security_headers))
+}
+
+/// What an upload's form may add to its file.
+const FORM_ALLOWANCE: usize = 1 << 20;
+
+/// The body any other request may send, axum's default.
+const BODY_LIMIT: usize = 2 << 20;
+
+/// Uploads whose bodies are read at once; more wait, so the memory bodies
+/// take stays bounded.
+const UPLOADS_AT_ONCE: usize = 16;
+
+/// The body read before the route sees it: an upload's up to
+/// `upload_limit`, one at a time of [`UPLOADS_AT_ONCE`], any other's up to
+/// [`BODY_LIMIT`]. A longer body is refused with 413 as soon as it passes
+/// the limit, never buffered whole.
+async fn body_limit(
+    State((upload_limit, uploading)): State<(usize, Arc<Semaphore>)>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let upload = uploads::takes_upload(request.uri());
+    let _permit = match upload {
+        true => uploading.acquire_owned().await.ok(),
+        false => None,
+    };
+    let limit = if upload { upload_limit } else { BODY_LIMIT };
+    let (parts, body) = request.into_parts();
+    match axum::body::to_bytes(body, limit).await {
+        Ok(bytes) => {
+            let request = axum::extract::Request::from_parts(parts, bytes.into());
+            next.run(request).await
+        }
+        Err(_) => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+    }
 }
 
 /// [`page`] for the site as the database has it now.
@@ -558,6 +632,30 @@ const MAX_CONNECTIONS: usize = 1024;
 /// keeps it only with a timer, which `axum::serve` does not give it.
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long a client has to send a request's body once its headers are in,
+/// so slow clients cannot hold connections open; Apache's `RequestReadTimeout`
+/// also answers 408.
+const BODY_READ_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The largest body read: above every route's own limit (axum's 2 MB, the
+/// setup form's 3 MiB), which still applies.
+const MAX_BODY: usize = 4 << 20;
+
+/// Reads a request's whole body within [`BODY_READ_TIMEOUT`] before it is
+/// served.
+async fn body_deadline(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let (parts, body) = request.into_parts();
+    let read = tokio::time::timeout(BODY_READ_TIMEOUT, axum::body::to_bytes(body, MAX_BODY));
+    match read.await {
+        Ok(Ok(body)) => {
+            next.run(axum::extract::Request::from_parts(parts, body.into()))
+                .await
+        }
+        Ok(Err(_)) => StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+        Err(_) => (StatusCode::REQUEST_TIMEOUT, [(header::CONNECTION, "close")]).into_response(),
+    }
+}
+
 /// Serves `site` on `listener` until `shutdown` completes, then finishes the
 /// requests in flight.
 pub async fn serve(
@@ -588,6 +686,7 @@ async fn serve_connections(
     let mut http = http1::Builder::new();
     http.timer(TokioTimer::new())
         .header_read_timeout(HEADER_READ_TIMEOUT);
+    let app = app.layer(axum::middleware::from_fn(body_deadline));
     let permits = Arc::new(Semaphore::new(limit));
     let graceful = GracefulShutdown::new();
     let mut shutdown = std::pin::pin!(shutdown);
@@ -684,9 +783,13 @@ async fn page(
     let uri = in_place(uri);
     let (head, post) = (method == Method::HEAD, method == Method::POST);
     let page_method = method == Method::GET || head || post;
-    let file = files::static_file(uri.path(), &headers, now() as u64);
-    if let Some(response) = file.filter(|_| page_method && !post) {
-        return response;
+    if !post && page_method {
+        let now = now() as u64;
+        let file = uploads::serve::serve(&site, uri.path(), &headers, now)
+            .or_else(|| files::static_file(uri.path(), &headers, now));
+        if let Some(response) = file {
+            return response;
+        }
     }
     let peer = peer.map(|axum::Extension(Peer(ip))| ip);
     if uri.path() == login::PATH && page_method {
@@ -719,15 +822,25 @@ async fn page(
         return loaders::load(loader, uri.query(), &headers, now() as u64);
     }
     if admin::is_admin(uri.path()) && page_method {
-        // `$_POST`, unless the body is one only PHP reads.
-        let form = if post {
-            trackback::form(&headers, &body)
-        } else {
-            Value::Array(Vec::new())
+        let max = site.upload_max();
+        let multipart = uploads::takes_upload(&uri)
+            .then(|| uploads::form(&headers, &body, max))
+            .flatten();
+        let (form, files) = match multipart {
+            Some((form, files)) => (Some(form), files),
+            None => {
+                // `$_POST`, unless the body is one only PHP reads.
+                let form = if post {
+                    trackback::form(&headers, &body)
+                } else {
+                    Value::Array(Vec::new())
+                };
+                let read =
+                    !post || body.is_empty() || form.as_array().is_some_and(|f| !f.is_empty());
+                (read.then_some(form), Vec::new())
+            }
         };
-        let read = !post || body.is_empty() || form.as_array().is_some_and(|f| !f.is_empty());
-        let form = read.then_some(form);
-        return admin::respond(&site, uri, headers, (post, peer), form).await;
+        return admin::respond(&site, uri, headers, (post, peer), (form, files)).await;
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();
@@ -1324,25 +1437,13 @@ fn render_page(
     Ok(document)
 }
 
-/// The embed sharing dialog's secret, ten letters and digits, and ID
-/// suffix, as large as `wp_rand()`'s: drawn from the standard library's
-/// randomly keyed hasher, as they guard nothing.
+/// The embed sharing dialog's secret and ID suffix, as large as
+/// `wp_rand()`'s: drawn from the standard library's randomly keyed hasher,
+/// as they guard nothing.
 fn share() -> Share {
     use std::hash::{BuildHasher, RandomState};
-    let mut draw = RandomState::new().hash_one(0_u8);
-    let mut secret = String::new();
-    for _ in 0..10 {
-        // Base 62: digits and lower case letters, then upper case ones.
-        let digit = u32::try_from(draw % 62).unwrap_or_default();
-        secret.push(char::from_digit(digit, 36).unwrap_or_else(|| {
-            char::from_digit(digit - 26, 36)
-                .unwrap_or_default()
-                .to_ascii_uppercase()
-        }));
-        draw /= 62;
-    }
     Share {
-        secret,
+        secret: hyscribe_render::head::embed_secret(),
         // Truncated to `wp_rand()`'s 32 bits.
         suffix: (RandomState::new().hash_one(1_u8) as u32).to_string(),
     }

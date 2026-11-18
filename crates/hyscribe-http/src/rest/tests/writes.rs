@@ -6,6 +6,7 @@
 //! after each request that wrote; and the rows each write makes, against
 //! the write oracle on the fixture.
 
+use crate::mail::tests::{mailed, outbox, php_mails, printed};
 use hyscribe_config::{Database, Mode};
 use hyscribe_db::Writer;
 use hyscribe_render::date::{Zone, stored_unix};
@@ -18,7 +19,7 @@ use sqlx::Connection as _;
 use super::*;
 
 /// The scratch database the writing tests reload.
-fn saves() -> Database {
+pub(super) fn saves() -> Database {
     Database {
         name: "wordpress_saves".into(),
         ..fixture_database()
@@ -27,7 +28,7 @@ fn saves() -> Database {
 
 /// `wordpress_saves` as the default install with `reference/rest/users.sql`'s
 /// users, as the oracle recorded over it.
-async fn fresh() {
+pub(super) async fn fresh() {
     fresh_with("").await;
 }
 
@@ -64,7 +65,7 @@ async fn fresh_with(state: &str) {
 
 /// The oracle's site over `wordpress_saves`, with sessions in `dir` and a
 /// writer.
-async fn saves_site(dir: &std::path::Path) -> Arc<Site> {
+pub(super) async fn saves_site(dir: &std::path::Path) -> Arc<Site> {
     let db = crate::Db::connect(&saves()).await.unwrap();
     let home = Some("http://127.0.0.1:8081".to_string());
     let site = Arc::new(Site::load(db, home.clone(), home).await.unwrap());
@@ -75,7 +76,7 @@ async fn saves_site(dir: &std::path::Path) -> Arc<Site> {
 
 /// The dates of `body` from `start` to `end` as `%now%`, as the golden
 /// keeps them.
-fn now_masked(body: &str, (start, end): (i64, i64)) -> String {
+pub(super) fn now_masked(body: &str, (start, end): (i64, i64)) -> String {
     let shaped = |date: &[u8]| {
         date.iter().enumerate().all(|(i, b)| match i {
             4 | 7 => *b == b'-',
@@ -139,6 +140,23 @@ async fn editor_saves_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/editor-saves.tsv");
     let state = include_str!("../../../../../reference/rest/editor-saves.sql");
     assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 34, 0));
+}
+
+/// PHP's answers to batches (`reference/rest/batch.list`) as a visitor, an
+/// author and the administrator, their writes made one after the other,
+/// those flagged `refused` answered 501; `hyscribe-rest` replays every role.
+#[tokio::test(flavor = "multi_thread")]
+async fn batches_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/batch.tsv");
+    let who = ["visitor\t", "author\t", "administrator\t"];
+    let golden: Vec<&str> = golden
+        .lines()
+        .filter(|line| who.iter().any(|who| line.starts_with(who)))
+        .collect();
+    assert_eq!(
+        writes_match_php(&golden.join("\n"), "", &[]).await,
+        (3 * 28, 3)
+    );
 }
 
 /// The cases of `golden`, recorded over `state`, sent over HTTP as each
@@ -292,7 +310,12 @@ async fn as_user<T: Send + 'static>(
 
 /// `target` asked of `site` by user 1 with the JSON `body`, past its
 /// checks: the write it plans.
-async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &str) -> Pending {
+pub(super) async fn planned(
+    site: &Arc<Site>,
+    method: &'static str,
+    target: &str,
+    body: &str,
+) -> Pending {
     let then = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
         rest, request,
     ) {
@@ -315,7 +338,9 @@ async fn answered(
         let hyscribe_rest::Answer::Write(pending) = hyscribe_rest::answer(rest, request) else {
             panic!("served at once")
         };
-        let served = hyscribe_rest::written(rest, request, *pending, outcome);
+        let served = hyscribe_rest::written(rest, request, *pending, outcome)
+            .served()
+            .unwrap();
         (served.status, String::from_utf8(served.body).unwrap())
     };
     as_admin(site, asked, (b"", None), then).await
@@ -339,7 +364,7 @@ async fn acted(
         if let Ok(write) = &mut write {
             write.fail_after(budget);
         }
-        match crate::rest::writes::act(write, plan, ctx).await {
+        match crate::rest::writes::act(write, plan, ctx, outbox()).await {
             Err(hyscribe_write::Error::Db(err)) if err.to_string().contains("budget is spent") => {
                 budget += 1;
             }
@@ -924,9 +949,26 @@ async fn refused_writes_are_answered_as_php_answers_them() {
     let roles = (
         "POST",
         "/?rest_route=/wp/v2/users/1",
-        r#"{"roles":["administrator"]}"#,
+        r#"{"roles":["administrator","administrator"]}"#,
     );
-    as_admin(&site, roles, (b"", None), plan_of).await;
+    let write = as_admin(&site, roles, (b"", None), plan_of).await;
+    let administrator = Some(vec![b"administrator".to_vec()]);
+    assert!(matches!(write, hyscribe_rest::Write::User(save) if save.roles == administrator));
+    // `/users/me` is the current user's, whatever ID a body gives.
+    let me = (
+        "POST",
+        "/?rest_route=/wp/v2/users/me",
+        r#"{"id":702,"first_name":"x"}"#,
+    );
+    let write = as_admin(&site, me, (b"", None), plan_of).await;
+    assert!(matches!(write, hyscribe_rest::Write::User(save) if save.id == 1));
+    let me = (
+        "DELETE",
+        "/?rest_route=/wp/v2/users/me&force=true&reassign=702",
+        r#"{"id":704}"#,
+    );
+    let write = as_admin(&site, me, (b"", None), plan_of).await;
+    assert_eq!(write, hyscribe_rest::Write::DeleteUser(1, Some(702)));
     // An author URL as long as its column takes is planned.
     let url = format!(r#"{{"author_url":"https://x.test/{}"}}"#, "a".repeat(185));
     let long = ("POST", "/?rest_route=/wp/v2/comments/1", url.as_str());
@@ -982,7 +1024,7 @@ async fn writes_refused_past_their_checks() {
         let mut plan = pending.plan.clone();
         plan.write = write;
         let ctx = crate::rest::writes::context(&site, &plan, now());
-        crate::rest::writes::act(writer.begin().await, &plan, &ctx)
+        crate::rest::writes::act(writer.begin().await, &plan, &ctx, outbox())
             .await
             .unwrap()
     };
@@ -1098,8 +1140,67 @@ async fn writes_refused_past_their_checks() {
     let mut plan = pending.plan.clone();
     plan.write = hyscribe_rest::Write::Settings(Box::new(save));
     let ctx = crate::rest::writes::context(&site, &plan, now());
-    let unported = crate::rest::writes::act(writer.begin().await, &plan, &ctx).await;
+    let unported = crate::rest::writes::act(writer.begin().await, &plan, &ctx, outbox()).await;
     assert!(matches!(unported, Err(hyscribe_write::Error::Unported(_))));
+    fresh().await;
+}
+
+/// A user's update tells the user as PHP's REST API does, in
+/// `reference/mail/run.php`'s `rest-user` saves, once written: nothing of
+/// a write that a failed statement stopped.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_updates_are_told_as_php_tells_them() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let writer = site.writer.as_ref().unwrap();
+    let mut write = writer.begin().await.unwrap();
+    let odd = hyscribe_write::users::UserData {
+        user_login: Some(b"Tom O. Neil.".to_vec()),
+        user_email: Some(br"o\'neil@example.test".to_vec()),
+        user_pass: Some(b"a password".to_vec()),
+        role: Some(b"subscriber".to_vec()),
+        ..Default::default()
+    };
+    let id = hyscribe_write::users::wp_insert_user(&mut write, &odd)
+        .await
+        .unwrap();
+    write.commit().await.unwrap();
+    let pass = r#""password":"another password""#;
+    for (case, body) in [
+        ("rest-user-name", r#"{"name":"Tom"}"#.to_string()),
+        (
+            "rest-user-same",
+            format!(r#"{{{pass},"email":"o'neil@example.test"}}"#),
+        ),
+        (
+            "rest-user",
+            format!(r#"{{{pass},"email":"new'address@example.test","roles":["author"]}}"#),
+        ),
+    ] {
+        let target = format!("/?rest_route=/wp/v2/users/{id}");
+        let pending = planned(&site, "PUT", &target, &body).await;
+        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+        mailed();
+        let mut budget = 0;
+        let outcome = loop {
+            let mut write = writer.begin().await;
+            if let Ok(write) = &mut write {
+                write.fail_after(budget);
+            }
+            match crate::rest::writes::act(write, &pending.plan, &ctx, outbox()).await {
+                Err(hyscribe_write::Error::Db(err))
+                    if err.to_string().contains("budget is spent") =>
+                {
+                    budget += 1;
+                }
+                outcome => break outcome.unwrap(),
+            }
+        };
+        assert_eq!(outcome, Outcome::Written(id), "{case}");
+        assert_eq!(printed(case, &mailed()), php_mails(case), "{case}");
+    }
     fresh().await;
 }
 
@@ -1115,7 +1216,8 @@ async fn settings_not_stored_read_as_their_default() {
     let pending = planned(&site, "POST", "/?rest_route=/wp/v2/settings", body).await;
     let ctx = crate::rest::writes::context(&site, &pending.plan, now());
     let writer = site.writer.as_ref().unwrap();
-    let outcome = crate::rest::writes::act(writer.begin().await, &pending.plan, &ctx).await;
+    let outcome =
+        crate::rest::writes::act(writer.begin().await, &pending.plan, &ctx, outbox()).await;
     assert_eq!(outcome.unwrap(), Outcome::Cached(Vec::new()));
     fresh().await;
 }
@@ -1331,7 +1433,8 @@ async fn writes_stop_short() {
     let writer = site.writer.as_ref().unwrap();
     for pending in [trash, delete] {
         let ctx = crate::rest::writes::context(&site, &pending.plan, now());
-        let outcome = crate::rest::writes::act(writer.begin().await, &pending.plan, &ctx).await;
+        let outcome =
+            crate::rest::writes::act(writer.begin().await, &pending.plan, &ctx, outbox()).await;
         assert_eq!(outcome.unwrap(), Outcome::Refused("rest_cannot_delete"));
     }
     // A database the writer refuses: its version is not supported.

@@ -271,6 +271,36 @@ pub struct Config {
     pub upload_max_size: u64,
     /// The mail transport.
     pub mail: Mail,
+    /// The limits uploaded images are decoded within.
+    pub image_limits: ImageLimits,
+}
+
+/// The limits an uploaded image is decoded within (ADR 0015); the defaults
+/// are the oracle's ImageMagick policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ImageLimits {
+    /// `IMAGE_MAX_BYTES`: the largest file decoded, default 64 MB.
+    pub bytes: u64,
+    /// `IMAGE_MAX_WIDTH`, default 32,000 pixels.
+    pub width: u32,
+    /// `IMAGE_MAX_HEIGHT`, default 32,000 pixels.
+    pub height: u32,
+    /// `IMAGE_MAX_AREA`: width times height, default 256,000,000 pixels.
+    pub area: u64,
+    /// `IMAGE_MAX_MEMORY`: one image's buffers in bytes, default 1 GB.
+    pub memory: u64,
+}
+
+impl Default for ImageLimits {
+    fn default() -> ImageLimits {
+        ImageLimits {
+            bytes: 64 << 20,
+            width: 32_000,
+            height: 32_000,
+            area: 256_000_000,
+            memory: 1 << 30,
+        }
+    }
 }
 
 /// Why configuration could not be loaded.
@@ -444,6 +474,23 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
     };
 
     let mail = mail(&get)?;
+    let image = ImageLimits::default();
+    let bytes = |key: &'static str, default| match get(key) {
+        None => Ok(default),
+        Some(value) => size(value).ok_or_else(|| {
+            invalid(
+                key,
+                "must be a size in bytes, or with a K, M or G suffix, such as 64M",
+            )
+        }),
+    };
+    let image_limits = ImageLimits {
+        bytes: bytes("IMAGE_MAX_BYTES", image.bytes)?,
+        width: limit("IMAGE_MAX_WIDTH", image.width, u32::MAX)?,
+        height: limit("IMAGE_MAX_HEIGHT", image.height, u32::MAX)?,
+        area: bytes("IMAGE_MAX_AREA", image.area)?,
+        memory: bytes("IMAGE_MAX_MEMORY", image.memory)?,
+    };
 
     let salts = SALT_KEYS
         .iter()
@@ -467,6 +514,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         alternate_wp_cron: boolean(get("ALTERNATE_WP_CRON"), "ALTERNATE_WP_CRON", false)?,
         upload_max_size,
         mail,
+        image_limits,
     })
 }
 

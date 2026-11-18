@@ -127,6 +127,23 @@ pub(crate) fn match_request(method: &str, path: &[u8]) -> Option<Matched> {
     None
 }
 
+/// The regexes of the routes registered in `namespace`, in their order, if
+/// it is one.
+pub(crate) fn namespace_routes(namespace: &[u8]) -> Option<Vec<&'static str>> {
+    let table = table();
+    let known = table
+        .namespaces
+        .iter()
+        .any(|known| known.as_bytes() == namespace);
+    let routes = table.routes.iter();
+    known.then(|| {
+        routes
+            .filter(|route| route.namespace.as_bytes() == namespace)
+            .map(|route| route.regex.as_str())
+            .collect()
+    })
+}
+
 /// Every route's regex.
 #[cfg(test)]
 pub(crate) fn regexes() -> impl Iterator<Item = &'static str> {

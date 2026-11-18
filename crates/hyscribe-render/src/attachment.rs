@@ -234,6 +234,64 @@ fn site_options(site: &dyn Site) -> impl Fn(&str) -> Vec<u8> {
     |name| site.option(name).unwrap_or_default()
 }
 
+/// `get_post_status()`: an attachment's is its parent's, or published
+/// without one, or a trashed parent's status before.
+pub fn post_status(site: &dyn Site, post: &Post) -> String {
+    let mut seen = vec![post.id];
+    let mut post = post.clone();
+    while post.status == "inherit" {
+        let parent = (!seen.contains(&post.parent))
+            .then(|| site.post(post.parent))
+            .flatten();
+        let Some(parent) = parent else {
+            return "publish".into();
+        };
+        if parent.status == "trash" {
+            let before = site.post_meta(parent.id, "_wp_trash_meta_status");
+            let before = before.filter(|status| !is_empty_string(status));
+            return before.map_or("publish".into(), |status| {
+                String::from_utf8_lossy(&status).into_owned()
+            });
+        }
+        seen.push(parent.id);
+        post = parent;
+    }
+    match post.status.as_str() {
+        "private" | "trash" | "auto-draft" => post.status,
+        _ if post.post_type == "attachment" => "publish".into(),
+        _ => post.status,
+    }
+}
+
+/// `get_attachment_link()`, with `%postname%` left in the link of a
+/// `sample` one; `can_read` is `current_user_can( 'read_post', $id )`.
+pub fn attachment_link(
+    site: &dyn Site,
+    post: &Post,
+    sample: bool,
+    can_read: &dyn Fn(u64) -> bool,
+) -> Vec<u8> {
+    let links = crate::permalinks::Permalinks::of(site);
+    let home = String::from_utf8_lossy(&site.home_url()).into_owned();
+    let plain = || format!("{home}/?attachment_id={}", post.id).into_bytes();
+    // `wp_force_plain_post_permalink()`.
+    let status = post_status(site, post);
+    let shown = status == "publish" || status == "private" && can_read(post.id) || sample;
+    let parent = (post.parent != 0).then(|| site.post(post.parent)).flatten();
+    let viewable = |parent: &Post| {
+        parent.id != post.id && ["post", "page", "attachment"].contains(&parent.post_type.as_str())
+    };
+    if !shown || post.parent != 0 && !parent.as_ref().is_some_and(viewable) {
+        return plain();
+    }
+    let parent_link = parent.map(|parent| {
+        String::from_utf8_lossy(&crate::permalinks::permalink(site, &parent)).into_owned()
+    });
+    links
+        .attachment_link(&home, post, parent_link.as_deref(), sample)
+        .map_or_else(plain, String::into_bytes)
+}
+
 /// `wp_get_attachment_url()`, from `_wp_attached_file`.
 pub fn attachment_url(site: &dyn Site, id: u64) -> Option<Vec<u8>> {
     let file = site.post_meta(id, "_wp_attached_file").unwrap_or_default();
@@ -383,6 +441,16 @@ fn best_size(meta: &Value, width: i64, height: i64, original_ratio: bool) -> Opt
 fn dimensions(image: &Value) -> (i64, i64) {
     let get = |key| image.get_str(key).map_or(0, Value::to_int);
     (get("width"), get("height"))
+}
+
+/// `image_constrain_size_for_editor()` of a named size: with no
+/// `$content_width`, the same in the `edit` context as in `display`.
+pub fn image_constrain_size_for_editor(
+    site: &dyn Site,
+    (width, height): (i64, i64),
+    size: &str,
+) -> (i64, i64) {
+    constrain_for_editor(site, width, height, Size::Named(size))
 }
 
 /// `image_constrain_size_for_editor()` in the `display` context, with no

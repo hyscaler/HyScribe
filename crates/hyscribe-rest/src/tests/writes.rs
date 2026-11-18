@@ -41,6 +41,12 @@ struct Changed {
 }
 
 impl Site for Changed {
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        self.oracle.wp_hash(data)
+    }
+    fn embed_secret(&self) -> String {
+        self.oracle.embed_secret()
+    }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         let changed = self.options.iter().find(|(known, _)| *known == name);
         changed.map_or_else(
@@ -205,7 +211,8 @@ fn on(site: &dyn Site, asked: &Asked, outcome: Outcome) -> (Option<Plan>, Served
         Answer::Served(served) => (None, served),
         Answer::Write(pending) => {
             let plan = pending.plan.clone();
-            (Some(plan), written(site, &request, *pending, outcome))
+            let served = written(site, &request, *pending, outcome).served();
+            (Some(plan), served.unwrap())
         }
     }
 }
@@ -276,6 +283,18 @@ fn a_create_plans_its_fields() {
     let location = served.headers.iter().find(|(name, _)| name == "Location");
     let posts = "http://127.0.0.1:8081/index.php?rest_route=/wp/v2/posts/1";
     assert_eq!(location.map(|(_, value)| value.as_str()), Some(posts));
+}
+
+/// Each term is set once and only terms that exist, which leaves the rows
+/// `wp_set_object_terms()` leaves, so a long list costs the write nothing.
+#[test]
+fn terms_are_set_once_each() {
+    let body = r#"{"title":"T","categories":[1,1,999,1],"tags":[999,999]}"#;
+    let save = plan("administrator", "POST", "/wp/v2/posts", body);
+    assert_eq!(
+        (save.categories, save.tags),
+        (Some(vec![1]), Some(Vec::new()))
+    );
 }
 
 /// The dates as `rest_get_date_with_gmt()` reads them: with a zone of
@@ -1177,4 +1196,81 @@ fn other_types_plan_no_delete() {
     let asked = Asked::new("administrator", "DELETE", "/wp/v2/menu-items/1", "");
     let (plan, served) = on(&site, &asked, Outcome::Written(1));
     assert_eq!((plan, served.status), (None, 501));
+}
+
+/// An upload to the media collection plans its fields, refuses a parent
+/// that is a revision or an attachment and answers 501 for the fields not
+/// ported; once written it answers the attachment with `201`, or the
+/// upload's refusal.
+#[test]
+fn uploads_plan_their_fields() {
+    let body = r#"{"title":"T","caption":{"raw":"C"},"description":"D","alt_text":"A","post":1}"#;
+    let asked = Asked::new("administrator", "POST", "/wp/v2/media&_fields=id", body);
+    let site = oracle("administrator", &[]);
+    // The extra posts' attachment 95, written; its answer only its ID.
+    let (plan, served) = on(&site, &asked, Outcome::Written(95));
+    let some = |text: &str| Some(text.as_bytes().to_vec());
+    let upload = Upload {
+        title: some("T"),
+        caption: some("C"),
+        description: some("D"),
+        alt_text: some("A"),
+        post: 1,
+    };
+    let plan = plan.unwrap();
+    assert_eq!(plan.write, Write::Upload(Box::new(upload)));
+    assert!(!plan.unfiltered_html);
+    assert_eq!(served.status, 201, "{}", text_of(&served));
+    let location = served.headers.iter().find(|(name, _)| name == "Location");
+    assert!(location.is_some_and(|(_, url)| url.ends_with("/wp/v2/media/95")));
+    let refused = Outcome::Failed("rest_upload_no_data", "No data supplied.".into(), 400);
+    let (_, served) = on(&site, &asked, refused);
+    assert_eq!(served.status, 400);
+    assert!(text_of(&served).contains(r#""code":"rest_upload_no_data""#));
+    // The draft's image 97 and post 1's revision 99 are no parents.
+    for parent in [97, 99] {
+        let body = format!(r#"{{"post":{parent}}}"#);
+        let served = answered("administrator", "POST", "/wp/v2/media", &body);
+        assert_eq!(served.status, 400, "{parent}");
+        assert!(
+            text_of(&served).contains("Invalid parent type."),
+            "{parent}"
+        );
+    }
+    for body in [
+        r#"{"date":"2026-01-02T03:04:05"}"#,
+        r#"{"date_gmt":"2026-01-02T03:04:05"}"#,
+        r#"{"slug":"a"}"#,
+        r#"{"status":"private"}"#,
+        r#"{"author":1}"#,
+        r#"{"comment_status":"closed"}"#,
+        r#"{"ping_status":"closed"}"#,
+        r#"{"meta":{}}"#,
+        r#"{"template":""}"#,
+        r#"{"featured_media":0}"#,
+        r#"{"generate_sub_sizes":false}"#,
+        r#"{"convert_format":false}"#,
+        r#"{"url":"http://example.test/a.jpg"}"#,
+        r#"{"title":{"raw":5}}"#,
+        r#"{"caption":{"raw":5}}"#,
+        r#"{"description":{"raw":5}}"#,
+    ] {
+        let served = answered("administrator", "POST", "/wp/v2/media", body);
+        assert_eq!(served.status, 501, "{body}");
+    }
+    let asked = Asked::new("administrator", "POST", "/wp/v2/media&slug=a", "");
+    assert_eq!(on(&site, &asked, Outcome::Written(95)).1.status, 501);
+}
+
+/// A role given twice is added once, as `add_role()` skips a role the user
+/// has.
+#[test]
+fn roles_are_added_once_each() {
+    let roles = r#"{"roles":["administrator","administrator"]}"#;
+    let asked = Asked::new("administrator", "POST", "/wp/v2/users/1", roles);
+    let (plan, _) = on(&oracle("administrator", &[]), &asked, Outcome::Written(1));
+    let Some(Write::User(save)) = plan.map(|plan| plan.write) else {
+        panic!("not planned");
+    };
+    assert_eq!(save.roles, Some(vec![b"administrator".to_vec()]));
 }

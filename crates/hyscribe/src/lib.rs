@@ -341,6 +341,11 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                     .with_constants(config.constants)
                     .with_proxy(config.server.behind_proxy)
                     .with_login_limits(config.login_limits)
+                    .with_uploads(hyscribe_http::Uploads::new(
+                        uploads_dir(&config, home),
+                        config.upload_max_size,
+                        config.image_limits,
+                    ))
                     .with_install(install(&config, &site.server.0))
                     .with_writer(writer);
             let fetch = config.http_outbound.then(outbound);
@@ -525,6 +530,15 @@ fn service(
             Ok(Reply::text(text))
         }
     }
+}
+
+/// The uploads folder: `UPLOADS_DIR`, an existing site's, else `uploads/`
+/// in the installation's folder.
+fn uploads_dir(config: &Config, home: &Path) -> std::path::PathBuf {
+    config
+        .uploads_dir
+        .clone()
+        .unwrap_or_else(|| home.join("uploads"))
 }
 
 fn mode_name(mode: Mode) -> &'static str {

@@ -74,11 +74,29 @@ pub struct Save {
     pub tags: Option<Vec<u64>>,
 }
 
+/// What an upload to the media collection saves besides its file: the
+/// attachment's fields the request gives.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Upload {
+    /// `post_title`.
+    pub title: Option<Vec<u8>>,
+    /// `post_excerpt`, from `caption`.
+    pub caption: Option<Vec<u8>>,
+    /// `post_content`, from `description`.
+    pub description: Option<Vec<u8>>,
+    /// `_wp_attachment_image_alt`, from `alt_text`.
+    pub alt_text: Option<Vec<u8>>,
+    /// `post_parent`, from `post`.
+    pub post: u64,
+}
+
 /// What a write does.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Write {
     /// Creates or updates a post.
     Save(Box<Save>),
+    /// Uploads a file to the media collection.
+    Upload(Box<Upload>),
     /// `wp_trash_post( $id )`.
     Trash(u64),
     /// `wp_delete_post( $id, true )`.
@@ -156,6 +174,8 @@ pub enum Outcome {
     /// the validated dates never have), or
     /// `rest_cannot_delete` where trashing or deleting did nothing.
     Refused(&'static str),
+    /// An upload's refusal: its code, message and status.
+    Failed(&'static str, String, u16),
     /// `wp_insert_term()`'s `term_exists`, with the term that has the name.
     Exists(u64),
     /// `wp_update_term()`'s `duplicate_term_slug`, with the slug.
@@ -173,6 +193,7 @@ pub(crate) type Finish = fn(&Context, &mut Params, Plan, Outcome) -> Result<Resp
 
 /// A ported write endpoint: the arguments it does not port, its argument
 /// checks for the request, its plan and its answer.
+#[derive(Clone)]
 pub(crate) struct Writing {
     pub(crate) unported: fn(&Params) -> bool,
     pub(crate) args: fn(&Context, &Params, Vec<Arg>) -> Vec<Arg>,
@@ -211,6 +232,16 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
         plan: plan_save,
         finish,
     };
+    // The media collection's create uploads.
+    if regex == "/wp/v2/media" && index == 1 {
+        return Some(Writing {
+            // The fields an upload does not port are the route's own unported arguments.
+            unported: |_| false,
+            args: |_, _, args| args,
+            plan: plan_upload,
+            finish,
+        });
+    }
     if !kind.writes() || regex != collection && regex != item {
         return None;
     }
@@ -219,6 +250,26 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
         1 => save,
         _ => Writing::plain(plan_delete, finish),
     })
+}
+
+/// `create_item()` of the media collection up to its upload: the parent
+/// checked, and the fields `prepare_item_for_database()` takes.
+fn plan_upload(context: &Context, params: &Params) -> Result<Plan, RestError> {
+    let post = params.get("post").map_or(0, Value::to_int).unsigned_abs();
+    let parent = (post != 0).then(|| context.site.post(post)).flatten();
+    if parent.is_some_and(|parent| ["revision", "attachment"].contains(&parent.post_type.as_str()))
+    {
+        return Err(invalid("rest_invalid_param", "Invalid parent type."));
+    }
+    let upload = Upload {
+        title: raw(params, "title")?,
+        caption: raw(params, "caption")?,
+        description: raw(params, "description")?,
+        alt_text: params.get("alt_text").map(Value::to_php_string),
+        post,
+    };
+    let write = Write::Upload(Box::new(upload));
+    Ok(Plan::new(context, write, Value::Null))
 }
 
 /// `check_status()`: the post's own status is valid whatever the schema
@@ -470,18 +521,23 @@ fn after_save(context: &Context, params: &Params, kind: Kind, save: &mut Save) {
     if kind == Kind::Post {
         let sticky = params.get("sticky").map(|sticky| !sticky.is_empty());
         save.sticky = sticky.or((save.id == 0).then_some(false));
-        let ids = |name| {
+        let ids = |name, taxonomy| {
             let ids = params
                 .get(name)
                 .and_then(Value::as_array)
                 .unwrap_or_default();
-            // The terms check refused 0, which no user may assign.
+            // The terms check refused 0, which no user may assign; the
+            // write skips a missing term and one set already.
+            let mut seen = std::collections::HashSet::new();
             let ids = ids.iter();
             ids.filter_map(|(_, id)| u64::try_from(id.to_int()).ok())
+                .filter(|&id| seen.insert(id) && context.site.reads().term(id, taxonomy).is_some())
                 .collect()
         };
-        save.categories = params.get("categories").map(|_| ids("categories"));
-        save.tags = params.get("tags").map(|_| ids("tags"));
+        save.categories = params
+            .get("categories")
+            .map(|_| ids("categories", "category"));
+        save.tags = params.get("tags").map(|_| ids("tags", "post_tag"));
     }
     // `set_post_thumbnail()` keeps an image `wp_get_attachment_image()`
     // shows and deletes the meta for any other post, as
@@ -644,6 +700,9 @@ fn finish(
             let message = "Content, title, and excerpt are empty.";
             return Err(invalid("empty_content", message));
         }
+        Outcome::Failed(code, message, status) => {
+            return Err(RestError::status(code, &message, status));
+        }
         // `WP_Error::add_data()` keeps wpdb's error as additional data.
         Outcome::InvalidText(last_error) => {
             let (code, message) = match &plan.write {
@@ -680,8 +739,13 @@ fn finish(
     }
     params.set("context", text("edit"));
     let post = context.site.post(id).unwrap_or_default();
-    let created = matches!(&plan.write, Write::Save(save) if save.id == 0);
-    if let Write::Save(_) = plan.write {
+    let created = match &plan.write {
+        Write::Save(save) => save.id == 0,
+        Write::Upload(_) => true,
+        _ => false,
+    };
+    // `rest_insert_attachment` fires at the upload's insert, in PHP before its sizes.
+    if let Write::Save(_) | Write::Upload(_) = plan.write {
         action("rest_insert", &[&post, params, &created]);
         action("rest_after_insert", &[&post, params, &created]);
     }

@@ -14,7 +14,7 @@ use super::super::tests::{
 };
 use super::super::{Ajax, ajax_handler};
 use super::*;
-use crate::mail::tests::{failing, mailed};
+use crate::mail::tests::{failing, mailed, php_mails, printed};
 
 fn request<'q>(screen: &'q str, action: &'q [u8], post: &'q str) -> Request<'q> {
     Request {
@@ -237,9 +237,13 @@ async fn profiles_are_php_s() {
         let to = redirected(&writer, conn, &request("profile", b"update", post)).await;
         assert_eq!(to, php_answer("profile-password").1);
         assert!(password_is(&writer, conn, 1, b"Another pass").await);
-        // The new address is asked to confirm the change.
+        // The new address is asked to confirm the change, and the user is
+        // told of the new password.
         let mails = mailed();
-        assert_eq!(mails.len(), 1);
+        assert_eq!(
+            printed("profile-admin", &mails[1..]),
+            php_mails("profile-admin")
+        );
         assert_eq!(mails[0].to, b"new-admin@example.test");
         let subject = &b"[HyScribe Default Install] Email Change Request"[..];
         assert_eq!(mails[0].subject, subject);
@@ -253,6 +257,81 @@ async fn profiles_are_php_s() {
     let nothing = async |_: &mut Connection| Ok::<_, String>(());
     let report = check_writes(&fixture_database(), "admin-profile", nothing, action).await;
     report.unwrap();
+}
+
+/// `wp_update_user()` tells the user of a new password and address, as
+/// `reference/mail/run.php`'s saves of another user and of one's own
+/// profile: an address with a quote is told of, as PHP compares it slashed.
+#[tokio::test]
+async fn changes_are_told_as_php_tells_them() {
+    use sqlx::Connection as _;
+    let _turn = turn().await;
+    let writer = writer().await;
+    let db = fixture_database();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = Connection::connect_with(&options).await.unwrap();
+    let mut tx = conn.begin().await.unwrap();
+    let mut write = writer.begin_on(&mut tx).await.unwrap();
+    let mut user = async |login: &[u8], email: &[u8]| {
+        let user = UserData {
+            user_login: Some(login.to_vec()),
+            user_email: Some(addslashes(email)),
+            user_pass: Some(b"a password".to_vec()),
+            role: Some(b"subscriber".to_vec()),
+            ..UserData::default()
+        };
+        wp_insert_user(&mut write, &user).await.unwrap()
+    };
+    let odd = user(b"Tom O. Neil.", b"o'neil@example.test").await;
+    let plain = user(b"an-subscriber", b"subscriber@example.test").await;
+    write.commit().await.unwrap();
+    let form = |id: u64, email: &str, pass: &str| {
+        format!(
+            "user_id={id}&email={email}&nickname=nick&display_name=nick&pass1={pass}&pass2={pass}"
+        )
+    };
+    let odd_email = "o%27neil%40example.test";
+    let pass = "another+password";
+    for (case, screen, user, post) in [
+        (
+            "edit-user-password",
+            "user-edit",
+            1,
+            form(odd, odd_email, pass),
+        ),
+        (
+            "edit-user-nothing",
+            "user-edit",
+            1,
+            form(plain, "subscriber%40example.test", ""),
+        ),
+        (
+            "edit-user-email",
+            "user-edit",
+            1,
+            form(plain, "new%27address%40example.test", ""),
+        ),
+        (
+            "profile-password",
+            "profile",
+            odd,
+            form(odd, odd_email, pass),
+        ),
+    ] {
+        mailed();
+        let request = Request {
+            user,
+            ..request(screen, b"update", &post)
+        };
+        redirected(&writer, &mut tx, &request).await;
+        assert_eq!(printed(case, &mailed()), php_mails(case), "{case}");
+    }
+    tx.rollback().await.unwrap();
 }
 
 /// The color scheme is saved as PHP saves it and answered with PHP's JSON.

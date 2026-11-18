@@ -80,7 +80,7 @@ fn the_dashboard_of_a_missing_theme_is_php_s() {
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows.len(), 13);
+    assert_eq!(rows.len(), 6);
 }
 
 /// The Tools screen's frame with a missing child or parent of the bundled

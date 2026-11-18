@@ -144,24 +144,6 @@ fn admin_post_classes() {
     );
 }
 
-#[test]
-fn sanitize_html_class_like_php() {
-    // sanitize_html_class() in PHP WordPress 7.1.3.
-    for (class, fallback, php) in [
-        ("a%zzb", "", "azzb"),
-        ("%2gx", "", "2gx"),
-        ("!!", "x y", "xy"),
-        ("%41b", "", "b"),
-        ("", "", ""),
-    ] {
-        assert_eq!(
-            sanitize_html_class(class.as_bytes(), fallback.as_bytes()),
-            php.as_bytes(),
-            "{class:?}"
-        );
-    }
-}
-
 /// The body classes of term archives in `terms.tsv` from
 /// `reference/head/golden.sh`, over the terms of
 /// `reference/default-install/terms.sql`.

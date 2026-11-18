@@ -2,8 +2,9 @@
 
 //! An arbitrary theme.json, as core, theme, block style partial and user
 //! global styles at once, resolves and prints its stylesheet, and the
-//! stylesheet of the style variation the input as a class name picks,
-//! without panicking or hanging.
+//! stylesheet of the style variation the input as a class name picks, and
+//! as a global styles post loses its insecure values, without panicking or
+//! hanging.
 
 #![no_main]
 
@@ -62,6 +63,7 @@ fuzz_target!(|data: &[u8]| {
     let _ = hyscribe_phpser::encode(styles.settings());
     let _ = styles.stylesheet();
     let _ = styles.inline_css(&|_| true);
+    let _ = styles.filter_global_styles_post(data);
     for block in blocks() {
         if let Some(variation) = styles.style_variation(&block.name, data) {
             let _ = styles.style_variation_css(&block.name, &variation, &format!("{variation}--1"));

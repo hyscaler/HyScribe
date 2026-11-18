@@ -21,7 +21,7 @@ use crate::typography::font_size_value;
 use crate::viewport;
 
 /// `PROPERTIES_METADATA`: CSS property and where its value is.
-const PROPERTIES: &[(&str, &[&str])] = &[
+pub(crate) const PROPERTIES: &[(&str, &[&str])] = &[
     ("aspect-ratio", &["dimensions", "aspectRatio"]),
     ("background", &["color", "gradient"]),
     ("background-color", &["color", "background"]),
@@ -242,7 +242,7 @@ pub(crate) struct StyleNode {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Variation {
     name: String,
-    path: Vec<String>,
+    pub(crate) path: Vec<String>,
     selector: String,
 }
 
@@ -549,7 +549,7 @@ impl Tree<'_> {
 
     /// `compute_style_properties( $styles, $settings, null, $theme_json,
     /// $selector, $use_root_padding )`.
-    fn compute(
+    pub(crate) fn compute(
         &self,
         styles: &Value,
         selector: Option<&str>,

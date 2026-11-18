@@ -74,29 +74,7 @@ pub(crate) fn title_filters(title: &[u8]) -> Vec<u8> {
     capital_p_dangit_title(php_trim(&title))
 }
 
-/// `sanitize_html_class( $class, $fallback )`.
-pub fn sanitize_html_class(class: &[u8], fallback: &[u8]) -> Vec<u8> {
-    let mut kept = Vec::with_capacity(class.len());
-    let mut rest = class;
-    for _ in 0..=class.len() {
-        match rest {
-            [b'%', a, b, after @ ..] if a.is_ascii_hexdigit() && b.is_ascii_hexdigit() => {
-                rest = after
-            }
-            [first, after @ ..] => {
-                if first.is_ascii_alphanumeric() || matches!(first, b'_' | b'-') {
-                    kept.push(*first);
-                }
-                rest = after;
-            }
-            [] => break,
-        }
-    }
-    if kept.is_empty() && !fallback.is_empty() {
-        return sanitize_html_class(fallback, b"");
-    }
-    kept
-}
+pub use hyscribe_kses::sanitize_html_class;
 
 /// `get_post_format()` as a class: the format's slug, or `standard`.
 fn post_format(site: &dyn Site, id: u64) -> Vec<u8> {
@@ -211,6 +189,15 @@ fn archive_class(taxonomy: Taxonomy) -> &'static str {
     }
 }
 
+/// `is_privacy_policy()` of the page `post` shown on its own, `option`
+/// the `wp_page_for_privacy_policy` option: it names the page by ID, title
+/// or name. A path naming it is not told apart.
+pub fn is_privacy_policy(option: &[u8], post: &Post) -> bool {
+    !is_empty_string(option)
+        && post.post_type == "page"
+        && (option == post.id.to_string().as_bytes() || option == post.title || option == post.name)
+}
+
 /// `get_page_template_slug( $post )`: none for `default`.
 pub(crate) fn page_template_slug(site: &dyn Site, post: u64) -> Option<Vec<u8>> {
     let slug = site.post_meta(post, "_wp_page_template")?;
@@ -225,6 +212,17 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
     for (on, class) in [
         (request.front_page, &b"home"[..]),
         (request.home, b"blog"),
+        (
+            singular.is_some_and(|post| {
+                is_privacy_policy(
+                    &site
+                        .option("wp_page_for_privacy_policy")
+                        .unwrap_or_default(),
+                    post,
+                )
+            }),
+            b"privacy-policy",
+        ),
         (request.archive.is_some(), b"archive"),
         (request.date, b"date"),
     ] {

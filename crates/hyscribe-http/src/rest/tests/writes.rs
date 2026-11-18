@@ -1409,6 +1409,15 @@ async fn template_writes_match_php() {
     assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 23, 0));
 }
 
+/// PHP's answers to the global styles saves of
+/// `reference/rest/global-styles-writes.list`, their insecure values gone.
+#[tokio::test(flavor = "multi_thread")]
+async fn global_styles_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/global-styles-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/global-styles-writes.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 16, 0));
+}
+
 /// The answers to what a write comes to past the goldens: a created
 /// template not found, a template gone before its answer, a refusal of an
 /// update, a revert or a delete, and an autosave of an empty draft, which
@@ -1447,6 +1456,15 @@ async fn written_answers_past_the_goldens() {
             (
                 "POST",
                 templates("/twentytwentyfive//my-custom"),
+                r#"{"title":"x"}"#,
+            ),
+            Outcome::InvalidText(String::new()),
+            (501, ""),
+        ),
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/global-styles/741".to_string(),
                 r#"{"title":"x"}"#,
             ),
             Outcome::InvalidText(String::new()),
@@ -1891,9 +1909,9 @@ async fn shadow_mode_refuses_writes() {
     assert_eq!(body(response).await, json);
 }
 
-/// A write `hyscribe-write` does not port answers 501, one the database
-/// refuses the error page, and a trash or deletion the post is already
-/// past writes nothing: each leaves the database as it was.
+/// A write the database refuses answers the error page, and a trash or
+/// deletion the post is already past writes nothing: each leaves the
+/// database as it was.
 #[tokio::test(flavor = "multi_thread")]
 async fn writes_stop_short() {
     let _saves = crate::admin::tests::SAVES.lock().await;
@@ -1909,10 +1927,6 @@ async fn writes_stop_short() {
             .header("x-wp-nonce", &nonce)
             .header(header::CONTENT_TYPE, "application/json")
     };
-    // kses refuses global styles content it does not port.
-    let styles = r#"{"title":"Styles","content":"isGlobalStylesUserThemeJSON"}"#;
-    let response = send(&site, ask("POST", "/?rest_route=/wp/v2/posts"), styles).await;
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     // Planned, then trashed and deleted by another request first.
     let trash = planned(&site, "DELETE", "/?rest_route=/wp/v2/posts/1", "").await;
     let delete = planned(&site, "DELETE", "/?rest_route=/wp/v2/posts/1&force=1", "").await;
@@ -1980,8 +1994,8 @@ fn json_object(fields: &[(&str, Value)]) -> String {
 
 /// The site editor's saves of `reference/site-edits/save.php` sent to
 /// HyScribe leave the rows PHP left (`reference/site-edits/content.sql`)
-/// but for their dates. They start from the global styles PHP saved:
-/// HyScribe answers that save 501.
+/// but for their dates, from the global styles post the site editor's
+/// first view writes.
 #[tokio::test(flavor = "multi_thread")]
 async fn site_editor_saves_leave_php_s_rows() {
     let _saves = crate::admin::tests::SAVES.lock().await;
@@ -1993,7 +2007,6 @@ async fn site_editor_saves_leave_php_s_rows() {
         .filter(|line| {
             [
                 "`wp_posts` VALUES (4,",
-                "`wp_posts` VALUES (5,",
                 "`wp_terms` VALUES (2,",
                 "`wp_term_taxonomy` VALUES (2,",
                 "`wp_term_relationships` VALUES (4,",
@@ -2001,11 +2014,12 @@ async fn site_editor_saves_leave_php_s_rows() {
             .iter()
             .any(|start| line.contains(start))
         })
-        // The theme's count as the global styles post left it.
-        .map(|line| line.replace("'wp_theme','',0,7)", "'wp_theme','',0,1)"))
+        .map(String::from)
         .collect();
-    assert_eq!(styles.len(), 5);
-    fresh_with(&styles.join("\n")).await;
+    assert_eq!(styles.len(), 4);
+    // The global styles post as the site editor's first view writes it.
+    let first = r#"UPDATE wp_posts SET post_content = '{"version":3,"isGlobalStylesUserThemeJSON":true}' WHERE ID = 4;"#;
+    fresh_with(&[styles.join("\n").as_str(), first].join("\n")).await;
     let dir = tempfile::tempdir().unwrap();
     let site = saves_site(dir.path()).await;
     let (cookie, nonce) = log_in(&site).await;
@@ -2038,6 +2052,23 @@ async fn site_editor_saves_leave_php_s_rows() {
         r#"<!-- wp:navigation-link {"label":"Sample Page","type":"page","id":2,"url":"http://127.0.0.1:8081/?page_id=2","kind":"post-type"} /-->"#,
         r#"<!-- wp:navigation-link {"label":"Elsewhere","url":"https://example.com/","kind":"custom"} /-->"#,
     ];
+    let decoded = |json: &str| hyscribe_phpser::json_decode(json.as_bytes()).unwrap();
+    let styles = json_object(&[
+        ("id", Value::Int(4)),
+        (
+            "settings",
+            decoded(
+                r##"{"color":{"palette":{"custom":[{"color":"#a1b2c3","name":"Brand","slug":"custom-brand"}]}}}"##,
+            ),
+        ),
+        (
+            "styles",
+            decoded(
+                r#"{"color":{"background":"var:preset|color|accent-2","text":"var:preset|color|contrast"},"typography":{"lineHeight":"1.7"},"elements":{"link":{"color":{"text":"var:preset|color|custom-brand"}}},"blocks":{"core/paragraph":{"typography":{"fontSize":"var:preset|font-size|large"}}},"css":"body{letter-spacing:0.01em}"}"#,
+            ),
+        ),
+    ]);
+    asked("POST", "/wp/v2/global-styles/4".into(), styles).await;
     let menu = json_object(&[
         ("title", text("Main menu")),
         ("status", text("publish")),
@@ -2120,6 +2151,13 @@ async fn site_editor_saves_leave_php_s_rows() {
         ("content", text(&sample)),
     ]);
     asked("POST", "/wp/v2/templates".into(), sample).await;
+    let policy = format!("{}\n\n<!-- wp:post-content /-->", paragraph("Our policy"));
+    let policy = json_object(&[
+        ("slug", text("privacy-policy")),
+        ("title", text("Privacy Policy")),
+        ("content", text(&policy)),
+    ]);
+    asked("POST", "/wp/v2/templates".into(), policy).await;
     assert_eq!(site_rows().await, php);
     fresh().await;
 }

@@ -536,29 +536,30 @@ pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> R
     hooks::save_revision(write, ctx, kind, id).await
 }
 
+/// The theme's global styles, which global styles posts are filtered
+/// with: the site's own change only how fluid font sizes print, never
+/// whether a value is safe.
+fn styles() -> &'static hyscribe_render::theme::Theme {
+    static THEME: std::sync::OnceLock<hyscribe_render::theme::Theme> = std::sync::OnceLock::new();
+    THEME.get_or_init(hyscribe_render::theme::twentytwentyfive)
+}
+
 /// `sanitize_post( $postarr, 'db' )` with a default install's filters:
 /// kses only for a user who may not post unfiltered HTML.
-fn sanitize(mut args: PostArgs, ctx: &Context) -> Result<PostArgs> {
+fn sanitize(mut args: PostArgs, ctx: &Context) -> PostArgs {
     args.title = hyscribe_phpser::php_trim(&args.title).to_vec();
     args.content = crate::convert_invalid_entities(&args.content);
     args.excerpt = crate::convert_invalid_entities(&args.excerpt);
     if !ctx.unfiltered_html {
         let post_kses = |text: &[u8]| hyscribe_render::kses::wp_kses_post(text, &ctx.upload_host);
-        // wp_filter_global_styles_post() rewrites a global styles post first:
-        // ported for the empty one a theme's first is created with.
+        // content_save_pre: wp_filter_global_styles_post(), then kses.
         let styles = |text: &[u8]| {
-            if text == GLOBAL_STYLES {
-                return Ok(br#"{"version":3,"isGlobalStylesUserThemeJSON":true}"#.to_vec());
-            }
-            let marker = b"isGlobalStylesUserThemeJSON";
-            if text.windows(marker.len()).any(|w| w == marker) {
-                return Err(Error::Unported("global styles content"));
-            }
-            Ok(post_kses(text))
+            let filtered = styles().global_styles().filter_global_styles_post(text);
+            post_kses(filtered.as_deref().unwrap_or(text))
         };
         args.title = hyscribe_render::kses::wp_kses_data(&args.title);
-        args.content = styles(&args.content)?;
-        args.content_filtered = styles(&args.content_filtered)?;
+        args.content = styles(&args.content);
+        args.content_filtered = styles(&args.content_filtered);
         args.excerpt = post_kses(&args.excerpt);
     }
     for key in [
@@ -571,7 +572,7 @@ fn sanitize(mut args: PostArgs, ctx: &Context) -> Result<PostArgs> {
     }
     args.mime_type
         .retain(|c| c.is_ascii_alphanumeric() || "-+*./".contains(c));
-    Ok(args)
+    args
 }
 
 /// `sanitize_trackback_urls( $to_ping )`.
@@ -633,7 +634,7 @@ async fn insert(
     args: PostArgs,
     file: Option<&str>,
 ) -> Result<(u64, Kind, bool)> {
-    let args = sanitize(args, ctx)?;
+    let args = sanitize(args, ctx);
     let before = match args.id {
         0 => None,
         id => Some(existing(write, id).await?),

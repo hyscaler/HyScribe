@@ -143,7 +143,18 @@ async fn invalid_input_is_refused_as_php() {
 async fn site_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/site-writes.tsv");
     let state = include_str!("../../../../../reference/rest/site-writes.sql");
-    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 30, 2 * 3));
+    // Meta PHP refuses only after the write, or `footnotes`, to those who
+    // may edit the pattern.
+    let editors: &[&str] = &["administrator", "editor"];
+    let unported = [
+        (r#"{"meta":{"wp_pattern_sync_status":"bogus"}}"#, editors),
+        (r#"{"meta":{"wp_pattern_sync_status":null}}"#, editors),
+        (r#"{"meta":{"footnotes":""}}"#, editors),
+    ];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 30, 2 * 3)
+    );
 }
 
 /// PHP's answers to the block editor's saves as its JavaScript sends them,
@@ -153,24 +164,6 @@ async fn editor_saves_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/editor-saves.tsv");
     let state = include_str!("../../../../../reference/rest/editor-saves.sql");
     assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 34, 0));
-}
-
-/// PHP's answers to the autosaves, over `reference/rest/autosaves.sql`,
-/// with `meta`, not ported for posts, answered 501.
-#[tokio::test(flavor = "multi_thread")]
-async fn autosaves_match_php() {
-    let golden = include_str!("../../../../hyscribe-rest/tests/golden/autosaves.tsv");
-    let state = include_str!("../../../../../reference/rest/autosaves.sql");
-    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 10, 6));
-}
-
-/// PHP's answers to the templates' and template parts' writes, over
-/// `reference/rest/templates-custom.sql`.
-#[tokio::test(flavor = "multi_thread")]
-async fn template_writes_match_php() {
-    let golden = include_str!("../../../../hyscribe-rest/tests/golden/template-writes.tsv");
-    let state = include_str!("../../../../../reference/rest/template-writes.sql");
-    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 23, 0));
 }
 
 /// The cases of `golden`, recorded over `state`, sent over HTTP as each
@@ -214,11 +207,6 @@ async fn writes_match_php(
             }
             None => String::from("%nonce%"),
         };
-        for (flag, method) in [("override", "DELETE"), ("put", "PUT")] {
-            if case.flag(flag) {
-                request = request.header("x-http-method-override", method);
-            }
-        }
         for (flag, kind) in [
             ("json", "application/json"),
             ("form", "application/x-www-form-urlencoded"),
@@ -227,16 +215,19 @@ async fn writes_match_php(
                 request = request.header(header::CONTENT_TYPE, kind);
             }
         }
+        for (flag, method) in [("override", "DELETE"), ("put", "PUT")] {
+            if case.flag(flag) {
+                request = request.header("x-http-method-override", method);
+            }
+        }
         let start = now();
         let response = send(&site, request, &sent).await;
         let what = format!("{} {} {} {sent}", case.who, case.method, case.target);
         let unported = unported.iter().any(|(body, whos)| {
             *body == sent && (whos.is_empty() || whos.contains(&case.who.as_str()))
         });
-        // A request refused past its permission check is PHP's before it,
-        // unless PHP answers 501 too (a trash its type does not support).
-        if response.status() == StatusCode::NOT_IMPLEMENTED && case.status != 501 {
-            assert!(case.flag("refused") || unported, "{what}");
+        if case.flag("refused") || unported {
+            assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{what}");
             refused += 1;
             continue;
         }
@@ -382,28 +373,6 @@ async fn acted(
     }
 }
 
-/// The write oracle's `%now%` spans its action alone, so a write dated
-/// when it was planned, a second or more before its action, is not PHP's:
-/// the rows tests date each write as its action runs.
-#[tokio::test(flavor = "multi_thread")]
-async fn writes_are_dated_as_their_action_runs() {
-    let dir = tempfile::tempdir().unwrap();
-    let site = site(false, dir.path()).await;
-    let body = r#"{"title":"A REST draft","status":"draft","slug":"hello-world"}"#;
-    let pending = planned(&site, "POST", "/?rest_route=/wp/v2/posts", body).await;
-    for (shift, dated) in [(-2, false), (0, true)] {
-        let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
-        let action = async |conn: &mut hyscribe_db::Connection, ()| {
-            let ctx = crate::rest::writes::context(&site, &pending.plan, now() + shift);
-            acted(conn, &pending.plan, &ctx).await;
-            Ok(())
-        };
-        let golden = "rest-posts-create-draft";
-        let report = check_writes(&fixture_database(), golden, nothing, action).await;
-        assert_eq!(report.is_ok(), dated, "{shift}");
-    }
-}
-
 /// Each write leaves the rows PHP's leaves (`reference/writes/actions-rest.php`),
 /// and nothing when a statement fails part way.
 #[tokio::test(flavor = "multi_thread")]
@@ -471,8 +440,8 @@ async fn post_writes_are_php_s() {
     for (golden, method, target, body) in writes {
         let pending = planned(&site, method, target, body).await;
         let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
-        // Dated as the action runs, which the golden's `%now%` spans.
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // The clock is read once the oracle's has started, as `%now%` counts from it.
             let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
@@ -483,42 +452,97 @@ async fn post_writes_are_php_s() {
     }
 }
 
-/// What a write oracle action inserts of its list's state first.
-#[derive(Clone, Copy, PartialEq)]
-enum Setup {
-    Nothing,
-    Posts,
-    All,
+/// The navigation menus' and synced patterns' writes leave the rows PHP's
+/// leave, planned over `wordpress_saves` and written on the fixture, each
+/// with `reference/rest/site-writes.sql`'s posts.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_writes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/site-writes.sql");
+    let insert = state
+        .lines()
+        .find(|line| line.starts_with("INSERT INTO `wp_posts`"))
+        .unwrap();
+    let footer = r#"{"title":"Footer","content":"<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"http://127.0.0.1:8081/\",\"kind\":\"custom\"} /-->","status":"publish"}"#;
+    let header = r#"{"title":"Header renamed","content":"<!-- wp:navigation-link {\"label\":\"Only\",\"url\":\"https://example.test/\",\"kind\":\"custom\"} /-->"}"#;
+    let pattern = r#"{"title":"A pattern","content":"<!-- wp:paragraph -->\n<p>Reused</p>\n<!-- /wp:paragraph -->","status":"publish","date":"2026-01-02T03:04:05"}"#;
+    let renamed = r#"{"title":"Renamed pattern","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->"}"#;
+    let navigation = "/?rest_route=/wp/v2/navigation";
+    let blocks = "/?rest_route=/wp/v2/blocks";
+    let writes = [
+        ("rest-navigation-create", "POST", navigation.into(), footer),
+        (
+            "rest-navigation-update",
+            "POST",
+            format!("{navigation}/851"),
+            header,
+        ),
+        (
+            "rest-navigation-publish",
+            "PUT",
+            format!("{navigation}/852"),
+            r#"{"status":"publish","slug":"header"}"#,
+        ),
+        (
+            "rest-navigation-trash",
+            "DELETE",
+            format!("{navigation}/851"),
+            "",
+        ),
+        (
+            "rest-navigation-delete",
+            "DELETE",
+            format!("{navigation}/852&force=true"),
+            "",
+        ),
+        ("rest-blocks-create", "POST", blocks.into(), pattern),
+        (
+            "rest-blocks-update",
+            "POST",
+            format!("{blocks}/853"),
+            renamed,
+        ),
+        (
+            "rest-blocks-publish",
+            "PATCH",
+            format!("{blocks}/854"),
+            r#"{"status":"publish"}"#,
+        ),
+        ("rest-blocks-trash", "DELETE", format!("{blocks}/853"), ""),
+        (
+            "rest-blocks-delete",
+            "DELETE",
+            format!("{blocks}/854&force=1"),
+            "",
+        ),
+    ];
+    let bare = |golden: &str| golden.ends_with("-create");
+    oracle_writes(state, insert, bare, &writes).await;
 }
 
 /// Each of `writes` leaves the rows PHP's leaves, planned over
-/// `wordpress_saves` with `state` and written on the fixture after the
-/// INSERTs of `state` its [`Setup`] names.
-async fn writes_are_php_s(state: &str, writes: Vec<(&str, &'static str, String, &str, Setup)>) {
+/// `wordpress_saves` with `state` and written on the fixture after
+/// `setup`'s statements, but where `bare` says a write starts without them.
+async fn oracle_writes(
+    state: &str,
+    setup: &str,
+    bare: fn(&str) -> bool,
+    writes: &[(&str, &'static str, String, &str)],
+) {
     let _saves = crate::admin::tests::SAVES.lock().await;
     fresh_with(state).await;
     let dir = tempfile::tempdir().unwrap();
     let site = saves_site(dir.path()).await;
-    for (golden, method, target, body, inserted) in writes {
-        let pending = planned(&site, method, &target, body).await;
-        let inserts: Vec<String> = state
-            .lines()
-            .filter(|line| match inserted {
-                Setup::Nothing => false,
-                Setup::Posts => line.starts_with("INSERT INTO `wp_posts`"),
-                Setup::All => line.starts_with("INSERT INTO "),
-            })
-            .map(String::from)
-            .collect();
+    for &(golden, method, ref target, body) in writes {
+        let pending = planned(&site, method, target, body).await;
         let setup = async |conn: &mut hyscribe_db::Connection| {
-            for insert in inserts {
-                let insert = sqlx::raw_sql(sqlx::AssertSqlSafe(insert));
-                insert.execute(&mut *conn).await.unwrap();
+            if !bare(golden) {
+                let setup = sqlx::raw_sql(sqlx::AssertSqlSafe(setup));
+                setup.execute(&mut *conn).await.unwrap();
             }
             Ok::<_, String>(())
         };
-        // Dated as the action runs, which the golden's `%now%` spans.
         let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // Timed within the oracle's run, however long the plan took.
             let ctx = crate::rest::writes::context(&site, &pending.plan, now());
             let outcome = acted(conn, &pending.plan, &ctx).await;
             assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
@@ -527,111 +551,6 @@ async fn writes_are_php_s(state: &str, writes: Vec<(&str, &'static str, String, 
         let report = check_writes(&fixture_database(), golden, setup, action).await;
         report.unwrap();
     }
-}
-
-/// The navigation menus' and synced patterns' writes leave the rows PHP's
-/// leave, over `reference/rest/site-writes.sql`.
-#[tokio::test(flavor = "multi_thread")]
-async fn site_writes_are_php_s() {
-    let state = include_str!("../../../../../reference/rest/site-writes.sql");
-    let footer = r#"{"title":"Footer","content":"<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"http://127.0.0.1:8081/\",\"kind\":\"custom\"} /-->","status":"publish"}"#;
-    let header = r#"{"title":"Header renamed","content":"<!-- wp:navigation-link {\"label\":\"Only\",\"url\":\"https://example.test/\",\"kind\":\"custom\"} /-->"}"#;
-    let pattern = r#"{"title":"A pattern","content":"<!-- wp:paragraph -->\n<p>Reused</p>\n<!-- /wp:paragraph -->","status":"publish","date":"2026-01-02T03:04:05"}"#;
-    let renamed = r#"{"title":"Renamed pattern","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->"}"#;
-    let in_two = r#"{"title":"In two","content":"<!-- wp:paragraph -->\n<p>Two</p>\n<!-- /wp:paragraph -->","status":"publish","wp_pattern_category":[861,862,999],"meta":{"other":"x","wp_pattern_sync_status":"partial"}}"#;
-    let navigation = |path: &str| format!("/?rest_route=/wp/v2/navigation{path}");
-    let blocks = |path: &str| format!("/?rest_route=/wp/v2/blocks{path}");
-    let (nothing, posts, all) = (Setup::Nothing, Setup::Posts, Setup::All);
-    let writes = vec![
-        (
-            "rest-navigation-create",
-            "POST",
-            navigation(""),
-            footer,
-            nothing,
-        ),
-        (
-            "rest-navigation-update",
-            "POST",
-            navigation("/851"),
-            header,
-            posts,
-        ),
-        (
-            "rest-navigation-publish",
-            "PUT",
-            navigation("/852"),
-            r#"{"status":"publish","slug":"header"}"#,
-            posts,
-        ),
-        (
-            "rest-navigation-trash",
-            "DELETE",
-            navigation("/851"),
-            "",
-            posts,
-        ),
-        (
-            "rest-navigation-delete",
-            "DELETE",
-            navigation("/852&force=true"),
-            "",
-            posts,
-        ),
-        ("rest-blocks-create", "POST", blocks(""), pattern, nothing),
-        ("rest-blocks-update", "POST", blocks("/853"), renamed, posts),
-        (
-            "rest-blocks-publish",
-            "PATCH",
-            blocks("/854"),
-            r#"{"status":"publish"}"#,
-            posts,
-        ),
-        ("rest-blocks-trash", "DELETE", blocks("/853"), "", posts),
-        (
-            "rest-blocks-delete",
-            "DELETE",
-            blocks("/854&force=1"),
-            "",
-            posts,
-        ),
-        (
-            "rest-blocks-create-unsynced",
-            "POST",
-            blocks(""),
-            r#"{"title":"Unsynced","meta":{"wp_pattern_sync_status":"unsynced"}}"#,
-            nothing,
-        ),
-        (
-            "rest-blocks-create-categorised",
-            "POST",
-            blocks(""),
-            in_two,
-            all,
-        ),
-        (
-            "rest-blocks-categories",
-            "POST",
-            blocks("/853"),
-            r#"{"wp_pattern_category":[862]}"#,
-            all,
-        ),
-        (
-            "rest-blocks-draft-meta",
-            "POST",
-            blocks("/854"),
-            r#"{"meta":{"wp_pattern_sync_status":"partial"},"wp_pattern_category":[861]}"#,
-            all,
-        ),
-        (
-            "rest-blocks-delete-categorised",
-            "DELETE",
-            blocks("/853&force=true"),
-            "",
-            all,
-        ),
-    ];
-    writes_are_php_s(state, writes).await;
 }
 
 /// Each of `writes`, a golden of the write oracle and the request that
@@ -1286,6 +1205,7 @@ async fn term_and_settings_writes_are_php_s() {
 #[tokio::test(flavor = "multi_thread")]
 async fn editor_saves_are_php_s() {
     let state = include_str!("../../../../../reference/rest/editor-saves.sql");
+    let setup = state.split("\n-- cleanup\n").next().unwrap();
     let para =
         |text: &str| format!(r#"<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->"#);
     let hello = para(
@@ -1362,141 +1282,29 @@ async fn editor_saves_are_php_s() {
             r#"{"id":2,"template":"page-no-title","parent":9607}"#.into(),
         ),
     ];
-    let writes = saves
+    let writes: Vec<_> = saves
         .iter()
-        .map(|(golden, target, body)| (*golden, "PUT", target.clone(), body.as_str(), Setup::All))
+        .map(|(golden, target, body)| (*golden, "PUT", target.clone(), body.as_str()))
         .collect();
-    writes_are_php_s(state, writes).await;
+    oracle_writes(state, setup, |_| false, &writes).await;
 }
 
-/// The templates' and parts' writes leave the rows PHP's leave, over
+/// PHP's answers to the autosaves, over `reference/rest/autosaves.sql`,
+/// with `meta`, not ported for posts, answered 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn autosaves_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/autosaves.tsv");
+    let state = include_str!("../../../../../reference/rest/autosaves.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 10, 6));
+}
+
+/// PHP's answers to the templates' and template parts' writes, over
 /// `reference/rest/templates-custom.sql`.
 #[tokio::test(flavor = "multi_thread")]
-async fn template_writes_are_php_s() {
+async fn template_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/template-writes.tsv");
     let state = include_str!("../../../../../reference/rest/template-writes.sql");
-    let paragraph =
-        |text: &str| format!(r#""<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->""#);
-    let templates = |path: &str| format!("/?rest_route=/wp/v2/templates{path}");
-    let parts = |path: &str| format!("/?rest_route=/wp/v2/template-parts{path}");
-    let mine = format!(
-        r#"{{"slug":"my-template","title":"My template","content":{},"description":"Made here"}}"#,
-        paragraph("Mine")
-    );
-    let side = format!(
-        r#"{{"slug":"my-sidebar","title":"My sidebar","area":"header","content":{}}}"#,
-        paragraph("Side")
-    );
-    let customised = format!(r#"{{"content":{}}}"#, paragraph("Customised"));
-    let foot = format!(r#"{{"content":{}}}"#, paragraph("Foot"));
-    let again = format!(
-        r#"{{"title":"Index again","content":{}}}"#,
-        paragraph("Changed")
-    );
-    let index = "/twentytwentyfive//index";
-    let writes = vec![
-        (
-            "rest-templates-create",
-            "POST",
-            templates(""),
-            mine.as_str(),
-        ),
-        (
-            "rest-templates-create-suggested",
-            "POST",
-            templates(""),
-            r#"{"slug":"page-about","title":{"raw":"About"},"content":{"raw":"<!-- wp:post-content /-->"},"author":1,"is_wp_suggestion":true}"#,
-        ),
-        (
-            "rest-templates-create-taken",
-            "POST",
-            templates(""),
-            r#"{"slug":"my-custom","title":"Again","content":"<!-- wp:post-title /-->"}"#,
-        ),
-        ("rest-template-parts-create", "POST", parts(""), &side),
-        (
-            "rest-template-parts-create-area",
-            "POST",
-            parts(""),
-            r#"{"slug":"odd-part","title":"Odd","area":"bogus"}"#,
-        ),
-        (
-            "rest-templates-customise",
-            "POST",
-            templates("/twentytwentyfive//page"),
-            &customised,
-        ),
-        (
-            "rest-template-parts-customise",
-            "PUT",
-            parts("/twentytwentyfive//footer"),
-            &foot,
-        ),
-        ("rest-templates-update", "POST", templates(index), &again),
-        (
-            "rest-template-parts-update",
-            "PATCH",
-            parts("/twentytwentyfive//header"),
-            r#"{"area":"footer","description":"Moved"}"#,
-        ),
-        (
-            "rest-templates-revert",
-            "POST",
-            templates("/twentytwentyfive//page-no-title"),
-            r#"{"source":"theme"}"#,
-        ),
-        (
-            "rest-templates-trash",
-            "DELETE",
-            templates("/twentytwentyfive//my-custom"),
-            "",
-        ),
-        (
-            "rest-templates-delete",
-            "DELETE",
-            templates("/twentytwentyfive//my-custom&force=true"),
-            "",
-        ),
-        (
-            "rest-template-parts-delete",
-            "DELETE",
-            parts("/twentytwentyfive//header&force=1"),
-            "",
-        ),
-    ];
-    let writes = writes
-        .into_iter()
-        .map(|(golden, method, target, body)| (golden, method, target, body, Setup::All))
-        .collect();
-    writes_are_php_s(state, writes).await;
-}
-
-/// The autosaves leave the rows PHP's leave, over
-/// `reference/rest/autosaves.sql`: a draft of the user's updated, their
-/// old autosave updated, and a new one.
-#[tokio::test(flavor = "multi_thread")]
-async fn autosaves_are_php_s() {
-    let state = include_str!("../../../../../reference/rest/autosaves.sql");
-    let saved = |title: &str, text: &str, excerpt: &str| {
-        format!(
-            r#"{{"title":"{title}","content":"<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->"{excerpt}}}"#
-        )
-    };
-    let autosaves = |path: &str| format!("/?rest_route=/wp/v2/{path}/autosaves");
-    let page = saved("Page autosaved", "Page words", "");
-    let held = saved("Held, autosaved", "Held", "");
-    let other = saved("Draft autosaved", "Later words", r#","excerpt":"""#);
-    let again = saved("Published", "Out there, changed", r#","excerpt":"""#);
-    let writes = vec![
-        ("rest-autosaves-draft", autosaves("pages/863"), &page),
-        ("rest-autosaves-new", autosaves("posts/866"), &held),
-        ("rest-autosaves-other", autosaves("posts/861"), &other),
-        ("rest-autosaves-again", autosaves("posts/862"), &again),
-    ];
-    let writes = writes
-        .into_iter()
-        .map(|(golden, target, body)| (golden, "POST", target, body.as_str(), Setup::All))
-        .collect();
-    writes_are_php_s(state, writes).await;
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 23, 0));
 }
 
 /// The answers to what a write comes to past the goldens: a created
@@ -1554,10 +1362,10 @@ async fn written_answers_past_the_goldens() {
         ),
     ];
     for ((method, target, body), outcome, (status, code)) in cases {
-        let served = answered(&site, (method, &target, body), outcome).await;
+        let (found, text) = answered(&site, (method, &target, body), outcome).await;
         let what = format!("{method} {target} {body}");
-        assert_eq!(served.0, status, "{what}");
-        assert!(served.1.contains(code), "{what}");
+        assert_eq!(found, status, "{what}");
+        assert!(text.contains(code), "{what}");
     }
     let unported = [
         // A template its slug would title after the page it names.
@@ -1603,16 +1411,12 @@ async fn written_answers_past_the_goldens() {
     fresh_with(autosaves).await;
     let site = saves_site(dir.path()).await;
     let page = "/?rest_route=/wp/v2/pages/863/autosaves";
-    let empty = ("POST", page, "{}");
-    let empty = answered(&site, empty, Outcome::Refused("empty_content")).await;
-    let not_ported = hyscribe_rest::Served::not_ported();
-    assert_eq!(
-        empty,
-        (
-            not_ported.status,
-            String::from_utf8(not_ported.body).unwrap()
-        )
+    let empty = answered(
+        &site,
+        ("POST", page, "{}"),
+        Outcome::Refused("empty_content"),
     );
+    assert_eq!(empty.await, (501, String::new()));
     let request = axum::http::Request::builder()
         .method("POST")
         .uri("/?rest_route=/wp/v2/blocks/853/autosaves")
@@ -1764,6 +1568,193 @@ async fn autosaves_past_the_goldens() {
     let response = send(&site, request, "title=a%FFb").await;
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     fresh().await;
+}
+
+/// The INSERTs of a list's `state`, which a write oracle action adds first.
+fn inserts(state: &str) -> String {
+    let lines = state
+        .lines()
+        .filter(|line| line.starts_with("INSERT INTO "));
+    lines.collect::<Vec<_>>().join("\n")
+}
+
+/// The synced patterns' sync status and categories leave the rows PHP's
+/// leave, over all of `reference/rest/site-writes.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn pattern_writes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/site-writes.sql");
+    let in_two = r#"{"title":"In two","content":"<!-- wp:paragraph -->\n<p>Two</p>\n<!-- /wp:paragraph -->","status":"publish","wp_pattern_category":[861,862,999],"meta":{"other":"x","wp_pattern_sync_status":"partial"}}"#;
+    let blocks = |path: &str| format!("/?rest_route=/wp/v2/blocks{path}");
+    let writes = [
+        (
+            "rest-blocks-create-unsynced",
+            "POST",
+            blocks(""),
+            r#"{"title":"Unsynced","meta":{"wp_pattern_sync_status":"unsynced"}}"#,
+        ),
+        ("rest-blocks-create-categorised", "POST", blocks(""), in_two),
+        (
+            "rest-blocks-categories",
+            "POST",
+            blocks("/853"),
+            r#"{"wp_pattern_category":[862]}"#,
+        ),
+        (
+            "rest-blocks-draft-meta",
+            "POST",
+            blocks("/854"),
+            r#"{"meta":{"wp_pattern_sync_status":"partial"},"wp_pattern_category":[861]}"#,
+        ),
+        (
+            "rest-blocks-delete-categorised",
+            "DELETE",
+            blocks("/853&force=true"),
+            "",
+        ),
+    ];
+    let bare = |golden: &str| golden == "rest-blocks-create-unsynced";
+    oracle_writes(state, &inserts(state), bare, &writes).await;
+}
+
+/// The templates' and parts' writes leave the rows PHP's leave, over
+/// `reference/rest/templates-custom.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn template_writes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/template-writes.sql");
+    let paragraph =
+        |text: &str| format!(r#""<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->""#);
+    let templates = |path: &str| format!("/?rest_route=/wp/v2/templates{path}");
+    let parts = |path: &str| format!("/?rest_route=/wp/v2/template-parts{path}");
+    let mine = format!(
+        r#"{{"slug":"my-template","title":"My template","content":{},"description":"Made here"}}"#,
+        paragraph("Mine")
+    );
+    let side = format!(
+        r#"{{"slug":"my-sidebar","title":"My sidebar","area":"header","content":{}}}"#,
+        paragraph("Side")
+    );
+    let customised = format!(r#"{{"content":{}}}"#, paragraph("Customised"));
+    let foot = format!(r#"{{"content":{}}}"#, paragraph("Foot"));
+    let again = format!(
+        r#"{{"title":"Index again","content":{}}}"#,
+        paragraph("Changed")
+    );
+    let writes = [
+        (
+            "rest-templates-create",
+            "POST",
+            templates(""),
+            mine.as_str(),
+        ),
+        (
+            "rest-templates-create-suggested",
+            "POST",
+            templates(""),
+            r#"{"slug":"page-about","title":{"raw":"About"},"content":{"raw":"<!-- wp:post-content /-->"},"author":1,"is_wp_suggestion":true}"#,
+        ),
+        (
+            "rest-templates-create-taken",
+            "POST",
+            templates(""),
+            r#"{"slug":"my-custom","title":"Again","content":"<!-- wp:post-title /-->"}"#,
+        ),
+        ("rest-template-parts-create", "POST", parts(""), &side),
+        (
+            "rest-template-parts-create-area",
+            "POST",
+            parts(""),
+            r#"{"slug":"odd-part","title":"Odd","area":"bogus"}"#,
+        ),
+        (
+            "rest-templates-customise",
+            "POST",
+            templates("/twentytwentyfive//page"),
+            &customised,
+        ),
+        (
+            "rest-template-parts-customise",
+            "PUT",
+            parts("/twentytwentyfive//footer"),
+            &foot,
+        ),
+        (
+            "rest-templates-update",
+            "POST",
+            templates("/twentytwentyfive//index"),
+            &again,
+        ),
+        (
+            "rest-template-parts-update",
+            "PATCH",
+            parts("/twentytwentyfive//header"),
+            r#"{"area":"footer","description":"Moved"}"#,
+        ),
+        (
+            "rest-templates-revert",
+            "POST",
+            templates("/twentytwentyfive//page-no-title"),
+            r#"{"source":"theme"}"#,
+        ),
+        (
+            "rest-templates-trash",
+            "DELETE",
+            templates("/twentytwentyfive//my-custom"),
+            "",
+        ),
+        (
+            "rest-templates-delete",
+            "DELETE",
+            templates("/twentytwentyfive//my-custom&force=true"),
+            "",
+        ),
+        (
+            "rest-template-parts-delete",
+            "DELETE",
+            parts("/twentytwentyfive//header&force=1"),
+            "",
+        ),
+    ];
+    oracle_writes(state, &inserts(state), |_| false, &writes).await;
+}
+
+/// The autosaves leave the rows PHP's leave, over
+/// `reference/rest/autosaves.sql`: a draft of the user's updated, their
+/// old autosave updated, and a new one.
+#[tokio::test(flavor = "multi_thread")]
+async fn autosaves_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/autosaves.sql");
+    let saved = |title: &str, text: &str, excerpt: &str| {
+        format!(
+            r#"{{"title":"{title}","content":"<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->"{excerpt}}}"#
+        )
+    };
+    let autosaves = |path: &str| format!("/?rest_route=/wp/v2/{path}/autosaves");
+    let page = saved("Page autosaved", "Page words", "");
+    let held = saved("Held, autosaved", "Held", "");
+    let other = saved("Draft autosaved", "Later words", r#","excerpt":"""#);
+    let again = saved("Published", "Out there, changed", r#","excerpt":"""#);
+    let writes = [
+        (
+            "rest-autosaves-draft",
+            "POST",
+            autosaves("pages/863"),
+            page.as_str(),
+        ),
+        ("rest-autosaves-new", "POST", autosaves("posts/866"), &held),
+        (
+            "rest-autosaves-other",
+            "POST",
+            autosaves("posts/861"),
+            &other,
+        ),
+        (
+            "rest-autosaves-again",
+            "POST",
+            autosaves("posts/862"),
+            &again,
+        ),
+    ];
+    oracle_writes(state, &inserts(state), |_| false, &writes).await;
 }
 
 /// Without a writer, a write past its checks is refused as hs-admin

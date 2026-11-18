@@ -242,7 +242,6 @@ fn answerable(
 /// A plan of `write`, by a user who passed `manage`.
 fn plan(context: &Context, write: Write, template: Option<Template>) -> Plan {
     let mut plan = Plan::new(context, write, Value::Null);
-    plan.can_publish = true;
     plan.template = template.map(Box::new);
     plan
 }
@@ -321,11 +320,12 @@ fn refused(outcome: Outcome) -> Result<u64, RestError> {
             let message = "Content, title, and excerpt are empty.";
             Err(RestError::status("empty_content", message, 400))
         }
-        Outcome::InvalidText(_) => Err(RestError::not_ported()),
-        _ => {
+        Outcome::Refused(_) => {
             let message = "The template cannot be deleted.";
             Err(RestError::status("rest_cannot_delete", message, 500))
         }
+        // Text `wpdb` refuses; a template writes no term, setting or the like.
+        _ => Err(RestError::not_ported()),
     }
 }
 

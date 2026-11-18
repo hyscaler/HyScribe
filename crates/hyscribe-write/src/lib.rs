@@ -21,6 +21,7 @@ pub mod comments;
 pub mod cron;
 pub mod options;
 pub mod posts;
+pub mod privacy;
 mod steps;
 pub mod terms;
 pub mod users;

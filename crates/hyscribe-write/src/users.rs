@@ -25,7 +25,7 @@ use crate::{Error, MYSQL, name_filters, now, wp_filter_kses};
 mod register;
 mod roles;
 
-pub use register::{Rejected, register_new_user};
+pub use register::{Rejected, register_new_user, registration_failed};
 pub use roles::{add_role, set_role};
 
 /// The post types whose posts `wp_delete_user()` deletes with their author:

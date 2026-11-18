@@ -32,6 +32,18 @@ fn rejected(code: &'static str, message: &str) -> Rejected {
     }
 }
 
+/// The `registerfail` error: the account could not be made, whom to write
+/// to being the site's `admin_email`.
+pub fn registration_failed(admin_email: &[u8]) -> Rejected {
+    let admin = esc_attr(admin_email);
+    Rejected {
+        code: "registerfail",
+        message: format!(
+            "<strong>Error:</strong> Could not register you&hellip; please contact the <a href=\"mailto:{admin}\">site admin</a>!"
+        ),
+    }
+}
+
 /// `validate_username()` of a login as given: it keeps every character
 /// `sanitize_user( $login, true )` keeps, and is not `empty()`.
 fn validate_username(login: &[u8]) -> bool {
@@ -124,16 +136,8 @@ pub async fn register_new_user(
         .await;
     if created == 0 {
         let admin = steps.run(async |w| get_option(w, "admin_email").await);
-        let admin = esc_attr(&admin.await.to_php_string());
-        let message = format!(
-            "<strong>Error:</strong> Could not register you&hellip; please contact the <a href=\"mailto:{}\">site admin</a>!",
-            admin
-        );
-        let registerfail = Rejected {
-            code: "registerfail",
-            message,
-        };
-        return steps.finish(Ok(Err(vec![registerfail])));
+        let admin = admin.await.to_php_string();
+        return steps.finish(Ok(Err(vec![registration_failed(&admin)])));
     }
     let nag = (Value::Bool(true), Value::Null);
     let meta = async |w: &mut Write<'_>| {

@@ -1849,3 +1849,183 @@ async fn writes_stop_short() {
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     fresh().await;
 }
+
+/// Every row of the posts, their meta and the terms in `wordpress_saves`,
+/// without the posts' dates.
+async fn site_rows() -> Vec<String> {
+    let mut conn = saves_conn().await;
+    let mut rows = Vec::new();
+    for sql in [
+        "SELECT CONCAT_WS('|', ID, post_author, post_content, post_title, post_excerpt, \
+         post_status, comment_status, ping_status, post_password, post_name, to_ping, pinged, \
+         post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, \
+         comment_count) FROM wp_posts ORDER BY ID",
+        "SELECT CONCAT_WS('|', meta_id, post_id, meta_key, meta_value) FROM wp_postmeta \
+         ORDER BY meta_id",
+        "SELECT CONCAT_WS('|', term_id, name, slug, term_group) FROM wp_terms ORDER BY term_id",
+        "SELECT CONCAT_WS('|', term_taxonomy_id, term_id, taxonomy, description, parent, count) \
+         FROM wp_term_taxonomy ORDER BY term_taxonomy_id",
+        "SELECT CONCAT_WS('|', object_id, term_taxonomy_id, term_order) \
+         FROM wp_term_relationships ORDER BY object_id, term_taxonomy_id",
+    ] {
+        let query = sqlx::query_scalar::<_, Vec<u8>>(sqlx::AssertSqlSafe(sql));
+        let found = query.fetch_all(&mut conn).await.unwrap();
+        rows.extend(found.into_iter().map(|row| String::from_utf8(row).unwrap()));
+    }
+    rows
+}
+
+/// A JSON object of `fields`.
+fn json_object(fields: &[(&str, Value)]) -> String {
+    let fields = fields
+        .iter()
+        .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value.clone()))
+        .collect();
+    String::from_utf8(hyscribe_phpser::json_encode(&Value::Array(fields)).unwrap()).unwrap()
+}
+
+/// The site editor's saves of `reference/site-edits/save.php` sent to
+/// HyScribe leave the rows PHP left (`reference/site-edits/content.sql`)
+/// but for their dates. They start from the global styles PHP saved:
+/// HyScribe answers that save 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_editor_saves_leave_php_s_rows() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let edits = include_str!("../../../../../reference/site-edits/content.sql");
+    fresh_with(edits).await;
+    let php = site_rows().await;
+    let styles: Vec<String> = edits
+        .lines()
+        .filter(|line| {
+            [
+                "`wp_posts` VALUES (4,",
+                "`wp_posts` VALUES (5,",
+                "`wp_terms` VALUES (2,",
+                "`wp_term_taxonomy` VALUES (2,",
+                "`wp_term_relationships` VALUES (4,",
+            ]
+            .iter()
+            .any(|start| line.contains(start))
+        })
+        // The theme's count as the global styles post left it.
+        .map(|line| line.replace("'wp_theme','',0,7)", "'wp_theme','',0,1)"))
+        .collect();
+    assert_eq!(styles.len(), 5);
+    fresh_with(&styles.join("\n")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let (cookie, nonce) = log_in(&site).await;
+    let asked = |method: &'static str, route: String, body: String| {
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(format!("/?rest_route={route}"))
+            .header(header::COOKIE, &cookie)
+            .header("x-wp-nonce", &nonce)
+            .header(header::CONTENT_TYPE, "application/json");
+        let site = Arc::clone(&site);
+        async move {
+            let response = send(&site, request, &body).await;
+            let status = response.status();
+            let body = super::body(response).await;
+            assert!(status.is_success(), "{route}: {status} {body}");
+            hyscribe_phpser::json_decode(body.as_bytes()).unwrap()
+        }
+    };
+    let text = |text: &str| Value::String(text.as_bytes().to_vec());
+    let paragraph =
+        |words: &str| format!("<!-- wp:paragraph -->\n<p>{words}</p>\n<!-- /wp:paragraph -->");
+    let saved = |route: &str, content: String| {
+        let id = route.rsplit_once('/').map_or("", |(_, id)| id);
+        let id = format!("twentytwentyfive/{id}");
+        let body = json_object(&[("id", text(&id)), ("content", text(&content))]);
+        asked("POST", route.to_string(), body)
+    };
+    let links = [
+        r#"<!-- wp:navigation-link {"label":"Sample Page","type":"page","id":2,"url":"http://127.0.0.1:8081/?page_id=2","kind":"post-type"} /-->"#,
+        r#"<!-- wp:navigation-link {"label":"Elsewhere","url":"https://example.com/","kind":"custom"} /-->"#,
+    ];
+    let menu = json_object(&[
+        ("title", text("Main menu")),
+        ("status", text("publish")),
+        ("content", text(&links.join("\n\n"))),
+    ]);
+    let menu = asked("POST", "/wp/v2/navigation".into(), menu).await;
+    let menu = menu.get_str("id").unwrap().to_int();
+    let mut opened = Vec::new();
+    for route in [
+        "/wp/v2/template-parts/twentytwentyfive//header",
+        "/wp/v2/templates/twentytwentyfive//home",
+        "/wp/v2/templates/twentytwentyfive//single",
+    ] {
+        let answer = asked("GET", format!("{route}&context=edit"), String::new()).await;
+        let content = answer.get_str("content").unwrap().get_str("raw").unwrap();
+        opened.push(String::from_utf8(content.to_php_string()).unwrap());
+    }
+    let header = opened[0].replacen(
+        "<!-- wp:navigation {",
+        &format!("<!-- wp:navigation {{\"ref\":{menu},"),
+        1,
+    );
+    saved("/wp/v2/template-parts/twentytwentyfive//header", header).await;
+    let footer = paragraph("Edited footer");
+    saved("/wp/v2/template-parts/twentytwentyfive//footer", footer).await;
+    for (slug, content) in ["home", "single"].into_iter().zip(&opened[1..]) {
+        let at = content
+            .find(r#"<!-- wp:template-part {"slug":"footer""#)
+            .unwrap();
+        let (before, after) = content.split_at(at);
+        let edited = format!(
+            "{before}{}\n\n{after}",
+            paragraph(&format!("Edited {slug}"))
+        );
+        saved(
+            &format!("/wp/v2/templates/twentytwentyfive//{slug}"),
+            edited,
+        )
+        .await;
+    }
+    let part = |slug: &str| {
+        format!(r#"<!-- wp:template-part {{"slug":"{slug}","theme":"twentytwentyfive"}} /-->"#)
+    };
+    let landing = format!(
+        "{}\n\n{}\n\n<!-- wp:post-title /-->\n\n<!-- wp:post-content /-->",
+        part("header"),
+        paragraph("Landing")
+    );
+    let landing = json_object(&[
+        ("slug", text("wp-custom-template-landing")),
+        ("title", text("Landing")),
+        ("content", text(&landing)),
+    ]);
+    asked("POST", "/wp/v2/templates".into(), landing).await;
+    let template = json_object(&[("template", text("wp-custom-template-landing"))]);
+    asked("POST", "/wp/v2/posts/1".into(), template).await;
+    saved("/wp/v2/templates/twentytwentyfive//archive", String::new()).await;
+    let blank = json_object(&[
+        ("slug", text("wp-custom-template-blank")),
+        ("title", text("Blank")),
+        ("content", text("")),
+    ]);
+    asked("POST", "/wp/v2/templates".into(), blank).await;
+    let page = json_object(&[
+        ("title", text("Blank page")),
+        ("status", text("publish")),
+        ("template", text("wp-custom-template-blank")),
+    ]);
+    asked("POST", "/wp/v2/pages".into(), page).await;
+    let sample = format!(
+        "{}\n\n<!-- wp:post-content /-->\n\n{}",
+        paragraph("Only the sample page"),
+        part("footer")
+    );
+    let sample = json_object(&[
+        ("slug", text("page-sample-page")),
+        ("title", text("Page: Sample Page")),
+        ("description", text("Template for Sample Page")),
+        ("is_wp_suggestion", Value::Bool(true)),
+        ("content", text(&sample)),
+    ]);
+    asked("POST", "/wp/v2/templates".into(), sample).await;
+    assert_eq!(site_rows().await, php);
+    fresh().await;
+}

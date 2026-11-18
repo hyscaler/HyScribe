@@ -354,8 +354,8 @@ impl Renderer<'_> {
 
 /// `$atts[ $name ] = $value`, in place.
 fn set_att(atts: &mut [(String, Value)], name: &str, value: Value) {
-    if let Some(found) = atts.iter_mut().find(|(known, _)| known == name) {
-        found.1 = value;
+    for (_, found) in atts.iter_mut().filter(|(known, _)| known == name) {
+        *found = value.clone();
     }
 }
 

@@ -154,8 +154,9 @@ type Row = Vec<(String, Vec<u8>)>;
 type NewIds = BTreeMap<(&'static str, Vec<u8>), Vec<u8>>;
 
 /// Every table of [`TABLES`] (each row tagged with its table's name) and the
-/// clock, in one round trip.
-const SNAPSHOT: &str = "SELECT 'clock', UNIX_TIMESTAMP() AS unix, UTC_TIMESTAMP() AS utc; \
+/// clock, now and five seconds earlier, in one round trip.
+const SNAPSHOT: &str = "SELECT 'clock', UNIX_TIMESTAMP() AS unix, UTC_TIMESTAMP() AS utc, \
+    UNIX_TIMESTAMP() - 5 AS earlier, UTC_TIMESTAMP() - INTERVAL 5 SECOND AS earlier_utc; \
     SELECT 'wp_posts', wp_posts.* FROM wp_posts; \
     SELECT 'wp_postmeta', wp_postmeta.* FROM wp_postmeta; \
     SELECT 'wp_comments', wp_comments.* FROM wp_comments; \
@@ -173,6 +174,9 @@ const SNAPSHOT: &str = "SELECT 'clock', UNIX_TIMESTAMP() AS unix, UTC_TIMESTAMP(
 struct Snapshot {
     /// The database's clock as Unix seconds and as a UTC date.
     clock: (u64, Vec<u8>),
+    /// The clock five seconds earlier, where a run's times start: a test reads its
+    /// request's time before [`check_writes`] connects, `wp_user_settings()` a cookie's.
+    earlier: (u64, Vec<u8>),
     /// The rows of each table of [`TABLES`] by raw key.
     tables: Vec<BTreeMap<Vec<u8>, Row>>,
 }
@@ -181,6 +185,7 @@ impl Snapshot {
     fn of(rows: &[MySqlRow]) -> Snapshot {
         let mut snapshot = Snapshot {
             clock: (0, Vec::new()),
+            earlier: (0, Vec::new()),
             tables: TABLES.iter().map(|_| BTreeMap::new()).collect(),
         };
         for row in rows {
@@ -198,8 +203,12 @@ impl Snapshot {
                     rows.insert(key(&values, table.key), values);
                 }
                 None => {
-                    let unix = number(value(&values, "unix")).unwrap_or_default();
-                    snapshot.clock = (unix, value(&values, "utc").to_vec());
+                    let time = |unix, utc| {
+                        let seconds = number(value(&values, unix)).unwrap_or_default();
+                        (seconds, value(&values, utc).to_vec())
+                    };
+                    snapshot.clock = time("unix", "utc");
+                    snapshot.earlier = time("earlier", "earlier_utc");
                 }
             }
         }
@@ -272,8 +281,7 @@ impl Masks {
         }
         let value = digit_runs(value, |run| {
             let unix = number(run).filter(|_| run.len() == 10)?;
-            // From five seconds before, as `wp_user_settings()` saves a newer cookie's time.
-            (self.start.0.saturating_sub(5)..=self.end.0)
+            (self.start.0..=self.end.0)
                 .contains(&unix)
                 .then(|| b"%unix%".to_vec())
         });
@@ -283,7 +291,7 @@ impl Masks {
         let token = |id: &[u8]| self.new.get(&(*of, id.to_vec())).cloned();
         match held {
             Whole => token(&value).unwrap_or(value),
-            Digits => digit_runs(&value, token),
+            Digits => id_runs(&value, token),
             TermMap => term_map(&value, token).unwrap_or(value),
         }
     }
@@ -293,7 +301,7 @@ impl Masks {
     fn rescheduled(&self, value: &[u8]) -> Vec<u8> {
         digit_runs(value, |run| {
             let unix = number(run).filter(|_| run.len() == 10)?;
-            let during = self.start.0.saturating_sub(5)..=self.end.0;
+            let during = self.start.0..=self.end.0;
             let interval = [3_600, 43_200, 86_400, 604_800]
                 .into_iter()
                 .find(|interval| {
@@ -365,6 +373,35 @@ fn digit_runs(value: &[u8], replace: impl Fn(&[u8]) -> Option<Vec<u8>>) -> Vec<u
         rest = tail;
     }
     out.extend_from_slice(rest);
+    out
+}
+
+/// `value` with each whole number replaced as `replace` says: a run of
+/// digits in a dotted number, such as an IP address's, is left as it is.
+fn id_runs(value: &[u8], replace: impl Fn(&[u8]) -> Option<Vec<u8>>) -> Vec<u8> {
+    let digit = |at: Option<usize>| {
+        at.and_then(|at| value.get(at))
+            .is_some_and(u8::is_ascii_digit)
+    };
+    let dot = |at: Option<usize>| at.and_then(|at| value.get(at)) == Some(&b'.');
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(&b) = value.get(at) {
+        let tail = value.get(at..).unwrap_or_default();
+        let len = tail.iter().take_while(|b| b.is_ascii_digit()).count();
+        if len == 0 {
+            out.push(b);
+            at += 1;
+            continue;
+        }
+        let run = tail.get(..len).unwrap_or_default();
+        let end = at + len;
+        let before = dot(at.checked_sub(1)) && digit(at.checked_sub(2));
+        let after = dot(Some(end)) && digit(Some(end + 1));
+        let token = replace(run).filter(|_| !before && !after);
+        out.extend(token.unwrap_or_else(|| run.to_vec()));
+        at = end;
+    }
     out
 }
 
@@ -540,7 +577,7 @@ async fn changed_rows<T>(
         before.and_then(|before| {
             after.map(|after| {
                 let new = new_ids(&fresh, &before, &after);
-                let (start, end) = (fresh.clock, after.clock.clone());
+                let (start, end) = (fresh.earlier, after.clock.clone());
                 lines(&Masks { start, end, new }, &before, &after)
             })
         })

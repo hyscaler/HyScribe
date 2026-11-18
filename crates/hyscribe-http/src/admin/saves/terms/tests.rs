@@ -31,7 +31,7 @@ const POSTED: Sent = Sent {
 };
 
 /// The answer of `handler` to `sent`, as [`acted`].
-async fn settled<T>(
+async fn settled<T: super::super::Mailed>(
     writer: &Writer,
     conn: &mut Connection,
     handler: Handler<T>,

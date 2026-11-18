@@ -4,15 +4,16 @@
 
 use hyscribe_admin::actions::{Asked, user_ids};
 use hyscribe_admin::posts::Answer;
-use hyscribe_db::{DbError, Write};
+use hyscribe_db::{DbError, Meta, Write};
 use hyscribe_phpser::{
-    Key, Maybe, Value, add_query_arg, lookup, maybe_unserialize, remove_query_arg,
+    Key, Maybe, Value, add_query_arg, is_empty_string, lookup, maybe_unserialize, remove_query_arg,
 };
 use hyscribe_write::Error;
-use hyscribe_write::users::{retrieve_password, set_role, wp_delete_user};
+use hyscribe_write::users::{Refusal, retrieve_password, set_role, wp_delete_user};
 
 use super::dashboard::context;
-use super::{Acting, Saving, Stop, text};
+use super::{Acting, Mailed, Saving, Stop, text};
+use crate::mail::{MailSite, Queued};
 
 /// `$redirect`: the list's own `wp_http_referer` field, else the list.
 fn redirect(asked: &Asked) -> Result<Vec<u8>, Stop> {
@@ -136,11 +137,11 @@ pub(super) fn dodelete<'a>(
 }
 
 /// `resetpassword`: a password reset link for each user but the current
-/// one, the mails taken as sent; then the list with how many were.
+/// one; then the list with how many were mailed.
 pub(super) fn resetpassword<'a>(
     write: &'a mut Write<'_>,
     asked: &'a Asked<'a>,
-    _: &'a dyn Acting,
+    site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
         let redirect = redirect(asked)?;
@@ -152,7 +153,10 @@ pub(super) fn resetpassword<'a>(
         for id in user_ids(asked).into_iter().filter(|id| *id != me) {
             let user = write.user(u64::try_from(id).unwrap_or_default()).await?;
             let login = user.map(|(login, _)| login).unwrap_or_default();
-            if retrieve_password(write, &login).await?.is_ok() {
+            if retrieve_password_mail(write, &login, (asked, site))
+                .await?
+                .is_ok()
+            {
                 count += 1;
             }
         }
@@ -163,6 +167,53 @@ pub(super) fn resetpassword<'a>(
         ];
         Ok(Answer::Redirect(text(&add_query_arg(&args, &redirect))))
     })
+}
+
+/// `retrieve_password( $user_login )` by a logged in user: the user's
+/// password reset key kept and its mail queued, to be waited for once the
+/// action commits; else the error PHP gives.
+pub(super) async fn retrieve_password_mail(
+    write: &mut Write<'_>,
+    login: &[u8],
+    (asked, site): (&Asked<'_>, &dyn Acting),
+) -> Result<Result<(), Refusal>, Error> {
+    let reset = match retrieve_password(write, login).await? {
+        Ok(reset) => reset,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    // `get_user_locale()`: the user's, else the site's, else `en_US`.
+    let own = write.meta_value(Meta::User, reset.id, "locale").await?;
+    let lang = write.option_value("WPLANG").await?;
+    let locale = [own, lang]
+        .into_iter()
+        .flatten()
+        .find(|locale| !is_empty_string(locale));
+    let locale = locale.unwrap_or_else(|| b"en_US".to_vec());
+    let mail_site = MailSite::read(write, asked.home).await?;
+    let user = hyscribe_mail::User {
+        login: &reset.login,
+        email: &reset.email,
+    };
+    let key = reset.key.as_bytes();
+    let mail = hyscribe_mail::retrieve_password(&mail_site.site(), &user, key, &locale, None);
+    let address = text(asked.ip).parse().ok();
+    site.outbox().queue(Queued::Reset(mail, reset.id, address));
+    Ok(Ok(()))
+}
+
+/// The users list's password resets are the only mails a screen's action
+/// waits for: `reset_count` counts those mailed, as PHP counts them.
+impl Mailed for Answer {
+    fn mailed(self, waited: usize, sent: usize) -> Answer {
+        match self {
+            Answer::Redirect(to) if waited > 0 => {
+                let count = sent.to_string();
+                let args: [(&[u8], Option<&[u8]>); 1] = [(b"reset_count", Some(count.as_bytes()))];
+                Answer::Redirect(text(&add_query_arg(&args, to.as_bytes())))
+            }
+            answer => answer,
+        }
+    }
 }
 
 /// `$wp_roles->role_objects[ $role ]->has_cap( 'promote_users' )`.

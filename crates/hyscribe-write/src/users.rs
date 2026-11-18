@@ -24,7 +24,7 @@ use crate::{Error, MYSQL, name_filters, now, wp_filter_kses};
 
 mod roles;
 
-pub use roles::set_role;
+pub use roles::{add_role, set_role};
 
 /// The post types whose posts `wp_delete_user()` deletes with their author:
 /// those with `delete_with_user`, or with it unset and supporting authors.
@@ -550,15 +550,16 @@ pub async fn reset_password(
 /// `send_confirmation_on_profile_email()`'s rows for the user `id` asking
 /// for `email`, valid and not its own, slashed as `$_POST` holds it: the
 /// change waits in `_new_email` under a random hash for its confirmation,
-/// or none waits when another user has the address. No mail is sent (MVP
-/// phase 8).
+/// or none waits when another user has the address. The hash waiting,
+/// which the confirmation mail carries.
 pub async fn request_email_change(
     write: &mut Write<'_>,
     id: u64,
     email: &[u8],
-) -> Result<(), Error> {
+) -> Result<Option<Vec<u8>>, Error> {
     let mut steps = Steps::new(write);
     let key = "_new_email";
+    let mut waiting = None;
     if step!(steps, user_id_by_email(php_trim(email))).is_some() {
         let none = &Value::Null;
         let deleted =
@@ -567,22 +568,21 @@ pub async fn request_email_change(
     } else {
         let random = steps.keep(generate_password(20, false).map_err(Error::Random));
         let seed = [email, now().to_string().as_bytes(), random.as_bytes()].concat();
+        let hash = md5(&seed).into_bytes();
         let change = Value::Array(vec![
-            (
-                Key::String(b"hash".to_vec()),
-                Value::String(md5(&seed).into_bytes()),
-            ),
+            (Key::String(b"hash".to_vec()), Value::String(hash.clone())),
             (
                 Key::String(b"newemail".to_vec()),
                 Value::String(email.to_vec()),
             ),
         ]);
+        waiting = Some(hash);
         let none = &Value::Null;
         let kept =
             async |w: &mut Write<'_>| update_metadata(w, Meta::User, id, key, &change, none).await;
         steps.run(kept).await;
     }
-    steps.finish(Ok(()))
+    steps.finish(Ok(waiting))
 }
 
 /// `wp_delete_user( $id, $reassign )`: the user and its meta, its posts and

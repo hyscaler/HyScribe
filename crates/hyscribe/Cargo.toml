@@ -23,6 +23,7 @@ hyscribe-config.workspace = true
 hyscribe-db.workspace = true
 hyscribe-fetch.workspace = true
 hyscribe-http.workspace = true
+hyscribe-mail.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-service.workspace = true
 hyscribe-write.workspace = true

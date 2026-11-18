@@ -430,6 +430,7 @@ async fn a_failed_read_is_the_database_error_page() {
         install: crate::unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
+        mailer: Arc::new(crate::mail_off()),
     });
     let cookie = format!(
         "hyscribe_logged_in_{}=admin%7C9999999999%7Ctoken%7Chmac",
@@ -541,4 +542,41 @@ async fn a_comment_links_to_its_post() {
     let permalink = Some(b"http://127.0.0.1:8081/hello-world".to_vec());
     let link = comment_link(&mut write, permalink, 5).await.unwrap();
     assert_eq!(link, "http://127.0.0.1:8081/hello-world/#comment-5");
+}
+
+/// Once saved, a held comment is mailed to its moderator and an approved
+/// one to the post's author (ADR 0016).
+#[tokio::test(flavor = "multi_thread")]
+async fn saved_comments_are_mailed() {
+    let db = hyscribe_db::Db::connect(&fixture_database()).await.unwrap();
+    let home = Some("http://127.0.0.1:8081".to_string());
+    let site = Site::load(db, home.clone(), home).await.unwrap();
+    let recorder = Arc::new(crate::mail::tests::Recorder::default());
+    let (site, _) = site.with_mail(&hyscribe_config::Mail::default(), recorder.clone());
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    let writer = writer.unwrap().unwrap();
+    let mut conn = connect().await;
+    let mut tx = conn.begin().await.unwrap();
+    let held = "comment_post_ID=1&author=Ann&email=ann%40example.test&comment=Held.";
+    post((&site, &writer), &mut tx, (held, ""), None).await;
+    // Past the flood check, a commenter approved before is approved again.
+    let sql = "UPDATE wp_comments SET comment_date_gmt = '2000-01-01 00:00:00'";
+    sqlx::query(sql).execute(&mut *tx).await.unwrap();
+    let known = "comment_post_ID=1&author=A+WordPress+Commenter\
+                 &email=wapuu%40wordpress.example&comment=Approved.";
+    post((&site, &writer), &mut tx, (known, ""), None).await;
+    let subjects: Vec<String> = recorder
+        .taken()
+        .into_iter()
+        .map(|mail| String::from_utf8(mail.subject).unwrap())
+        .collect();
+    let title = "[HyScribe Default Install]";
+    assert_eq!(
+        subjects,
+        [
+            format!("{title} Please moderate: \"Hello world!\""),
+            format!("{title} Comment: \"Hello world!\""),
+        ]
+    );
+    tx.rollback().await.unwrap();
 }

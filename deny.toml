@@ -12,6 +12,8 @@ yanked = "deny"
 version = 2
 # Licenses compatible with distributing HyScribe under AGPL-3.0-or-later.
 allow = [
+    # For quoted_printable, lettre's (ADR 0016): public domain equivalent.
+    "0BSD",
     "AGPL-3.0-or-later",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
@@ -29,6 +31,9 @@ allow = [
 confidence-threshold = 0.9
 # The allow list is the policy, not an inventory of what is in use today.
 unused-allowed-license = "allow"
+# Mozilla's root certificates as data, which lettre's rustls build check
+# requires though the mail transport passes the host's roots (ADR 0016).
+exceptions = [{ allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" }]
 
 [bans]
 multiple-versions = "warn"

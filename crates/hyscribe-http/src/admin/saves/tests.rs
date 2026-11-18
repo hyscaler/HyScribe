@@ -88,7 +88,7 @@ pub(in crate::admin) async fn settled<T>(
 
 /// `handler` asked `asked` by `site` as one action on `conn`, once every
 /// statement budget short of it has failed, each failure rolled back.
-pub(super) async fn acted<T>(
+pub(super) async fn acted<T: Mailed>(
     writer: &Writer,
     conn: &mut Connection,
     (handler, site): (Handler<T>, &dyn Acting),

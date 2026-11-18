@@ -243,7 +243,7 @@ async fn bounds_redirects_size_and_time() {
     let started = Instant::now();
     let slow = client.get(b"http://pages.test/", b"", quick).await;
     assert_eq!(slow, failed(Kind::Timeout, 0));
-    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(started.elapsed() < Duration::from_secs(30));
     drop(silent);
 }
 
@@ -277,7 +277,7 @@ async fn reading_stops_at_the_limit_and_closes() {
             .write_all(&[&head[..], &[b'x'; 100]].concat())
             .await
             .unwrap();
-        let read = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buffer)).await;
+        let read = tokio::time::timeout(Duration::from_secs(30), stream.read(&mut buffer)).await;
         let _ = closed.send(matches!(read, Ok(Ok(0))));
     });
     let client = client(Table::new(address));

@@ -1,0 +1,24 @@
+# The rows PHP WordPress writes for the action rest-users-update (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 15:19:59 to 2026-11-16 15:19:59 UTC.
+# %wp_users:1% is 3.
+# %wp_usermeta:1% is 31.
+# %wp_usermeta:2% is 32.
+# %wp_usermeta:3% is 33.
+# %wp_usermeta:4% is 34.
+# %wp_usermeta:5% is 35.
+# %wp_usermeta:6% is 36.
+# %wp_usermeta:7% is 37.
+# %wp_usermeta:8% is 38.
+# %wp_usermeta:9% is 39.
+# %wp_usermeta:10% is 40.
+# %wp_usermeta:11% is 41.
+# %wp_usermeta:12% is 42.
+# %wp_usermeta:13% is 43.
+# %wp_usermeta:14% is 44.
+wp_usermeta	%wp_usermeta:1%	~	meta_value	oracle-author	Nick
+wp_usermeta	%wp_usermeta:13%	~	meta_value	a:1:{s:6:"author";b:1;}	a:1:{s:10:"subscriber";b:1;}
+wp_usermeta	%wp_usermeta:14%	~	meta_value	2	0
+wp_usermeta	%wp_usermeta:4%	~	meta_value		Bio <em>here</em>
+wp_users	%wp_users:1%	~	display_name	oracle-author	Author Renamed
+wp_users	%wp_users:1%	~	user_email	oracle-author@example.test	renamed@example.test
+wp_users	%wp_users:1%	~	user_url		https://a.example.test

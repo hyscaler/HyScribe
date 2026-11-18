@@ -130,10 +130,6 @@ criteria = "safe-to-deploy"
 version = "5.4.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.fastrand]]
-version = "2.5.0"
-criteria = "safe-to-run"
-
 [[exemptions.futures-intrusive]]
 version = "0.5.0"
 criteria = "safe-to-deploy"

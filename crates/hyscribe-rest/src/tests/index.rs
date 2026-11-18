@@ -111,6 +111,8 @@ fn local_hosts_are_secure_contexts() {
             head: false,
             uri: b"/",
             parameters: false,
+            remote_addr: b"",
+            user_agent: None,
             host,
             now: 0,
         };

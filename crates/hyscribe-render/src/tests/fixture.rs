@@ -45,6 +45,13 @@ pub(crate) struct ThemeTestData {
     pub(crate) home: Vec<u8>,
 }
 
+impl ThemeTestData {
+    /// Every `wp_posts` row of the dump, whatever its status and type.
+    pub(crate) fn posts(&self) -> Vec<Post> {
+        self.dump().table("wp_posts").map(post).collect()
+    }
+}
+
 impl Source for ThemeTestData {
     fn dump(&self) -> &'static Dump {
         static DUMP: OnceLock<Dump> = OnceLock::new();

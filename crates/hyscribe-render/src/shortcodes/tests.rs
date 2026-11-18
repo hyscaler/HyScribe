@@ -57,8 +57,10 @@ impl Site for Library<'_> {
     fn query(&self, query: &PostQuery) -> Vec<Post> {
         assert_eq!(query.post_types, ["attachment"]);
         let prefix = query.mime_types[0].trim_end_matches('%').to_string();
-        let mut found: Vec<Post> = (1..3000)
-            .filter_map(|id| self.data.post(id))
+        let mut found: Vec<Post> = self
+            .data
+            .posts()
+            .into_iter()
             .filter(|post| post.post_type == "attachment" && post.status == "inherit")
             .filter(|post| post.mime_type.starts_with(&prefix))
             .filter(|post| query.parents.is_empty() || query.parents.contains(&post.parent))

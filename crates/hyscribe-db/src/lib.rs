@@ -472,6 +472,25 @@ impl Db {
         .await
     }
 
+    /// `get_post_meta( $post_id, $key )`: every value, in the order stored.
+    pub async fn post_meta_all(&self, post_id: u64, key: &str) -> Result<Vec<Vec<u8>>, DbError> {
+        let rows = sqlx::query(self.prefix.sql(
+            "SELECT meta_value FROM {prefix}postmeta WHERE post_id = ? AND meta_key = ? ORDER BY meta_id",
+        ))
+        .bind(post_id)
+        .bind(key)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let value = c.bytes("meta_value");
+                c.finish(value)
+            })
+            .collect()
+    }
+
     /// `get_term( $id, $taxonomy )`.
     pub async fn term(&self, id: u64, taxonomy: &str) -> Result<Option<Term>, DbError> {
         let sql = self.prefix.sql(concat!(
@@ -1415,20 +1434,18 @@ impl Db {
     }
 
     /// `get_terms()` for a tag cloud: the terms of `taxonomy` with posts,
-    /// the most used first, `limit` of them, each with its post count.
+    /// the most used first, `limit` of them, each with its post count. As
+    /// `WP_Term_Query` asks, so that a tie in the count, which the plan
+    /// breaks, is broken as it breaks it.
     pub async fn cloud_terms(&self, taxonomy: &str, limit: u64) -> Result<Vec<Term>, DbError> {
-        let sql = self.prefix.sql(concat!(
-            "SELECT ",
-            terms_from!(),
-            "WHERE tt.taxonomy = ? AND tt.count > 0 ORDER BY tt.count DESC LIMIT ?"
-        ));
-        let rows = sqlx::query(sql)
-            .bind(taxonomy)
-            .bind(limit)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(db_error)?;
-        rows.iter().map(term).collect()
+        self.term_query(&TermQuery {
+            taxonomy: taxonomy.into(),
+            nonempty: true,
+            order: Some((TermOrder::Count, true)),
+            limit: Some(limit),
+            ..TermQuery::default()
+        })
+        .await
     }
 
     /// Every term of `taxonomy` with its post count, by name, as

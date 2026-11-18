@@ -163,6 +163,10 @@ impl RenderSite for Reads<'_> {
         })
     }
 
+    fn post_meta_all(&self, post_id: u64, key: &str) -> Vec<Vec<u8>> {
+        self.wait(self.site.db.post_meta_all(post_id, key))
+    }
+
     fn query(&self, query: &PostQuery) -> Vec<Post> {
         self.wait(self.site.db.posts(query))
     }

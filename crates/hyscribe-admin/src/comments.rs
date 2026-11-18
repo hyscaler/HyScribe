@@ -259,6 +259,17 @@ pub fn comment_link(
     } else {
         None
     };
+    comment_page_link(option, permalink, request_uri, (page, comment.id))
+}
+
+/// `get_comment_link()`'s link to comment `id` on `page`, `None` for the
+/// post's own link, from the post's `permalink` as `comment_link()` has it.
+pub fn comment_page_link(
+    option: &dyn Fn(&str) -> Vec<u8>,
+    permalink: Option<&str>,
+    request_uri: &str,
+    (page, id): (Option<i64>, u64),
+) -> String {
     let oldest = option("default_comments_page") == b"oldest";
     let page = page.filter(|&page| !(oldest && page == 1));
     let links = Permalinks::new(
@@ -278,7 +289,7 @@ pub fn comment_link(
         (None, Some(link)) if links.pretty() => links.trailing(link),
         (None, link) => link.unwrap_or_default().to_string(),
     };
-    format!("{link}#comment-{}", comment.id)
+    format!("{link}#comment-{id}")
 }
 
 /// `get_page_of_comment()` of comment `id` among `comments`: its top level

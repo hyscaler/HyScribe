@@ -74,6 +74,21 @@ pub trait Site {
         None
     }
 
+    /// `get_comment( $id )` in any state: approved, held, spam or trashed.
+    /// Sites without comment data have none; by default a comment this
+    /// site shows, approved or held.
+    fn any_comment(&self, id: u64) -> Option<Comment> {
+        self.comment(id).or_else(|| self.held_comment(id))
+    }
+
+    /// The comments of `post_id` held for moderation, notes left out, whose
+    /// author's email is `email`, oldest first then by ID; only comment
+    /// `only` when set: `include_unapproved` of a comment query. Sites
+    /// without comment data have none.
+    fn held_comments(&self, _post_id: u64, _email: &[u8], _only: Option<i64>) -> Vec<Comment> {
+        vec![]
+    }
+
     /// `get_userdata( $id )`. Sites without user data have none.
     fn user(&self, _id: u64) -> Option<User> {
         None
@@ -221,9 +236,24 @@ pub struct Request {
     pub uri: Vec<u8>,
     /// `$_GET`: the query as `parse_str()` reads it.
     pub get: Value,
+    /// `wp_get_current_commenter()`: the commenter's cookies.
+    pub commenter: Commenter,
     /// The query vars: `$_GET` with what the path gives under pretty
     /// permalinks.
     pub vars: Value,
+}
+
+/// `wp_get_current_commenter()`: the name, email and URL in the commenter
+/// cookies, as `sanitize_comment_cookies()` leaves them, empty for a
+/// cookie that is not sent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Commenter {
+    /// `comment_author`, escaped for attributes.
+    pub author: Vec<u8>,
+    /// `comment_author_email`, escaped for attributes.
+    pub email: Vec<u8>,
+    /// `comment_author_url`.
+    pub url: Vec<u8>,
 }
 
 impl Request {

@@ -7,7 +7,7 @@ use hyscribe_testkit::unhex;
 use super::*;
 use crate::fixture::DefaultInstall;
 use crate::media::Loading;
-use crate::site::{Request, Site};
+use crate::site::{Commenter, Request, Site};
 use crate::theme::twentytwentyfive;
 
 /// The fixture database with `golden.php`'s comments and options.
@@ -76,6 +76,15 @@ impl Site for WithComments {
     }
     fn held_comment(&self, id: u64) -> Option<Comment> {
         self.held.iter().find(|c| c.id == id).cloned()
+    }
+    fn held_comments(&self, post_id: u64, email: &[u8], only: Option<i64>) -> Vec<Comment> {
+        let theirs = |c: &&Comment| {
+            c.post_id == post_id
+                && c.comment_type != b"note"
+                && c.author_email.eq_ignore_ascii_case(email)
+                && only.is_none_or(|only| i64::try_from(c.id) == Ok(only))
+        };
+        self.held.iter().filter(theirs).cloned().collect()
     }
     fn wp_hash(&self, data: &[u8]) -> Option<String> {
         let hash = self
@@ -152,14 +161,15 @@ fn matches_php() {
 }
 
 /// A held comment shows only to its author, from the link
-/// `wp-comments-post.php` sends them to, while it is new
-/// (`reference/comments/held-golden.php`).
+/// `wp-comments-post.php` sends them to, while it is new, or whatever its
+/// age to the commenter cookies' email, and the form and comment blocks
+/// show the commenter's cookies (`reference/comments/held-golden.php`).
 #[test]
 fn held_comments_preview_as_php() {
     let golden = include_str!("../../tests/golden/held-comments.tsv");
     let failures = differences(golden);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 67);
+    assert_eq!(golden.lines().count(), 641);
 }
 
 /// A site without notes counts its comments' top level ones from before
@@ -285,6 +295,20 @@ fn differences(golden: &str) -> Vec<String> {
             post: state.get_str("global").map(|id| id.to_int() as u64),
             uri: uri.clone(),
             get: parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default()),
+            commenter: state
+                .get_str("commenter")
+                .map_or_else(Commenter::default, |c| {
+                    let text = |name| {
+                        c.get_str(name)
+                            .map(Value::to_php_string)
+                            .unwrap_or_default()
+                    };
+                    Commenter {
+                        author: text("comment_author"),
+                        email: text("comment_author_email"),
+                        url: text("comment_author_url"),
+                    }
+                }),
             // `cpage` from a pretty path is recorded on its own.
             vars: state.get_str("vars").cloned().unwrap_or_else(|| {
                 parse_str(uri.splitn(2, |&b| b == b'?').nth(1).unwrap_or_default())
@@ -318,9 +342,10 @@ fn differences(golden: &str) -> Vec<String> {
                 .into_owned()
             };
             failures.push(format!(
-                "{} {:?} {}\n  php:  {}\n  ours: {}",
+                "{} {:?} {:?} {}\n  php:  {}\n  ours: {}",
                 String::from_utf8_lossy(&markup),
                 state.get_str("options"),
+                state.get_str("cookies"),
                 String::from_utf8_lossy(&uri),
                 around(&php),
                 around(&ours)
@@ -421,7 +446,7 @@ fn a_preview_needs_a_signed_held_comment() {
             get: parse_str(query.as_bytes()),
             ..Request::default()
         };
-        assert!(held_preview(&site, &request).is_none(), "{query}");
+        assert!(unapproved(&site, &request).is_none(), "{query}");
     }
     assert!(site.base.held_comment(3).is_none());
 }
@@ -457,7 +482,7 @@ fn a_preview_lasts_ten_minutes_on_its_post() {
         now,
         ..Request::default()
     };
-    let shown = |id, now| post_comments(&site, &request(id, now), 1).len();
+    let shown = |id, now| post_comments(&site, &request(id, now), 1).0.len();
     assert_eq!(shown(3, expiry - 1), 1);
     assert_eq!(shown(3, expiry), 0);
     assert_eq!(shown(4, expiry - 1), 0);

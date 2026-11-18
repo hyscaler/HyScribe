@@ -984,6 +984,19 @@ async fn options_meta_and_terms() {
         db.older_comments(2, "2027-01-01 00:00:00").await.unwrap(),
         0
     );
+    // Nothing is held in the default install.
+    assert!(
+        db.held_comments(1, b"wapuu@wordpress.example", None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        db.held_comments(1, b"x", Some(-1))
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         db.post_meta(2, "_wp_page_template").await.unwrap(),
         Some(b"default".to_vec())

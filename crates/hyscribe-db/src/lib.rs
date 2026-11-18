@@ -559,6 +559,35 @@ impl Db {
         rows.iter().map(comment).collect()
     }
 
+    /// The comments of `post_id` held for moderation whose author's email
+    /// is `email`, notes left out, oldest first then by ID: what a comment
+    /// query's `include_unapproved` adds. With `only`, just that comment.
+    pub async fn held_comments(
+        &self,
+        post_id: u64,
+        email: &[u8],
+        only: Option<i64>,
+    ) -> Result<Vec<Comment>, DbError> {
+        let mut sql = select_comments(
+            " FROM {prefix}comments \
+             WHERE comment_post_ID = ? AND comment_approved = '0' AND comment_type != 'note' \
+             AND comment_author_email = ?",
+        );
+        sql.bind(Bind::Int(post_id));
+        sql.bind(Bind::Bytes(email.to_vec()));
+        if let Some(only) = only {
+            sql.push(" AND comment_ID = ?");
+            sql.bind(Bind::Signed(only));
+        }
+        sql.push(" ORDER BY comment_date_gmt ASC, comment_ID ASC");
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(comment).collect()
+    }
+
     /// How many approved top level comments of every type, notes too,
     /// `post_id` has from before `date_gmt`: `get_page_of_comment()`'s count.
     pub async fn older_comments(&self, post_id: u64, date_gmt: &str) -> Result<u64, DbError> {
@@ -2474,4 +2503,6 @@ mod dialect;
 mod people;
 mod write;
 
-pub use write::{CommentFields, DB_VERSIONS, Meta, PostFields, TermRow, UserFields, Write, Writer};
+pub use write::{
+    CommentFields, DB_VERSIONS, Meta, PostFields, TermRow, Unapproved, UserFields, Write, Writer,
+};

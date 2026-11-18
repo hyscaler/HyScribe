@@ -663,6 +663,60 @@ async fn writes_comments() {
     assert_eq!(write.post_comment_ids(1).await.unwrap(), [1]);
 }
 
+/// `get_page_of_comment()`'s count: approved top level comments before a
+/// date, and the held ones of a user or an author's email.
+#[tokio::test]
+async fn comments_before_a_date_include_the_held_of_one_commenter() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let comment = |approved: &str, parent, user_id, email: &str, date: &str| CommentFields {
+        approved: approved.into(),
+        parent,
+        user_id,
+        author_email: email.as_bytes().to_vec(),
+        date_gmt: date.into(),
+        ..commenter()
+    };
+    let rows = [
+        comment("1", 0, 0, "a@example.test", "2026-10-28 00:00:00"),
+        comment("0", 0, 7, "Held@Example.test", "2026-10-28 00:00:01"),
+        comment("0", 0, 0, "held@example.test", "2026-10-28 00:00:02"),
+        comment("0", 0, 0, "other@example.test", "2026-10-28 00:00:03"),
+        comment("0", 1, 7, "held@example.test", "2026-10-28 00:00:04"),
+        comment("spam", 0, 7, "held@example.test", "2026-10-28 00:00:05"),
+    ];
+    for row in &rows {
+        write.insert_comment(row).await.unwrap();
+    }
+    let end = "2026-10-29 00:00:00";
+    let count =
+        async |write: &mut Write<'_>, date, who| write.comments_before(1, date, who).await.unwrap();
+    // The fixture's comment and the first are approved.
+    assert_eq!(count(&mut write, end, None).await, 2);
+    assert_eq!(count(&mut write, end, Some(Unapproved::User(7))).await, 3);
+    assert_eq!(count(&mut write, end, Some(Unapproved::User(8))).await, 2);
+    let email = |email| Some(Unapproved::Email(email));
+    assert_eq!(count(&mut write, end, email(b"held@example.test")).await, 4);
+    assert_eq!(
+        count(&mut write, end, email(b"nobody@example.test")).await,
+        2
+    );
+    // Strictly before the date.
+    let date = "2026-10-28 00:00:02";
+    assert_eq!(
+        count(&mut write, date, email(b"held@example.test")).await,
+        3
+    );
+    assert_eq!(
+        write
+            .comments_before(2, end, email(b"held@example.test"))
+            .await
+            .unwrap(),
+        0
+    );
+}
+
 #[tokio::test]
 async fn reads_for_comment_writes() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -1428,6 +1482,17 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         ),
         alone!(w.duplicate_comment((1, 0), b"a", None, b"c").await.err()),
         alone!(w.user_has_approved_comment(1).await.err()),
+        alone!(w.comments_before(1, since, None).await.err()),
+        alone!(
+            w.comments_before(1, since, Some(Unapproved::User(1)))
+                .await
+                .err()
+        ),
+        alone!(
+            w.comments_before(1, since, Some(Unapproved::Email(b"e")))
+                .await
+                .err()
+        ),
         alone!(w.author_has_approved_comment(b"a", b"e").await.err()),
         alone!(w.last_comment_date(since, (0, b"ip"), b"e").await.err()),
         alone!(w.last_comment_date(since, (1, b""), b"e").await.err()),

@@ -1279,7 +1279,7 @@ async fn feeds_match_php() {
             "{path} {sent:?}"
         );
     }
-    assert_eq!(golden.lines().count(), 71);
+    assert_eq!(golden.lines().count(), 76);
 }
 
 /// Every page of `reference/head/golden.sh`, status and HTML, against

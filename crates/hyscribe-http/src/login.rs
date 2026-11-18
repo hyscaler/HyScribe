@@ -897,21 +897,23 @@ fn signon_writes(
     };
     reads.reads.block_on(async {
         let mut write = writer.begin().await?;
-        if let Some((id, password)) = rehash {
-            user.pass = wp_set_password(&mut write, &password, id)
-                .await?
-                .into_bytes();
-        } else {
-            let cleared = UserData {
-                id: user.id,
-                user_activation_key: Some(Vec::new()),
-                ..UserData::default()
-            };
-            wp_update_user(&mut write, &cleared).await?;
-        }
-        user.activation_key.clear();
+        let written = match rehash {
+            Some((id, password)) => wp_set_password(&mut write, &password, id)
+                .await
+                .map(|pass| user.pass = pass.into_bytes()),
+            None => {
+                let cleared = UserData {
+                    id: user.id,
+                    user_activation_key: Some(Vec::new()),
+                    ..UserData::default()
+                };
+                wp_update_user(&mut write, &cleared).await.map(drop)
+            }
+        };
+        // A statement that failed fails the commit.
         write.commit().await?;
-        Ok(user)
+        user.activation_key.clear();
+        written.map(|()| user)
     })
 }
 

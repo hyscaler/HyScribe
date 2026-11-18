@@ -343,15 +343,22 @@ async fn a_login_rehashes_old_passwords_and_clears_reset_keys() {
     let current = stored(&db, 1).await.0;
     assert_eq!(login(&db, admin).await.1.status, StatusCode::FOUND);
     assert_eq!(stored(&db, 1).await, (current, String::new()));
-    // Writes refused at an unsupported database version.
+    // Writes refused at an unsupported database version, and a write the
+    // database fails.
     let version = "UPDATE wp_options SET option_value = '1' WHERE option_name = 'db_version'";
-    let db = loaded(&format!("{keyed}; {version}")).await;
-    let (site, refused) = login(&db, admin).await;
-    assert_eq!(refused.status, StatusCode::INTERNAL_SERVER_ERROR);
-    let handle = Handle::current();
-    let key = tokio::task::spawn_blocking(move || {
-        let reads = LoginReads::new(&site, handle, crate::now());
-        reads.user_by_login(b"admin").unwrap().activation_key
-    });
-    assert_eq!(key.await.unwrap(), b"k");
+    for broken in [version, "DROP TABLE wp_usermeta"] {
+        let db = loaded(&format!("{keyed}; {broken}")).await;
+        let (site, refused) = login(&db, admin).await;
+        assert_eq!(
+            refused.status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "{broken}"
+        );
+        let handle = Handle::current();
+        let key = tokio::task::spawn_blocking(move || {
+            let reads = LoginReads::new(&site, handle, crate::now());
+            reads.user_by_login(b"admin").unwrap().activation_key
+        });
+        assert_eq!(key.await.unwrap(), b"k", "{broken}");
+    }
 }

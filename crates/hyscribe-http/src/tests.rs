@@ -277,6 +277,9 @@ async fn database_errors_show_no_details() {
         "/?error=404&p=1&feed=rss2",
         "/?name=x",
         "/?pagename=x",
+        "/?attachment=x",
+        "/?subpost=x",
+        "/?name=x&post_type=attachment",
         "/?attachment_id=1",
         // Past a route that reads nothing, sitemaps fail.
         "/?author=1&sitemap=index",
@@ -3170,7 +3173,82 @@ async fn attachment_pages_match_php() {
         assert_listed_pages("wordpress_saves", golden, false, &known).await,
         0
     );
-    assert_eq!(golden.lines().count(), 108);
+    assert_eq!(golden.lines().count(), 110);
+    // Without the table of its meta the file of an attachment is unread.
+    let tables = [
+        "options",
+        "posts",
+        "terms",
+        "term_taxonomy",
+        "term_relationships",
+        "users",
+        "usermeta",
+        "comments",
+        "commentmeta",
+        "termmeta",
+    ];
+    for table in tables {
+        let copy = format!("CREATE TABLE broken_{table} AS SELECT * FROM wp_{table}");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(copy))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    let config = Database {
+        prefix: hyscribe_config::Prefix::new("broken_").unwrap(),
+        ..db
+    };
+    let site = Site::load(Db::connect(&config).await.unwrap(), None, None).await;
+    let reply = match site {
+        Ok(site) => Some(request(&Arc::new(site), "GET", "/?attachment_id=801").await),
+        Err(_) => None,
+    };
+    for table in tables {
+        let drop = format!("DROP TABLE broken_{table}");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(drop))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        reply.expect("the site loads").status,
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+}
+
+/// The pages of `reference/duotone/page-golden.sh`: covers and an image with
+/// every kind of duotone filter, the footer's filters and the global
+/// styles' custom properties of presets, over the default install with the
+/// posts of `reference/duotone/page.sql`, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn duotone_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let rows = include_str!("../../../reference/duotone/page.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(rows))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/duotone-pages.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 2);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

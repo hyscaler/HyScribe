@@ -67,7 +67,7 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(10)].join("\n")
     );
-    assert_eq!(cases, 86);
+    assert_eq!(cases, 132);
 }
 
 /// Channels as colord reads them, the ones the golden's tables show: hex of
@@ -89,8 +89,30 @@ fn parses_colors() {
         parse_color(b"hsl(120, 100%, 25%)"),
         Some([0.0, 127.5, 0.0, 1.0])
     );
+    // A newline may end the pattern, nothing else may follow it.
+    assert_eq!(parse_color(b"#fff\n"), Some([255.0, 255.0, 255.0, 1.0]));
+    assert_eq!(parse_color(b"rgb(1,2,3)\n"), Some([1.0, 2.0, 3.0, 1.0]));
+    // An angle too large to be one is none.
+    let huge = format!("hsl({}, 50%, 50%)", "9".repeat(400));
+    assert_eq!(
+        parse_color(huge.as_bytes()),
+        parse_color(b"hsl(0, 50%, 50%)")
+    );
     for no_color in [
         "red",
+        "rgb(1,2,3)\n\n",
+        "rgb(1,2,3)x",
+        "rgb(, 2, 3)",
+        "rgb(1, , 3)",
+        "rgb(1 2,3)",
+        "rgbx(1,2,3)",
+        "rgb 1,2,3",
+        "rgb(1,2,3",
+        "rgb(1,2,3,)",
+        "rgb(1,2,3, 0.5",
+        "hsl(10, 50, 50%)",
+        "hsl(10, 50%, 50)",
+        "hsl(10 50% 50%, 1)",
         "#12",
         "#123456789",
         "#12g456",

@@ -26,8 +26,8 @@ cleanup() {
   rm -f "$TMP" "$HEADERS"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-options.php"
   echo "DELETE FROM wp_users WHERE ID IN (2, 3); DELETE FROM wp_usermeta WHERE umeta_id BETWEEN 801 AND 806;
-    DELETE FROM wp_posts WHERE ID BETWEEN 801 AND 831 OR ID BETWEEN 9001 AND 9007;
-    DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 854 OR meta_id BETWEEN 9001 AND 9005;
+    DELETE FROM wp_posts WHERE ID BETWEEN 801 AND 831 OR ID BETWEEN 9001 AND 9008;
+    DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 854 OR meta_id BETWEEN 9001 AND 9006;
     DELETE FROM wp_comments WHERE comment_ID = 801;" | sql
 }
 trap cleanup EXIT
@@ -49,7 +49,7 @@ record() {
 }
 paths="12345"
 for id in 801 802 803 804 805 806 807 808 809 810 811 812 813 814 815 816 817 818 819 820 821 822 823 824 825 826 828 829 830 \
-  9001 9002 9003 9004 9005 9006 9007; do
+  9001 9002 9003 9004 9005 9006 9007 9008; do
   paths="$paths $id"
 done
 for options in "" "wp_attachment_pages_enabled=1"; do

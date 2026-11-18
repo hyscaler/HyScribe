@@ -63,6 +63,7 @@ $cases = array(
 	duotone_cover( duotone( 'var:preset|duotone|plain' ) ),
 	duotone_cover( duotone( 'var:preset|duotone|my-preset' ) ) . duotone_cover( duotone( 'var:preset|duotone|My Preset' ) ),
 	duotone_cover( duotone( 'var(--wp--preset--duotone--grayscale)' ) ) . duotone_cover( duotone( 'var:preset|duotone|plain' ) ),
+	'<!-- wp:cover ' . wp_json_encode( duotone( array( '#8c00b7', '#fcff41' ) ) ) . ' -->no tags<!-- /wp:cover -->',
 	duotone_cover( duotone( 5 ) ),
 	duotone_cover( duotone( true ) ),
 	duotone_cover( duotone( null ) ),
@@ -132,3 +133,19 @@ foreach ( array( 'global_styles_block_names', 'global_styles_presets' ) as $name
 }
 echo "user\t", bin2hex( wp_json_encode( $user + array( 'isGlobalStylesUserThemeJSON' => true ) ) ), "\n";
 $run( 1 );
+
+// A block whose global styles name a preset nobody defined.
+$user['styles']['blocks']['core/image'] = array( 'filter' => array( 'duotone' => 'var:preset|duotone|no-such-preset' ) );
+add_filter(
+	'wp_theme_json_data_user',
+	function ( $data ) use ( $user ) {
+		return $data->update_with( $user );
+	}
+);
+WP_Theme_JSON_Resolver::clean_cached_data();
+wp_cache_flush_group( 'theme_json' );
+foreach ( array( 'global_styles_block_names', 'global_styles_presets' ) as $name ) {
+	( new ReflectionProperty( 'WP_Duotone', $name ) )->setValue( null, null );
+}
+echo "user\t", bin2hex( wp_json_encode( $user + array( 'isGlobalStylesUserThemeJSON' => true ) ) ), "\n";
+$run( 2 );

@@ -154,8 +154,44 @@ pub(crate) fn registered_sizes(context: &Context) -> Vec<SubSize> {
     wp_get_registered_image_subsizes(&|name| context.option(name).unwrap_or_default())
 }
 
+/// `wp_getimagesize( wp_get_original_image_path() )` of an image with an
+/// `original_image` in `meta`; `None` without one or where the file gives
+/// no size. 501 where the site does not read its uploads, or the name
+/// leaves the attachment's folder.
+pub(crate) fn original_image_size(
+    context: &Context,
+    id: u64,
+    meta: &Value,
+) -> Result<Option<(u32, u32)>, RestError> {
+    let original = meta.get_str("original_image").map(Value::to_php_string);
+    let Some(original) = original.filter(|original| !original.is_empty()) else {
+        return Ok(None);
+    };
+    let attached = context.site.post_meta(id, "_wp_attached_file");
+    let attached = String::from_utf8_lossy(&attached.unwrap_or_default()).into_owned();
+    let original = String::from_utf8_lossy(&original).into_owned();
+    let path = original_path(&attached, &original).ok_or_else(RestError::not_ported)?;
+    let size = context.site.image_size(&path);
+    size.ok_or_else(RestError::not_ported)
+}
+
+/// `path_join( dirname( $attached ), $original )` within the uploads
+/// folder, `None` where `path_join()` would leave it: an absolute name,
+/// or one with `..`.
+pub(crate) fn original_path(attached: &str, original: &str) -> Option<String> {
+    let folder = attached.rsplit_once('/').map_or("", |(folder, _)| folder);
+    let path = if folder.is_empty() {
+        original.to_string()
+    } else {
+        format!("{folder}/{original}")
+    };
+    let escapes = attached.starts_with('/') || original.starts_with('/');
+    (!escapes && !path.split('/').any(|part| part == "..")).then_some(path)
+}
+
 /// `missing_image_sizes`: the sizes an image, or a PDF's fallbacks, could
-/// have and lack; 501 where PHP reads an original image's file.
+/// have and lack; 501 where PHP reads an original image's file the site
+/// cannot.
 fn missing_sizes(
     context: &Context,
     post: &Post,
@@ -184,14 +220,12 @@ fn missing_sizes(
             registered.iter().map(|size| size.name.as_str()).collect(),
         ));
     };
-    if meta
-        .get_str("original_image")
-        .is_some_and(|original| !original.is_empty())
-    {
-        return Err(RestError::not_ported());
-    }
     let side = |key| u32::try_from(meta.get_str(key).map_or(0, Value::to_int)).unwrap_or(0);
-    let full = (side("width"), side("height"));
+    let mut full = (side("width"), side("height"));
+    // The originally uploaded image's dimensions are the full size's.
+    if let Some(original) = original_image_size(context, post.id, meta)? {
+        full = original;
+    }
     let missing = registered
         .iter()
         .filter(|size| {

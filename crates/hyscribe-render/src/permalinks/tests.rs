@@ -200,6 +200,17 @@ fn plain_comments_feed_link_of_an_attachment() {
     assert_eq!(link(&attachment, "rss2").unwrap(), "/?feed=rss2&p=13");
     let page = post(2, "page", "publish", "sample-page", "");
     assert_eq!(link(&page, "atom").unwrap(), "/?feed=atom&page_id=2");
+    // Under pretty permalinks, the unattached attachment's feed address is
+    // its own and another post's is its link's.
+    let site = crate::fixture::site(vec![("permalink_structure", "/%postname%/")]);
+    let link = |post: &Post, feed| String::from_utf8(post_comments_feed_link(&site, post, feed));
+    attachment.parent = 0;
+    assert_eq!(
+        link(&attachment, "atom").unwrap(),
+        "/feed/atom/?attachment_id=13"
+    );
+    let hello = post(1, "post", "publish", "hello-world", "2026-10-27 08:08:15");
+    assert_eq!(link(&hello, "rss2").unwrap(), "/hello-world/feed/");
 }
 
 #[test]

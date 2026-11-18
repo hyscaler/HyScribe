@@ -134,10 +134,9 @@ impl<'a> Scan<'a> {
             self.at = start;
             return None;
         }
-        std::str::from_utf8(self.text.get(start..self.at)?)
-            .ok()?
-            .parse()
-            .ok()
+        // Only ASCII digits, a sign and a dot were taken: they always parse.
+        let taken = self.text.get(start..self.at).unwrap_or_default();
+        Some(String::from_utf8_lossy(taken).parse().unwrap_or_default())
     }
 
     /// The end of the pattern: `$`, which allows one newline last.
@@ -189,6 +188,17 @@ struct Values {
     alpha: Option<(f64, bool)>,
 }
 
+/// A separator, then a number and its `%`, which a hue's saturation and
+/// lightness must have.
+fn next_value(scan: &mut Scan<'_>, syntax: Syntax, percent_needed: bool) -> Option<(f64, bool)> {
+    if !separator(scan, syntax) {
+        return None;
+    }
+    let number = scan.number()?;
+    let percent = scan.byte(b'%');
+    (percent || !percent_needed).then_some((number, percent))
+}
+
 /// `^name a?\( ... \)$` under `syntax`; `hue` reads the first value's unit
 /// and the other two as percentages, else all three may have a `%`.
 fn function(input: &[u8], name: &[u8], syntax: Syntax, hue: bool) -> Option<Values> {
@@ -201,33 +211,23 @@ fn function(input: &[u8], name: &[u8], syntax: Syntax, hue: bool) -> Option<Valu
         return None;
     }
     scan.spaces();
-    let mut numbers = Vec::new();
-    let mut percents = Vec::new();
+    let first = scan.number()?;
     let mut unit = Vec::new();
-    for at in 0..3 {
-        if at > 0 && !separator(&mut scan, syntax) {
-            return None;
-        }
-        numbers.push(scan.number()?);
-        if hue && at == 0 {
-            // `(deg|rad|grad|turn)?`: the first alternative that fits.
-            for candidate in [&b"deg"[..], b"rad", b"grad", b"turn"] {
-                let start = scan.at;
-                if scan.word(candidate) {
-                    unit = input.get(start..scan.at).unwrap_or_default().to_vec();
-                    break;
-                }
+    let mut first_percent = false;
+    if hue {
+        // `(deg|rad|grad|turn)?`: the first alternative that fits.
+        for candidate in [&b"deg"[..], b"rad", b"grad", b"turn"] {
+            let start = scan.at;
+            if scan.word(candidate) {
+                unit = input.get(start..scan.at).unwrap_or_default().to_vec();
+                break;
             }
-            percents.push(false);
-        } else if hue {
-            if !scan.byte(b'%') {
-                return None;
-            }
-            percents.push(true);
-        } else {
-            percents.push(scan.byte(b'%'));
         }
+    } else {
+        first_percent = scan.byte(b'%');
     }
+    let (second, second_percent) = next_value(&mut scan, syntax, hue)?;
+    let (third, third_percent) = next_value(&mut scan, syntax, hue)?;
     scan.spaces();
     let mut alpha = None;
     let before = scan.at;
@@ -240,8 +240,8 @@ fn function(input: &[u8], name: &[u8], syntax: Syntax, hue: bool) -> Option<Valu
         scan.at = before;
     }
     (scan.byte(b')') && scan.end()).then_some(Values {
-        numbers: numbers.try_into().ok()?,
-        percents: percents.try_into().ok()?,
+        numbers: [first, second, third],
+        percents: [first_percent, second_percent, third_percent],
         unit,
         alpha,
     })

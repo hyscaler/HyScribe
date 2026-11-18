@@ -19,11 +19,11 @@ $reset = function () {
 };
 
 function duotone_cover( $attrs ) {
-	return '<!-- wp:cover ' . wp_json_encode( $attrs ) . ' --><div class="wp-block-cover"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><div class="wp-block-cover__inner-container"><!-- wp:paragraph --><p>Text</p><!-- /wp:paragraph --></div></div><!-- /wp:cover -->';
+	return '<!-- wp:cover ' . wp_json_encode( (object) $attrs ) . ' --><div class="wp-block-cover"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><div class="wp-block-cover__inner-container"><!-- wp:paragraph --><p>Text</p><!-- /wp:paragraph --></div></div><!-- /wp:cover -->';
 }
 
 function duotone_image( $attrs ) {
-	return '<!-- wp:image ' . wp_json_encode( $attrs ) . ' --><figure class="wp-block-image"><img src="http://127.0.0.1:8081/x.jpg" alt=""/></figure><!-- /wp:image -->';
+	return '<!-- wp:image ' . wp_json_encode( (object) $attrs ) . ' --><figure class="wp-block-image"><img src="http://127.0.0.1:8081/x.jpg" alt=""/></figure><!-- /wp:image -->';
 }
 
 function duotone( $value ) {

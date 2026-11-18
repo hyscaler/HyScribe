@@ -1340,6 +1340,10 @@ impl crate::profile::ProfileSite for Role {
             )
         };
         let list = match (self.variant(), id) {
+            // An item without a `uuid`, which PHP repairs.
+            ("psslnouuid", 1) => {
+                return Some(b"a:1:{i:0;a:1:{s:4:\"name\";s:1:\"n\";}}".to_vec());
+            }
             ("psslapps1" | "psslhidden" | "psslhiddenall", 1) => vec![phone()],
             ("psslapps3", 1) => vec![
                 phone(),

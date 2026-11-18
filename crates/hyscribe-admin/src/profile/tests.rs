@@ -6,7 +6,7 @@ use hyscribe_testkit::{hs_admin_page, unhex};
 use super::*;
 use crate::admin_bar::Browser;
 use crate::page::REMOVABLE;
-use crate::tests::{BROWSER, Role, first_difference, request_at};
+use crate::tests::{BROWSER, Role, SITE, first_difference, request_at};
 
 const CHROME: &[u8] = b"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const CHROME136: &[u8] = b"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
@@ -218,4 +218,31 @@ fn application_passwords_are_read_as_php_s() {
     ] {
         assert!(items(stored.as_bytes()).is_none(), "{stored}");
     }
+}
+
+/// Over HTTPS a profile with passwords PHP would repair is not ported, over
+/// HTTP the list is not read.
+#[test]
+fn a_profile_with_passwords_to_repair_is_not_ported() {
+    let path = "/hs-admin/profile";
+    let site = Role("psslnouuid:administrator").site();
+    let canonical = format!("{site}{path}");
+    let request = request_at(&site, &canonical, path, &BROWSER);
+    let ours = profile(
+        &Role("psslnouuid:administrator"),
+        &EditArgs::default(),
+        &request,
+    );
+    assert_eq!(ours, None);
+    let args = EditArgs {
+        user_id: Some("1".into()),
+        ..EditArgs::default()
+    };
+    let ours = user_edit(&Role("psslnouuid:administrator"), &args, &request);
+    assert_eq!(ours, None);
+    let site = SITE;
+    let canonical = format!("{site}{path}");
+    let request = request_at(site, &canonical, path, &BROWSER);
+    let plain = Role("pnouuid:administrator");
+    assert!(profile(&plain, &EditArgs::default(), &request).is_some());
 }

@@ -629,20 +629,17 @@ fn localhost(origin: &str) -> bool {
 /// `wp_get_chromium_major_version()`: the digits after the first `Chrome/`
 /// that has any, as PHP casts them (saturating).
 pub fn chromium_version(user_agent: &[u8]) -> Option<i64> {
-    let starts = user_agent.windows(7).enumerate();
-    starts
-        .filter(|(_, window)| *window == b"Chrome/")
-        .find_map(|(at, _)| {
-            let digits = user_agent[at + 7..]
-                .iter()
-                .take_while(|byte| byte.is_ascii_digit());
-            let version = digits.clone().fold(0i64, |version, digit| {
-                version
-                    .saturating_mul(10)
-                    .saturating_add(i64::from(digit - b'0'))
-            });
-            (digits.count() > 0).then_some(version)
-        })
+    let mut starts = user_agent.windows(7).enumerate();
+    starts.find_map(|(at, window)| {
+        let digits = user_agent.get(at + 7..).filter(|_| window == b"Chrome/")?;
+        let digits = digits.iter().take_while(|byte| byte.is_ascii_digit());
+        let version = digits.clone().fold(0i64, |version, digit| {
+            version
+                .saturating_mul(10)
+                .saturating_add(i64::from(digit - b'0'))
+        });
+        (digits.count() > 0).then_some(version)
+    })
 }
 
 /// The emoji styles `wp_enqueue_emoji_styles()` adds inline.

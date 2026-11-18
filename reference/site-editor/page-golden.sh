@@ -6,7 +6,7 @@
 # the same page for, as crates/hyscribe-admin/tests/golden/site-editor.tsv,
 # one row each:
 #   case<TAB>part<TAB>value
-# The parts, from reference/site-editor/parts.php: `settings.<key>` for each
+# The parts, from reference/post-edit/editor-parts.php: `settings.<key>` for each
 # key of the editor's settings, `categories`, `bindings` and `blocks` (the
 # inline scripts of wp-blocks), `preloads` (the paths PHP preloads) and
 # `html` (hex of the page, those values left out). Another value over 2000
@@ -38,7 +38,7 @@ SQL
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 # User 1's nonces, without a session as the requests have none.
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \
-  wp_rest heartbeat-nonce log-out media-form media-send-to-editor update_can_compress_scripts \
+  wp_rest heartbeat-nonce log-out media-form media-send-to-editor set-attachment-thumbnail update_can_compress_scripts \
   screen-options-nonce internal-linking > "$TMP/nonces"
 : > "$OUT"
 record() {
@@ -46,7 +46,7 @@ record() {
   status=$(curl -s -o "$TMP/page" -w '%{http_code}' -b hyscribe_role=administrator "$BASE/wp-admin/site-editor.php$query")
   [ "$status" = 200 ] || { echo "PHP answered $status for $query" >&2; exit 1; }
   [ -z "${RAW:-}" ] || cp "$TMP/page" "$RAW/$case.html"
-  php "$ROOT/reference/site-editor/parts.php" "$TMP/page" "$TMP/nonces" "$case" ${RAW:+"$RAW"} >> "$OUT"
+  php "$ROOT/reference/post-edit/editor-parts.php" "$TMP/page" "$TMP/nonces" "$case" ${RAW:+"$RAW"} >> "$OUT"
 }
 record se-first ''
 record se-again ''

@@ -16,6 +16,7 @@ fn view(settings: bool, rules: bool) -> View {
         settings,
         rules,
         editor: None,
+        site_editor: false,
     }
 }
 
@@ -311,4 +312,166 @@ async fn a_failed_begin_ends_the_editor_s_view() {
     let target = Target::New("post".into());
     let written = editor_written(Err(err), &ctx, &target, ("twentytwentyfive", "")).await;
     assert!(matches!(written, Err(Error::Db(_))));
+    let mut write = writer.begin().await.unwrap();
+    write.fail_after(0);
+    let err = write.option_value("home").await.unwrap_err();
+    let written = site_editor_written(Err(err), &ctx, ("twentytwentyfive", "")).await;
+    assert!(matches!(written, Err(Error::Db(_))));
+}
+
+/// The paths of the page's preload memo, `OPTIONS` ones prefixed.
+fn preloaded_paths(page: &str) -> Vec<String> {
+    let marker = "wp.apiFetch.createPreloadingMiddleware( ";
+    let json = page.split_once(marker).unwrap().1;
+    let json = json.split(" ) );").next().unwrap();
+    let memo = hyscribe_phpser::json_decode(json.as_bytes()).unwrap();
+    let mut paths = Vec::new();
+    for (key, value) in memo.as_array().unwrap() {
+        let key = String::from_utf8(key.to_php_string()).unwrap();
+        match key.as_str() {
+            "OPTIONS" => paths.extend(value.as_array().unwrap().iter().map(|(path, _)| {
+                format!("OPTIONS {}", String::from_utf8_lossy(&path.to_php_string()))
+            })),
+            _ => paths.push(format!("GET {key}")),
+        }
+    }
+    paths
+}
+
+/// In primary mode the site editor's first view writes the custom CSS
+/// lookup and the theme's global styles post, then serves its page with
+/// the preloads PHP's has; later views write nothing more. What it does
+/// not port answers 501 and writes nothing, as does a view whose writes
+/// the write layer does not port.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_editor_s_page_is_served() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = crate::admin::tests::logged_in(&db.name, dir.path()).await;
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary)
+        .await
+        .unwrap();
+    let site = std::sync::Arc::new(
+        std::sync::Arc::try_unwrap(site)
+            .ok()
+            .unwrap()
+            .with_writer(writer),
+    );
+    let send = async |path: &str| {
+        let response = crate::admin::tests::send(&site, "GET", path, &cookies, None).await;
+        let status = response.status();
+        (status, crate::admin::tests::page_of(response).await)
+    };
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    // Arguments that are not strings are not ported.
+    let (status, _) = send("/hs-admin/site-editor?p[]=/").await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    let mut write = writer.begin().await.unwrap();
+    assert!(write.post(4).await.unwrap().is_none());
+    drop(write);
+    let golden = include_str!("../../../../hyscribe-admin/tests/golden/site-editor.tsv");
+    for (path, case) in [
+        ("/hs-admin/site-editor", "se-first"),
+        ("/hs-admin/site-editor", "se-again"),
+        ("/hs-admin/site-editor?p=/page/2&canvas=edit", "se-page-2"),
+        (
+            "/hs-admin/site-editor?p=/&postId=1&postType=post",
+            "se-post",
+        ),
+    ] {
+        let (status, page) = send(path).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        let row = golden
+            .lines()
+            .find(|line| line.starts_with(&format!("{case}\tpreloads\t")))
+            .unwrap();
+        let tokens: Vec<&str> = row.rsplit('\t').next().unwrap().split(' ').collect();
+        let php: Vec<String> = tokens.chunks(2).map(|pair| pair.join(" ")).collect();
+        assert_eq!(preloaded_paths(&page), php, "{path}");
+    }
+    // Nor is a post neither a post nor a page: the global styles post.
+    let (status, _) = send("/hs-admin/site-editor?p=/&postId=4").await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    let mut write = writer.begin().await.unwrap();
+    let styles = write.post(4).await.unwrap().unwrap();
+    assert_eq!(styles.post_type, "wp_global_styles");
+    assert!(write.post(5).await.unwrap().is_none());
+    let mods = write.option_value("theme_mods_twentytwentyfive").await;
+    let lookup: &[u8] = b"a:1:{s:18:\"custom_css_post_id\";i:-1;}";
+    assert_eq!(mods.unwrap().as_deref(), Some(lookup));
+    let unported = Value::String(b"x".to_vec());
+    update_option(&mut write, "theme_mods_twentytwentyfive", &unported, None)
+        .await
+        .unwrap();
+    write.commit().await.unwrap();
+    let (status, _) = send("/hs-admin/site-editor").await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+}
+
+/// The site editor's view writes only once the preloads it does not write
+/// are answered, for a user who may edit theme options, past its redirects.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_editor_s_view_waits_for_its_preloads() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, _) = crate::admin::tests::logged_in(&fixture_database().name, dir.path()).await;
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let mut reads = crate::login::LoginReads::new(&site, handle, crate::now());
+        reads.act_as(1, Vec::new());
+        let user = reads.reads.wait(site.db.user(1)).unwrap();
+        let admin = Admin::new(&reads, &site, user);
+        for answered in [true, false] {
+            let preloads = |paths: &[(&'static str, String)]| {
+                assert!(
+                    !paths
+                        .iter()
+                        .any(|(_, path)| path.contains("/wp/v2/themes?"))
+                );
+                assert!(
+                    !paths
+                        .iter()
+                        .any(|(_, path)| path.contains("/global-styles/0"))
+                );
+                answered.then_some(Value::Null)
+            };
+            assert_eq!(site_editor_before(&admin, "", &preloads), answered);
+            assert!(!site_editor_before(&admin, "postType=page", &preloads));
+            assert!(!site_editor_before(&admin, "p[]=/", &preloads));
+        }
+        let nobody = Admin::new(&reads, &site, hyscribe_model::User::default());
+        assert!(!site_editor_before(&nobody, "", &|_| Some(Value::Null)));
+        // The page, once the view found the global styles post: none for
+        // arguments not ported or a preload not answered.
+        let mut admin = admin;
+        admin.styles = Some(4);
+        let browser = hyscribe_admin::admin_bar::Browser::default();
+        let request = hyscribe_admin::page::Request {
+            canonical: "http://127.0.0.1:8081/hs-admin/site-editor",
+            origin: "http://127.0.0.1:8081",
+            uri: "/hs-admin/site-editor",
+            browser: &browser,
+        };
+        let with = |query: &str, answered: bool| {
+            let preloads = |_: &[(&'static str, String)]| answered.then_some(Value::Null);
+            super::super::site_editor_with(&admin, query, &request, &preloads)
+        };
+        assert!(with("p[]=/", true).is_none());
+        assert!(with("", false).is_none());
+        assert!(matches!(
+            with("", true),
+            Some(hyscribe_admin::posts::Answer::Page(_))
+        ));
+    })
+    .await
+    .unwrap();
 }

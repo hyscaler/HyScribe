@@ -683,17 +683,29 @@ fn navigation_and_patterns_save_their_fields() {
         let closed = format!("a<!-- /wp:{wrapper} -->b<!-- wp:c /-->");
         assert_eq!(save.content, Some(closed.into_bytes()), "{post_type}");
     }
-    // Neither a pattern's categories nor an autosave is ported, and a
-    // format is checked against its schema.
+    // A pattern's categories and sync status; its footnotes, revisioned
+    // with it, are not ported.
+    let body =
+        r#"{"title":"x","wp_pattern_category":[1],"meta":{"wp_pattern_sync_status":"partial"}}"#;
+    let save = plan("administrator", "POST", "/wp/v2/blocks", body);
+    assert_eq!(save.pattern_categories, Some(vec![1]));
+    assert_eq!(
+        save.meta,
+        vec![("wp_pattern_sync_status", text_value("partial"))]
+    );
+    // `check_meta_is_array()`'s false, with no details.
+    let string = r#"{"title":"x","meta":"nope"}"#;
+    let refused = answered("administrator", "POST", "/wp/v2/blocks", string);
+    assert_eq!(refused.status, 400);
+    assert!(text_of(&refused).contains(r#""params":{"meta":"Invalid parameter."},"details":[]"#));
+    let footnotes = r#"{"title":"x","meta":{"footnotes":""}}"#;
+    let served = answered("administrator", "POST", "/wp/v2/blocks", footnotes);
+    assert_eq!(served.status, 501);
+    // Media and menu items are not written, and a format is checked
+    // against its schema.
     for (method, target, body) in [
         ("POST", "/wp/v2/media", ""),
         ("DELETE", "/wp/v2/menu-items/1&force=1", ""),
-        (
-            "POST",
-            "/wp/v2/blocks",
-            r#"{"title":"x","wp_pattern_category":[]}"#,
-        ),
-        ("POST", "/wp/v2/posts/1/autosaves", r#"{"title":"x"}"#),
     ] {
         let served = answered("administrator", method, target, body);
         assert_eq!(served.status, 501, "{target}");

@@ -1,0 +1,44 @@
+# The rows PHP WordPress writes for the action rest-blocks-categories (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 22:03:24 to 2026-11-16 22:03:24 UTC.
+# %wp_posts:1% is 851.
+# %wp_posts:2% is 852.
+# %wp_posts:3% is 853.
+# %wp_posts:4% is 854.
+# %wp_posts:5% is 856.
+# %wp_terms:1% is 861.
+# %wp_terms:2% is 862.
+# %wp_term_taxonomy:1% is 861.
+# %wp_term_taxonomy:2% is 862.
+wp_posts	%wp_posts:3%	~	post_modified	2026-11-03 10:00:00	%now%
+wp_posts	%wp_posts:3%	~	post_modified_gmt	2026-11-03 10:00:00	%now%
+wp_posts	%wp_posts:5%	+	ID	%wp_posts:5%
+wp_posts	%wp_posts:5%	+	comment_count	0
+wp_posts	%wp_posts:5%	+	comment_status	closed
+wp_posts	%wp_posts:5%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:5%
+wp_posts	%wp_posts:5%	+	menu_order	0
+wp_posts	%wp_posts:5%	+	ping_status	closed
+wp_posts	%wp_posts:5%	+	pinged	
+wp_posts	%wp_posts:5%	+	post_author	1
+wp_posts	%wp_posts:5%	+	post_content	<!-- wp:paragraph -->\n<p>Synced call to action</p>\n<!-- /wp:paragraph -->
+wp_posts	%wp_posts:5%	+	post_content_filtered	
+wp_posts	%wp_posts:5%	+	post_date	%now%
+wp_posts	%wp_posts:5%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:5%	+	post_excerpt	
+wp_posts	%wp_posts:5%	+	post_mime_type	
+wp_posts	%wp_posts:5%	+	post_modified	%now%
+wp_posts	%wp_posts:5%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:5%	+	post_name	%wp_posts:3%-revision-v1
+wp_posts	%wp_posts:5%	+	post_parent	%wp_posts:3%
+wp_posts	%wp_posts:5%	+	post_password	
+wp_posts	%wp_posts:5%	+	post_status	inherit
+wp_posts	%wp_posts:5%	+	post_title	Call to action
+wp_posts	%wp_posts:5%	+	post_type	revision
+wp_posts	%wp_posts:5%	+	to_ping	
+wp_term_relationships	%wp_posts:3%,%wp_term_taxonomy:1%	-	object_id	%wp_posts:3%
+wp_term_relationships	%wp_posts:3%,%wp_term_taxonomy:1%	-	term_order	0
+wp_term_relationships	%wp_posts:3%,%wp_term_taxonomy:1%	-	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_relationships	%wp_posts:3%,%wp_term_taxonomy:2%	+	object_id	%wp_posts:3%
+wp_term_relationships	%wp_posts:3%,%wp_term_taxonomy:2%	+	term_order	0
+wp_term_relationships	%wp_posts:3%,%wp_term_taxonomy:2%	+	term_taxonomy_id	%wp_term_taxonomy:2%
+wp_term_taxonomy	%wp_term_taxonomy:1%	~	count	1	0
+wp_term_taxonomy	%wp_term_taxonomy:2%	~	count	0	1

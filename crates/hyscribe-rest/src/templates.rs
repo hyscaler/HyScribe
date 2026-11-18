@@ -7,6 +7,7 @@
 
 pub(crate) mod content;
 mod query;
+mod write;
 
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, is_empty_string};
@@ -14,13 +15,15 @@ use hyscribe_render::date::{Zone, format};
 use hyscribe_render::post::admin_title;
 
 use crate::fields::{fields_for_response, is_field_included, links_wanted};
-use crate::request::{Arg, Params, Sanitize, required, string_arg};
+use crate::request::{Arg, Params, Sanitize, string_arg, typed};
 use crate::response::{Response, RestError, list, object, text};
 use crate::types::{can_edit_any, context_arg};
 use crate::{Context, Endpoint};
 
 use content::resolve_patterns;
-use query::{Kind, Query, Template, file_template, hierarchy, resolve, templates, theme};
+pub(crate) use query::Template;
+use query::{Kind, Query, file_template, hierarchy, resolve, templates, theme};
+pub(crate) use write::writing;
 
 /// The template's ID: a theme folder, maybe in a subfolder, and a slug.
 const ID: &str = "([^\\/:<>\\*\\?\"\\|]+(?:\\/[^\\/:<>\\*\\?\"\\|]+)?)[\\/\\w%-]+";
@@ -76,8 +79,8 @@ fn per_kind(
     })
 }
 
-/// A write endpoint, not ported: its permission check, which `Allow` and
-/// links read, after its `args`.
+/// A write endpoint, which [`writing`] plans: its permission check, which
+/// `Allow` and links read, after its `args`.
 fn write(args: Vec<Arg>) -> Endpoint {
     Endpoint {
         args,
@@ -87,10 +90,7 @@ fn write(args: Vec<Arg>) -> Endpoint {
 }
 
 pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
-    let (kind, rest) = [Kind::Template, Kind::Part].into_iter().find_map(|kind| {
-        let rest = regex.strip_prefix(&format!("/wp/v2/{}", base(kind)))?;
-        Some((kind, rest))
-    })?;
+    let (kind, rest) = write::route(regex)?;
     let id = Arg {
         name: "id",
         schema: object([("type", text("string"))]),
@@ -118,7 +118,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                     |context, params| items(context, params, Kind::Part),
                 ),
             },
-            write(vec![required("slug")]),
+            write(write::save_args(kind, true)),
         ]),
         "/lookup" => Some(vec![Endpoint {
             args: vec![
@@ -145,7 +145,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         }]),
         _ if rest == format!("/(?P<id>{ID})") => Some(vec![
             Endpoint {
-                args: vec![id, context_arg()],
+                args: vec![id.clone(), context_arg()],
                 permission: read,
                 callback: per_kind(
                     kind,
@@ -153,8 +153,11 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                     |context, params| item(context, params, Kind::Part),
                 ),
             },
-            write(Vec::new()),
-            write(Vec::new()),
+            write([vec![id.clone()], write::save_args(kind, false)].concat()),
+            write(vec![
+                id,
+                typed("force", r#"{"type":"boolean","default":false}"#),
+            ]),
         ]),
         _ => None,
     }
@@ -323,18 +326,22 @@ fn author_text(context: &Context, template: &Template) -> Vec<u8> {
     }
 }
 
-/// `prepare_item_for_response()` by the controller of `kind`.
+/// `prepare_item_for_response()` by the controller of `kind`, through
+/// `rest_prepare_{$post_type}`.
 fn prepare(
     context: &Context,
     params: &Params,
     template: &Template,
     kind: Kind,
 ) -> Result<Response, RestError> {
-    if context.head {
-        return Ok(Response::new(Value::Array(Vec::new()), 200));
-    }
-    resolve_patterns(&template.content)
-        .and_then(|content| prepare_resolved(context, params, template, kind, &content))
+    let response = if context.head {
+        Ok(Response::new(Value::Array(Vec::new()), 200))
+    } else {
+        resolve_patterns(&template.content)
+            .and_then(|content| prepare_resolved(context, params, template, kind, &content))
+    };
+    let hook = format!("rest_prepare_{}", kind.name());
+    response.map(|response| crate::hooks::apply_filters(&hook, response, &[template, params]))
 }
 
 /// [`prepare`] of a template whose patterns are resolved in `content`.

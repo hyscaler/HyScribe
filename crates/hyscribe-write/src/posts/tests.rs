@@ -1006,11 +1006,133 @@ async fn what_php_refuses_is_refused() {
     assert!(matches!(Error::from(err), Error::Db(_)));
 }
 
+/// Templates and parts, whose rows the REST goldens check
+/// (`rest-templates-*`, `rest-template-parts-*`): their theme and area by
+/// name, a new term made and counted over the types it is of, their
+/// `meta_input`, slugs unique within the theme of the post or else the
+/// active one, nothing in them refused, and deleting a part leaves its terms.
+#[tokio::test]
+async fn templates_take_their_terms() {
+    let one = ONE_AT_A_TIME.lock().await;
+    // A statement that fails stops a template's update or insert there,
+    // its slug checked in its theme, its terms or its meta.
+    let mut budget = 0;
+    loop {
+        let result = rolled_back(async |w, ctx| {
+            let template = || PostArgs {
+                post_type: "wp_template".into(),
+                status: "publish".into(),
+                name: Some(b"index".to_vec()),
+                title: b"Index".to_vec(),
+                tax_input: vec![(Taxonomy::WpTheme, b"twentytwentyfive".to_vec())],
+                meta_input: vec![("origin", Value::String(b"theme".to_vec()))],
+                ..PostArgs::default()
+            };
+            let first = wp_insert_post(w, ctx, template()).await?;
+            w.fail_after(budget);
+            // Updated, its slug is checked within its own theme term.
+            let renamed = |args: &mut PostArgs| args.name = Some(b"index".to_vec());
+            wp_update_post(w, ctx, first, &renamed).await?;
+            wp_insert_post(w, ctx, template()).await
+        })
+        .await;
+        match result {
+            Err(Error::Db(_)) => budget += 1,
+            done => {
+                done.unwrap();
+                break;
+            }
+        }
+    }
+    assert!(budget > 5);
+    drop(one);
+    templates_are_written().await;
+}
+
+async fn templates_are_written() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let found = rolled_back(async |w, ctx| {
+        let template = |post_type: &str, theme: &str, area: Option<&str>| {
+            let mut tax_input = vec![(Taxonomy::WpTheme, theme.as_bytes().to_vec())];
+            tax_input
+                .extend(area.map(|area| (Taxonomy::TemplatePartArea, area.as_bytes().to_vec())));
+            PostArgs {
+                post_type: post_type.into(),
+                status: "publish".into(),
+                name: Some(b"index".to_vec()),
+                title: b"Index".to_vec(),
+                content: b"<!-- wp:paragraph /-->".to_vec(),
+                tax_input,
+                meta_input: vec![("origin", Value::String(b"theme".to_vec()))],
+                ..PostArgs::default()
+            }
+        };
+        let first =
+            wp_insert_post(w, ctx, template("wp_template", "twentytwentyfive", None)).await?;
+        let second =
+            wp_insert_post(w, ctx, template("wp_template", "twentytwentyfive", None)).await?;
+        let other = wp_insert_post(w, ctx, template("wp_template", "other", None)).await?;
+        // Updated, its slug is unique within its own theme.
+        let renamed = |args: &mut PostArgs| args.name = Some(b"index".to_vec());
+        wp_update_post(w, ctx, other, &renamed).await?;
+        let part = wp_insert_post(
+            w,
+            ctx,
+            template("wp_template_part", "twentytwentyfive", Some("header")),
+        )
+        .await?;
+        let mut names = Vec::new();
+        for id in [first, second, other, part] {
+            names.push(w.post(id).await?.map(|post| post.name).unwrap_or_default());
+        }
+        let origin = get_metadata(w, Meta::Post, first, "origin").await?;
+        let (area, _) = w.object_terms(part, "wp_template_part_area").await?[0];
+        let area = w
+            .term_in("wp_template_part_area", area)
+            .await?
+            .unwrap_or_default();
+        let (theme, _) = w.object_terms(part, "wp_theme").await?[0];
+        let theme = w.term_in("wp_theme", theme).await?.unwrap_or_default();
+        let empty = PostArgs {
+            title: Vec::new(),
+            content: Vec::new(),
+            ..template("wp_template", "twentytwentyfive", None)
+        };
+        let refused = wp_insert_post(w, ctx, empty).await;
+        // A long percent-encoded slug, taken, is not cut short.
+        let long = PostArgs {
+            name: Some(b"%c3%a9".repeat(40)),
+            ..template("wp_template", "twentytwentyfive", None)
+        };
+        wp_insert_post(w, ctx, long.clone()).await?;
+        let cut = wp_insert_post(w, ctx, long).await;
+        let deleted = wp_delete_post(w, ctx, part, true).await?;
+        let left = w.object_terms(part, "wp_theme").await?;
+        Ok((
+            names,
+            origin,
+            (area.name, area.count, theme.count),
+            (refused, cut),
+            deleted,
+            left,
+        ))
+    })
+    .await
+    .unwrap();
+    let (names, origin, counts, refused, deleted, left) = found;
+    let names: Vec<&[u8]> = names.iter().map(Vec::as_slice).collect();
+    assert_eq!(names, [&b"index"[..], b"index-2", b"index", b"index"]);
+    assert_eq!(origin, vec![Value::String(b"theme".to_vec())]);
+    assert_eq!(counts, (b"header".to_vec(), 1, 3));
+    assert!(invalid(refused.0, "empty_content") && unported(refused.1));
+    assert!(deleted && left.is_empty());
+}
+
 /// Navigation menus and synced patterns, whose rows the REST goldens check
 /// (`rest-navigation-*`, `rest-blocks-*`): a pattern with nothing in it is
 /// refused as a post is, a menu is not, and both are core types, whose
 /// GUIDs follow the posts' permalink structure, their slugs unique per type;
-/// a pattern in a category is not deleted, as its categories are not ported.
+/// a pattern in a category leaves it when deleted, its count recomputed.
 #[tokio::test]
 async fn navigation_menus_and_patterns() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -1043,7 +1165,6 @@ async fn navigation_menus_and_patterns() {
         assert_eq!(typed.comment_status, "closed", "{post_type}");
     }
     assert!(insert_rolled_back(empty("wp_navigation")).await.is_ok());
-    // A pattern's categories are not ported, so one in a category stays.
     let categorised = rolled_back(async |w, ctx| {
         let args = PostArgs {
             post_type: "wp_block".into(),
@@ -1054,10 +1175,17 @@ async fn navigation_menus_and_patterns() {
         let taxonomy = (term, "wp_pattern_category");
         let term_taxonomy = w.insert_term_taxonomy(taxonomy, b"", 0).await?;
         w.add_relationship(id, term_taxonomy).await?;
-        wp_delete_post(w, ctx, id, true).await
+        w.set_term_count(term_taxonomy, 1).await?;
+        let deleted = wp_delete_post(w, ctx, id, true).await?;
+        let left = w.term_post_count(term_taxonomy, &["publish"], &["wp_block"]);
+        Ok((
+            deleted,
+            left.await?,
+            w.object_terms(id, "wp_pattern_category").await?,
+        ))
     })
     .await;
-    assert!(unported(categorised));
+    assert_eq!(categorised.unwrap(), (true, 0, Vec::new()));
 }
 
 #[tokio::test]

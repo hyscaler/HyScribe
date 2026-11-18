@@ -19,6 +19,7 @@ use super::prepare::writes_or_unported;
 use super::{Kind, get_post, is_sticky, prepare, render_request, set};
 use crate::request::{Arg, Params};
 use crate::response::{Response, RestError, object, text};
+use crate::templates::Template;
 use crate::{Context, schema};
 
 /// What a create or update saves: `wp_insert_post()`'s fields where the
@@ -72,6 +73,16 @@ pub struct Save {
     pub categories: Option<Vec<u64>>,
     /// After the save: `wp_set_object_terms()` of these tags' IDs.
     pub tags: Option<Vec<u64>>,
+    /// After the save: `wp_set_object_terms()` of these pattern categories' IDs.
+    pub pattern_categories: Option<Vec<u64>>,
+    /// After the terms: the meta `WP_REST_Meta_Fields::update_value()`
+    /// updates, each key with its value.
+    pub meta: Vec<(&'static str, Value)>,
+    /// `tax_input`: a flat taxonomy's terms, by name, for
+    /// `wp_set_post_terms()`.
+    pub tax_input: Vec<(&'static str, Vec<u8>)>,
+    /// `meta_input`, which `wp_insert_post()` updates.
+    pub meta_input: Vec<(&'static str, Value)>,
 }
 
 /// What a write does.
@@ -100,6 +111,9 @@ pub enum Write {
     /// `update_option()` of each setting's option, `delete_option()` for
     /// none.
     Settings(Box<crate::settings::SettingsSave>),
+    /// `WP_REST_Autosaves_Controller::create_item()`'s autosave of the post
+    /// the save names, with the fields it gives.
+    Autosave(Box<Save>),
 }
 
 /// A write whose checks passed.
@@ -119,6 +133,8 @@ pub struct Plan {
     pub(crate) previous: Value,
     /// A deleted post, which the post type's hooks are given.
     deleted: Option<Post>,
+    /// A template as it was found before its write, which a trash answers.
+    pub(crate) template: Option<Box<Template>>,
 }
 
 impl Plan {
@@ -131,6 +147,7 @@ impl Plan {
             write,
             previous,
             deleted: None,
+            template: None,
         }
     }
 
@@ -223,7 +240,7 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
 
 /// `check_status()`: the post's own status is valid whatever the schema
 /// says.
-fn status_args(context: &Context, params: &Params, mut args: Vec<Arg>) -> Vec<Arg> {
+pub(crate) fn status_args(context: &Context, params: &Params, mut args: Vec<Arg>) -> Vec<Arg> {
     let post = set(params, "id")
         .then(|| get_post(context, params, Kind::of(params.route)).ok())
         .flatten();
@@ -314,6 +331,15 @@ fn status(context: &Context, kind: Kind, status: String) -> Result<String, RestE
 /// `create_item()` and `update_item()` up to their writes, with
 /// `prepare_item_for_database()`.
 fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
+    planned_save(context, params, |save| Write::Save(Box::new(save)))
+}
+
+/// [`plan_save`], its save written as `write` says.
+pub(crate) fn planned_save(
+    context: &Context,
+    params: &Params,
+    write: fn(Save) -> Write,
+) -> Result<Plan, RestError> {
     let kind = Kind::of(params.route);
     let existing = match params.get("id") {
         Some(_) => Some(get_post(context, params, kind)?),
@@ -395,7 +421,7 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
     if slug && matches!(slugged, Some("draft" | "pending")) {
         save.unique_slug = Some(save.parent.unwrap_or_default());
     }
-    after_save(context, params, kind, &mut save);
+    after_save(context, params, kind, &mut save)?;
     let hook = format!("rest_pre_insert_{}", kind.name());
     let save = crate::hooks::apply_filters(&hook, save, &[params]);
     let unfiltered_html = context.can("unfiltered_html");
@@ -404,9 +430,10 @@ fn plan_save(context: &Context, params: &Params) -> Result<Plan, RestError> {
         user: context.user,
         can_publish,
         unfiltered_html,
-        write: Write::Save(Box::new(save)),
+        write: write(save),
         previous: Value::Null,
         deleted: None,
+        template: None,
     })
 }
 
@@ -466,22 +493,30 @@ fn protection(
 /// What `create_item()` and `update_item()` do once the post is saved:
 /// stickiness (a create always), the featured image, the template and the
 /// terms.
-fn after_save(context: &Context, params: &Params, kind: Kind, save: &mut Save) {
+fn after_save(
+    context: &Context,
+    params: &Params,
+    kind: Kind,
+    save: &mut Save,
+) -> Result<(), RestError> {
+    let ids = |name| {
+        let ids = params.get(name)?.as_array().unwrap_or_default();
+        // The terms check refused 0, which no user may assign.
+        let ids = ids.iter();
+        Some(
+            ids.filter_map(|(_, id)| u64::try_from(id.to_int()).ok())
+                .collect(),
+        )
+    };
     if kind == Kind::Post {
         let sticky = params.get("sticky").map(|sticky| !sticky.is_empty());
         save.sticky = sticky.or((save.id == 0).then_some(false));
-        let ids = |name| {
-            let ids = params
-                .get(name)
-                .and_then(Value::as_array)
-                .unwrap_or_default();
-            // The terms check refused 0, which no user may assign.
-            let ids = ids.iter();
-            ids.filter_map(|(_, id)| u64::try_from(id.to_int()).ok())
-                .collect()
-        };
-        save.categories = params.get("categories").map(|_| ids("categories"));
-        save.tags = params.get("tags").map(|_| ids("tags"));
+        save.categories = ids("categories");
+        save.tags = ids("tags");
+    }
+    if kind == Kind::Block {
+        save.pattern_categories = ids("wp_pattern_category");
+        save.meta = pattern_meta(params)?;
     }
     // `set_post_thumbnail()` keeps an image `wp_get_attachment_image()`
     // shows and deletes the meta for any other post, as
@@ -507,6 +542,7 @@ fn after_save(context: &Context, params: &Params, kind: Kind, save: &mut Save) {
             });
     }
     save.template = params.get("template").map(Value::to_php_string);
+    Ok(())
 }
 
 /// `check_template()`: no template, the post's own, or one of
@@ -556,6 +592,24 @@ pub(super) fn check_template(
     })
 }
 
+/// `update_value()` of a synced pattern's `meta`, an array: its
+/// `wp_pattern_sync_status` where it is one of the enum's strings. PHP
+/// checks the meta after the post is written, so a value it refuses, or
+/// resets (`null`), and `footnotes`, revisioned with the post, are not
+/// ported.
+fn pattern_meta(params: &Params) -> Result<Vec<(&'static str, Value)>, RestError> {
+    let meta = params.get("meta").and_then(Value::as_array);
+    let given = |key| meta.and_then(|meta| lookup(meta, key));
+    match given("wp_pattern_sync_status") {
+        _ if given("footnotes").is_some() => Err(RestError::not_ported()),
+        None => Ok(Vec::new()),
+        Some(status @ Value::String(text)) if text == b"partial" || text == b"unsynced" => {
+            Ok(vec![("wp_pattern_sync_status", status.clone())])
+        }
+        Some(_) => Err(RestError::not_ported()),
+    }
+}
+
 /// The answer after the save renders the content as stored, for the
 /// logged in user every write has, which must be ported: kses filters it
 /// unless the user may post unfiltered HTML.
@@ -567,17 +621,32 @@ fn answerable(
 ) -> Result<(), RestError> {
     let stored = existing.map(|post| post.content.clone());
     let content = save.content.clone().or(stored).unwrap_or_default();
-    let content = if unfiltered_html {
-        content
-    } else {
-        let site = context.option("siteurl").unwrap_or_default();
-        let host = hyscribe_render::link::host(&site);
-        hyscribe_render::kses::wp_kses_post(&content, &host)
-    };
+    let (content, _) = as_stored(context, unfiltered_html, content, b"");
     if writes_or_unported(&content, true) {
         return Err(RestError::not_ported());
     }
     Ok(())
+}
+
+/// `content` and `title` as `sanitize_post()` stores them: the title
+/// trimmed, and both filtered by kses unless the user may post unfiltered
+/// HTML.
+pub(crate) fn as_stored(
+    context: &Context,
+    unfiltered_html: bool,
+    content: Vec<u8>,
+    title: &[u8],
+) -> (Vec<u8>, Vec<u8>) {
+    let title = hyscribe_phpser::php_trim(title);
+    if unfiltered_html {
+        return (content, title.to_vec());
+    }
+    let site = context.option("siteurl").unwrap_or_default();
+    let host = hyscribe_render::link::host(&site);
+    (
+        hyscribe_render::kses::wp_kses_post(&content, &host),
+        hyscribe_render::kses::wp_kses_data(title),
+    )
 }
 
 /// `delete_item()` up to its write: `force` deletes, else the post goes
@@ -613,6 +682,7 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
         write,
         previous: previous.unwrap_or_default(),
         deleted,
+        template: None,
     })
 }
 

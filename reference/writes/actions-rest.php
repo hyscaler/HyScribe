@@ -31,6 +31,21 @@ $rest_site_posts = function () {
 	$wpdb->query( $insert[0] );
 };
 
+// The rows of a state beside the list it is recorded with: each INSERT of
+// reference/rest/<file>, which the tests insert as they are.
+$rest_state = function ( $file ) {
+	return function () use ( $file ) {
+		global $wpdb;
+		$sql = file_get_contents( __DIR__ . '/' . $file );
+		preg_match_all( '/^INSERT INTO .*;$/m', $sql, $inserts );
+		foreach ( $inserts[0] as $insert ) {
+			$wpdb->query( $insert );
+		}
+	};
+};
+
+$paragraph = fn( $text ) => "<!-- wp:paragraph -->\n<p>$text</p>\n<!-- /wp:paragraph -->";
+
 return array(
 	'rest-posts-create'         => array(
 		'action' => function () use ( $rest_send ) {
@@ -236,6 +251,252 @@ return array(
 		'setup'  => $rest_site_posts,
 		'action' => function () use ( $rest_send ) {
 			$rest_send( 'DELETE', '/wp/v2/blocks/854', array(), array( 'force' => '1' ) );
+		},
+	),
+	'rest-blocks-create-unsynced'     => array(
+		'action' => function () use ( $rest_send ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/blocks',
+				array(
+					'title' => 'Unsynced',
+					'meta'  => array( 'wp_pattern_sync_status' => 'unsynced' ),
+				)
+			);
+		},
+	),
+	'rest-blocks-create-categorised'  => array(
+		'setup'  => $rest_state( 'site-writes.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/blocks',
+				array(
+					'title'               => 'In two',
+					'content'             => $paragraph( 'Two' ),
+					'status'              => 'publish',
+					'wp_pattern_category' => array( 861, 862, 999 ),
+					'meta'                => array(
+						'other'                  => 'x',
+						'wp_pattern_sync_status' => 'partial',
+					),
+				)
+			);
+		},
+	),
+	'rest-blocks-categories'          => array(
+		'setup'  => $rest_state( 'site-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send( 'POST', '/wp/v2/blocks/853', array( 'wp_pattern_category' => array( 862 ) ) );
+		},
+	),
+	'rest-blocks-draft-meta'          => array(
+		'setup'  => $rest_state( 'site-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/blocks/854',
+				array(
+					'meta'                => array( 'wp_pattern_sync_status' => 'partial' ),
+					'wp_pattern_category' => array( 861 ),
+				)
+			);
+		},
+	),
+	'rest-blocks-delete-categorised'  => array(
+		'setup'  => $rest_state( 'site-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send( 'DELETE', '/wp/v2/blocks/853', array(), array( 'force' => 'true' ) );
+		},
+	),
+	'rest-templates-create'           => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/templates',
+				array(
+					'slug'        => 'my-template',
+					'title'       => 'My template',
+					'content'     => $paragraph( 'Mine' ),
+					'description' => 'Made here',
+				)
+			);
+		},
+	),
+	'rest-templates-create-suggested' => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/templates',
+				array(
+					'slug'             => 'page-about',
+					'title'            => array( 'raw' => 'About' ),
+					'content'          => array( 'raw' => '<!-- wp:post-content /-->' ),
+					'author'           => 1,
+					'is_wp_suggestion' => true,
+				)
+			);
+		},
+	),
+	'rest-templates-create-taken'     => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/templates',
+				array(
+					'slug'    => 'my-custom',
+					'title'   => 'Again',
+					'content' => '<!-- wp:post-title /-->',
+				)
+			);
+		},
+	),
+	'rest-template-parts-create'      => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/template-parts',
+				array(
+					'slug'    => 'my-sidebar',
+					'title'   => 'My sidebar',
+					'area'    => 'header',
+					'content' => $paragraph( 'Side' ),
+				)
+			);
+		},
+	),
+	'rest-template-parts-create-area' => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/template-parts',
+				array(
+					'slug'  => 'odd-part',
+					'title' => 'Odd',
+					'area'  => 'bogus',
+				)
+			);
+		},
+	),
+	'rest-templates-customise'        => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send( 'POST', '/wp/v2/templates/twentytwentyfive//page', array( 'content' => $paragraph( 'Customised' ) ) );
+		},
+	),
+	'rest-template-parts-customise'   => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send( 'PUT', '/wp/v2/template-parts/twentytwentyfive//footer', array( 'content' => $paragraph( 'Foot' ) ) );
+		},
+	),
+	'rest-templates-update'           => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/templates/twentytwentyfive//index',
+				array(
+					'title'   => 'Index again',
+					'content' => $paragraph( 'Changed' ),
+				)
+			);
+		},
+	),
+	'rest-template-parts-update'      => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send(
+				'PATCH',
+				'/wp/v2/template-parts/twentytwentyfive//header',
+				array(
+					'area'        => 'footer',
+					'description' => 'Moved',
+				)
+			);
+		},
+	),
+	'rest-templates-revert'           => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send( 'POST', '/wp/v2/templates/twentytwentyfive//page-no-title', array( 'source' => 'theme' ) );
+		},
+	),
+	'rest-templates-trash'            => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send( 'DELETE', '/wp/v2/templates/twentytwentyfive//my-custom' );
+		},
+	),
+	'rest-templates-delete'           => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send( 'DELETE', '/wp/v2/templates/twentytwentyfive//my-custom', array(), array( 'force' => 'true' ) );
+		},
+	),
+	'rest-template-parts-delete'      => array(
+		'setup'  => $rest_state( 'template-writes.sql' ),
+		'action' => function () use ( $rest_send ) {
+			$rest_send( 'DELETE', '/wp/v2/template-parts/twentytwentyfive//header', array(), array( 'force' => '1' ) );
+		},
+	),
+	'rest-autosaves-draft'            => array(
+		'setup'  => $rest_state( 'autosaves.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/pages/863/autosaves',
+				array(
+					'title'   => 'Page autosaved',
+					'content' => $paragraph( 'Page words' ),
+				)
+			);
+		},
+	),
+	'rest-autosaves-new'              => array(
+		'setup'  => $rest_state( 'autosaves.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/posts/866/autosaves',
+				array(
+					'title'   => 'Held, autosaved',
+					'content' => $paragraph( 'Held' ),
+				)
+			);
+		},
+	),
+	'rest-autosaves-other'            => array(
+		'setup'  => $rest_state( 'autosaves.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/posts/861/autosaves',
+				array(
+					'title'   => 'Draft autosaved',
+					'content' => $paragraph( 'Later words' ),
+					'excerpt' => '',
+				)
+			);
+		},
+	),
+	'rest-autosaves-again'            => array(
+		'setup'  => $rest_state( 'autosaves.sql' ),
+		'action' => function () use ( $rest_send, $paragraph ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/posts/862/autosaves',
+				array(
+					'title'   => 'Published',
+					'content' => $paragraph( 'Out there, changed' ),
+					'excerpt' => '',
+				)
+			);
 		},
 	),
 	'rest-categories-create'    => array(

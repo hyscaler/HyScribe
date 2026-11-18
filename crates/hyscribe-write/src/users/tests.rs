@@ -27,7 +27,7 @@ async fn insert_ok(write: &mut Write<'_>, data: UserData) -> u64 {
     wp_insert_user(write, &data).await.unwrap()
 }
 
-fn refused(result: Result<u64, Error>, code: &str) -> bool {
+fn refused<T>(result: Result<T, Error>, code: &str) -> bool {
     matches!(result, Err(Error::Refused(refused)) if refused == code)
 }
 
@@ -166,7 +166,15 @@ async fn updates_a_user() {
                 role: some("editor"),
                 ..UserData::default()
             };
-            assert_eq!(wp_update_user(write, &new).await.unwrap(), id);
+            // The new address is told to the old one; no password was given.
+            let updated = Updated {
+                id,
+                login: b"oracle-update".to_vec(),
+                email: b"oracle-update@example.test".to_vec(),
+                password_changed: false,
+                new_email: some("new@example.test"),
+            };
+            assert_eq!(wp_update_user(write, &new).await.unwrap(), updated);
         },
     )
     .await;
@@ -185,7 +193,9 @@ async fn updates_a_password() {
             user_pass: some("Another pass phrase"),
             ..UserData::default()
         };
-        wp_update_user(write, &new).await.unwrap();
+        let updated = wp_update_user(write, &new).await.unwrap();
+        assert!(updated.password_changed);
+        assert_eq!(updated.new_email, None);
         let hash = write.user(id).await.unwrap().unwrap().1.pass;
         assert!(check_password(b"Another pass phrase", hash.as_bytes()));
     })
@@ -485,9 +495,12 @@ async fn an_update_keeps_the_reset_key_and_the_hash() {
             id,
             first_name: some("New"),
             user_pass: Some(user.pass.clone().into_bytes()),
+            user_email: some("oracle-keep@example.test"),
             ..UserData::default()
         };
-        wp_update_user(write, &same).await.unwrap();
+        let updated = wp_update_user(write, &same).await.unwrap();
+        assert!(!updated.password_changed);
+        assert_eq!(updated.new_email, None);
         let (_, updated) = write.user(id).await.unwrap().unwrap();
         assert_eq!(updated.pass, user.pass);
         assert_eq!(updated.activation_key, "1:key");
@@ -495,6 +508,23 @@ async fn an_update_keeps_the_reset_key_and_the_hash() {
         let caps = get_metadata(write, Meta::User, id, "wp_capabilities").await;
         let editor = Value::Array(vec![(Key::String(b"editor".to_vec()), Value::Bool(true))]);
         assert_eq!(caps.unwrap(), [editor]);
+        // A quote in the old address is slashed before the two are compared.
+        let quoted = UserData {
+            id,
+            user_email: some("o'keep@example.test"),
+            ..UserData::default()
+        };
+        wp_update_user(write, &quoted).await.unwrap();
+        let updated = wp_update_user(write, &quoted).await.unwrap();
+        assert_eq!(updated.new_email, quoted.user_email);
+        let slashed = UserData {
+            user_email: some("o\\'keep@example.test"),
+            ..quoted
+        };
+        assert_eq!(
+            wp_update_user(write, &slashed).await.unwrap().new_email,
+            None
+        );
     })
     .await;
 }

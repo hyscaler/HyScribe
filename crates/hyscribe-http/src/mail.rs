@@ -10,9 +10,13 @@ use std::sync::Arc;
 
 use hyscribe_config::Constants;
 use hyscribe_db::{DbError, Write};
-use hyscribe_mail::{Comment, Mail, Mailer, Post, PostAuthor, notify_moderator, notify_postauthor};
+use hyscribe_mail::{
+    Comment, Mail, Mailer, Post, PostAuthor, User, email_changed, notify_moderator,
+    notify_postauthor, password_changed,
+};
 use hyscribe_phpser::Value;
 use hyscribe_write::caps::Caps;
+use hyscribe_write::users::Updated;
 
 /// `retrieve_password()`'s error when `wp_mail()` fails.
 pub(crate) const EMAIL_FAILURE: &str = concat!(
@@ -119,6 +123,32 @@ impl MailSite {
             admin_email: &self.admin_email,
         }
     }
+}
+
+/// `wp_update_user()`'s notices to the user of `updated` on the site at
+/// `home`, queued in `outbox`: the password's change, then the address's.
+pub(crate) async fn queue_changes(
+    write: &mut Write<'_>,
+    home: &str,
+    updated: &Updated,
+    outbox: &Outbox,
+) -> Result<(), DbError> {
+    let site = MailSite::read(write, home).await?;
+    let user = User {
+        login: &updated.login,
+        email: &updated.email,
+    };
+    let password = updated
+        .password_changed
+        .then(|| password_changed(&site.site(), &user));
+    let address = updated
+        .new_email
+        .as_ref()
+        .map(|new| email_changed(&site.site(), &user, new));
+    for mail in password.into_iter().chain(address) {
+        outbox.queue(Queued::Background("wp_update_user", mail));
+    }
+    Ok(())
 }
 
 /// An option as `get_option()` tests it: set and not empty.

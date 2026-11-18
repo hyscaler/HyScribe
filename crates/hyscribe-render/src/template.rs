@@ -273,7 +273,7 @@ impl<'a> Renderer<'a> {
                 comment: None,
                 comment_depth: 0,
                 terms: Default::default(),
-                loading: Loading::in_the_loop(request.singular),
+                loading: Loading::in_the_loop(request.singular || request.feed),
             },
             assets: Assets::default(),
             open_parts: Vec::new(),

@@ -58,6 +58,33 @@ impl Site for DefaultInstall {
     }
 }
 
+/// A feed's posts are in the loop, as a singular page's are: the first
+/// large image has the high priority and a later one none; a page of other
+/// posts is outside the loop and its images are lazy.
+#[test]
+fn images_of_a_feed_are_in_the_loop() {
+    let theme = twentytwentyfive();
+    let image = br#"<img width="600" height="400" src="http://example.test/a.jpg">"#;
+    let filtered = |request: Request| {
+        let renderer = Renderer::new(&theme, &DefaultInstall, &request);
+        let loading = renderer.context.loading.clone();
+        let first = crate::content_tags::wp_filter_content_tags(&DefaultInstall, &loading, image);
+        let second = crate::content_tags::wp_filter_content_tags(&DefaultInstall, &loading, image);
+        (
+            String::from_utf8(first).unwrap(),
+            String::from_utf8(second).unwrap(),
+        )
+    };
+    let feed = filtered(Request {
+        feed: true,
+        ..Request::default()
+    });
+    assert!(feed.0.contains(r#"fetchpriority="high""#), "{}", feed.0);
+    assert!(!feed.1.contains("fetchpriority"), "{}", feed.1);
+    let archive = filtered(Request::default());
+    assert!(archive.0.contains(r#"loading="lazy""#), "{}", archive.0);
+}
+
 fn render(theme: &Theme, markup: &str) -> String {
     String::from_utf8(render_content(
         theme,

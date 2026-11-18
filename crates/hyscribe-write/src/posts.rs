@@ -28,7 +28,10 @@ mod trash;
 
 pub use autosave::{Revisioned, wp_create_post_autosave};
 pub use date::checkdate as wp_checkdate;
-pub use trash::{stick_post, unstick_post, wp_delete_post, wp_trash_post, wp_untrash_post};
+pub use trash::{
+    AttachmentDeleted, stick_post, unstick_post, wp_delete_attachment, wp_delete_post,
+    wp_trash_post, wp_untrash_post,
+};
 
 /// Who writes and where: what the PHP functions read from the request and
 /// the configuration rather than the database.
@@ -150,7 +153,7 @@ enum Kind {
     Template,
     /// `wp_template_part`.
     TemplatePart,
-    /// A new attachment, which only [`wp_insert_attachment`] makes.
+    /// An attachment, which only [`wp_insert_attachment`] makes.
     Attachment,
 }
 
@@ -166,6 +169,7 @@ impl Kind {
             "wp_block" => Ok(Kind::Block),
             "wp_template" => Ok(Kind::Template),
             "wp_template_part" => Ok(Kind::TemplatePart),
+            "attachment" => Ok(Kind::Attachment),
             _ => Err(Error::Unported("a post type other than post and page")),
         }
     }
@@ -204,8 +208,9 @@ async fn existing(write: &mut Write<'_>, id: u64) -> Result<PostFields> {
 /// `wp_insert_post( $postarr )`: the post's ID.
 pub async fn wp_insert_post(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<u64> {
     let (id, kind, update) = insert(write, ctx, args, None).await?;
-    // wp_after_insert_post: wp_save_post_revision_on_insert().
-    if update {
+    // wp_after_insert_post: wp_save_post_revision_on_insert(), which an
+    // attachment's insert returns before.
+    if update && kind != Kind::Attachment {
         hooks::save_revision(write, ctx, kind, id).await?;
     }
     Ok(id)
@@ -524,6 +529,9 @@ pub async fn wp_publish_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> R
     }
     // Only categories have a default term on a default install.
     let kind = Kind::of(&post.post_type)?;
+    if kind == Kind::Attachment {
+        return Err(Error::Unported("publishing an attachment"));
+    }
     if kind == Kind::Post && write.object_terms(id, "category").await?.is_empty() {
         let default = site::option_int(write, "default_category").await?;
         if default != 0 {
@@ -653,6 +661,9 @@ async fn insert(
         Some(_) => Kind::Attachment,
         None => Kind::of(&post_type)?,
     };
+    if kind == Kind::Attachment && before.is_none() && file.is_none() {
+        return Err(Error::Unported("a new attachment but by an upload"));
+    }
     // The types that support the editor, a title and an excerpt.
     if matches!(
         kind,
@@ -808,6 +819,11 @@ async fn insert(
         let any = Value::String(Vec::new());
         update_metadata(write, Meta::Post, id, "_wp_attached_file", &file, &any).await?;
         return Ok((id, kind, false));
+    }
+    // An attachment's update fires `attachment_updated` alone.
+    if let (Kind::Attachment, Some(before)) = (kind, &before) {
+        hooks::post_updated(write, kind, id, before).await?;
+        return Ok((id, kind, true));
     }
     if truthy(&args.page_template) {
         if args.page_template != b"default" {

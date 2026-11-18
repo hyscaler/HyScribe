@@ -328,7 +328,7 @@ fn id3_box(meta: &Value) -> String {
 }
 
 /// `human_readable_duration()`: `[H:]M:S` in words, empty for any other.
-fn human_readable_duration(duration: &Value) -> String {
+pub fn human_readable_duration(duration: &Value) -> String {
     let Value::String(duration) = duration else {
         return String::new();
     };

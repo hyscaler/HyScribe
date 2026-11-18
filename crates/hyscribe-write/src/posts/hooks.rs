@@ -237,7 +237,8 @@ pub(super) async fn post_updated(
     before: &PostFields,
 ) -> Result<()> {
     let after = super::existing(write, id).await?;
-    if after.status != "publish" || kind.hierarchical() {
+    let inherited = kind == Kind::Attachment && after.status == "inherit";
+    if after.status != "publish" && !inherited || kind.hierarchical() {
         return Ok(());
     }
     if after.name != before.name {

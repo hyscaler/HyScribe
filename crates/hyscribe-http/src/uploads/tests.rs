@@ -330,3 +330,38 @@ async fn bodies_are_refused_past_their_limits() {
     assert_eq!(status("/", (2 << 20) + 1).await, large);
     assert_ne!(status("/", 2 << 20).await, large);
 }
+
+/// An attachment's files are read and deleted only inside the uploads
+/// folder, each below its own folder, as `wp_delete_file_from_directory()`
+/// resolves them; a link is deleted, not what it points to.
+#[test]
+fn files_stay_inside_the_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let uploads = uploads(dir.path());
+    std::fs::create_dir_all(dir.path().join("2026/05")).unwrap();
+    for name in ["2026/05/a.png", "2026/05/b.png", "c.png"] {
+        std::fs::write(dir.path().join(name), b"abc").unwrap();
+    }
+    std::fs::write(outside.path().join("d.png"), b"d").unwrap();
+    let link = dir.path().join("2026/05/d.png");
+    std::os::unix::fs::symlink(outside.path().join("d.png"), &link).unwrap();
+    assert_eq!(uploads.file_size(b"2026/05/a.png"), Some(Some(3)));
+    assert_eq!(uploads.file_size(b"2026/05/none.png"), Some(None));
+    assert_eq!(uploads.file_size(b"/etc/passwd"), None);
+    assert_eq!(uploads.file_size(b"2026/../../x"), None);
+    let pair = |file: &str, folder: &str| (file.as_bytes().to_vec(), folder.as_bytes().to_vec());
+    uploads.delete(&[
+        pair("2026/05/a.png", "2026/05"),
+        pair("c.png", "2026/05"),
+        pair("2026/05", "2026/05"),
+        pair("2026/05/d.png", "2026/05"),
+        pair("2026/05/none.png", "2026/05"),
+        pair("../b.png", ""),
+        pair("2026/05/b.png", "/"),
+    ]);
+    let exists = |name: &str| dir.path().join(name).exists();
+    assert!(!exists("2026/05/a.png") && exists("2026/05/b.png") && exists("c.png"));
+    assert!(exists("2026/05") && link.symlink_metadata().is_ok());
+    assert!(outside.path().join("d.png").exists());
+}

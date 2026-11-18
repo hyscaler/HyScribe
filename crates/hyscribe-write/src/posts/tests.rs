@@ -970,6 +970,146 @@ async fn insert_rolled_back(args: PostArgs) -> Result<u64> {
     rolled_back(async |w, ctx| wp_insert_post(w, ctx, args).await).await
 }
 
+/// `wp_delete_attachment()` refuses what is no attachment, and an
+/// attachment the theme's or site's logo uses, or with a header or
+/// background image set, is not ported, nor through `wp_delete_post()`.
+#[tokio::test]
+async fn attachment_deletes_stop_as_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let post = rolled_back(async |w, ctx| wp_delete_attachment(w, ctx, 1, true).await);
+    assert_eq!(post.await.unwrap(), None);
+    let missing = rolled_back(async |w, ctx| wp_delete_attachment(w, ctx, MISSING, true).await);
+    assert_eq!(missing.await.unwrap(), None);
+    let mods = "theme_mods_twentytwentyfive";
+    for (name, raw) in [
+        (mods, "a:1:{s:11:\"custom_logo\";i:%id%;}"),
+        (mods, "a:1:{s:12:\"header_image\";s:1:\"x\";}"),
+        (mods, "a:1:{s:16:\"background_image\";s:1:\"x\";}"),
+        ("site_logo", "%id%"),
+        ("", ""),
+    ] {
+        let deleted = rolled_back(async |w, ctx| {
+            let args = PostArgs {
+                title: b"A file".to_vec(),
+                mime_type: "image/png".into(),
+                ..PostArgs::default()
+            };
+            let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+            if name.is_empty() {
+                return wp_delete_post(w, ctx, id, true).await.map(|_| None);
+            }
+            set(w, name, raw.replace("%id%", &id.to_string()).as_bytes()).await?;
+            wp_delete_attachment(w, ctx, id, true).await
+        })
+        .await;
+        assert!(unported(deleted), "{name} {raw}");
+    }
+    // A file by its absolute path is not ported.
+    let absolute = rolled_back(async |w, ctx| {
+        let args = PostArgs {
+            title: b"A file".to_vec(),
+            mime_type: "image/png".into(),
+            ..PostArgs::default()
+        };
+        let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+        let file = Value::String(b"/srv/a.png".to_vec());
+        let key = "_wp_attached_file";
+        crate::options::update_metadata(w, Meta::Post, id, key, &file, &Value::Null).await?;
+        wp_delete_attachment(w, ctx, id, true).await
+    })
+    .await;
+    assert!(unported(absolute));
+}
+
+/// An attachment is trashed only with `MEDIA_TRASH` and a Trash that is kept,
+/// and never by a forced delete.
+#[tokio::test]
+async fn attachments_are_trashed_by_the_constants() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let deleted = async |media_trash: bool, empty_trash_days: u32, force: bool| {
+        let kept = rolled_back(async |w, ctx| {
+            let args = PostArgs {
+                title: b"A file".to_vec(),
+                mime_type: "image/png".into(),
+                ..PostArgs::default()
+            };
+            let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+            let constants = hyscribe_config::Constants {
+                media_trash,
+                empty_trash_days,
+                ..ctx.constants
+            };
+            let ctx = Context {
+                constants,
+                ..ctx.clone()
+            };
+            let done = wp_delete_attachment(w, &ctx, id, force).await?;
+            Ok(done.map(|done| matches!(done, AttachmentDeleted::Trashed)))
+        });
+        kept.await.unwrap()
+    };
+    assert_eq!(deleted(true, 30, false).await, Some(true));
+    assert_eq!(deleted(false, 30, false).await, Some(false));
+    assert_eq!(deleted(true, 0, false).await, Some(false));
+    assert_eq!(deleted(true, 30, true).await, Some(false));
+}
+
+/// An attachment that inherits keeps its old slug when it is renamed, one of
+/// another status does not.
+#[tokio::test]
+async fn attachments_keep_their_old_slugs_while_they_inherit() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let old_slugs = async |status: &'static str| {
+        let slugs = rolled_back(async |w, ctx| {
+            let args = PostArgs {
+                title: b"A file".to_vec(),
+                mime_type: "image/png".into(),
+                ..PostArgs::default()
+            };
+            let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+            wp_update_post(w, ctx, id, &|args| {
+                args.name = Some(b"renamed".to_vec());
+                args.status = status.into();
+            })
+            .await?;
+            Ok(crate::options::get_metadata(w, Meta::Post, id, "_wp_old_slug").await?)
+        });
+        slugs.await.unwrap()
+    };
+    assert_eq!(old_slugs("inherit").await.len(), 1);
+    assert!(old_slugs("private").await.is_empty());
+}
+
+/// What no ported function takes, a post of a type other than the ported
+/// ones, is refused by each of them.
+#[tokio::test]
+async fn other_post_types_are_refused() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let refused = rolled_back(async |w, ctx| {
+        let post = existing(w, 1).await?;
+        let menu = PostFields {
+            post_type: "nav_menu_item".into(),
+            ..post
+        };
+        let id = w.insert_post(&menu).await?;
+        let updated = wp_update_post(w, ctx, id, &|_| ()).await.map(drop);
+        let trashed = wp_trash_post(w, ctx, id).await.map(drop);
+        let deleted = wp_delete_post(w, ctx, id, true).await.map(drop);
+        let slug = wp_unique_post_slug(w, b"x".to_vec(), (id, "publish"), "nav_menu_item", 0);
+        let slug = slug.await.map(drop);
+        let menu = PostArgs {
+            post_type: "nav_menu_item".into(),
+            ..oracle_post("publish")
+        };
+        let inserted = wp_insert_post(w, ctx, menu).await.map(drop);
+        Ok([updated, trashed, deleted, slug, inserted])
+    })
+    .await;
+    for result in refused.unwrap() {
+        assert!(unported(result));
+    }
+}
+
 #[tokio::test]
 async fn what_php_refuses_is_refused() {
     let _one = ONE_AT_A_TIME.lock().await;
@@ -1446,6 +1586,55 @@ async fn database_errors_end_every_function() {
         .await?;
         Ok(id)
     };
+    // An attachment with a comment: updated, deleted, and trashed then deleted.
+    let attachment = async |w: &mut Write<'_>, ctx: &Context| {
+        let args = PostArgs {
+            title: b"A file".to_vec(),
+            mime_type: "image/png".into(),
+            ..PostArgs::default()
+        };
+        let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+        let reply = CommentFields {
+            post_id: id,
+            author: b"A reader".to_vec(),
+            author_email: Vec::new(),
+            author_url: Vec::new(),
+            author_ip: Vec::new(),
+            date: "2026-01-01 00:00:00".into(),
+            date_gmt: "2026-01-01 00:00:00".into(),
+            content: b"A comment.".to_vec(),
+            karma: 0,
+            approved: "1".into(),
+            agent: Vec::new(),
+            comment_type: "comment".into(),
+            parent: 0,
+            user_id: 0,
+        };
+        w.insert_comment(&reply).await?;
+        Ok(id)
+    };
+    every_cut(
+        attachment,
+        updating(|args| args.title = b"A renamed file".to_vec()),
+    )
+    .await;
+    let deleting_file = async |w: &mut Write<'_>, ctx: &Context, id| {
+        wp_delete_attachment(w, ctx, id, true).await.map(drop)
+    };
+    every_cut(attachment, deleting_file).await;
+    let trashing_file = async |w: &mut Write<'_>, ctx: &Context, id| {
+        let ctx = Context {
+            constants: hyscribe_config::Constants {
+                media_trash: true,
+                ..ctx.constants
+            },
+            ..ctx.clone()
+        };
+        let trashed = wp_delete_attachment(w, &ctx, id, false).await?;
+        assert_eq!(trashed, Some(AttachmentDeleted::Trashed));
+        wp_delete_attachment(w, &ctx, id, false).await.map(drop)
+    };
+    every_cut(attachment, trashing_file).await;
     every_cut(none, inserting(oracle_post("publish"))).await;
     every_cut(none, inserting(future_post())).await;
     every_cut(
@@ -1576,31 +1765,14 @@ async fn attachments_are_not_ported() {
         };
         Ok(w.insert_post(&fields).await?)
     };
-    let refused = [
-        rolled_back(async |w, ctx| {
-            let id = attachment(w, "inherit").await?;
-            wp_update_post(w, ctx, id, &|_| ()).await.map(drop)
-        })
-        .await,
-        rolled_back(async |w, ctx| {
-            let id = attachment(w, "inherit").await?;
-            wp_trash_post(w, ctx, id).await.map(drop)
-        })
-        .await,
-        rolled_back(async |w, ctx| {
-            let id = attachment(w, "trash").await?;
-            wp_untrash_post(w, ctx, id, false).await.map(drop)
-        })
-        .await,
-        rolled_back(async |w, ctx| {
-            let id = attachment(w, "inherit").await?;
-            wp_delete_post(w, ctx, id, true).await.map(drop)
-        })
-        .await,
-    ];
-    for result in refused {
-        assert!(unported(result));
-    }
+    // Its own functions update, trash and delete it, which the media library's
+    // write oracle matches; `wp_delete_post()` leaves its files, so it refuses.
+    let refused = rolled_back(async |w, ctx| {
+        let id = attachment(w, "inherit").await?;
+        wp_delete_post(w, ctx, id, true).await.map(drop)
+    })
+    .await;
+    assert!(unported(refused));
 }
 
 /// `wp_insert_attachment()`'s own rules, which the uploads' write oracle
@@ -2383,7 +2555,7 @@ async fn list_actions_match_php() {
         wp_unique_post_slug(w, b"x".to_vec(), (0, "publish"), "attachment", 0).await
     })
     .await;
-    assert!(unported(other));
+    assert_eq!(other.unwrap(), b"x");
 }
 
 #[tokio::test]

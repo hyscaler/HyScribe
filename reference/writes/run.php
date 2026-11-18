@@ -13,6 +13,10 @@ define( 'DISABLE_WP_CRON', true );
 if ( ! str_ends_with( $argv[1] ?? '', '-unfiltered-html' ) ) {
 	define( 'DISALLOW_UNFILTERED_HTML', true );
 }
+// An action named `*-media-trash` runs as an owner's .env with MEDIA_TRASH.
+if ( str_ends_with( $argv[1] ?? '', '-media-trash' ) ) {
+	define( 'MEDIA_TRASH', true );
+}
 require '/var/www/html/wp-load.php';
 
 // A function's scope, so no variable here overwrites a WordPress global.

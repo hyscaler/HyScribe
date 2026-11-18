@@ -32,6 +32,7 @@ done
 for state in site-writes template-writes autosaves editor-saves; do
   "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/$state.sql" < "$ROOT/reference/rest/$state.sql"
 done
+"$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/attachment-edit.sql" < "$ROOT/reference/attachment-edit/content.sql"
 mkdir -p "$OUT"
 if [ $# -eq 0 ]; then
   set -- $("$DOCKER" exec "$NAME" php "$DIR/run.php")

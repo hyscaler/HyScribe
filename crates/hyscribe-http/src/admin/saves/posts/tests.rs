@@ -38,7 +38,7 @@ async fn answered(
         // Quick Edit's answers as pages: its text, or nothing for its row.
         "admin-ajax" => {
             let handler = ajax_handler(&action).unwrap();
-            let saved = acted(writer, conn, (handler, &Unread(constants)), &asked).await;
+            let saved = acted(writer, conn, (handler, &Unread(constants, false)), &asked).await;
             saved.map(|saved| match saved {
                 Ajax::Text(text) => Answer::Page(text),
                 _ => Answer::Page(String::new()),
@@ -46,7 +46,7 @@ async fn answered(
         }
         _ => {
             let handler = handler(screen, &action).unwrap();
-            acted(writer, conn, (handler, &Unread(constants)), &asked).await
+            acted(writer, conn, (handler, &Unread(constants, false)), &asked).await
         }
     };
     answer.map_err(|err| format!("{err:?}"))
@@ -580,7 +580,8 @@ async fn post_php_stops_as_php_stops() {
         "SELECT post_status FROM wp_posts WHERE ID = 2",
     )
     .await;
-    assert!(unported(&answer));
+    // An attachment goes with its files, which the test site deletes none of.
+    assert_eq!(answer, redirect("/hs-admin/upload?deleted=1"));
     let (answer, _) = tried(
         1,
         &[],

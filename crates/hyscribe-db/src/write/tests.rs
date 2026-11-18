@@ -443,6 +443,22 @@ async fn writes_posts() {
         [first, second]
     );
 
+    // Attaching changes the attachments' parents only, and counts the rows changed.
+    let media = |parent| PostFields {
+        parent,
+        post_type: "attachment".into(),
+        ..hello()
+    };
+    let loose = write.insert_post(&media(0)).await.unwrap();
+    let kept = write.insert_post(&media(9)).await.unwrap();
+    let ids = [loose, kept, id];
+    assert_eq!(write.set_attachments_parent(&ids, 9).await.unwrap(), 1);
+    assert_eq!(write.set_attachments_parent(&ids, 9).await.unwrap(), 0);
+    assert_eq!(write.set_attachments_parent(&ids, 0).await.unwrap(), 2);
+    assert_eq!(write.set_attachments_parent(&[], 0).await.unwrap(), 0);
+    write.delete_post(loose).await.unwrap();
+    write.delete_post(kept).await.unwrap();
+
     let types = ["post", "page", "attachment", "revision"];
     let mine = sorted(write.author_post_ids_of_types(1, &types).await.unwrap());
     assert_eq!(mine, [1, 2, 3, first, second]);
@@ -1376,6 +1392,7 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         alone!(w.set_post_guid(1, b"g").await.err()),
         alone!(w.set_comment_count(1, 1).await.err()),
         alone!(w.reparent_posts(1, "page", 0).await.err()),
+        alone!(w.set_attachments_parent(&[1], 0).await.err()),
         alone!(w.reassign_posts(1, 2).await.err()),
         alone!(w.delete_post(1).await.err()),
         alone!(w.insert_comment(&comment).await.err()),

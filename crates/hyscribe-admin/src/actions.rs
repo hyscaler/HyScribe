@@ -28,6 +28,8 @@ pub trait ActionSite: CapabilityData {
     /// `wp_check_post_lock( $post )`: the display name of another user
     /// whose edit lock on the post is fresh.
     fn lock_holder(&self, post: u64) -> Option<String>;
+    /// `get_user_option( $name )` of the current user.
+    fn user_option(&self, name: &str) -> Option<Vec<u8>>;
 }
 
 /// The request an action is read from.
@@ -311,9 +313,81 @@ pub fn admin(site: &dyn ActionSite, screen: &str, asked: &Asked, post: bool) -> 
         "options-privacy" => privacy(site, asked)?,
         "themes" => themes(site, asked)?,
         "revision" => restore(site, asked)?,
+        "upload" => media_list(site, asked)?,
         _ => return None,
     };
     Some(checked)
+}
+
+/// `WP_Media_List_Table::current_action()`: attaching, detaching and
+/// emptying the Trash before the list's own.
+pub fn media_action(asked: &Asked) -> Option<Value> {
+    let named = |name: &str| Some(Value::String(name.as_bytes().to_vec()));
+    let given = |name| asked.request(name).is_some();
+    if given("media") && given("found_post_id") {
+        return named("attach");
+    }
+    if given("media") && given("parent_post_id") {
+        return named("detach");
+    }
+    if given("delete_all") || given("delete_all2") {
+        return named("delete_all");
+    }
+    asked.current_action(false)
+}
+
+/// `upload.php`'s bulk actions in list mode: the library's mode is the
+/// user's, as the list's form sends none.
+fn media_list(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
+    if asked.get("mode").is_some() {
+        return None;
+    }
+    let doaction = media_action(asked)?;
+    let mode = site.user_option("media_library_mode");
+    if mode.is_none_or(|mode| mode == b"grid" || Value::String(mode).is_empty()) {
+        return None;
+    }
+    if !site.current_user_can("upload_files", &[]) {
+        return Some(Err(no_access()));
+    }
+    Some(referer(site, asked, "bulk-media").and_then(|()| media_bulk(site, asked, &doaction)))
+}
+
+/// The refusals of `upload.php`'s action before its first write: the
+/// first attachment the user may not change, or that cannot be.
+fn media_bulk(site: &dyn ActionSite, asked: &Asked, doaction: &Value) -> Checked {
+    let ids = match (asked.request("media"), asked.request("ids")) {
+        (Some(media), _) => items(media),
+        (None, Some(Value::String(ids))) => ids
+            .split(|&b| b == b',')
+            .map(|id| Value::String(id.to_vec()))
+            .collect(),
+        _ => return Ok(()),
+    };
+    let Some(first) = ids.first().map(Value::to_int) else {
+        return Ok(());
+    };
+    let (denied, failed): (&str, Option<String>) = match doaction.as_bytes() {
+        Some(b"trash") => (
+            "Sorry, you are not allowed to move this item to the Trash.",
+            trash_check(&post_status(site, first)).map(Into::into),
+        ),
+        Some(b"untrash") => (
+            "Sorry, you are not allowed to restore this item from the Trash.",
+            untrash_check(&post_status(site, first)).map(Into::into),
+        ),
+        Some(b"delete") => {
+            let post = u64::try_from(first).ok().and_then(|id| site.post(id));
+            let attachment = post.is_some_and(|post| post.post_type == "attachment");
+            let error = (!attachment).then(|| "Error in deleting the attachment.".into());
+            ("Sorry, you are not allowed to delete this item.", error)
+        }
+        _ => return Ok(()),
+    };
+    if !can_for(site, "delete_post", first) {
+        return Err(died(500, denied));
+    }
+    failed.map_or(Ok(()), |error| Err(died(500, error)))
 }
 
 /// `revision.php`'s restore of a revision the user may edit the post of,
@@ -489,6 +563,7 @@ fn post_action(site: &dyn ActionSite, asked: &Asked, post: bool) -> Option<Check
             "Sorry, you are not allowed to delete this item.",
             None,
         ),
+        b"editpost" => return Some(referer(site, asked, &format!("update-post_{id}"))),
         b"post-quickdraft-save" if post => return Some(quickdraft(site, asked, found, id)),
         _ => return post.then_some(Ok(())),
     };
@@ -1184,6 +1259,13 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
             }
         }
         "delete-comment" | "dim-comment" => comment_ajax(site, asked, action == "dim-comment"),
+        "save-attachment" | "save-attachment-compat" => attachment_ajax(site, asked, action),
+        "delete-post" => {
+            let id = post_int(asked, "id");
+            ajax_referer(site, asked, &format!("delete-post_{id}"), None)?;
+            // No one may delete a post that is not there, which PHP checks next.
+            allowed(can_for(site, "delete_post", id))
+        }
         // `wp_send_json_error()` without a nonce.
         "heartbeat" if asked.post("_nonce").is_none_or(Value::is_empty) => Err(Refusal {
             status: 200,
@@ -1283,6 +1365,46 @@ fn ajax_action(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
             }
         }
         _ => Ok(()),
+    }
+}
+
+/// `wp_ajax_save_attachment()` and `wp_ajax_save_attachment_compat()`:
+/// the attachment its user may edit, with the changes or fields it is sent;
+/// `wp_send_json_error()` otherwise. Fields that are not a list are not
+/// ported.
+fn attachment_ajax(site: &dyn ActionSite, asked: &Asked, action: &str) -> Checked {
+    let error = || Refusal {
+        status: 200,
+        body: Body::Json("{\"success\":false}"),
+    };
+    let id = asked.request("id").map(absint);
+    let compat = action == "save-attachment-compat";
+    if id.is_none() || !compat && asked.request("changes").is_none() {
+        return Err(error());
+    }
+    let id = id.unwrap_or_default();
+    if id == 0 {
+        return Err(error());
+    }
+    if compat {
+        let fields = asked.request("attachments").filter(|all| !all.is_empty());
+        match fields {
+            None => return Err(error()),
+            Some(Value::Array(_)) => {}
+            Some(_) => return Err(not_ported()),
+        }
+        let fields = fields.and_then(|all| all.get_str(&id.to_string()));
+        if fields.is_none_or(Value::is_empty) {
+            return Err(error());
+        }
+    }
+    ajax_referer(site, asked, &format!("update-post_{id}"), Some("nonce"))?;
+    let post = site
+        .post(id)
+        .filter(|_| can_for(site, "edit_post", id.cast_signed()));
+    match post {
+        Some(post) if post.post_type == "attachment" => Ok(()),
+        _ => Err(error()),
     }
 }
 

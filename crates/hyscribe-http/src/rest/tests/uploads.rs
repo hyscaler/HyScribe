@@ -680,6 +680,12 @@ async fn uploads_stop_short() {
     assert_eq!(status, StatusCode::OK);
     assert!(json.contains("\"uploadedTo\":1"), "{json}");
     emptied(uploads.path());
+    // A parent edited on a screen other than `post.php` is not ported.
+    run("UPDATE wp_posts SET post_type = 'wp_template' WHERE ID = 1").await;
+    let (status, _) = sent_case(&site, &private, admin).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    run("UPDATE wp_posts SET post_type = 'post' WHERE ID = 1").await;
+    emptied(uploads.path());
     // The author's nickname, without a display name.
     run("UPDATE wp_users SET display_name = '' WHERE ID = 1").await;
     let site = uploading(sessions.path(), uploads.path()).await;

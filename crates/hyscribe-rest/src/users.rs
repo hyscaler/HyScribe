@@ -170,15 +170,13 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     }
 }
 
-/// `$request['id'] = get_current_user_id()`.
+/// `$request['id'] = get_current_user_id()`, in every source that has it.
 fn as_me(context: &Context, params: &Params) -> Params {
     let mut params = params.clone();
-    let id = (
-        Key::String(b"id".to_vec()),
+    params.set(
+        "id",
         Value::Int(i64::try_from(context.user).unwrap_or_default()),
     );
-    params.get.retain(|(key, _)| key.to_php_string() != b"id");
-    params.get.insert(0, id);
     params
 }
 

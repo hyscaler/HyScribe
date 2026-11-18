@@ -278,6 +278,18 @@ fn a_create_plans_its_fields() {
     assert_eq!(location.map(|(_, value)| value.as_str()), Some(posts));
 }
 
+/// Each term is set once and only terms that exist, which leaves the rows
+/// `wp_set_object_terms()` leaves, so a long list costs the write nothing.
+#[test]
+fn terms_are_set_once_each() {
+    let body = r#"{"title":"T","categories":[1,1,999,1],"tags":[999,999]}"#;
+    let save = plan("administrator", "POST", "/wp/v2/posts", body);
+    assert_eq!(
+        (save.categories, save.tags),
+        (Some(vec![1]), Some(Vec::new()))
+    );
+}
+
 /// The dates as `rest_get_date_with_gmt()` reads them: with a zone of
 /// their own, or the site's, and a null resetting both.
 #[test]

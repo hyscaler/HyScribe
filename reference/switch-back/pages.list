@@ -55,3 +55,26 @@ admin	/wp-admin/edit-comments.php?comment_status=moderated	200	Moderated twice.
 admin	/wp-admin/edit-comments.php?comment_status=approved	200	Spammed and back.
 admin	/wp-admin/options-general.php	200	new-admin@example.test
 admin	/wp-admin/edit-tags.php?taxonomy=post_tag	200	Bulk tag
+# Uploads: the library, the attachment's screen and page, the files and their sizes.
+admin	/wp-admin/upload.php?mode=list	200	REST image
+admin	/wp-admin/upload.php?mode=list	200	REST png
+admin	/wp-admin/upload.php?mode=list	200	orient-6
+admin	/wp-admin/post.php?post=%rest-media%&action=edit	200	A wide REST picture
+admin	/wp-admin/post.php?post=%async-plain%&action=edit	200	small
+visitor	/a-rest-post/rest-image/	301	-
+visitor	/a-rest-post/	200	wide-768x256.jpg
+visitor	/wp-content/uploads/%ym%/wide.jpg	200	-
+visitor	/wp-content/uploads/%ym%/wide-160x160.jpg	200	-
+visitor	/wp-content/uploads/%ym%/small.jpg	200	-
+# The site editor's saves: customised templates and parts, the new template, global styles.
+visitor	/a-rest-post/	200	Single template saved from HyScribe.
+visitor	/a-rest-post/	200	Footer saved from HyScribe.
+visitor	/	200	Footer saved from HyScribe.
+visitor	/templated-page/	200	Custom template saved from HyScribe.
+visitor	/templated-page/	200	A part made in HyScribe.
+visitor	/templated-page/	200	A page in the new template.
+visitor	/	200	#fdf2d0
+admin	/wp-admin/site-editor.php	200	site-editor
+# Cron: the scheduled post it published, the trashed post it deleted.
+visitor	/a-cron-scheduled-post/	200	Published by HyScribe cron.
+visitor	/a-cron-trashed-post/	404	Page not found

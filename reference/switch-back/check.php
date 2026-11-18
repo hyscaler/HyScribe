@@ -154,14 +154,103 @@ foreach ( array( 'Scratch A', 'Scratch C', 'Scratch D', 'Scratch E', 'Deleted ov
 		$failures[] = "the deleted post $title is still there";
 	}
 }
-foreach ( array( 3, 7, 8, 9, 10 ) as $id ) {
+// The default install's comment and term IDs; the Theme Test Data's differ.
+$default_install = 'ttd' !== getenv( 'HYSCRIBE_SB_FIXTURE' );
+foreach ( $default_install ? array( 3, 7, 8, 9, 10, 11 ) : array() as $id ) {
 	if ( get_comment( $id ) ) {
 		$failures[] = "the deleted comment $id is still there";
 	}
 }
-foreach ( array( 6, 7, 9 ) as $id ) {
+foreach ( $default_install ? array( 6, 7, 9 ) : array() as $id ) {
 	if ( get_term( $id ) ) {
 		$failures[] = "the deleted term $id is still there";
+	}
+}
+
+// Cron: the scheduled post HyScribe published and the trash it emptied.
+$cron_id = (int) $wpdb->get_var( "SELECT ID FROM $wpdb->posts WHERE post_title = 'A cron scheduled post'" );
+if ( $cron_id && 'publish' !== get_post_status( $cron_id ) ) {
+	$failures[] = 'the scheduled post is ' . get_post_status( $cron_id ) . ', not published by cron';
+}
+if ( $cron_id && false !== wp_next_scheduled( 'publish_future_post', array( $cron_id ) ) ) {
+	$failures[] = 'the scheduled post still has its publish_future_post event';
+}
+if ( $wpdb->get_var( "SELECT ID FROM $wpdb->posts WHERE post_title = 'A cron trashed post'" ) ) {
+	$failures[] = 'the post trashed 40 days ago is still there after cron';
+}
+
+// Attachments HyScribe made in the last day: the files, sizes and links PHP uses.
+foreach ( $wpdb->get_col( "SELECT ID FROM $wpdb->posts WHERE post_type = 'attachment' AND post_date_gmt > UTC_TIMESTAMP() - INTERVAL 1 DAY" ) as $id ) {
+	$file = get_attached_file( $id );
+	if ( ! $file || ! file_exists( $file ) ) {
+		$failures[] = "attachment $id has no file at " . var_export( $file, true );
+		continue;
+	}
+	if ( ! wp_get_attachment_url( $id ) || ! get_attachment_link( $id ) ) {
+		$failures[] = "attachment $id has no URL";
+	}
+	if ( ! wp_attachment_is_image( $id ) ) {
+		continue;
+	}
+	$meta = wp_get_attachment_metadata( $id );
+	if ( ! is_array( $meta ) || empty( $meta['width'] ) || empty( $meta['file'] ) ) {
+		$failures[] = "attachment $id has no metadata PHP can use";
+		continue;
+	}
+	$size = getimagesize( $file );
+	if ( ! $size || $size[0] !== $meta['width'] || $size[1] !== $meta['height'] ) {
+		$failures[] = "attachment $id: file is " . ( $size ? "{$size[0]}x{$size[1]}" : 'not an image' ) . ", metadata says {$meta['width']}x{$meta['height']}";
+	}
+	foreach ( $meta['sizes'] ?? array() as $name => $info ) {
+		$path = path_join( dirname( $file ), $info['file'] );
+		$real = file_exists( $path ) ? getimagesize( $path ) : false;
+		if ( ! $real || $real[0] !== $info['width'] || $real[1] !== $info['height'] ) {
+			$failures[] = "attachment $id size $name ({$info['file']}) is " . ( $real ? "{$real[0]}x{$real[1]}" : 'missing' ) . ", metadata says {$info['width']}x{$info['height']}";
+		}
+	}
+	if ( ! wp_get_attachment_image( $id, 'thumbnail' ) ) {
+		$failures[] = "attachment $id: wp_get_attachment_image() is empty";
+	}
+	if ( ! empty( $meta['original_image'] ) && ! file_exists( (string) wp_get_original_image_path( $id ) ) ) {
+		$failures[] = "attachment $id: its original image is missing";
+	}
+}
+
+// The site editor's saves: templates, parts and global styles as PHP finds them.
+foreach ( array( 'wp_template', 'wp_template_part' ) as $type ) {
+	foreach ( $wpdb->get_results( $wpdb->prepare( "SELECT ID, post_name FROM $wpdb->posts WHERE post_type = %s AND post_status = 'publish'", $type ) ) as $row ) {
+		$themes = wp_get_object_terms( $row->ID, 'wp_theme', array( 'fields' => 'names' ) );
+		if ( 1 !== count( $themes ) || ! wp_get_theme( $themes[0] )->exists() ) {
+			$failures[] = "$type $row->post_name has no wp_theme term of an installed theme";
+			continue;
+		}
+		$template = get_block_template( "{$themes[0]}//$row->post_name", $type );
+		if ( ! $template || 'custom' !== $template->source || (int) $template->wp_id !== (int) $row->ID ) {
+			$failures[] = "PHP does not find the custom $type $row->post_name";
+		}
+	}
+}
+foreach ( array( 'single' => 'Single template saved from HyScribe.', 'switch-back-template' => 'Custom template saved from HyScribe.' ) as $slug => $text ) {
+	$template = get_block_template( "twentytwentyfive//$slug", 'wp_template' );
+	if ( $template && ! str_contains( $template->content, $text ) ) {
+		$failures[] = "the template $slug does not hold its saved content";
+	}
+}
+if ( get_block_template( 'twentytwentyfive//doomed-template', 'wp_template' ) ) {
+	$failures[] = 'the deleted template is still there';
+}
+$styles = $wpdb->get_row( "SELECT ID, post_content FROM $wpdb->posts WHERE post_type = 'wp_global_styles' AND post_status = 'publish'" );
+if ( $styles ) {
+	$data = json_decode( $styles->post_content, true );
+	if ( ! is_array( $data ) || empty( $data['isGlobalStylesUserThemeJSON'] ) ) {
+		$failures[] = 'the global styles post is not user theme.json data';
+	}
+	if ( (int) WP_Theme_JSON_Resolver::get_user_global_styles_post_id() !== (int) $styles->ID ) {
+		$failures[] = 'PHP names another global styles post than the one HyScribe saved';
+	}
+	if ( isset( $data['styles']['color']['background'] ) && '#fdf2d0' === $data['styles']['color']['background']
+		&& ! str_contains( wp_get_global_stylesheet(), '#fdf2d0' ) ) {
+		$failures[] = "PHP's global stylesheet does not carry the saved background";
 	}
 }
 
@@ -189,8 +278,13 @@ foreach ( file( '/tmp/hyscribe-rest.tsv', FILE_IGNORE_NEW_LINES ) as $line ) {
 		continue;
 	}
 	parse_str( (string) parse_url( $path, PHP_URL_QUERY ), $query );
-	$base   = preg_replace( '#/\d+$#', '', $query['rest_route'] );
+	// A template's ID is a string with slashes, which its route carries whole.
+	$base   = preg_replace( '#^(/wp/v2/templates|/wp/v2/template-parts)/.*$#', '$1', preg_replace( '#/\d+$#', '', $query['rest_route'] ) );
 	$answer = json_decode( $body, true );
+	if ( '/wp/v2/settings' === $base ) {
+		$answers[ $base ] = $answer;
+		continue;
+	}
 	if ( isset( $answer['deleted'] ) ) {
 		$answers[ "$base/{$answer['previous']['id']}" ] = null;
 	} else {
@@ -213,7 +307,7 @@ function switch_back_diff( $php, $hyscribe, $at = '' ) {
 }
 foreach ( $answers as $route => $answer ) {
 	$request = new WP_REST_Request( 'GET', $route );
-	$request->set_param( 'context', 'edit' );
+	$request->set_param( 'context', str_starts_with( $route, '/wp/v2/template' ) ? 'view' : 'edit' );
 	$response = rest_do_request( $request );
 	if ( null === $answer ) {
 		if ( 404 !== $response->get_status() ) {
@@ -227,6 +321,11 @@ foreach ( $answers as $route => $answer ) {
 	$at = array_search( 'post-password-protected', $read['class_list'] ?? array(), true );
 	if ( false !== $at && in_array( 'post-password-required', $answer['class_list'], true ) ) {
 		$read['class_list'][ $at ] = 'post-password-required';
+	}
+	// PHP answers a template's create in the view context and its update in edit,
+	// the one with block_version: read in view, and leave that field out of both.
+	if ( str_starts_with( $route, '/wp/v2/template' ) ) {
+		unset( $answer['content']['block_version'] );
 	}
 	foreach ( array_slice( switch_back_diff( $read, $answer ), 0, 5 ) as $diff ) {
 		$failures[] = "REST $route differs at $diff";

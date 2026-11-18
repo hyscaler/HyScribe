@@ -691,6 +691,11 @@ fn navigation_and_patterns_save_their_fields() {
         save.meta,
         vec![("wp_pattern_sync_status", text_value("partial"))]
     );
+    // `check_meta_is_array()`'s false, with no details.
+    let string = r#"{"title":"x","meta":"nope"}"#;
+    let refused = answered("administrator", "POST", "/wp/v2/blocks", string);
+    assert_eq!(refused.status, 400);
+    assert!(text_of(&refused).contains(r#""params":{"meta":"Invalid parameter."},"details":[]"#));
     let footnotes = r#"{"title":"x","meta":{"footnotes":""}}"#;
     let served = answered("administrator", "POST", "/wp/v2/blocks", footnotes);
     assert_eq!(served.status, 501);

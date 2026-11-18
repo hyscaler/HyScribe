@@ -38,8 +38,9 @@ use hyscribe_render::link;
 use hyscribe_render::permalinks::{self, Permalinks, home_path};
 use hyscribe_render::post::body_class;
 use hyscribe_render::site::{Archive, Request, Taxonomy};
+use hyscribe_render::site_templates::{block_template, with_page_template};
 use hyscribe_render::template::render_template;
-use hyscribe_render::theme::{Theme, twentytwentyfive};
+use hyscribe_render::theme::{Theme, twentytwentyfive, twentytwentyfive_for};
 use hyscribe_render::{search_count, search_terms, sticky_posts};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
@@ -93,6 +94,9 @@ pub struct Site {
     options: HashMap<String, Vec<u8>>,
     home: String,
     theme: Arc<Theme>,
+    /// The theme as built for the site's global styles post's content,
+    /// shared by the site as reloaded, so a change rebuilds it once.
+    styled: Arc<tokio::sync::Mutex<Styled>>,
     /// The rewrite rules of the permalink options.
     rewriter: Arc<rewrite::Rewriter>,
     /// The rules compiled for an earlier request.
@@ -119,6 +123,9 @@ pub struct Site {
     fetch: Option<Arc<hyscribe_fetch::Client>>,
 }
 
+/// A global styles post's content, if any, and the theme built with it.
+type Styled = (Option<Vec<u8>>, Arc<Theme>);
+
 /// The address a connection comes from.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Peer(pub(crate) std::net::IpAddr);
@@ -143,11 +150,13 @@ impl Site {
         home: Option<String>,
         siteurl: Option<String>,
     ) -> Result<Site, DbError> {
+        let theme = Arc::new(twentytwentyfive());
         let mut site = Site {
             db,
             options: HashMap::new(),
             home: String::new(),
-            theme: Arc::new(twentytwentyfive()),
+            styled: Arc::new(tokio::sync::Mutex::new((None, Arc::clone(&theme)))),
+            theme,
             rewriter: Arc::default(),
             compiled: Arc::default(),
             salts: Vec::new(),
@@ -185,11 +194,13 @@ impl Site {
         let home = String::from_utf8_lossy(options.get("home").map_or(&[][..], Vec::as_slice))
             .trim_end_matches('/')
             .to_string();
+        let theme = self.styled_theme().await?;
         let mut site = Site {
             db: self.db.clone(),
             options,
             home,
-            theme: Arc::clone(&self.theme),
+            theme,
+            styled: Arc::clone(&self.styled),
             rewriter: Arc::default(),
             compiled: Arc::clone(&self.compiled),
             salts: self.salts.clone(),
@@ -205,6 +216,35 @@ impl Site {
         };
         site.build_rewriter();
         Ok(site)
+    }
+
+    /// The active theme with the site's global styles: the content of its
+    /// newest published `wp_global_styles` post, as
+    /// `WP_Theme_JSON_Resolver::get_user_data()` reads it.
+    async fn styled_theme(&self) -> Result<Arc<Theme>, DbError> {
+        let query = PostQuery {
+            post_types: vec!["wp_global_styles".into()],
+            limit: u32::MAX,
+            ..PostQuery::default()
+        };
+        let mut user = None;
+        for post in self.db.posts(&query).await? {
+            let themes = self.db.post_terms(post.id, "wp_theme").await?;
+            let slug = self.theme.slug().as_bytes();
+            if themes
+                .iter()
+                .any(|term| term.name.eq_ignore_ascii_case(slug))
+            {
+                user = Some(post.content);
+                break;
+            }
+        }
+        let mut styled = self.styled.lock().await;
+        if styled.0 != user {
+            let theme = Arc::new(twentytwentyfive_for(user.as_deref()));
+            *styled = (user, theme);
+        }
+        Ok(Arc::clone(&styled.1))
     }
 
     /// The site with the keys and salts `wp_hash()` signs with.
@@ -1259,12 +1299,10 @@ fn render_page(
             &share(),
         ))
     } else {
+        let candidates = with_page_template(&reads, request, candidates);
         // Every block theme has an index template.
-        let template = site
-            .theme
-            .template(candidates)
-            .map_or(&[][..], |(_, template)| template);
-        let (html, assets) = render_template(&site.theme, &reads, request, template);
+        let template = block_template(&site.theme, &reads, &candidates).unwrap_or_default();
+        let (html, assets) = render_template(&site.theme, &reads, request, &template);
         let classes = body_class(&reads, request, site.theme.slug());
         let head = wp_head(&site.theme, &reads, request, &assets, title.as_bytes());
         let footer = wp_footer(&reads, &assets);

@@ -244,6 +244,10 @@ async fn database_errors_show_no_details() {
         ]),
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        styled: Arc::new(tokio::sync::Mutex::new((
+            None,
+            Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        ))),
         rewriter: Arc::default(),
         compiled: Arc::default(),
         salts: Vec::new(),
@@ -940,6 +944,10 @@ async fn the_front_page_links_to_home() {
         options,
         home: base.home.clone(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        styled: Arc::new(tokio::sync::Mutex::new((
+            None,
+            Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        ))),
         rewriter: Arc::default(),
         compiled: Arc::default(),
         salts: Vec::new(),
@@ -1075,6 +1083,10 @@ async fn failed_reads_answer_defaults() {
         options: HashMap::new(),
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        styled: Arc::new(tokio::sync::Mutex::new((
+            None,
+            Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        ))),
         rewriter: Arc::default(),
         compiled: Arc::default(),
         salts: Vec::new(),
@@ -3017,6 +3029,41 @@ async fn theme_test_data_pages_match_php() {
         10
     );
     assert_eq!(golden.lines().count(), 747);
+}
+
+/// The pages of `reference/pages/site-edits.list` over the site editor's
+/// saves as PHP wrote them (`reference/site-edits/content.sql`): edited
+/// templates and template parts, a custom template, global styles and a
+/// navigation menu, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn edited_site_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let edits = include_str!("../../../reference/site-edits/content.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(edits))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-site-edits.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 8);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

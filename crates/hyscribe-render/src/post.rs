@@ -9,6 +9,7 @@ use hyscribe_phpser::{Value, decode, is_empty_string, php_trim};
 
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit_title, convert_chars, wptexturize};
 use crate::site::{Archive, Request, Site, Taxonomy};
+use crate::template::replace;
 
 /// `get_post_format_strings()`: each format's slug, which
 /// `_post_format_request()` prefixes, and its name.
@@ -210,8 +211,13 @@ fn archive_class(taxonomy: Taxonomy) -> &'static str {
     }
 }
 
+/// `get_page_template_slug( $post )`: none for `default`.
+pub(crate) fn page_template_slug(site: &dyn Site, post: u64) -> Option<Vec<u8>> {
+    let slug = site.post_meta(post, "_wp_page_template")?;
+    (!is_empty_string(&slug) && slug != b"default").then_some(slug)
+}
+
 /// `get_body_class()` for a visitor, with `template` as `get_template()`.
-/// Page templates other than the default are not told apart yet.
 pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8> {
     let mut classes: Vec<Vec<u8>> = Vec::new();
     let mut push = |class: &[u8]| classes.push(class.to_vec());
@@ -243,7 +249,22 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
     if let Some(post) = singular {
         let kind = &post.post_type;
         push(b"wp-singular");
-        push(format!("{kind}-template-default").as_bytes());
+        match page_template_slug(site, post.id) {
+            Some(slug) => {
+                let class = |name: &[u8]| {
+                    let name = sanitize_html_class(&replace(name, b".", b"-"), b"");
+                    [format!("{kind}-template-").as_bytes(), &name].concat()
+                };
+                push(format!("{kind}-template").as_bytes());
+                for part in slug.split(|&b| b == b'/') {
+                    // basename( $part, '.php' )
+                    let base = part.strip_suffix(b".php").filter(|base| !base.is_empty());
+                    push(&class(base.unwrap_or(part)));
+                }
+                push(&class(&slug));
+            }
+            None => push(format!("{kind}-template-default").as_bytes()),
+        }
         if kind != "page" {
             push(b"single");
             push(

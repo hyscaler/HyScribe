@@ -137,6 +137,12 @@ pub fn twentytwentyfive() -> Theme {
     with_user_styles(None, &[])
 }
 
+/// Twenty Twenty-Five with the site's global styles, `user` the content
+/// of its `wp_global_styles` post if it has one.
+pub fn twentytwentyfive_for(user: Option<&[u8]>) -> Theme {
+    with_user_styles(user, &[])
+}
+
 /// Twenty Twenty-Five with `user` as the site's global styles and `styles`
 /// registered after its own block styles.
 #[cfg(test)]

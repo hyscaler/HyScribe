@@ -148,6 +148,9 @@ pub struct Constants {
     /// `EMPTY_TRASH_DAYS`, default 30: posts and comments go to the trash
     /// before they are deleted unless it is 0.
     pub empty_trash_days: u32,
+    /// `MEDIA_TRASH`, default false: attachments go to the trash before
+    /// they are deleted only when it is true.
+    pub media_trash: bool,
 }
 
 impl Default for Constants {
@@ -156,6 +159,7 @@ impl Default for Constants {
             disallow_unfiltered_html: true,
             allow_unfiltered_uploads: false,
             empty_trash_days: 30,
+            media_trash: false,
         }
     }
 }
@@ -167,6 +171,7 @@ impl Constants {
         match name {
             "DISALLOW_UNFILTERED_HTML" => self.disallow_unfiltered_html,
             "ALLOW_UNFILTERED_UPLOADS" => self.allow_unfiltered_uploads,
+            "MEDIA_TRASH" => self.media_trash,
             _ => false,
         }
     }
@@ -397,6 +402,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
                 .parse()
                 .map_err(|_| invalid("EMPTY_TRASH_DAYS", "must be a number of days, 0 or more"))?,
         },
+        media_trash: boolean(get("MEDIA_TRASH"), "MEDIA_TRASH", safer.media_trash)?,
     };
 
     let limits = LoginLimits::default();

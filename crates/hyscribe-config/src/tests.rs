@@ -61,6 +61,7 @@ fn defaults_are_safe() {
                 disallow_unfiltered_html: true,
                 allow_unfiltered_uploads: false,
                 empty_trash_days: 30,
+                media_trash: false,
             },
             login_limits: LoginLimits {
                 address: 5,
@@ -141,14 +142,17 @@ fn reads_the_capability_constants() {
     let set = constants(&[
         ("DISALLOW_UNFILTERED_HTML", "False"),
         ("ALLOW_UNFILTERED_UPLOADS", "TRUE"),
+        ("MEDIA_TRASH", "true"),
         ("MULTISITE", "false"),
     ])
     .unwrap();
-    assert!(!set.disallow_unfiltered_html && set.allow_unfiltered_uploads);
+    assert!(!set.disallow_unfiltered_html && set.allow_unfiltered_uploads && set.media_trash);
     assert!(!set.defined("DISALLOW_UNFILTERED_HTML") && set.defined("ALLOW_UNFILTERED_UPLOADS"));
+    assert!(set.defined("MEDIA_TRASH") && !Constants::default().defined("MEDIA_TRASH"));
     let numbers = constants(&[
         ("DISALLOW_UNFILTERED_HTML", "0"),
         ("ALLOW_UNFILTERED_UPLOADS", "1"),
+        ("MEDIA_TRASH", "1"),
         ("MULTISITE", "0"),
     ]);
     assert_eq!(numbers, Ok(set));
@@ -168,6 +172,7 @@ fn reads_the_capability_constants() {
         "MULTISITE",
         "DISALLOW_UNFILTERED_HTML",
         "ALLOW_UNFILTERED_UPLOADS",
+        "MEDIA_TRASH",
     ] {
         for value in ["y", "2", "'true'", " true"] {
             assert_eq!(

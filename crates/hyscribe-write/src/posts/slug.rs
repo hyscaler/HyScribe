@@ -90,8 +90,10 @@ pub(super) async fn unique(
     let reserved = FEEDS.contains(&&slug[..]) || slug == b"embed";
     // Attachment slugs are unique across all types.
     let attachment = kind == Kind::Attachment;
+    // PHP takes the name it finds as its check, which an empty one fails.
+    let found = super::truthy(&slug);
     let taken = if attachment {
-        write.any_post_name_used(&slug, id).await? || reserved
+        found && write.any_post_name_used(&slug, id).await? || reserved
     } else if kind.hierarchical() {
         let used = write
             .sibling_name_used(&slug, (post_type, parent), id)

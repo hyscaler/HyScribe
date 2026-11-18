@@ -28,6 +28,7 @@ use crate::redirect::wp_validate_redirect;
 mod comments;
 pub(super) mod dashboard;
 pub(super) mod heartbeat;
+pub(super) mod media;
 pub(super) mod options;
 mod posts;
 pub(super) mod screen;
@@ -78,6 +79,14 @@ pub(super) trait Acting: ActionSite {
     fn nonce_state(&self, nonce: &[u8], action: &str) -> u8;
     /// `is_user_logged_in()` past the auth cookie's grace period.
     fn logged_in(&self) -> bool;
+    /// Keeps `files` (each with the folder it must be within, under the
+    /// uploads folder) to delete once the action is committed; false
+    /// without an uploads folder.
+    fn delete_files(&self, _files: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
+        true
+    }
+    /// Deletes the files kept, once the action is `committed`, or forgets them.
+    fn settle_files(&self, _committed: bool) {}
 }
 
 impl Acting for Admin<'_> {
@@ -102,6 +111,16 @@ impl Acting for Admin<'_> {
     }
     fn logged_in(&self) -> bool {
         !self.grace
+    }
+    fn delete_files(&self, files: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
+        self.files.borrow_mut().extend(files);
+        self.site.uploads.is_some()
+    }
+    fn settle_files(&self, committed: bool) {
+        let files = std::mem::take(&mut *self.files.borrow_mut());
+        if let Some(uploads) = self.site.uploads.as_ref().filter(|_| committed) {
+            uploads.delete(&files);
+        }
     }
 }
 
@@ -132,6 +151,8 @@ pub(super) enum Ajax {
     CommentRow(comments::Row),
     /// Quick Edit's answer: the posts list's row of the post saved.
     PostRow(u64),
+    /// `wp_send_json_success( wp_prepare_attachment_for_js( $id ) )`.
+    Attachment(u64),
 }
 
 /// The handler of `action` (as `hyscribe_admin::actions::action` names it)
@@ -163,6 +184,7 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("edit-tags", b"editedtag") => Some(terms::edited_tag),
         ("post", b"post-quickdraft-save") => Some(dashboard::quickdraft_save),
         ("edit", _) => Some(posts::bulk),
+        ("upload", _) => Some(media::bulk),
         _ => None,
     }
 }
@@ -185,6 +207,9 @@ pub(super) fn ajax_handler(action: &[u8]) -> Option<Handler<Ajax>> {
         b"hidden-columns" => Some(screen::hidden_columns),
         b"meta-box-order" => Some(screen::meta_box_order),
         b"heartbeat" => Some(heartbeat::heartbeat),
+        b"save-attachment" => Some(media::save_attachment),
+        b"save-attachment-compat" => Some(media::save_attachment_compat),
+        b"delete-post" => Some(media::delete_post),
         _ => None,
     }
 }
@@ -208,6 +233,19 @@ pub(super) fn ajax_served(admin: &Admin, asked: &Asked, answer: Ajax) -> Respons
         Ajax::TermAdded(taxonomy, added) => (XML, term_added(admin, taxonomy, &added, &referer())),
         Ajax::CommentRow(row) => (XML, row.sent(admin, asked)),
         Ajax::PostRow(id) => (HTML, post_row(admin, asked, id)),
+        Ajax::Attachment(id) => {
+            let mut reads = LoginReads::new(admin.site, Handle::current(), admin.reads.now);
+            reads.act_as(admin.user.id, admin.reads.session_token().to_vec());
+            let fresh = Admin::new(&reads, admin.site, admin.user.clone());
+            let post = fresh.full_post(id).unwrap_or_default();
+            let Some(data) = super::media::prepare_for_js(&fresh, &post) else {
+                return super::not_ported();
+            };
+            let json = [(b"success".as_slice(), Value::Bool(true)), (b"data", data)];
+            let json = json.map(|(key, value)| (hyscribe_phpser::Key::String(key.to_vec()), value));
+            let json = hyscribe_phpser::json_encode(&Value::Array(json.to_vec()));
+            (JSON, text(&json.unwrap_or_default()))
+        }
     };
     ajax_text(StatusCode::OK, kind, body.into_bytes())
 }
@@ -251,11 +289,16 @@ pub(super) async fn act<'w, T>(
     site: &dyn Acting,
 ) -> Result<T, hyscribe_write::Error> {
     let mut write = write?;
-    match handler(&mut write, asked, site).await {
+    let acted = match handler(&mut write, asked, site).await {
         Ok(answer) => write.commit().await.map(|()| answer).map_err(Into::into),
-        Err(Stop::Died(answer)) => Ok(answer),
+        Err(Stop::Died(answer)) => {
+            site.settle_files(false);
+            return Ok(answer);
+        }
         Err(Stop::Failed(err)) => Err(err),
-    }
+    };
+    site.settle_files(acted.is_ok());
+    acted
 }
 
 #[cfg(test)]

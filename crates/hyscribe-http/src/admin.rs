@@ -58,6 +58,7 @@ use crate::login::{
 use crate::redirect::wp_sanitize_redirect;
 use crate::{Site, now};
 
+mod media;
 mod saves;
 mod uploads;
 mod views;
@@ -202,6 +203,8 @@ struct Admin<'a> {
     /// `$GLOBALS['login_grace_period']`: the auth cookie expired within
     /// its grace.
     grace: bool,
+    /// The files an action deletes once it is committed.
+    files: RefCell<Vec<(Vec<u8>, Vec<u8>)>>,
 }
 
 impl<'a> Admin<'a> {
@@ -221,6 +224,7 @@ impl<'a> Admin<'a> {
             edited: None,
             welcome: None,
             grace: false,
+            files: RefCell::default(),
         }
     }
 
@@ -381,6 +385,9 @@ impl ActionSite for Admin<'_> {
         let post = PostsSite::post(self, post).unwrap_or_default();
         let holder = hyscribe_admin::posts::lock_holder(self, &post)?;
         Some(String::from_utf8_lossy(&holder.display_name).into_owned())
+    }
+    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        PageSite::user_option(self, name)
     }
 }
 
@@ -1280,6 +1287,13 @@ fn screen(
     origin: &str,
     browser: &Browser,
 ) -> Option<Response> {
+    // The screens with the media library's templates or its list, which
+    // `MEDIA_TRASH` changes, are not ported with it.
+    let media = ["upload", "post", "post-new", "options-general"];
+    let screen = path.strip_prefix("/hs-admin/").unwrap_or_default();
+    if admin.site.constants.media_trash && media.contains(&screen) {
+        return None;
+    }
     let canonical =
         String::from_utf8_lossy(&remove_query_arg(&REMOVABLE, url.as_bytes())).into_owned();
     let request = Request {
@@ -1649,7 +1663,10 @@ fn ajax_answer(
                         saves::destroy_sessions(sessions, &asked, reads.session_token(), name);
                     return ajax_text(StatusCode::OK, JSON, json);
                 }
-                Ok(()) => return ajax_save(&admin, &asked),
+                Ok(()) => {
+                    return media::read(&admin, &asked)
+                        .unwrap_or_else(|| ajax_save(&admin, &asked));
+                }
                 refused => refused,
             }
         }

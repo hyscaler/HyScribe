@@ -110,11 +110,6 @@ impl GlobalStyles {
         php::get(self.settings(), path)
     }
 
-    /// A setting of one block (`settings.blocks.<block>`).
-    pub fn block_setting(&self, block: &str, path: &[&str]) -> Option<&Value> {
-        php::get(self.settings(), &["blocks", block]).and_then(|s| php::get(s, path))
-    }
-
     /// A global style, e.g. `["spacing", "blockGap"]`.
     pub fn style(&self, path: &[&str]) -> Option<&Value> {
         php::get(self.styles(), path)
@@ -128,17 +123,6 @@ impl GlobalStyles {
     /// `settings.useRootPaddingAwareAlignments`, as block supports test it.
     pub fn use_root_padding_aware_alignments(&self) -> bool {
         !php::empty(self.setting(&["useRootPaddingAwareAlignments"]))
-    }
-
-    /// `settings.layout.contentSize`.
-    pub fn content_size(&self) -> Option<&str> {
-        self.setting(&["layout", "contentSize"])
-            .and_then(php::as_str)
-    }
-
-    /// `settings.layout.wideSize`.
-    pub fn wide_size(&self) -> Option<&str> {
-        self.setting(&["layout", "wideSize"]).and_then(php::as_str)
     }
 
     /// Whether the theme supports block gap: `settings.spacing.blockGap`
@@ -163,12 +147,6 @@ impl GlobalStyles {
     /// size.
     pub fn font_size_value(&self, preset: &Value) -> Option<Value> {
         typography::font_size_value(preset, &php::array(), self.settings())
-    }
-
-    /// The responsive style states and their media queries, from
-    /// `settings.viewport` (`@mobile`, `@tablet`).
-    pub fn viewport_media_queries(&self) -> Vec<(String, String)> {
-        viewport::media_queries(self.setting(&["viewport"]))
     }
 
     /// `wp_get_global_stylesheet()`: variables, styles (block styles

@@ -1178,3 +1178,67 @@ fn other_types_plan_no_delete() {
     let (plan, served) = on(&site, &asked, Outcome::Written(1));
     assert_eq!((plan, served.status), (None, 501));
 }
+
+/// An upload to the media collection plans its fields, refuses a parent
+/// that is a revision or an attachment and answers 501 for the fields not
+/// ported; once written it answers the attachment with `201`, or the
+/// upload's refusal.
+#[test]
+fn uploads_plan_their_fields() {
+    let body = r#"{"title":"T","caption":{"raw":"C"},"description":"D","alt_text":"A","post":1}"#;
+    let asked = Asked::new("administrator", "POST", "/wp/v2/media&_fields=id", body);
+    let site = oracle("administrator", &[]);
+    // The extra posts' attachment 95, written; its answer only its ID.
+    let (plan, served) = on(&site, &asked, Outcome::Written(95));
+    let some = |text: &str| Some(text.as_bytes().to_vec());
+    let upload = Upload {
+        title: some("T"),
+        caption: some("C"),
+        description: some("D"),
+        alt_text: some("A"),
+        post: 1,
+    };
+    let plan = plan.unwrap();
+    assert_eq!(plan.write, Write::Upload(Box::new(upload)));
+    assert!(!plan.unfiltered_html);
+    assert_eq!(served.status, 201, "{}", text_of(&served));
+    let location = served.headers.iter().find(|(name, _)| name == "Location");
+    assert!(location.is_some_and(|(_, url)| url.ends_with("/wp/v2/media/95")));
+    let refused = Outcome::Failed("rest_upload_no_data", "No data supplied.".into(), 400);
+    let (_, served) = on(&site, &asked, refused);
+    assert_eq!(served.status, 400);
+    assert!(text_of(&served).contains(r#""code":"rest_upload_no_data""#));
+    // The draft's image 97 and post 1's revision 99 are no parents.
+    for parent in [97, 99] {
+        let body = format!(r#"{{"post":{parent}}}"#);
+        let served = answered("administrator", "POST", "/wp/v2/media", &body);
+        assert_eq!(served.status, 400, "{parent}");
+        assert!(
+            text_of(&served).contains("Invalid parent type."),
+            "{parent}"
+        );
+    }
+    for body in [
+        r#"{"date":"2026-01-02T03:04:05"}"#,
+        r#"{"date_gmt":"2026-01-02T03:04:05"}"#,
+        r#"{"slug":"a"}"#,
+        r#"{"status":"private"}"#,
+        r#"{"author":1}"#,
+        r#"{"comment_status":"closed"}"#,
+        r#"{"ping_status":"closed"}"#,
+        r#"{"meta":{}}"#,
+        r#"{"template":""}"#,
+        r#"{"featured_media":0}"#,
+        r#"{"generate_sub_sizes":false}"#,
+        r#"{"convert_format":false}"#,
+        r#"{"url":"http://example.test/a.jpg"}"#,
+        r#"{"title":{"raw":5}}"#,
+        r#"{"caption":{"raw":5}}"#,
+        r#"{"description":{"raw":5}}"#,
+    ] {
+        let served = answered("administrator", "POST", "/wp/v2/media", body);
+        assert_eq!(served.status, 501, "{body}");
+    }
+    let asked = Asked::new("administrator", "POST", "/wp/v2/media&slug=a", "");
+    assert_eq!(on(&site, &asked, Outcome::Written(95)).1.status, 501);
+}

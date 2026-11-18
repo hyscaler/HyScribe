@@ -18,7 +18,7 @@ use sqlx::Connection as _;
 use super::*;
 
 /// The scratch database the writing tests reload.
-fn saves() -> Database {
+pub(super) fn saves() -> Database {
     Database {
         name: "wordpress_saves".into(),
         ..fixture_database()
@@ -27,7 +27,7 @@ fn saves() -> Database {
 
 /// `wordpress_saves` as the default install with `reference/rest/users.sql`'s
 /// users, as the oracle recorded over it.
-async fn fresh() {
+pub(super) async fn fresh() {
     fresh_with("").await;
 }
 
@@ -64,7 +64,7 @@ async fn fresh_with(state: &str) {
 
 /// The oracle's site over `wordpress_saves`, with sessions in `dir` and a
 /// writer.
-async fn saves_site(dir: &std::path::Path) -> Arc<Site> {
+pub(super) async fn saves_site(dir: &std::path::Path) -> Arc<Site> {
     let db = crate::Db::connect(&saves()).await.unwrap();
     let home = Some("http://127.0.0.1:8081".to_string());
     let site = Arc::new(Site::load(db, home.clone(), home).await.unwrap());
@@ -75,7 +75,7 @@ async fn saves_site(dir: &std::path::Path) -> Arc<Site> {
 
 /// The dates of `body` from `start` to `end` as `%now%`, as the golden
 /// keeps them.
-fn now_masked(body: &str, (start, end): (i64, i64)) -> String {
+pub(super) fn now_masked(body: &str, (start, end): (i64, i64)) -> String {
     let shaped = |date: &[u8]| {
         date.iter().enumerate().all(|(i, b)| match i {
             4 | 7 => *b == b'-',
@@ -292,7 +292,12 @@ async fn as_user<T: Send + 'static>(
 
 /// `target` asked of `site` by user 1 with the JSON `body`, past its
 /// checks: the write it plans.
-async fn planned(site: &Arc<Site>, method: &'static str, target: &str, body: &str) -> Pending {
+pub(super) async fn planned(
+    site: &Arc<Site>,
+    method: &'static str,
+    target: &str,
+    body: &str,
+) -> Pending {
     let then = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
         rest, request,
     ) {

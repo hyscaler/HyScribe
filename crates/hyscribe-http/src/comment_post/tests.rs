@@ -427,6 +427,7 @@ async fn a_failed_read_is_the_database_error_page() {
         behind_proxy: false,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(crate::login::limits::Limiter::new(Default::default())),
+        uploads: None,
         install: crate::unconfigured(),
         fetch: None,
         mailer: Arc::new(crate::mail_off()),

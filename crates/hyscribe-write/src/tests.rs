@@ -108,7 +108,11 @@ pub(crate) async fn fails_at_each_step<T>(
         write.fail_after(budget);
         match action(&mut write, state).await {
             Ok(()) => break,
-            Err(err) => assert!(matches!(err, crate::Error::Db(_)), "{err:?}"),
+            // Only the budget may stop it, so a fault that fails every try ends the loop.
+            Err(err) => assert!(
+                matches!(&err, crate::Error::Db(db) if db.to_string().contains("budget is spent")),
+                "{err:?}"
+            ),
         }
     }
 }

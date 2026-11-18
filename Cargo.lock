@@ -855,6 +855,7 @@ dependencies = [
  "hyscribe-config",
  "hyscribe-db",
  "hyscribe-fetch",
+ "hyscribe-image",
  "hyscribe-kses",
  "hyscribe-mail",
  "hyscribe-model",
@@ -944,6 +945,7 @@ version = "0.1.0"
 dependencies = [
  "hyscribe-auth",
  "hyscribe-fetch",
+ "hyscribe-image",
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",

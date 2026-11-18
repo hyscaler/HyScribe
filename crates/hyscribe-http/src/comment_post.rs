@@ -321,7 +321,7 @@ pub(crate) fn client_ip(
 
 /// The address of an `X-Forwarded-For` entry: `ip`, `ip:port`, `[ipv6]` or
 /// `[ipv6]:port`.
-fn address(entry: &str) -> Option<IpAddr> {
+pub fn address(entry: &str) -> Option<IpAddr> {
     let bare = entry
         .strip_prefix('[')
         .and_then(|entry| entry.strip_suffix(']'));

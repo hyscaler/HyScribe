@@ -323,3 +323,24 @@ path = "fuzz_targets/upload_name.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "upload_filetype"
+path = "fuzz_targets/upload_filetype.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "auth_cookie"
+path = "fuzz_targets/auth_cookie.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "forwarded_for"
+path = "fuzz_targets/forwarded_for.rs"
+test = false
+doc = false
+bench = false

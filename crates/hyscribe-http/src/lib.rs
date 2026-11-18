@@ -65,7 +65,7 @@ pub use hyscribe_admin::site_health::Install;
 /// from outside.
 #[doc(hidden)]
 pub mod fuzzing {
-    pub use crate::comment_post::read_form;
+    pub use crate::comment_post::{address as forwarded_address, read_form};
     pub use crate::files::http_date;
     pub use crate::login::cookies;
     pub use crate::redirect::{wp_sanitize_redirect, wp_validate_redirect};

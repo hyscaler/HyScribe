@@ -1223,6 +1223,7 @@ fn uploads_plan_their_fields() {
     }
     for body in [
         r#"{"status":"private"}"#,
+        r#"{"comment_status":"closed"}"#,
         r#"{"generate_sub_sizes":false}"#,
         r#"{"title":{"raw":5}}"#,
         r#"{"caption":{"raw":5}}"#,

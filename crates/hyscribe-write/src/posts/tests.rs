@@ -1478,6 +1478,14 @@ async fn attachments_are_inserted_as_php_inserts_them() {
         };
         let later = wp_insert_attachment(w, ctx, dated, "c.jpg").await?;
         assert_eq!(existing(w, later).await?.status, "inherit");
+        // An ID given is not an update: the upload is always a new post.
+        let given = PostArgs {
+            id: 1,
+            ..args("New", "inherit")
+        };
+        let new = wp_insert_attachment(w, ctx, given, "e.jpg").await?;
+        assert_ne!(new, 1);
+        assert_eq!(existing(w, 1).await?.post_type, "post");
         Ok(())
     })
     .await

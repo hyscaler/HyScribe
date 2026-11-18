@@ -2,8 +2,9 @@
 
 //! The REST API answers any route, query, method, headers and body without
 //! panicking: route matching, the JSON and form bodies, `_fields`,
-//! `_jsonp`, `_envelope`, the arguments' schemas, the routes and the
-//! writes' plans and answers all take input from the request, and
+//! `_jsonp`, `_envelope`, the arguments' schemas, the routes, a batch's
+//! nested requests and the writes' plans and answers all take input from
+//! the request, and
 //! the site's one template, template part and global styles post, its one
 //! comment and its one user have the input's content.
 
@@ -144,6 +145,12 @@ impl Site for Fuzzed<'_> {
     fn public_users(&self) -> bool {
         self.content.len() % 2 == 0
     }
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        (data.len() % 2 == 0).then(|| hyscribe_phpser::md5(data))
+    }
+    fn embed_secret(&self) -> String {
+        "0123456789".into()
+    }
     fn reads(&self) -> &dyn hyscribe_render::site::Site {
         self
     }
@@ -224,19 +231,23 @@ fuzz_target!(|data: &[u8]| {
         now: i64::from(header.first().copied().unwrap_or(0)) << 24,
     };
     let site = Fuzzed { content };
-    let served = match answer(&site, &request) {
-        Answer::Served(served) => served,
-        // The write made, the item written is the fuzzed one, or refused.
-        Answer::Write(pending) => {
-            let outcomes = [
-                Outcome::Written(4),
-                Outcome::Refused("rest_cannot_delete"),
-                Outcome::Exists(1),
-                Outcome::Duplicate(content.to_vec()),
-                Outcome::Cached(vec![("blogname".into(), Value::String(content.to_vec()))]),
-            ];
-            let at = usize::from(verb.get(2).copied().unwrap_or(0)) % outcomes.len();
-            written(&site, &request, *pending, outcomes[at].clone())
+    // Each write made, a batch's one after the other, the item written is
+    // the fuzzed one, or refused.
+    let outcomes = [
+        Outcome::Written(4),
+        Outcome::Refused("rest_cannot_delete"),
+        Outcome::Exists(1),
+        Outcome::Duplicate(content.to_vec()),
+        Outcome::Cached(vec![("blogname".into(), Value::String(content.to_vec()))]),
+    ];
+    let at = usize::from(verb.get(2).copied().unwrap_or(0)) % outcomes.len();
+    let mut answered = answer(&site, &request);
+    let served = loop {
+        match answered {
+            Answer::Served(served) => break served,
+            Answer::Write(pending) => {
+                answered = written(&site, &request, *pending, outcomes[at].clone());
+            }
         }
     };
     assert!((200..600).contains(&served.status));

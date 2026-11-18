@@ -103,6 +103,12 @@ impl hyscribe_rest::Site for AsRole<'_> {
     fn has_posts(&self, author: u64, types: &[(String, bool)]) -> bool {
         self.rest.has_posts(author, types)
     }
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        self.rest.wp_hash(data)
+    }
+    fn embed_secret(&self) -> String {
+        self.rest.embed_secret()
+    }
     fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
         self.rest.posts_of_type(post_type)
     }
@@ -284,7 +290,7 @@ async fn unported(database: &str, requests: &'static [(&str, &str, &str)]) {
 #[tokio::test]
 async fn index_matches_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/index.tsv");
-    replay("wordpress", golden, false, 6 * 47, &[]).await;
+    replay("wordpress", golden, false, 6 * 41, &[]).await;
 }
 
 /// Writes answer 501, as do the arguments whose schemas use keywords not

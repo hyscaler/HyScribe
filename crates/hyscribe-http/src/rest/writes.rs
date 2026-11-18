@@ -13,8 +13,8 @@ use hyscribe_phpser::Value;
 use hyscribe_phpser::addslashes;
 use hyscribe_render::date::Zone;
 use hyscribe_rest::{
-    CommentSave, Outcome, Pending, Plan, Request, Save, Served, Setting, SettingsSave, TermSave,
-    UserSave,
+    Answer, CommentSave, Outcome, Pending, Plan, Request, Save, Served, Setting, SettingsSave,
+    TermSave, UserSave,
 };
 use hyscribe_write::Error;
 use hyscribe_write::comments::{
@@ -58,45 +58,62 @@ pub(super) fn answer(
     let Some(writer) = &site.writer else {
         return sent(read_only());
     };
-    let plan = &pending.plan;
-    let ctx = context(site, plan, now);
-    let outcome = handle.block_on(async { act(writer.begin().await, plan, &ctx).await });
-    finished(site, request, pending, outcome, (user, token, now, handle))
+    let ctx = context(site, &pending.plan, now);
+    let outcome = handle.block_on(async { act(writer.begin().await, &pending.plan, &ctx).await });
+    finished(
+        site,
+        writer,
+        request,
+        pending,
+        outcome,
+        (user, token, now, handle),
+    )
 }
 
 /// The answer to a write that came to `outcome`: made from the site
 /// reloaded, 501 for what `hyscribe-write` does not port, and the database
-/// error page for an error, the write rolled back.
+/// error page for an error, the write rolled back. A batch's next write is
+/// made with `writer` in its own action, one after the other.
 pub(super) fn finished(
     site: &Site,
+    writer: &hyscribe_db::Writer,
     request: &Request,
     pending: Pending,
     outcome: Result<Outcome, Error>,
     (user, token, now, handle): Asker,
 ) -> Response {
-    let served = match outcome {
-        // What PHP refuses past the checks only as another write gets in.
-        Err(Error::Unported(_) | Error::Refused(_)) => Ok(Served::not_ported()),
-        Err(err) => Err(err),
-        Ok(outcome) => {
-            let reloaded = handle.block_on(site.reloaded());
-            let fresh = reloaded.as_ref().unwrap_or(site);
-            let mut reads = LoginReads::new(fresh, handle, now);
-            reads.act_as(user, token);
-            let rest = Rest {
-                reads,
-                site: fresh,
-                user,
-                caps: OnceCell::new(),
-            };
-            let served = hyscribe_rest::written(&rest, request, pending, outcome);
-            let Rest { reads, .. } = rest;
-            reads.reads.finish().map(|()| served).map_err(Error::Db)
+    let (mut pending, mut outcome) = (pending, outcome);
+    loop {
+        let answered = match outcome {
+            // What PHP refuses past the checks only as another write gets in.
+            Err(Error::Unported(_) | Error::Refused(_)) => Ok(Answer::Served(Served::not_ported())),
+            Err(err) => Err(err),
+            Ok(outcome) => {
+                let reloaded = handle.block_on(site.reloaded());
+                let fresh = reloaded.as_ref().unwrap_or(site);
+                let mut reads = LoginReads::new(fresh, handle.clone(), now);
+                reads.act_as(user, token.clone());
+                let rest = Rest {
+                    reads,
+                    site: fresh,
+                    user,
+                    caps: OnceCell::new(),
+                };
+                let answered = hyscribe_rest::written(&rest, request, pending, outcome);
+                let Rest { reads, .. } = rest;
+                reads.reads.finish().map(|()| answered).map_err(Error::Db)
+            }
+        };
+        match answered {
+            Ok(Answer::Served(served)) => return sent(served),
+            Ok(Answer::Write(next)) => {
+                pending = *next;
+                let ctx = context(site, &pending.plan, now);
+                outcome =
+                    handle.block_on(async { act(writer.begin().await, &pending.plan, &ctx).await });
+            }
+            Err(err) => return crate::html(crate::database_error(site, &format!("{err:?}"))),
         }
-    };
-    match served {
-        Ok(served) => sent(served),
-        Err(err) => crate::html(crate::database_error(site, &format!("{err:?}"))),
     }
 }
 

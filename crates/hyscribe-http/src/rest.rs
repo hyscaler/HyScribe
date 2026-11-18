@@ -198,6 +198,14 @@ impl hyscribe_rest::Site for Rest<'_> {
         self.reads.reads.wait(self.site.db.revisions(post))
     }
 
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        RenderSite::wp_hash(&self.reads.reads, data)
+    }
+
+    fn embed_secret(&self) -> String {
+        hyscribe_render::head::embed_secret()
+    }
+
     fn outbound(&self) -> bool {
         self.site.fetch.is_some()
     }

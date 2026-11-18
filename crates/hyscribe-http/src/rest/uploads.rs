@@ -139,7 +139,7 @@ pub(super) fn answer(
         Ok(Outcome::Written(id)) => Some(*id),
         _ => None,
     };
-    let mut answer = finished(site, request, pending, outcome, asker);
+    let mut answer = finished(site, writer, request, pending, outcome, asker);
     if let Some(id) = id.filter(|_| answer.status().is_success()) {
         let name = HeaderName::from_static(crate::uploads::ATTACHMENT_ID);
         answer.headers_mut().insert(name, HeaderValue::from(id));

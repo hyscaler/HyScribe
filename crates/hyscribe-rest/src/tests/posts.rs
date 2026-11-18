@@ -63,6 +63,12 @@ impl CapabilityData for Oracle {
 }
 
 impl Site for Oracle {
+    fn wp_hash(&self, _: &[u8]) -> Option<String> {
+        None
+    }
+    fn embed_secret(&self) -> String {
+        String::new()
+    }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         self.fixture.option(name)
     }

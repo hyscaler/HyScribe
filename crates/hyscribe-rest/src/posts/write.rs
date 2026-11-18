@@ -193,6 +193,7 @@ pub(crate) type Finish = fn(&Context, &mut Params, Plan, Outcome) -> Result<Resp
 
 /// A ported write endpoint: the arguments it does not port, its argument
 /// checks for the request, its plan and its answer.
+#[derive(Clone)]
 pub(crate) struct Writing {
     pub(crate) unported: fn(&Params) -> bool,
     pub(crate) args: fn(&Context, &Params, Vec<Arg>) -> Vec<Arg>,

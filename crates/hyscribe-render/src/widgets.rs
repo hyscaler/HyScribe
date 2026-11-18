@@ -140,6 +140,12 @@ const WIDGETS: [Widget; 18] = [
     },
 ];
 
+/// The `id_base` of each core widget, in the order `wp_widgets_init()`
+/// registers them.
+pub fn core_widgets() -> impl Iterator<Item = &'static str> {
+    WIDGETS.iter().map(|widget| widget.id_base)
+}
+
 /// The markup a widget is wrapped in: a sidebar's, or `the_widget()`'s.
 #[derive(Default)]
 struct Args {

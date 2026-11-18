@@ -32,7 +32,19 @@ fn replay(content: &'static Content, golden: &str, count: usize) {
 #[test]
 fn index_matches_php() {
     let golden = include_str!("../../tests/golden/index.tsv");
-    replay(content::default_install(), golden, 6 * 47);
+    replay(content::default_install(), golden, 6 * 41);
+}
+
+/// The namespace indexes (`namespaces.tsv`), but for a namespace that is
+/// not a string, an offset PHP fails on, which is answered 501.
+#[test]
+fn namespace_indexes_match_php() {
+    let golden = include_str!("../../tests/golden/namespaces.tsv");
+    let unported = |case: &RestCase| case.target.contains("namespace[]");
+    let goldens = [(content::default_install(), golden, false)];
+    let (failures, not_served) = mismatches(&goldens, true, &unported);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!((rest_cases(golden).len(), not_served), (6 * 34, 6));
 }
 
 /// A site icon, a theme's logo and a named time zone.

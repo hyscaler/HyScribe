@@ -41,6 +41,12 @@ struct Changed {
 }
 
 impl Site for Changed {
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        self.oracle.wp_hash(data)
+    }
+    fn embed_secret(&self) -> String {
+        self.oracle.embed_secret()
+    }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         let changed = self.options.iter().find(|(known, _)| *known == name);
         changed.map_or_else(
@@ -205,7 +211,8 @@ fn on(site: &dyn Site, asked: &Asked, outcome: Outcome) -> (Option<Plan>, Served
         Answer::Served(served) => (None, served),
         Answer::Write(pending) => {
             let plan = pending.plan.clone();
-            (Some(plan), written(site, &request, *pending, outcome))
+            let served = written(site, &request, *pending, outcome).served();
+            (Some(plan), served.unwrap())
         }
     }
 }

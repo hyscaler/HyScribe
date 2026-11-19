@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Release archives for a version tag (ADR 0005, docs/SECURITY_MODEL.md):
 # reproducible static builds, SHA256SUMS.txt, an SBOM and signed build
-# provenance. Actions are pinned to commit SHAs.
+# provenance. Actions are pinned to commit SHAs. Jobs run on the self-hosted
+# runner in throwaway containers, as ci.yml does; a tag is pushed by
+# someone with write access, never by a fork. The release builds use no
+# compile cache, so the bytes stay reproducible.
 name: Release
 
 on:
@@ -16,19 +19,39 @@ jobs:
     strategy:
       matrix:
         target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, hyscribe]
+    container:
+      image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
+      env:
+        CARGO_HOME: /cache/cargo
+        DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
+        TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      volumes:
+        - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
+        - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
+        - hyscribe-cargo:/cache/cargo
+    defaults:
+      run:
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+    timeout-minutes: 120
+    env:
+      HYSCRIBE_DB_CONTAINER: ci-release-db-${{ github.run_id }}
+      HYSCRIBE_REF_NETWORK: ci-release-ref-${{ github.run_id }}
+      HYSCRIBE_PHP_CONTAINER: ci-release-php-${{ github.run_id }}
+      HYSCRIBE_DB_PORT: "33993"
+      HYSCRIBE_TEST_DB_PORT: "33993"
+      HYSCRIBE_PHP_PORT: "8093"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
+      - name: Tools
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/ci-setup.sh
+      - run: rustup target add ${{ matrix.target }}
       - name: Tag matches the workspace version
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
           test "v$version" = "$GITHUB_REF_NAME"
-      - name: C compiler for ring (scripts/package.sh)
-        run: clang --version || (sudo apt-get update && sudo apt-get install -y --no-install-recommends clang)
       - name: Build and package
         run: scripts/package.sh ${{ matrix.target }} dist
       - name: Rebuilding gives the same bytes
@@ -40,38 +63,64 @@ jobs:
       - name: Smoke test
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
+          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 33993=db:3306
           reference/default-install/db.sh up
           scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
       - name: Switch back to PHP WordPress (MVP 8.5, GOALS S7)
         if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: reference/switch-back/run.sh
+        run: |
+          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" "8093=$HYSCRIBE_PHP_CONTAINER:80" || true
+          reference/switch-back/run.sh
+      - name: Remove the fixture containers
+        if: always() && matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          reference/default-install/php.sh down || true
+          reference/default-install/db.sh down || true
+          scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
       - name: Runs under emulation
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: |
-          sudo apt-get update && sudo apt-get install -y qemu-user-static
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends qemu-user-static
           tar -xzf dist/hyscribe_*_linux_arm64.tar.gz -C "$RUNNER_TEMP"
           qemu-aarch64-static "$RUNNER_TEMP/hyscribe/hyscribe" version | grep -q AGPL-3.0-or-later
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist-${{ matrix.target }}
-          path: dist/*.tar.gz
+          path: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/dist/*.tar.gz
 
   publish:
     needs: build
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, hyscribe]
+    container:
+      image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
+      env:
+        CARGO_HOME: /cache/cargo
+        DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
+        TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      volumes:
+        - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
+        - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
+        - hyscribe-cargo:/cache/cargo
+    defaults:
+      run:
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+    timeout-minutes: 30
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tools
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/ci-setup.sh cargo-cyclonedx@0.5.10
+          apt-get install -y -qq --no-install-recommends gh
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: dist
+          path: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/dist
           merge-multiple: true
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
-        with:
-          tool: cargo-cyclonedx
+      - run: rustup target add x86_64-unknown-linux-musl
       - name: SBOM
         run: |
           cargo cyclonedx --manifest-path crates/hyscribe/Cargo.toml --format json \
@@ -79,7 +128,7 @@ jobs:
             --override-filename hyscribe-sbom.cdx
           mv crates/hyscribe/hyscribe-sbom.cdx.json dist/
       - name: Checksums
-        working-directory: dist
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/dist
         run: sha256sum *.tar.gz *.json > SHA256SUMS.txt
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

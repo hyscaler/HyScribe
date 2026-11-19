@@ -427,15 +427,16 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<Option<PathBuf
         uploads,
     };
     choices.push(&mut values);
-    let (report, path) = tokio::runtime::Builder::new_current_thread()
+    let (_, path) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(failed("cannot start the runtime".into()))
         .and_then(|runtime| {
-            let settled = settle(home, values, content.as_deref(), plan.as_ref(), replace);
+            let content = content.as_deref();
+            let mut say = |report: &str| term.say(report);
+            let settled = settle(home, values, content, plan.as_ref(), replace, &mut say);
             runtime.block_on(settled)
         })?;
-    term.say(&report)?;
     Ok(Some(path))
 }
 
@@ -502,18 +503,21 @@ async fn unmade(made: Option<Made>, err: String) -> String {
     }
 }
 
-/// Checks the configuration, installs the new site if there is one, and
-/// writes `.env`: what the checks found, and where `.env` went. A failure
-/// after the install drops the new site's tables again.
+/// Checks the configuration, installs the new site if there is one, tells
+/// the report to `announce` and writes `.env`: what the checks found, and
+/// where `.env` went. A failure after the install drops the new site's
+/// tables again.
 pub(crate) async fn settle(
     home: &Path,
     values: Vec<(&'static str, String)>,
     content: Option<&Path>,
     new: Option<&Plan>,
     replace: bool,
+    announce: &mut dyn FnMut(&str) -> Result<(), String>,
 ) -> Result<(String, PathBuf), String> {
     let (report, text, made) = checked(values, content, new).await?;
-    match write_env(home, &text, replace) {
+    // The report is told before `.env` is written, as the terminal shows it.
+    match announce(&report).and_then(|()| write_env(home, &text, replace)) {
         Ok(path) => Ok((report, path)),
         Err(err) => Err(unmade(made, err).await),
     }

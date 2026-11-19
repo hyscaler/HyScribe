@@ -395,7 +395,18 @@ impl Wizard {
         } else {
             None
         };
-        let written = settle(&self.home, values, content.as_deref(), plan.as_ref(), false).await;
+        // The page tells the report once `.env` is written.
+        let mut quiet = |_: &str| Ok(());
+        let content = content.as_deref();
+        let written = settle(
+            &self.home,
+            values,
+            content,
+            plan.as_ref(),
+            false,
+            &mut quiet,
+        )
+        .await;
         match written {
             Ok((report, path)) => {
                 self.signed_in = false;

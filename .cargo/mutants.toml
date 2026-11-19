@@ -9,4 +9,10 @@ exclude_re = [
     "text_diff\\.rs:.*(in up$|replace up )",
     # hyscribe-image: a resampling window's edges hold weights of 0 (searched).
     "pixels\\.rs:.*(in window$|replace window )",
+    # outbound: `Hooks::img_caption_shortcode` returns an empty Vec by default, so `vec![]` is the same.
+    "outbound\\.rs:.*Hooks::img_caption_shortcode -> Vec<u8> with vec!\\[\\]$",
+    # outbound: `Hooks::post_gallery` returns an empty Vec by default, so `vec![]` is the same.
+    "outbound\\.rs:.*Hooks::post_gallery -> Vec<u8> with vec!\\[\\]$",
+    # outbound: `Hooks::media_shortcode_override` returns an empty Vec by default, so `vec![]` is the same.
+    "outbound\\.rs:.*Hooks::media_shortcode_override -> Vec<u8> with vec!\\[\\]$",
 ]

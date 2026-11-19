@@ -63,6 +63,15 @@ impl CapabilityData for Oracle {
 }
 
 impl Site for Oracle {
+    /// Uploads that hold no files, unless `deny` says there is no uploads
+    /// folder (`no_uploads`) or that every image is 1000 by 600 (`small_originals`).
+    fn image_size(&self, _: &str) -> Option<Option<(u32, u32)>> {
+        match () {
+            () if self.deny.contains(&"no_uploads") => None,
+            () if self.deny.contains(&"small_originals") => Some(Some((1000, 600))),
+            () => Some(None),
+        }
+    }
     fn wp_hash(&self, _: &[u8]) -> Option<String> {
         None
     }

@@ -198,6 +198,11 @@ impl hyscribe_rest::Site for Rest<'_> {
         self.reads.reads.wait(self.site.db.revisions(post))
     }
 
+    fn image_size(&self, file: &str) -> Option<Option<(u32, u32)>> {
+        let uploads = self.site.uploads.as_ref()?;
+        Some(uploads.image_size(file))
+    }
+
     fn wp_hash(&self, data: &[u8]) -> Option<String> {
         RenderSite::wp_hash(&self.reads.reads, data)
     }

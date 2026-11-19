@@ -48,6 +48,15 @@ picture 2600x260 big.ppm
 convert big.ppm -quality 85 big.jpg
 cp big.jpg "$OUT/big.jpg"
 exif big.jpg big-orient-6.jpg '{"exif": {"Orientation": 6}}'
+exif big.jpg big-orient-8.jpg '{"exif": {"Orientation": 8}}'
+exif big.jpg big-orient-3.jpg '{"exif": {"Orientation": 3}}'
+# One pixel either side of big_image_size_threshold (2560).
+picture 2562x120 edge.ppm
+convert edge.ppm -crop 2560x120+0+0 +repage -quality 85 "$OUT/edge-2560.jpg"
+convert edge.ppm -crop 2561x120+0+0 +repage -quality 85 "$OUT/edge-2561.jpg"
+convert big.ppm "${NODATE[@]}" "PNG24:$OUT/big.png"
+convert big.ppm -colors 64 "${NODATE[@]}" "PNG8:$OUT/big-indexed.png"
+convert big.ppm \( -size 2600x260 gradient:white-black \) -alpha off -compose copy-opacity -composite "${NODATE[@]}" "PNG32:$OUT/big-rgba.png"
 picture 260x2700 tall.ppm
 convert tall.ppm -quality 85 "$OUT/tall.jpg"
 picture 1200x400 wide.ppm

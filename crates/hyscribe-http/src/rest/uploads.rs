@@ -4,10 +4,8 @@
 //! file sent as the body with its `Content-Type` and `Content-Disposition`
 //! (`upload_from_data()`), or as a multipart form's `file`
 //! (`upload_from_file()`), then the attachment, its sizes and metadata,
-//! and the answer the attachments controller prepares. An image that gets
-//! a `-scaled` or `-rotated` copy answers 501 before its insert, as its
-//! answer reads the original's size from its file; so does a
-//! `Content-MD5`, and an image type no editor here is known to take.
+//! and the answer the attachments controller prepares. A `Content-MD5`
+//! answers 501, and so does an image type no editor here is known to take.
 
 use axum::body::Bytes;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};

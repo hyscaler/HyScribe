@@ -22,7 +22,7 @@ mod people;
 mod posts;
 mod previews;
 mod search;
-mod site;
+pub(crate) mod site;
 mod widgets;
 mod writes;
 
@@ -315,6 +315,11 @@ pub(crate) fn serve_case(case: &RestCase) -> Served {
 /// `case` served by HyScribe's API over `content`.
 pub(crate) fn serve_over(content: &'static Content, case: &RestCase) -> Served {
     serve_with(&Oracle::over(content, case.flag("pretty")), case)
+}
+
+/// `content` as rendering reads it.
+pub(crate) fn render_site(content: &'static Content) -> Box<dyn hyscribe_render::site::Site> {
+    Box::new(Oracle::over(content, false).fixture)
 }
 
 /// The role of `who` and its user, none for a visitor.

@@ -10,9 +10,12 @@
 # every URL on the page is the same on both sides; only the prefix differs
 # (/wp-admin/<file>.php, /hs-admin/<file>, ADR 0008). Each side starts from
 # a fresh db.sh up with seed.sql added (page views write), PHP first; the
-# database is reset after. The report folder gets php/ and hyscribe/ (the
-# pictures), report.tsv, report.html and diff-<screen>.png for each screen
-# that differs. Exit 0 when every screen matches, 1 when one differs.
+# database is reset after. Each side first answers a visitor's page view of
+# the home page (wait_for), which writes the navigation fallback post as PHP
+# does; PHP's Site Health tests would otherwise make that view
+# themselves, as loopback requests HyScribe does not run, at another point.
+# The report folder gets php/ and hyscribe/ (the pictures), report.tsv,
+# report.html and diff-<screen>.png for each screen that differs. Exit 0 when every screen matches, 1 when one differs.
 # HYSCRIBE_BIN is the release binary to serve (default target/release/hyscribe,
 # built with cargo when absent; it runs in the Playwright image, Ubuntu 24.04,
 # so a musl build runs as well). Takes the same HYSCRIBE_DB_CONTAINER,
@@ -101,6 +104,7 @@ if [ -z "$KEEP_PHP" ]; then
     "$ROOT/reference/default-install/php.sh" up >/dev/null
   MU=/var/www/html/wp-content/mu-plugins
   "$DOCKER" exec -i "$PHP_NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-screenshots.php" < "$HERE/mu-plugin.php"
+  wait_for PHP
   browser /shots/capture.py php "$URL" /shots/screens.list /out/php
   posts php
   "$DOCKER" rm -f "$PHP_NAME" >/dev/null

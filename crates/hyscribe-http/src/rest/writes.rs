@@ -45,6 +45,7 @@ use super::{Rest, sent};
 use crate::Site;
 use crate::login::LoginReads;
 use crate::mail::{Outbox, queue_changes};
+use crate::outbound::insert_navigation;
 
 /// The current user, their session's token, the time and the runtime.
 pub(super) type Asker = (u64, Vec<u8>, i64, Handle);
@@ -257,6 +258,15 @@ async fn written(
             let stylesheet = stylesheet.as_deref().unwrap_or_default();
             let id = get_user_global_styles_post_id(write, ctx, stylesheet).await?;
             Ok(Outcome::Written(id))
+        }
+        hyscribe_rest::Write::NavigationFallback(post) => {
+            let Some(post) = post else {
+                return Ok(Outcome::Written(0));
+            };
+            let fields = [&post.title[..], &post.name, &post.content];
+            Ok(Outcome::Written(
+                insert_navigation(write, ctx, fields).await?,
+            ))
         }
     }
 }

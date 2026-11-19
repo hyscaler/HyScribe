@@ -2,10 +2,13 @@
 
 use std::cell::RefCell;
 
-use hyscribe_model::Term;
+use hyscribe_model::{Post, Term};
 
 use super::*;
 use crate::outbound::Hooks;
+use context::with_scheme;
+
+mod objects;
 use crate::template::Renderer;
 use crate::theme::twentytwentyfive;
 
@@ -27,6 +30,12 @@ struct Menus {
     existing: Option<Post>,
     /// What `insert_navigation_fallback()` was given.
     inserted: RefCell<Vec<[Vec<u8>; 3]>>,
+    /// The posts the items link to.
+    posts: Vec<Post>,
+    /// The `category` terms.
+    categories: Vec<Term>,
+    /// The categories of the first post.
+    post_categories: Vec<u64>,
 }
 
 /// A hook that declines to create a fallback.
@@ -36,6 +45,22 @@ struct Declined;
 impl Hooks for Declined {
     fn wp_navigation_should_create_fallback(&self, _create: bool) -> bool {
         false
+    }
+}
+
+/// A hook that shows a menu the database lacks.
+#[derive(Debug)]
+struct Phantom;
+
+impl Hooks for Phantom {
+    fn wp_get_nav_menus(&self, _menus: Vec<Term>, _args: &[(String, Value)]) -> Vec<Term> {
+        vec![Term {
+            id: 77,
+            name: "Phantom".into(),
+            slug: "phantom".into(),
+            count: 1,
+            ..Term::default()
+        }]
     }
 }
 
@@ -63,12 +88,24 @@ impl Site for Menus {
         b"http://127.0.0.1:8081".to_vec()
     }
 
-    fn post(&self, _id: u64) -> Option<Post> {
-        None
+    fn post(&self, id: u64) -> Option<Post> {
+        self.posts.iter().find(|post| post.id == id).cloned()
     }
 
-    fn post_terms(&self, _post_id: u64, _taxonomy: &str) -> Vec<Term> {
-        Vec::new()
+    fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<Term> {
+        assert_eq!((post_id, taxonomy), (1, "category"));
+        let all = self.categories.iter();
+        all.filter(|term| self.post_categories.contains(&term.id))
+            .cloned()
+            .collect()
+    }
+
+    fn term(&self, id: u64, taxonomy: &str) -> Option<Term> {
+        let terms = match taxonomy {
+            "nav_menu" => &self.terms,
+            _ => &self.categories,
+        };
+        terms.iter().find(|term| term.id == id).cloned()
     }
 
     fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
@@ -99,8 +136,10 @@ impl Site for Menus {
     }
 
     fn taxonomy_terms(&self, taxonomy: &str) -> Vec<Term> {
-        assert_eq!(taxonomy, "nav_menu");
-        self.terms.clone()
+        match taxonomy {
+            "nav_menu" => self.terms.clone(),
+            _ => self.categories.clone(),
+        }
     }
 
     fn insert_navigation_fallback(&self, title: &[u8], name: &[u8], content: &[u8]) {
@@ -195,8 +234,16 @@ const DOCS: (&str, &str) = (
 );
 const TWITTER: (&str, &str) = ("twitter.com", "https://twitter.com/wordpress");
 
+/// What the conversion made of `site` for `request`, if it made a post.
+fn made_for(site: &Menus, request: &Request) -> Option<Classic> {
+    match classic_menu(site, request) {
+        Conversion::Made(classic) => Some(classic),
+        Conversion::Error | Conversion::NotPorted => None,
+    }
+}
+
 fn made(site: &Menus) -> Classic {
-    classic_menu(site, &Request::default()).unwrap()
+    made_for(site, &Request::default()).unwrap()
 }
 
 /// What `reference/writes/actions-navigation.php` has PHP write for a
@@ -325,40 +372,46 @@ fn theme_mods_come_from_either_option() {
     assert_eq!(made(&site).name, b"located");
 }
 
-/// No menu, a menu without items, and an item of a post, a term or an
-/// archive make no fallback; a link to a page asked for does not either.
+/// No menu, a menu without items, and one whose items are gone are the
+/// converter's `WP_Error`; the default fallback follows.
 #[test]
-fn what_is_not_ported_makes_no_fallback() {
+fn what_does_not_convert_is_an_error() {
     let request = Request::default();
+    let error = |site: &Menus| matches!(classic_menu(site, &request), Conversion::Error);
     let mut site = Menus::default();
-    assert!(classic_menu(&site, &request).is_none());
+    assert!(error(&site));
     site.menu(2, "Empty", "empty");
-    assert!(classic_menu(&site, &request).is_none());
+    assert!(error(&site));
     // Counted but gone: the converter has nothing to convert.
     site.terms[0].count = 1;
-    assert!(classic_menu(&site, &request).is_none());
-    for kind in ["post_type", "post_type_archive", "taxonomy"] {
-        let mut site = Menus::default();
-        site.menu(2, "Menu", "menu");
-        site.link(2, 1, 0, TWITTER);
-        site.link(2, 2, 0, DOCS).set("_menu_item_type", kind);
-        assert!(classic_menu(&site, &request).is_none(), "{kind}");
-    }
+    assert!(error(&site));
+    // `wp_get_nav_menu_items()` finds no items of a menu that counts none.
+    let mut site = Menus::default();
+    site.menu(2, "Menu", "menu");
+    site.link(2, 1, 0, TWITTER);
+    site.terms[0].count = 0;
+    assert!(error(&site));
     // Items whose parents are not in the menu leave nothing at the top.
     let mut site = Menus::default();
     site.menu(2, "Menu", "menu");
     site.link(2, 1, 7, TWITTER);
-    assert!(classic_menu(&site, &request).is_none());
+    assert!(error(&site));
     // An item with a parent of no integer is not at the top either.
     site.entries[0].set("_menu_item_menu_item_parent", "");
-    assert!(classic_menu(&site, &request).is_none());
+    assert!(error(&site));
+    // A menu that the filter shows but the database lacks.
+    let mut site = Menus::default();
+    site.menu(2, "Menu", "menu");
+    site.link(2, 1, 0, TWITTER);
+    site.hooks = Some(&Phantom);
+    assert!(error(&site));
 }
 
-/// A link to the page being asked for adds the current item's classes,
-/// which are not ported; the URL is compared as PHP does, with or without
-/// the host, the fragment, a trailing slash, `index.php` and encoding.
+/// A link to the page being asked for is the current item; the URL is
+/// compared as PHP does, with or without the host, the fragment, a
+/// trailing slash, `index.php` and encoding.
 #[test]
-fn a_link_to_the_current_page_makes_no_fallback() {
+fn a_link_to_the_current_page_is_the_current_item() {
     let current = |url: &str, uri: &str| {
         let mut site = Menus::default();
         site.menu(2, "Menu", "menu");
@@ -367,7 +420,10 @@ fn a_link_to_the_current_page_makes_no_fallback() {
             uri: uri.into(),
             ..Request::default()
         };
-        classic_menu(&site, &request).is_none()
+        let content = made_for(&site, &request).unwrap().content;
+        String::from_utf8(content)
+            .unwrap()
+            .contains("current-menu-item")
     };
     assert!(current("http://127.0.0.1:8081/about", "/about"));
     assert!(current("https://127.0.0.1:8081/about/", "/about/"));
@@ -402,7 +458,7 @@ fn the_home_link_has_its_classes() {
         uri: "/?paged=2".into(),
         ..Request::default()
     };
-    let content = classic_menu(&site, &request).unwrap().content;
+    let content = made_for(&site, &request).unwrap().content;
     let content = String::from_utf8(content).unwrap();
     let class = |label: &str| {
         let after = content
@@ -427,7 +483,7 @@ fn the_home_link_has_its_classes() {
         uri: "/other".into(),
         ..Request::default()
     };
-    let content = classic_menu(&site, &other).unwrap().content;
+    let content = made_for(&site, &other).unwrap().content;
     let content = String::from_utf8(content).unwrap();
     assert_eq!(content.matches("current-menu-item").count(), 0);
     assert_eq!(content.matches("menu-item-home").count(), 2);
@@ -513,8 +569,8 @@ fn the_nesting_is_bounded() {
         }
         classic_menu(&site, &Request::default())
     };
-    assert!(chain(127).is_some());
-    assert!(chain(128).is_none());
+    assert!(matches!(chain(127), Conversion::Made(_)));
+    assert!(matches!(chain(128), Conversion::NotPorted));
 }
 
 /// The navigation block with no menu of its own shows the fallback: the
@@ -556,11 +612,42 @@ fn the_navigation_block_falls_back_to_the_classic_menu() {
     };
     assert!(!render(&declined).contains("Docs"));
     assert!(declined.inserted.borrow().is_empty());
-    // So does a menu not ported.
+    // So does a menu not ported, which writes no post at all.
     let mut unported = two_menus();
     unported.entries[1].set("_menu_item_type", "taxonomy");
+    unported.entries[1].set("_menu_item_object", "nav_menu");
+    unported.entries[1].set("_menu_item_object_id", "2");
     assert!(!render(&unported).contains("Docs"));
     assert!(unported.inserted.borrow().is_empty());
+}
+
+/// With no `wp_navigation` post and no classic menu that converts, the
+/// default fallback is the page list in a post titled `Navigation`, written
+/// once as PHP writes it (`navigation-fallback-default` and
+/// `navigation-fallback-empty-menu`).
+#[test]
+fn the_default_fallback_is_a_page_list_post() {
+    let theme = twentytwentyfive();
+    let request = Request::default();
+    let case = "navigation-fallback-default";
+    let mut empty = Menus::default();
+    empty.menu(2, "No items", "no-items");
+    for site in [Menus::default(), empty] {
+        Renderer::new(&theme, &site, &request).render(b"<!-- wp:navigation /-->");
+        let post = [
+            golden(case, "post_title"),
+            golden(case, "post_name"),
+            golden(case, "post_content"),
+        ];
+        assert_eq!(*site.inserted.borrow(), [post]);
+    }
+    // Declined by the filter, nothing is written.
+    let declined = Menus {
+        hooks: Some(&Declined),
+        ..Menus::default()
+    };
+    Renderer::new(&theme, &declined, &request).render(b"<!-- wp:navigation /-->");
+    assert!(declined.inserted.borrow().is_empty());
 }
 
 /// `set_url_scheme()` puts the scheme of the home URL on a URL that has

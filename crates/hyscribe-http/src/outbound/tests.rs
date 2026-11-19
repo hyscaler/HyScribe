@@ -36,9 +36,9 @@ fn golden(case: &str, column: &str) -> Vec<u8> {
     unescaped.into_bytes()
 }
 
-/// The `wp_navigation` post a visitor's page view makes of a classic menu
-/// is written row for row as PHP writes it (`navigation-fallback-*` of
-/// the write oracle), by no user, as the menu's title and slug.
+/// The `wp_navigation` post a visitor's page view makes of a classic menu,
+/// or of the page list when there is none, is written row for row as PHP
+/// writes it (`navigation-fallback-*` of the write oracle), by no user.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_navigation_fallback_is_written_as_php_writes_it() {
     let db = fixture_database();
@@ -47,6 +47,8 @@ async fn the_navigation_fallback_is_written_as_php_writes_it() {
     let ctx = visitor(&site);
     let cases = [
         "navigation-fallback-classic",
+        "navigation-fallback-default",
+        "navigation-fallback-objects",
         "navigation-fallback-escapes",
         "navigation-fallback-primary-location",
         "navigation-fallback-primary-slug",

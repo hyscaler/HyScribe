@@ -3164,7 +3164,7 @@ async fn listed_pages_match_php() {
         assert_listed_pages("wordpress", golden, false, known).await,
         0
     );
-    assert_eq!(golden.lines().count(), 99);
+    assert_eq!(golden.lines().count(), 101);
 }
 
 /// The Theme Test Data fixture's requests of `reference/pages/ttd.list`,
@@ -3251,6 +3251,52 @@ async fn a_page_view_writes_the_classic_menu_fallback() {
         let label = "\"label\":\"twitter.com\"";
         assert!(written[0].starts_with(&format!("0|publish|Social menu|social-menu|{content}")));
         assert!(written[0].contains(label), "{}", written[0]);
+    }
+}
+
+/// A visitor's page view over the default install, which has no classic
+/// menu and no `wp_navigation` post, in primary mode: the navigation block's
+/// fallback writes the page list post PHP writes (`create_default_fallback()`,
+/// the oracle's `navigation-fallback-default`), once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_view_writes_the_default_fallback() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let delete = "DELETE FROM wp_posts WHERE post_type = 'wp_navigation'";
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    sqlx::query(delete).execute(&mut conn).await.unwrap();
+    let oracle = Some("http://127.0.0.1:8081".to_string());
+    let site = Site::load(Db::connect(&db).await.unwrap(), oracle.clone(), oracle)
+        .await
+        .unwrap();
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary).await;
+    let site = Arc::new(site.with_writer(writer.unwrap()));
+    let posts = "SELECT CONCAT_WS('|', post_author, post_status, post_title, post_name, \
+        post_content) FROM wp_posts WHERE post_type = 'wp_navigation'";
+    for visit in 0..2 {
+        let reply = request(&site, "GET", "/").await;
+        assert_eq!(reply.status, StatusCode::OK);
+        assert!(reply.body.contains("wp-block-page-list"));
+        let written: Vec<String> = sqlx::query_scalar(posts)
+            .fetch_all(&mut conn)
+            .await
+            .unwrap();
+        // The first view wrote the one post; the second found it.
+        let expected = "0|publish|Navigation|navigation|<!-- wp:page-list /-->";
+        assert_eq!(written, [expected], "view {visit}");
     }
 }
 

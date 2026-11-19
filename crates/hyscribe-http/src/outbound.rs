@@ -76,8 +76,8 @@ pub(crate) enum Write<'a> {
     Transient(&'a str, &'a [u8], i64),
     /// `delete_site_transient()`.
     Expire(&'a str),
-    /// `wp_insert_post()` of the navigation fallback's post, from its
-    /// title, slug and content.
+    /// `wp_insert_post()` of the navigation fallback's post (a classic
+    /// menu's or the default page list's), from its title, slug and content.
     Navigation(&'a [u8], &'a [u8], &'a [u8]),
 }
 
@@ -130,9 +130,9 @@ fn visitor(site: &Site) -> Context {
     }
 }
 
-/// `WP_Navigation_Fallback::create_classic_menu_fallback()`'s
-/// `wp_insert_post()`: the published `wp_navigation` post of a menu's
-/// title, slug and content.
+/// `WP_Navigation_Fallback::create_classic_menu_fallback()`'s and
+/// `create_default_fallback()`'s `wp_insert_post()`: the published
+/// `wp_navigation` post of a title, slug and content.
 async fn insert_navigation(
     write: &mut hyscribe_db::Write<'_>,
     ctx: &Context,

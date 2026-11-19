@@ -513,7 +513,7 @@ pub(crate) async fn settle(
     content: Option<&Path>,
     new: Option<&Plan>,
     replace: bool,
-    announce: &mut dyn FnMut(&str) -> Result<(), String>,
+    announce: &mut impl FnMut(&str) -> Result<(), String>,
 ) -> Result<(String, PathBuf), String> {
     let (report, text, made) = checked(values, content, new).await?;
     // The report is told before `.env` is written, as the terminal shows it.

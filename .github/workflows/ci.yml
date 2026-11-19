@@ -9,7 +9,9 @@
 # and main and manual runs, never pull requests (a pull request from a fork
 # would run its code on that machine). Fixture containers start through the
 # runner's rootless Docker (scripts/ci-net.sh joins them to the job).
-# Mutation testing runs before a merge, not here.
+# Mutation testing runs before a merge, not here. The containers run
+# as root without DAC_OVERRIDE and DAC_READ_SEARCH, so file permissions bind
+# them as they bind the ordinary user the tests expect.
 name: CI
 
 on:
@@ -42,6 +44,7 @@ jobs:
         SCCACHE_DIR: /cache/sccache
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
@@ -97,6 +100,7 @@ jobs:
         SCCACHE_DIR: /cache/sccache
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
@@ -110,8 +114,8 @@ jobs:
     env:
       HYSCRIBE_DB_CONTAINER: ci-coverage-db-${{ github.run_id }}
       HYSCRIBE_REF_NETWORK: ci-coverage-ref-${{ github.run_id }}
-      HYSCRIBE_DB_PORT: "33991"
-      HYSCRIBE_TEST_DB_PORT: "33991"
+      HYSCRIBE_DB_PORT: "28991"
+      HYSCRIBE_TEST_DB_PORT: "28991"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools (system packages, cargo tools from the cache volume)
@@ -125,7 +129,7 @@ jobs:
         run: reference/theme-test-data/build.sh
       - name: Default install fixture in MariaDB (hyscribe-db tests)
         run: |
-          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 33991=db:3306
+          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 28991=db:3306
           reference/default-install/db.sh up
       - name: Tests with the 100% gate (ADR 0007)
         run: |
@@ -152,6 +156,7 @@ jobs:
         SCCACHE_DIR: /cache/sccache
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
@@ -165,7 +170,7 @@ jobs:
     env:
       HYSCRIBE_DB_CONTAINER: ci-package-db-${{ github.run_id }}
       HYSCRIBE_REF_NETWORK: ci-package-ref-${{ github.run_id }}
-      HYSCRIBE_DB_PORT: "33992"
+      HYSCRIBE_DB_PORT: "28992"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools (system packages, cargo tools from the cache volume)
@@ -177,7 +182,7 @@ jobs:
       - run: rustup target add x86_64-unknown-linux-musl
       - name: Release archive installs and serves the default install (ADR 0005)
         run: |
-          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 33992=db:3306
+          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 28992=db:3306
           reference/default-install/db.sh up
           scripts/package.sh x86_64-unknown-linux-musl dist
           scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
@@ -196,6 +201,7 @@ jobs:
         SCCACHE_DIR: /cache/sccache
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}

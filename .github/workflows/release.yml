@@ -26,6 +26,7 @@ jobs:
         CARGO_HOME: /cache/cargo
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
@@ -39,8 +40,8 @@ jobs:
       HYSCRIBE_DB_CONTAINER: ci-release-db-${{ github.run_id }}
       HYSCRIBE_REF_NETWORK: ci-release-ref-${{ github.run_id }}
       HYSCRIBE_PHP_CONTAINER: ci-release-php-${{ github.run_id }}
-      HYSCRIBE_DB_PORT: "33993"
-      HYSCRIBE_TEST_DB_PORT: "33993"
+      HYSCRIBE_DB_PORT: "28993"
+      HYSCRIBE_TEST_DB_PORT: "28993"
       HYSCRIBE_PHP_PORT: "8093"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,7 +65,7 @@ jobs:
       - name: Smoke test
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
-          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 33993=db:3306
+          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 28993=db:3306
           reference/default-install/db.sh up
           scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
       - name: Switch back to PHP WordPress (MVP 8.5, GOALS S7)
@@ -98,6 +99,7 @@ jobs:
         CARGO_HOME: /cache/cargo
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}

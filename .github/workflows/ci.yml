@@ -114,6 +114,8 @@ jobs:
       HYSCRIBE_REF_NETWORK: ci-coverage-ref-${{ github.run_id }}
       HYSCRIBE_DB_PORT: "28991"
       HYSCRIBE_TEST_DB_PORT: "28991"
+      # The fixture database takes a few test connections at a time.
+      RUST_TEST_THREADS: "4"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools (system packages, cargo tools from the cache volume)

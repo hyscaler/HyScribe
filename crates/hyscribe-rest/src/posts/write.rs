@@ -425,10 +425,11 @@ pub(crate) fn planned_save(
     if kind == Kind::Attachment {
         checked_parent(context, params)?;
     }
-    // An attachment's description and caption are its content and excerpt.
-    let (content, excerpt) = match kind {
-        Kind::Attachment => (raw(params, "description")?, raw(params, "caption")?),
-        _ => (
+    // Without a `content` of its own, a type's description and caption are
+    // its content and excerpt (an attachment's).
+    let (content, excerpt) = match field(kind, "content") {
+        false => (raw(params, "description")?, raw(params, "caption")?),
+        true => (
             raw(params, "content")?,
             match field(kind, "excerpt") {
                 true => raw(params, "excerpt")?,

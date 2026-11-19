@@ -474,8 +474,9 @@ async fn a_themes_read_creates_the_styles_post_as_php() {
     report.unwrap();
 }
 
-/// The administrator's `method target` sent to `site` with their cookie.
-async fn as_administrator(site: &Arc<Site>, method: &str, target: &str) -> StatusCode {
+/// The status and body of the administrator's `method target` sent to
+/// `site` with their cookie.
+async fn as_administrator(site: &Arc<Site>, method: &str, target: &str) -> (StatusCode, String) {
     let (cookie, nonce) = log_in_as(site, "admin", 1).await;
     let request = axum::http::Request::builder()
         .method(method)
@@ -483,7 +484,8 @@ async fn as_administrator(site: &Arc<Site>, method: &str, target: &str) -> Statu
         .header(header::HOST, "127.0.0.1:8081")
         .header(header::COOKIE, cookie)
         .header("x-wp-nonce", nonce);
-    send(site, request, "").await.status()
+    let response = send(site, request, "").await;
+    (response.status(), body(response).await)
 }
 
 /// How many posts of `wordpress_saves` have the ID `id`.
@@ -525,8 +527,8 @@ async fn a_media_delete_removes_its_files_once_it_commits() {
     let target = "/?rest_route=/wp/v2/media/9301&force=true";
     // No uploads folder: not ported, and nothing written.
     let plain = saves_site(sessions.path()).await;
-    let status = as_administrator(&plain, "DELETE", target).await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    let (status, text) = as_administrator(&plain, "DELETE", target).await;
+    assert_eq!((status, text.as_str()), (StatusCode::NOT_IMPLEMENTED, ""));
     assert_eq!(posts_with(9301).await, 1);
     assert!(folder.join("oracle-one.jpg").exists());
     // MEDIA_TRASH on: a delete that is not forced is not ported.
@@ -536,13 +538,19 @@ async fn a_media_delete_removes_its_files_once_it_commits() {
         ..hyscribe_config::Constants::default()
     };
     let trashing = Arc::new(Arc::into_inner(site).unwrap().with_constants(constants));
-    let status = as_administrator(&trashing, "DELETE", "/?rest_route=/wp/v2/media/9301").await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    let unforced = "/?rest_route=/wp/v2/media/9301";
+    let (status, text) = as_administrator(&trashing, "DELETE", unforced).await;
+    assert_eq!((status, text.as_str()), (StatusCode::NOT_IMPLEMENTED, ""));
     assert_eq!(posts_with(9301).await, 1);
     // Forced, it deletes the rows and then the files.
     let site = uploading(sessions.path(), uploads.path()).await;
+    // With MEDIA_TRASH off, an unforced delete is PHP's own refusal.
+    let (status, text) = as_administrator(&site, "DELETE", unforced).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert!(text.contains("rest_trash_not_supported"), "{text}");
+    assert_eq!(posts_with(9301).await, 1);
     assert_eq!(
-        as_administrator(&site, "DELETE", target).await,
+        as_administrator(&site, "DELETE", target).await.0,
         StatusCode::OK
     );
     assert_eq!(posts_with(9301).await, 0);

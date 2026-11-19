@@ -1445,3 +1445,36 @@ fn media_deletes_are_forced() {
     let (_, served) = on(&media("administrator"), &asked, Outcome::Written(9131));
     assert!(text_of(&served).starts_with(r#"{"deleted":true,"previous":{"id":9131,"#));
 }
+
+/// A themes read plans the global styles post of the bundled theme where
+/// the site has none and its links are wanted, and plans no write else.
+#[test]
+fn themes_reads_plan_the_global_styles_post() {
+    let who = "administrator";
+    let planned = |target: &str| {
+        let asked = Asked::new(who, "GET", target, "");
+        on(&oracle(who, &[]), &asked, Outcome::Written(1)).0
+    };
+    let creates = Write::StylesPost(Some("twentytwentyfive".into()));
+    for target in [
+        "/wp/v2/themes&status[]=active",
+        "/wp/v2/themes&status[]=active&context=edit",
+        "/wp/v2/themes/twentytwentyfive",
+        "/wp/v2/themes/twentytwentyfive&_fields=_links",
+    ] {
+        assert_eq!(
+            planned(target).map(|plan| plan.write),
+            Some(creates.clone()),
+            "{target}"
+        );
+    }
+    // No links, another status, another theme: nothing to write.
+    for target in [
+        "/wp/v2/themes&status[]=active&_fields=stylesheet",
+        "/wp/v2/themes&status[]=inactive",
+        "/wp/v2/themes/twentytwentyfour",
+        "/wp/v2/themes/twentytwentyfive&_fields=stylesheet",
+    ] {
+        assert!(planned(target).is_none(), "{target}");
+    }
+}

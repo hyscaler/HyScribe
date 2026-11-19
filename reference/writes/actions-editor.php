@@ -62,6 +62,37 @@ $editor_save = function ( $route, $body ) use ( $editor_state ) {
 	);
 };
 
+// The same over reference/rest/editor-meta.sql, with any method and route.
+$meta_state = function () {
+	global $wpdb;
+	$sql = file_get_contents( __DIR__ . '/editor-meta.sql' );
+	$sql = strstr( $sql, "\n-- cleanup\n", true );
+	foreach ( explode( "\n", $sql ) as $line ) {
+		if ( preg_match( '/^(INSERT|UPDATE|DELETE) /', $line ) ) {
+			$wpdb->query( $line );
+		}
+	}
+};
+
+$meta_save = function ( $method, $route, $body ) use ( $meta_state ) {
+	return array(
+		'setup'  => $meta_state,
+		'action' => function () use ( $method, $route, $body ) {
+			$request = new WP_REST_Request( $method, $route );
+			$request->set_header( 'Content-Type', 'application/json' );
+			$request->set_body( wp_json_encode( $body ) );
+			$response = rest_do_request( $request );
+			if ( $response->is_error() ) {
+				fwrite( STDERR, wp_json_encode( $response->get_data() ) . "\n" );
+				exit( 1 );
+			}
+		},
+	);
+};
+
+// A footnotes value of one footnote.
+$note = fn( $id, $content ) => wp_json_encode( array( array( 'content' => $content, 'id' => $id ) ) );
+
 $para = fn( $text ) => "<!-- wp:paragraph -->\n<p>$text</p>\n<!-- /wp:paragraph -->";
 $hello = $para( 'Welcome to WordPress. This is your first post. Edit or delete it, then start writing!' );
 $drafted = $para( 'Drafted in the editor.' );
@@ -100,4 +131,19 @@ return array(
 	'editor-format-standard' => $editor_save( '/wp/v2/posts/9606', array( 'id' => 9606, 'format' => 'standard', 'content' => $para( 'For friends.' ) ) ),
 	'editor-terms'          => $editor_save( '/wp/v2/posts/1', array( 'id' => 1, 'categories' => array( 1, 9602 ), 'tags' => array( 9601 ), 'content' => $hello ) ),
 	'editor-page-template'  => $editor_save( '/wp/v2/pages/2', array( 'id' => 2, 'template' => 'page-no-title', 'parent' => 9607 ) ),
+	// The saves with `meta` of reference/rest/editor-meta.list, over editor-meta.sql.
+	'editor-meta-footnotes' => $meta_save( 'POST', '/wp/v2/posts/9701', array( 'content' => $para( 'Noted now.' ), 'meta' => array( 'footnotes' => $note( 'n1', 'A <b>note</b>' ) ) ) ),
+	'editor-meta-first'     => $meta_save( 'POST', '/wp/v2/posts/9701', array( 'meta' => array( 'footnotes' => $note( 'n1', 'First' ) ) ) ),
+	'editor-meta-kses'      => $meta_save( 'POST', '/wp/v2/posts/9701', array( 'meta' => array( 'footnotes' => '[{"content":"Bad <script>x()<\/script><em>ok<\/em> café \/ <a href=\"https:\/\/x.test\/\" onclick=\"y()\">l<\/a>","id":"AB 12!"},{"content":"","id":"e"},{"content":"no id"},{"id":"no-content"},{"content":"kept","id":7}]' ) ) ),
+	'editor-meta-changed'   => $meta_save( 'POST', '/wp/v2/posts/9702', array( 'meta' => array( 'footnotes' => $note( 'a1', 'New' ) ) ) ),
+	'editor-meta-same'      => $meta_save( 'POST', '/wp/v2/posts/9702', array( 'meta' => array( 'footnotes' => '[{"id":"a1","content":"Old"}]' ) ) ),
+	'editor-meta-content'   => $meta_save( 'POST', '/wp/v2/posts/9702', array( 'content' => $para( 'Noted again.' ), 'meta' => array( 'footnotes' => $note( 'a1', 'Newer' ) ) ) ),
+	'editor-meta-reset'     => $meta_save( 'POST', '/wp/v2/posts/9702', array( 'meta' => array( 'footnotes' => null ) ) ),
+	'editor-meta-empty'     => $meta_save( 'POST', '/wp/v2/posts/9702', array( 'meta' => array( 'footnotes' => '' ) ) ),
+	'editor-meta-page'      => $meta_save( 'POST', '/wp/v2/pages/9704', array( 'meta' => array( 'footnotes' => $note( 'g1', 'On a page' ) ) ) ),
+	'editor-meta-create'    => $meta_save( 'POST', '/wp/v2/posts', array( 'title' => 'Created', 'status' => 'draft', 'meta' => array( 'footnotes' => $note( 'b1', 'Born' ) ) ) ),
+	'editor-meta-create-page' => $meta_save( 'POST', '/wp/v2/pages', array( 'title' => 'A page', 'status' => 'draft', 'meta' => array( 'footnotes' => $note( 'c1', 'Page born' ) ) ) ),
+	'editor-meta-pattern'   => $meta_save( 'POST', '/wp/v2/blocks/9707', array( 'meta' => array( 'footnotes' => $note( 'p1', 'Pattern new' ) ) ) ),
+	'editor-meta-pattern-reset' => $meta_save( 'POST', '/wp/v2/blocks/9707', array( 'meta' => array( 'footnotes' => null, 'wp_pattern_sync_status' => 'unsynced' ) ) ),
+	'editor-meta-create-pattern' => $meta_save( 'POST', '/wp/v2/blocks', array( 'title' => 'Fresh pattern', 'status' => 'publish', 'meta' => array( 'footnotes' => $note( 'f1', 'Fresh' ), 'wp_pattern_sync_status' => 'unsynced' ) ) ),
 );

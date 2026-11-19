@@ -91,3 +91,34 @@ fn dates_are_parsed_as_rest_parse_date_parses_them() {
         assert_eq!(at(wrong), None, "{wrong}");
     }
 }
+
+/// What `schema.tsv`'s addresses leave unsaid: where PHP's `str_repeat()`
+/// of a negative count throws, which no answer is made of, a last new line,
+/// and the forms of a mapped address.
+#[test]
+fn ip_addresses_are_read_as_php_reads_them() {
+    let is = |ip: &str| is_ip_address(ip.as_bytes());
+    for fatal in [
+        "::1:2:3:4:5:6:7:8:9",
+        "1:2:3:4:5:6:7:8:9::",
+        "1:2:3:4:5:6:7::8:9",
+    ] {
+        assert_eq!(is(fatal), None, "{fatal}");
+    }
+    assert_eq!(is_ip_address(b"\xff::1"), Some(false));
+    assert_eq!(is("10.0.0.1\n"), Some(true));
+    assert_eq!(is("10.0.0.1\n\n"), Some(false));
+    assert_eq!(is("1.2.3"), Some(false));
+    assert_eq!(is("1:2:3:4:5:6:1.2.3.4"), Some(true));
+    assert_eq!(is("1:2:3:4:5:6:1.2.3.04"), Some(false));
+    assert_eq!(is("1:2:3:4:5:6:1.2.3.256"), Some(false));
+    assert_eq!(is("::ffff:1.2.3.4"), Some(true));
+    assert_eq!(is("ffff::"), Some(true));
+    assert_eq!(is("1::2:3"), Some(true));
+    let schema = json_decode(br#"{"type":"string","format":"ip"}"#).unwrap();
+    let fatal = Value::String(b"1:2:3:4:5:6:7::8:9".to_vec());
+    assert_eq!(
+        validate_value_from_schema(&fatal, &schema, "p"),
+        Err(Refusal(None))
+    );
+}

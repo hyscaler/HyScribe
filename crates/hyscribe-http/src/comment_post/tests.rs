@@ -16,10 +16,6 @@ use super::*;
 use crate::admin::tests::{logged_in, page_of, salted, send, session_nonce, unwritable};
 use crate::{Peer, router};
 
-/// The tests that insert comments take turns: the cases that set comment IDs
-/// and the ones that leave the database to number them lock each other out.
-static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
 const GOLDEN: &str = include_str!("../../tests/golden/comment-post.tsv");
 const CASES: &str = include_str!("../../../../reference/comment-post/cases.list");
 const FORM: &str = "application/x-www-form-urlencoded";
@@ -198,7 +194,7 @@ async fn comment_count(conn: &mut Connection) -> i64 {
 async fn posts_answer_and_write_as_php() {
     // The admin saves' content shares the users' meta rows, which deadlock.
     let _turn = crate::admin::saves::tests::turn().await;
-    let _writes = WRITES.lock().await;
+    let _writes = crate::admin::tests::COMMENT_ROWS.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let (site, logged_in) = logged_in("wordpress", dir.path()).await;
     let nonce = session_nonce(&site, &logged_in, "unfiltered-html-comment_1").await;
@@ -289,7 +285,7 @@ async fn connect() -> sqlx::MySqlConnection {
 /// administrator's comment, under every budget short of success.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_statement_keeps_nothing() {
-    let _writes = WRITES.lock().await;
+    let _writes = crate::admin::tests::COMMENT_ROWS.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let (site, logged_in) = logged_in("wordpress", dir.path()).await;
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
@@ -530,7 +526,7 @@ async fn only_a_held_comment_is_previewed() {
 /// year; a `redirect_to` of `0` is empty, so the comment's link is used.
 #[tokio::test(flavor = "multi_thread")]
 async fn cookies_last_a_year_or_go() {
-    let _writes = WRITES.lock().await;
+    let _writes = crate::admin::tests::COMMENT_ROWS.lock().await;
     let dir = tempfile::tempdir().unwrap();
     let (site, _) = logged_in("wordpress", dir.path()).await;
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
@@ -597,7 +593,7 @@ async fn held_comments_are_read() {
 /// pretty permalink structure that has one.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_comment_links_to_its_post() {
-    let _writes = WRITES.lock().await;
+    let _writes = crate::admin::tests::COMMENT_ROWS.lock().await;
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
     let writer = writer.unwrap().unwrap();
     let mut conn = connect().await;
@@ -615,7 +611,7 @@ async fn a_comment_links_to_its_post() {
 /// puts every comment on page 1.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_comment_without_a_thread_top_has_no_page() {
-    let _writes = WRITES.lock().await;
+    let _writes = crate::admin::tests::COMMENT_ROWS.lock().await;
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
     let writer = writer.unwrap().unwrap();
     let mut conn = connect().await;
@@ -647,7 +643,7 @@ async fn a_comment_without_a_thread_top_has_no_page() {
 /// one to the post's author (ADR 0016).
 #[tokio::test(flavor = "multi_thread")]
 async fn saved_comments_are_mailed() {
-    let _writes = WRITES.lock().await;
+    let _writes = crate::admin::tests::COMMENT_ROWS.lock().await;
     let db = hyscribe_db::Db::connect(&fixture_database()).await.unwrap();
     let home = Some("http://127.0.0.1:8081".to_string());
     let site = Site::load(db, home.clone(), home).await.unwrap();

@@ -223,6 +223,7 @@ fuzz_target!(|data: &[u8]| {
         origin: header.get(1..).filter(|origin| !origin.is_empty()),
         nonce: header.get(..1),
         remote_addr: header.get(1..).unwrap_or_default(),
+        postpass: header.first().is_some_and(|b| b % 2 == 1),
         user_agent: Some(header),
         method_override: None,
         content_type,

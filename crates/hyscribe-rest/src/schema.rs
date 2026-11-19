@@ -2,7 +2,7 @@
 
 //! `rest_validate_value_from_schema()` and `rest_sanitize_value_from_schema()`
 //! for every type and keyword but `anyOf`, `pattern`,
-//! `patternProperties` and a `format` other than `date-time`, `email` and
+//! `patternProperties` and a `format` other than `date-time`, `email`, `ip` and
 //! `uri`, which a
 //! schema using them is refused for.
 
@@ -12,6 +12,9 @@ use hyscribe_render::date::strtotime;
 use hyscribe_render::formatting::{is_email, sanitize_text_field};
 
 use crate::response::{RestError, object, text};
+
+mod ip;
+use ip::is_ip_address;
 
 /// Why a value is not taken: the error WordPress gives, or none when its
 /// schema uses a keyword not ported yet.
@@ -210,7 +213,7 @@ fn resolve(value: &Value, schema: &Value) -> Result<String, String> {
 }
 
 /// The formats ported.
-const FORMATS: [&[u8]; 3] = [b"date-time", b"email", b"uri"];
+const FORMATS: [&[u8]; 4] = [b"date-time", b"email", b"ip", b"uri"];
 
 /// A `pattern` the byte matcher reads as PCRE's `u` mode does: literals
 /// and classes of ASCII, with no anchor or Unicode-aware escape.
@@ -531,6 +534,16 @@ pub fn validate_value_from_schema(value: &Value, schema: &Value, param: &str) ->
     let format = schema.get_str("format").and_then(Value::as_bytes);
     if ty == "string" && format == Some(b"email") && !is_email(&value.to_php_string()) {
         return invalid("rest_invalid_email", "Invalid email address.".into());
+    }
+    if ty == "string" && format == Some(b"ip") {
+        // A fatal error in PHP is not ported.
+        let valid = is_ip_address(&value.to_php_string()).ok_or(Refusal(None))?;
+        if !valid {
+            return invalid(
+                "rest_invalid_ip",
+                format!("{param} is not a valid IP address."),
+            );
+        }
     }
     if ty == "string"
         && format == Some(b"date-time")
@@ -870,9 +883,11 @@ fn sanitize_as(value: &Value, schema: &Value, ty: &str, param: &str) -> Checked<
         "number" => Value::Float(hyscribe_phpser::Float::from_f64(value.to_float())),
         "boolean" => Value::Bool(sanitize_boolean(value)),
         "string" => match schema.get_str("format").and_then(Value::as_bytes) {
-            Some(b"email" | b"date-time") => {
-                Value::String(sanitize_text_field(&value.to_php_string()))
-            }
+            // `sanitize_text_field()` makes nothing of an array.
+            Some(b"email" | b"date-time" | b"ip") => Value::String(match value {
+                Value::Array(_) => Vec::new(),
+                value => sanitize_text_field(&value.to_php_string()),
+            }),
             Some(b"uri") => Value::String(esc_url_raw(&value.to_php_string())),
             _ => Value::String(value.to_php_string()),
         },

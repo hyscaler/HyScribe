@@ -591,7 +591,9 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
         return None;
     }
     Some(Writing {
-        unported: |params| params.get("template").is_some_and(|t| *t != text("")),
+        unported: |params| {
+            params.get("template").is_some_and(|t| *t != text("")) || params.get("meta").is_some()
+        },
         args: status_args,
         plan: plan_autosave,
         finish: finish_autosave,
@@ -600,12 +602,9 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
 
 /// `create_item()` up to its write: the parent's
 /// `prepare_item_for_database()`, of which an autosave writes the fields
-/// alone. Its `meta`, which an autosave compares with the revisioned
-/// meta, is not ported.
+/// alone. Its `meta`, which an autosave compares with the revisioned meta,
+/// is not ported: the route answers 501 first.
 fn plan_autosave(context: &Context, params: &Params) -> Result<Plan, RestError> {
-    if params.get("meta").is_some() {
-        return Err(RestError::not_ported());
-    }
     // The autosave writes the fields alone, never what the controller
     // does after a save.
     planned_save(context, params, |save| Write::Autosave(Box::new(save)))

@@ -77,6 +77,7 @@ $cases = array(
 	array( array( 'type' => 'object', 'enum' => array( array( 'a' => 1, 'b' => 2 ) ) ), array( array( 'b' => 2, 'a' => 1 ), array( 'a' => 1 ) ) ),
 	array( array( 'type' => array( 'array', 'string' ) ), array( 'a,b' ) ),
 	array( array( 'type' => 'integer', 'minimum' => 1 ), array( ' 2 ', "\x0b3" ) ),
+	array( array( 'type' => 'string', 'format' => 'ip' ), array( '10.0.0.1', '127.0.0.1', '255.255.255.255', '256.1.1.1', '1.1.1', '1.1.1.1.1', '010.001.1.1', '1.1.1.1 ', ' 1.1.1.1', "1.1.1.1\n", '1.1.1.01a', '', '0', '2001:db8::1', '::1', '::', '1::', '2001:0db8:0000:0000:0000:0000:0000:0001', '2001:db8:::1', '12345::1', '::ffff:10.0.0.1', '::ffff:10.0.0.256', '::ffff:10.0.0.01', '1:2:3:4:5:6:7:8', '1:2:3:4:5:6:7', '1:2:3:4:5:6:7::', 'fe80::1', 'FE80::ABCD', '1:2:3:4:5:6:1.2.3.4', '1:2:3:4:5:1.2.3.4', ':::', '1.2.3.4:5', 'a:b', 5, true, array( '1.1.1.1' ) ) ),
 	array( array( 'type' => 'string', 'format' => 'email' ), array( 'a@example.test', 'not an email', ' a@b.test ', '<b>x</b>@y.test', '' ) ),
 	array( array( 'type' => 'string', 'format' => 'uri' ), array( 'http://example.test/a b', 'javascript:alert(1)', '' ) ),
 	// The posts controller's term limits, and oneOf's other errors.

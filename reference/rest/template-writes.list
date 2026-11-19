@@ -40,3 +40,19 @@ POST	/?rest_route=/wp/v2/template-parts	json,restore	{"slug":"page-about-us","co
 PATCH	/?rest_route=/wp/v2/template-parts/twentytwentyfive//header	json,restore	{"title":"Head"}
 PATCH	/?rest_route=/wp/v2/template-parts/twentytwentyfive//side-part	json,restore	{"title":"Side"}
 GET	/?rest_route=/wp/v2/template-parts&wp_id=721&area=footer&_fields=id,area
+# A custom template made from the editor: the "Add template" dialog, with its suggestions.
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"wp-custom-template-landing-page","title":"Landing page","description":"","status":"publish","is_wp_suggestion":false,"content":""}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"wp-custom-template-landing-page","title":"Landing page","description":"For landing","status":"publish","content":"<!-- wp:post-title /-->\n\n<!-- wp:post-content /-->"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"wp-custom-template-landing-page","title":"Landing page","status":"publish"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"wp-custom-template-wide","title":"Wide","description":"","status":"publish","is_wp_suggestion":false,"content":"<!-- wp:template-part {\"slug\":\"header\",\"theme\":\"twentytwentyfive\"} /-->\n\n<!-- wp:post-content /-->","theme":"twentytwentyfive"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"single-post-hello-world","title":"Single Entry: Hello world!","description":"Template for Hello world!","status":"publish","is_wp_suggestion":true,"content":"<!-- wp:post-content /-->"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"single-post-hello-world","title":"single-post-hello-world","status":"publish","is_wp_suggestion":true}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"category-uncategorized","title":"Category: Uncategorized","description":"Template for Uncategorized","status":"publish","is_wp_suggestion":true,"content":"<!-- wp:query-title {\"type\":\"archive\"} /-->"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"category-uncategorized","title":"","description":"","status":"publish","is_wp_suggestion":true,"content":"x"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"tag-tagged","title":"Tag: Tagged","description":"Template for Tagged","status":"publish","is_wp_suggestion":true,"content":"<!-- wp:query-title {\"type\":\"archive\"} /-->"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"author-admin","title":"Author: admin","description":"Template for admin","status":"publish","is_wp_suggestion":true,"content":"x"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"page-privacy-policy","title":"Page: Privacy Policy","description":"Template for Privacy Policy","status":"publish","is_wp_suggestion":true,"content":"x"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"wp-custom-template-","title":"Empty slug tail","status":"publish","content":"x"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"Wp Custom Template Upper","title":"Upper","status":"publish","content":"x"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"wp-custom-template-landing-page","title":"Landing page","status":"publish","content":"x","theme":"nope"}
+POST	/index.php?rest_route=/wp/v2/templates&_locale=user	json,restore	{"slug":"wp-custom-template-two","title":"Two","status":"draft","content":"x"}

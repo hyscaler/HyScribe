@@ -214,7 +214,7 @@ impl Context<'_> {
             &self.queried,
             Queried::Term(taxonomy, _) if taxonomy.as_bytes() == item.object
         );
-        let queried_here = object_id == i64::try_from(request.queried_object_id).unwrap_or(-1);
+        let queried_here = u64::try_from(object_id).is_ok_and(|id| id == request.queried_object_id);
         if request.singular
             && item.kind == b"taxonomy"
             && self.ancestry.object_parents.contains(&id_of(object_id))

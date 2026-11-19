@@ -1,78 +1,88 @@
 # The rows PHP WordPress writes for the action navigation-fallback-single-post (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-19 13:09:43 to 2026-11-19 13:09:43 UTC.
-# %wp_posts:1% is 61.
-# %wp_posts:2% is 62.
-# %wp_posts:3% is 63.
-# %wp_posts:4% is 64.
-# %wp_posts:5% is 65.
-# %wp_posts:6% is 66.
-# %wp_postmeta:1% is 307.
-# %wp_postmeta:2% is 308.
-# %wp_postmeta:3% is 309.
-# %wp_postmeta:4% is 310.
-# %wp_postmeta:5% is 311.
-# %wp_postmeta:6% is 312.
-# %wp_postmeta:7% is 313.
-# %wp_postmeta:8% is 314.
-# %wp_postmeta:9% is 315.
-# %wp_postmeta:10% is 316.
-# %wp_postmeta:11% is 317.
-# %wp_postmeta:12% is 318.
-# %wp_postmeta:13% is 319.
-# %wp_postmeta:14% is 320.
-# %wp_postmeta:15% is 321.
-# %wp_postmeta:16% is 322.
-# %wp_postmeta:17% is 323.
-# %wp_postmeta:18% is 324.
-# %wp_postmeta:19% is 325.
-# %wp_postmeta:20% is 326.
-# %wp_postmeta:21% is 327.
-# %wp_postmeta:22% is 328.
-# %wp_postmeta:23% is 329.
-# %wp_postmeta:24% is 330.
-# %wp_postmeta:25% is 331.
-# %wp_postmeta:26% is 332.
-# %wp_postmeta:27% is 333.
-# %wp_postmeta:28% is 334.
-# %wp_postmeta:29% is 335.
-# %wp_postmeta:30% is 336.
-# %wp_postmeta:31% is 337.
-# %wp_postmeta:32% is 338.
-# %wp_postmeta:33% is 339.
-# %wp_postmeta:34% is 340.
-# %wp_postmeta:35% is 341.
-# %wp_postmeta:36% is 342.
-# %wp_postmeta:37% is 343.
-# %wp_postmeta:38% is 344.
-# %wp_postmeta:39% is 345.
-# %wp_postmeta:40% is 346.
+# %now% and %unix% stand for times from 2026-11-19 14:23:17 to 2026-11-19 14:23:17 UTC.
+# %wp_posts:1% is 38.
+# %wp_posts:2% is 39.
+# %wp_posts:3% is 40.
+# %wp_posts:4% is 41.
+# %wp_posts:5% is 42.
+# %wp_posts:6% is 43.
+# %wp_posts:7% is 44.
+# %wp_postmeta:1% is 197.
+# %wp_postmeta:2% is 198.
+# %wp_postmeta:3% is 199.
+# %wp_postmeta:4% is 200.
+# %wp_postmeta:5% is 201.
+# %wp_postmeta:6% is 202.
+# %wp_postmeta:7% is 203.
+# %wp_postmeta:8% is 204.
+# %wp_postmeta:9% is 205.
+# %wp_postmeta:10% is 206.
+# %wp_postmeta:11% is 207.
+# %wp_postmeta:12% is 208.
+# %wp_postmeta:13% is 209.
+# %wp_postmeta:14% is 210.
+# %wp_postmeta:15% is 211.
+# %wp_postmeta:16% is 212.
+# %wp_postmeta:17% is 213.
+# %wp_postmeta:18% is 214.
+# %wp_postmeta:19% is 215.
+# %wp_postmeta:20% is 216.
+# %wp_postmeta:21% is 217.
+# %wp_postmeta:22% is 218.
+# %wp_postmeta:23% is 219.
+# %wp_postmeta:24% is 220.
+# %wp_postmeta:25% is 221.
+# %wp_postmeta:26% is 222.
+# %wp_postmeta:27% is 223.
+# %wp_postmeta:28% is 224.
+# %wp_postmeta:29% is 225.
+# %wp_postmeta:30% is 226.
+# %wp_postmeta:31% is 227.
+# %wp_postmeta:32% is 228.
+# %wp_postmeta:33% is 229.
+# %wp_postmeta:34% is 230.
+# %wp_postmeta:35% is 231.
+# %wp_postmeta:36% is 232.
+# %wp_postmeta:37% is 233.
+# %wp_postmeta:38% is 234.
+# %wp_postmeta:39% is 235.
+# %wp_postmeta:40% is 236.
+# %wp_postmeta:41% is 237.
+# %wp_postmeta:42% is 238.
+# %wp_postmeta:43% is 239.
+# %wp_postmeta:44% is 240.
+# %wp_postmeta:45% is 241.
+# %wp_postmeta:46% is 242.
+# %wp_postmeta:47% is 243.
+# %wp_postmeta:48% is 244.
 # %wp_terms:1% is 9001.
 # %wp_terms:2% is 9002.
-# %wp_terms:3% is 9009.
+# %wp_terms:3% is 9008.
 # %wp_term_taxonomy:1% is 9001.
 # %wp_term_taxonomy:2% is 9002.
-# %wp_term_taxonomy:3% is 9009.
+# %wp_term_taxonomy:3% is 9003.
+# %wp_term_taxonomy:4% is 9009.
 # %wp_options:1% is 132.
-wp_posts	%wp_posts:6%	+	ID	%wp_posts:6%
-wp_posts	%wp_posts:6%	+	comment_count	0
-wp_posts	%wp_posts:6%	+	comment_status	closed
-wp_posts	%wp_posts:6%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:6%
-wp_posts	%wp_posts:6%	+	menu_order	0
-wp_posts	%wp_posts:6%	+	ping_status	closed
-wp_posts	%wp_posts:6%	+	pinged	
-wp_posts	%wp_posts:6%	+	post_author	0
-wp_posts	%wp_posts:6%	+	post_content	<!-- wp:navigation-link {"className":" menu-item menu-item-type-post_type menu-item-object-post current-menu-item current-post-parent","description":"","id":"1","kind":"post-type","label":"Hello world!","opensInNewTab":false,"rel":null,"title":"","type":"post","url":"http://127.0.0.1:8081/?p=1"} /--><!-- wp:navigation-submenu {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-post-ancestor","description":"","id":"9001","kind":"taxonomy","label":"Parent Category","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=9001"} --><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-post-ancestor current-menu-parent current-post-parent","description":"","id":"9002","kind":"taxonomy","label":"Child Category","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=9002"} /--><!-- /wp:navigation-submenu --><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-post-ancestor current-menu-parent current-post-parent","description":"","id":"1","kind":"taxonomy","label":"Uncategorized","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=1"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-post_type menu-item-object-page","description":"","id":"2","kind":"post-type","label":"Sample Page","opensInNewTab":false,"rel":null,"title":"","type":"page","url":"http://127.0.0.1:8081/?page_id=2"} /-->
-wp_posts	%wp_posts:6%	+	post_content_filtered	
-wp_posts	%wp_posts:6%	+	post_date	%now%
-wp_posts	%wp_posts:6%	+	post_date_gmt	%now%
-wp_posts	%wp_posts:6%	+	post_excerpt	
-wp_posts	%wp_posts:6%	+	post_mime_type	
-wp_posts	%wp_posts:6%	+	post_modified	%now%
-wp_posts	%wp_posts:6%	+	post_modified_gmt	%now%
-wp_posts	%wp_posts:6%	+	post_name	single-post
-wp_posts	%wp_posts:6%	+	post_parent	0
-wp_posts	%wp_posts:6%	+	post_password	
-wp_posts	%wp_posts:6%	+	post_status	publish
-wp_posts	%wp_posts:6%	+	post_title	Single post
-wp_posts	%wp_posts:6%	+	post_type	wp_navigation
-wp_posts	%wp_posts:6%	+	to_ping	
+wp_posts	%wp_posts:7%	+	ID	%wp_posts:7%
+wp_posts	%wp_posts:7%	+	comment_count	0
+wp_posts	%wp_posts:7%	+	comment_status	closed
+wp_posts	%wp_posts:7%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:7%
+wp_posts	%wp_posts:7%	+	menu_order	0
+wp_posts	%wp_posts:7%	+	ping_status	closed
+wp_posts	%wp_posts:7%	+	pinged	
+wp_posts	%wp_posts:7%	+	post_author	0
+wp_posts	%wp_posts:7%	+	post_content	<!-- wp:navigation-link {"className":" menu-item menu-item-type-post_type menu-item-object-post current-menu-item current-post-parent","description":"","id":"1","kind":"post-type","label":"Hello world!","opensInNewTab":false,"rel":null,"title":"","type":"post","url":"http://127.0.0.1:8081/?p=1"} /--><!-- wp:navigation-submenu {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-post-ancestor","description":"","id":"9001","kind":"taxonomy","label":"Parent Category","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=9001"} --><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-post-ancestor current-menu-parent current-post-parent","description":"","id":"9002","kind":"taxonomy","label":"Child Category","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=9002"} /--><!-- /wp:navigation-submenu --><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-post-ancestor current-menu-parent current-post-parent","description":"","id":"1","kind":"taxonomy","label":"Uncategorized","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=1"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-post_type menu-item-object-page","description":"","id":"2","kind":"post-type","label":"Sample Page","opensInNewTab":false,"rel":null,"title":"","type":"page","url":"http://127.0.0.1:8081/?page_id=2"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-post_tag current-menu-parent current-post-parent","description":"","id":"9002","kind":"taxonomy","label":"Child Category","opensInNewTab":false,"rel":null,"title":"","type":"post_tag","url":"http://127.0.0.1:8081/?tag=child-category"} /-->
+wp_posts	%wp_posts:7%	+	post_content_filtered	
+wp_posts	%wp_posts:7%	+	post_date	%now%
+wp_posts	%wp_posts:7%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:7%	+	post_excerpt	
+wp_posts	%wp_posts:7%	+	post_mime_type	
+wp_posts	%wp_posts:7%	+	post_modified	%now%
+wp_posts	%wp_posts:7%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:7%	+	post_name	single-post
+wp_posts	%wp_posts:7%	+	post_parent	0
+wp_posts	%wp_posts:7%	+	post_password	
+wp_posts	%wp_posts:7%	+	post_status	publish
+wp_posts	%wp_posts:7%	+	post_title	Single post
+wp_posts	%wp_posts:7%	+	post_type	wp_navigation
+wp_posts	%wp_posts:7%	+	to_ping	

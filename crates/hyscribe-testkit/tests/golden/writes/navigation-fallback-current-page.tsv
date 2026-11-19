@@ -1,44 +1,44 @@
 # The rows PHP WordPress writes for the action navigation-fallback-current-page (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-19 13:09:42 to 2026-11-19 13:09:42 UTC.
-# %wp_posts:1% is 52.
-# %wp_posts:2% is 53.
-# %wp_posts:3% is 54.
-# %wp_posts:4% is 55.
-# %wp_posts:5% is 56.
-# %wp_postmeta:1% is 259.
-# %wp_postmeta:2% is 260.
-# %wp_postmeta:3% is 261.
-# %wp_postmeta:4% is 262.
-# %wp_postmeta:5% is 263.
-# %wp_postmeta:6% is 264.
-# %wp_postmeta:7% is 265.
-# %wp_postmeta:8% is 266.
-# %wp_postmeta:9% is 267.
-# %wp_postmeta:10% is 268.
-# %wp_postmeta:11% is 269.
-# %wp_postmeta:12% is 270.
-# %wp_postmeta:13% is 271.
-# %wp_postmeta:14% is 272.
-# %wp_postmeta:15% is 273.
-# %wp_postmeta:16% is 274.
-# %wp_postmeta:17% is 275.
-# %wp_postmeta:18% is 276.
-# %wp_postmeta:19% is 277.
-# %wp_postmeta:20% is 278.
-# %wp_postmeta:21% is 279.
-# %wp_postmeta:22% is 280.
-# %wp_postmeta:23% is 281.
-# %wp_postmeta:24% is 282.
-# %wp_postmeta:25% is 283.
-# %wp_postmeta:26% is 284.
-# %wp_postmeta:27% is 285.
-# %wp_postmeta:28% is 286.
-# %wp_postmeta:29% is 287.
-# %wp_postmeta:30% is 288.
-# %wp_postmeta:31% is 289.
-# %wp_postmeta:32% is 290.
+# %now% and %unix% stand for times from 2026-11-19 14:23:16 to 2026-11-19 14:23:16 UTC.
+# %wp_posts:1% is 33.
+# %wp_posts:2% is 34.
+# %wp_posts:3% is 35.
+# %wp_posts:4% is 36.
+# %wp_posts:5% is 37.
+# %wp_postmeta:1% is 165.
+# %wp_postmeta:2% is 166.
+# %wp_postmeta:3% is 167.
+# %wp_postmeta:4% is 168.
+# %wp_postmeta:5% is 169.
+# %wp_postmeta:6% is 170.
+# %wp_postmeta:7% is 171.
+# %wp_postmeta:8% is 172.
+# %wp_postmeta:9% is 173.
+# %wp_postmeta:10% is 174.
+# %wp_postmeta:11% is 175.
+# %wp_postmeta:12% is 176.
+# %wp_postmeta:13% is 177.
+# %wp_postmeta:14% is 178.
+# %wp_postmeta:15% is 179.
+# %wp_postmeta:16% is 180.
+# %wp_postmeta:17% is 181.
+# %wp_postmeta:18% is 182.
+# %wp_postmeta:19% is 183.
+# %wp_postmeta:20% is 184.
+# %wp_postmeta:21% is 185.
+# %wp_postmeta:22% is 186.
+# %wp_postmeta:23% is 187.
+# %wp_postmeta:24% is 188.
+# %wp_postmeta:25% is 189.
+# %wp_postmeta:26% is 190.
+# %wp_postmeta:27% is 191.
+# %wp_postmeta:28% is 192.
+# %wp_postmeta:29% is 193.
+# %wp_postmeta:30% is 194.
+# %wp_postmeta:31% is 195.
+# %wp_postmeta:32% is 196.
 # %wp_terms:1% is 9007.
-# %wp_term_taxonomy:1% is 9007.
+# %wp_term_taxonomy:1% is 9008.
 wp_posts	%wp_posts:5%	+	ID	%wp_posts:5%
 wp_posts	%wp_posts:5%	+	comment_count	0
 wp_posts	%wp_posts:5%	+	comment_status	closed
@@ -47,7 +47,7 @@ wp_posts	%wp_posts:5%	+	menu_order	0
 wp_posts	%wp_posts:5%	+	ping_status	closed
 wp_posts	%wp_posts:5%	+	pinged	
 wp_posts	%wp_posts:5%	+	post_author	0
-wp_posts	%wp_posts:5%	+	post_content	<!-- wp:navigation-submenu {"className":" menu-item menu-item-type-custom menu-item-object-custom current-menu-ancestor current-menu-parent","description":"","id":null,"kind":"custom","label":"Top","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"https://example.test/"} --><!-- wp:navigation-submenu {"className":" menu-item menu-item-type-post_type menu-item-object-page current-menu-item page_item page-item-2 current_page_item","description":"","id":"2","kind":"post-type","label":"Sample Page","opensInNewTab":false,"rel":null,"title":"","type":"page","url":"http://127.0.0.1:8081/?page_id=2"} --><!-- wp:navigation-link {"className":" menu-item menu-item-type-custom menu-item-object-custom","description":"","id":null,"kind":"custom","label":"Below","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"https://example.test/below"} /--><!-- /wp:navigation-submenu --><!-- /wp:navigation-submenu --><!-- wp:navigation-link {"className":" menu-item menu-item-type-post_type menu-item-object-post","description":"","id":"1","kind":"post-type","label":"Hello world!","opensInNewTab":false,"rel":null,"title":"","type":"post","url":"http://127.0.0.1:8081/?p=1"} /-->
+wp_posts	%wp_posts:5%	+	post_content	<!-- wp:navigation-submenu {"className":" menu-item menu-item-type-custom menu-item-object-custom current-menu-ancestor","description":"","id":null,"kind":"custom","label":"Top","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"https://example.test/"} --><!-- wp:navigation-submenu {"className":" menu-item menu-item-type-post_type menu-item-object-post current-menu-ancestor current-menu-parent","description":"","id":"1","kind":"post-type","label":"Hello world!","opensInNewTab":false,"rel":null,"title":"","type":"post","url":"http://127.0.0.1:8081/?p=1"} --><!-- wp:navigation-submenu {"className":" menu-item menu-item-type-post_type menu-item-object-page current-menu-item page_item page-item-2 current_page_item","description":"","id":"2","kind":"post-type","label":"Sample Page","opensInNewTab":false,"rel":null,"title":"","type":"page","url":"http://127.0.0.1:8081/?page_id=2"} --><!-- wp:navigation-link {"className":" menu-item menu-item-type-custom menu-item-object-custom","description":"","id":null,"kind":"custom","label":"Below","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"https://example.test/below"} /--><!-- /wp:navigation-submenu --><!-- /wp:navigation-submenu --><!-- /wp:navigation-submenu -->
 wp_posts	%wp_posts:5%	+	post_content_filtered	
 wp_posts	%wp_posts:5%	+	post_date	%now%
 wp_posts	%wp_posts:5%	+	post_date_gmt	%now%

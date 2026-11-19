@@ -39,6 +39,8 @@ $navigation_visitor = function () {
 // in the request a page view is: its host, its URI and its main query.
 $navigation_get = function ( $uri = '/', $query = array() ) {
 	return function () use ( $uri, $query ) {
+		// A query that needs what the setup made is a function.
+		$query = is_callable( $query ) ? $query() : $query;
 		$_SERVER['HTTP_HOST']   = '127.0.0.1:8081';
 		$_SERVER['REQUEST_URI'] = $uri;
 		$GLOBALS['wp_query']    = new WP_Query();
@@ -49,7 +51,7 @@ $navigation_get = function ( $uri = '/', $query = array() ) {
 
 // Categories with IDs of their own, so the menus' blocks name no ID that
 // differs by run: a parent and its child, both on the first post.
-$navigation_categories = function () {
+$navigation_categories = function ( $post_categories = array( 1, 9002 ) ) {
 	global $wpdb;
 	foreach ( array( array( 9001, 'Parent Category', 'parent-category', 0 ), array( 9002, 'Child Category', 'child-category', 9001 ) ) as list( $id, $name, $slug, $parent ) ) {
 		$wpdb->insert( $wpdb->terms, array( 'term_id' => $id, 'name' => $name, 'slug' => $slug ) );
@@ -57,8 +59,13 @@ $navigation_categories = function () {
 	}
 	delete_option( 'category_children' );
 	clean_term_cache( array( 9001, 9002 ), 'category' );
-	wp_set_object_terms( 1, array( 1, 9002 ), 'category' );
+	wp_set_object_terms( 1, $post_categories, 'category' );
+	// The child category's term is also a tag: a term shared by two taxonomies, which IDs no longer tell apart.
+	$wpdb->insert( $wpdb->term_taxonomy, array( 'term_taxonomy_id' => 9003, 'term_id' => 9002, 'taxonomy' => 'post_tag', 'parent' => 0, 'count' => 0 ) );
+	clean_term_cache( array( 9002 ), 'post_tag' );
 };
+
+$navigation_attachment = 0;
 
 $navigation_page = function ( $id, $args ) {
 	wp_update_post( array( 'ID' => $id ) + $args );
@@ -213,6 +220,7 @@ return array(
 			$navigation_categories();
 			$navigation_page( 1, array( 'post_title' => 'Hello "world" -- & <b>more</b>' ) );
 			$navigation_page( 3, array( 'post_status' => 'draft' ) );
+			update_option( 'page_for_posts', 2 );
 			$navigation_menu(
 				'Objects',
 				array(
@@ -253,15 +261,20 @@ return array(
 	),
 	'navigation-fallback-posts-page'       => array(
 		'setup'  => function () use ( $navigation_menu, $navigation_visitor, $navigation_page, $object ) {
+			global $wpdb;
 			$navigation_page( 3, array( 'post_status' => 'publish' ) );
 			update_option( 'show_on_front', 'page' );
 			update_option( 'page_on_front', 3 );
 			update_option( 'page_for_posts', 2 );
+			// A category of the posts page's ID, which is no reason for it to be current.
+			$wpdb->insert( $wpdb->terms, array( 'term_id' => 2, 'name' => 'Same ID', 'slug' => 'same-id' ) );
+			$wpdb->insert( $wpdb->term_taxonomy, array( 'term_taxonomy_id' => 2, 'term_id' => 2, 'taxonomy' => 'category', 'parent' => 0, 'count' => 0 ) );
 			$navigation_menu(
 				'Posts page',
 				array(
 					$object( 'post_type', 'page', 2 ),
 					$object( 'post_type', 'page', 3 ),
+					$object( 'taxonomy', 'category', 2 ),
 					$object( 'post_type_archive', 'post', 0 ),
 					array(
 						'menu-item-title' => 'Home',
@@ -272,6 +285,22 @@ return array(
 			$navigation_visitor();
 		},
 		'action' => $navigation_get( '/?page_id=2', array( 'page_id' => 2 ) ),
+	),
+	'navigation-fallback-front-only'       => array(
+		'setup'  => function () use ( $navigation_menu, $navigation_visitor, $navigation_page, $object ) {
+			$navigation_page( 3, array( 'post_status' => 'publish' ) );
+			update_option( 'show_on_front', 'page' );
+			update_option( 'page_on_front', 3 );
+			$navigation_menu(
+				'Front only',
+				array(
+					$object( 'post_type', 'page', 3 ),
+					$object( 'post_type_archive', 'post', 0 ),
+				)
+			);
+			$navigation_visitor();
+		},
+		'action' => $navigation_get( '/', array( 'page_id' => 3 ) ),
 	),
 	'navigation-fallback-front-page'       => array(
 		'setup'  => function () use ( $navigation_menu, $navigation_visitor, $navigation_page, $object ) {
@@ -301,13 +330,13 @@ return array(
 						'menu-item-title' => 'Top',
 						'menu-item-url'   => 'https://example.test/',
 					),
-					$object( 'post_type', 'page', 2, array( 'parent' => 0 ) ),
+					$object( 'post_type', 'post', 1, array( 'parent' => 0 ) ),
+					$object( 'post_type', 'page', 2, array( 'parent' => 1 ) ),
 					array(
 						'menu-item-title' => 'Below',
 						'menu-item-url'   => 'https://example.test/below',
-						'parent'          => 1,
+						'parent'          => 2,
 					),
-					$object( 'post_type', 'post', 1 ),
 				)
 			);
 			$navigation_visitor();
@@ -339,6 +368,49 @@ return array(
 					$object( 'taxonomy', 'category', 9002, array( 'parent' => 1 ) ),
 					$object( 'taxonomy', 'category', 1 ),
 					$object( 'post_type', 'page', 2 ),
+					$object( 'taxonomy', 'post_tag', 9002 ),
+				)
+			);
+			$navigation_visitor();
+		},
+		'action' => $navigation_get( '/?p=1', array( 'p' => 1 ) ),
+	),
+	// An attachment is singular, and in no category of its own.
+	'navigation-fallback-attachment'       => array(
+		'setup'  => function () use ( $navigation_menu, $navigation_visitor, $navigation_categories, $object, &$navigation_attachment ) {
+			$navigation_categories();
+			$navigation_attachment = wp_insert_attachment(
+				array(
+					'post_title'     => 'Picture',
+					'post_mime_type' => 'image/jpeg',
+					'post_status'    => 'inherit',
+				),
+				'picture.jpg',
+				1
+			);
+			$navigation_menu(
+				'Attachment',
+				array(
+					$object( 'taxonomy', 'category', 1 ),
+					$object( 'taxonomy', 'category', 9002 ),
+					$object( 'post_type', 'post', 1 ),
+				)
+			);
+			$navigation_visitor();
+		},
+		'action' => $navigation_get( '/', function () use ( &$navigation_attachment ) {
+			return array( 'attachment_id' => $navigation_attachment );
+		} ),
+	),
+	'navigation-fallback-single-other'     => array(
+		'setup'  => function () use ( $navigation_menu, $navigation_visitor, $navigation_categories, $object ) {
+			$navigation_categories( array( 9002 ) );
+			$navigation_menu(
+				'Single other',
+				array(
+					$object( 'post_type', 'post', 1 ),
+					$object( 'taxonomy', 'category', 1 ),
+					$object( 'taxonomy', 'category', 9002 ),
 				)
 			);
 			$navigation_visitor();
@@ -355,6 +427,7 @@ return array(
 					$object( 'taxonomy', 'category', 9002, array( 'parent' => 0 ) ),
 					$object( 'taxonomy', 'category', 1 ),
 					$object( 'post_type', 'post', 1 ),
+					$object( 'taxonomy', 'post_tag', 9002 ),
 				)
 			);
 			$navigation_visitor();

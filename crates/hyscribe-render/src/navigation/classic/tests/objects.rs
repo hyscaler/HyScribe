@@ -72,7 +72,7 @@ impl Menus {
                 .iter()
                 .find(|post| post.id == id)
                 .map(|post| post.parent),
-            "taxonomy" => self
+            "taxonomy" if object == "category" => self
                 .categories
                 .iter()
                 .find(|term| term.id == id)
@@ -136,6 +136,7 @@ fn singular(id: u64, uri: &str) -> Request {
 fn objects_are_converted_as_php_does() {
     let mut site = site("Objects");
     site.post_categories = vec![1, 9002];
+    site.option_is("page_for_posts", "2");
     site.post_mut(1).title = b"Hello \"world\" -- &amp; <b>more</b>".to_vec();
     site.object("post_type", "page", 2, None);
     let renamed = site.object("post_type", "page", 2, None);
@@ -191,8 +192,10 @@ fn the_posts_page_and_the_front_page() {
     ] {
         site.option_is(name, value);
     }
+    site.categories.push(category(2, "Same ID", 0));
     site.object("post_type", "page", 2, None);
     site.object("post_type", "page", 3, None);
+    site.object("taxonomy", "category", 2, None);
     site.object("post_type_archive", "post", 0, None);
     site.custom(None, ("Home", "http://127.0.0.1:8081/"));
     let request = Request {
@@ -203,6 +206,19 @@ fn the_posts_page_and_the_front_page() {
     };
     let menu = ("Posts page", "posts-page");
     matches_golden("navigation-fallback-posts-page", &site, &request, menu);
+
+    let mut site = self::site("Front only");
+    site.post_mut(3).status = "publish".into();
+    site.option_is("show_on_front", "page");
+    site.option_is("page_on_front", "3");
+    site.object("post_type", "page", 3, None);
+    site.object("post_type_archive", "post", 0, None);
+    let request = Request {
+        front_page: true,
+        ..singular(3, "/")
+    };
+    let menu = ("Front only", "front-only");
+    matches_golden("navigation-fallback-front-only", &site, &request, menu);
 
     let mut site = self::site("Front page");
     site.post_mut(3).status = "publish".into();
@@ -229,9 +245,9 @@ fn the_posts_page_and_the_front_page() {
 fn the_current_page_and_its_menu_ancestors() {
     let mut site = site("Current page");
     site.custom(None, ("Top", "https://example.test/"));
-    site.object("post_type", "page", 2, Some(0));
-    site.custom(Some(1), ("Below", "https://example.test/below"));
-    site.object("post_type", "post", 1, None);
+    site.object("post_type", "post", 1, Some(0));
+    site.object("post_type", "page", 2, Some(1));
+    site.custom(Some(2), ("Below", "https://example.test/below"));
     let request = singular(2, "/?page_id=2");
     matches_golden(
         "navigation-fallback-current-page",
@@ -265,6 +281,7 @@ fn terms_above_the_post_or_the_category_asked_for() {
     site.object("taxonomy", "category", 9002, Some(1));
     site.object("taxonomy", "category", 1, None);
     site.object("post_type", "page", 2, None);
+    site.object("taxonomy", "post_tag", 9002, None);
     let request = singular(1, "/?p=1");
     matches_golden(
         "navigation-fallback-single-post",
@@ -273,12 +290,22 @@ fn terms_above_the_post_or_the_category_asked_for() {
         ("Single post", "single-post"),
     );
 
+    // A category that shares the post's ID is not the current item.
+    let mut site = self::site("Single other");
+    site.post_categories = vec![9002];
+    site.object("post_type", "post", 1, None);
+    site.object("taxonomy", "category", 1, None);
+    site.object("taxonomy", "category", 9002, None);
+    let menu = ("Single other", "single-other");
+    matches_golden("navigation-fallback-single-other", &site, &request, menu);
+
     let mut site = self::site("Category archive");
     site.post_categories = vec![1, 9002];
     site.object("taxonomy", "category", 9001, None);
     site.object("taxonomy", "category", 9002, Some(0));
     site.object("taxonomy", "category", 1, None);
     site.object("post_type", "post", 1, None);
+    site.object("taxonomy", "post_tag", 9002, None);
     let request = Request {
         archive: Some(Archive::Term(
             Taxonomy::Category,
@@ -494,4 +521,23 @@ fn a_loop_of_parents_ends() {
     let content = String::from_utf8(content).unwrap();
     // Only the item at the top is converted.
     assert!(content.contains("twitter.com") && !content.contains("Here"));
+}
+
+/// An attachment is singular but has no categories of its own, whatever
+/// the categories of its parent: no item is above it.
+#[test]
+fn an_attachment_has_no_terms_above_it() {
+    let mut site = site("Attachment");
+    site.post_categories = vec![1, 9002];
+    site.posts
+        .push(post(77, ("Picture", "picture", "attachment"), "inherit", 1));
+    site.object("taxonomy", "category", 1, None);
+    site.object("taxonomy", "category", 9002, None);
+    site.object("post_type", "post", 1, None);
+    let request = Request {
+        attachment: true,
+        ..singular(77, "/")
+    };
+    let menu = ("Attachment", "attachment");
+    matches_golden("navigation-fallback-attachment", &site, &request, menu);
 }

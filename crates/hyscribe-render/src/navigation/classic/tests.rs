@@ -385,6 +385,12 @@ fn what_does_not_convert_is_an_error() {
     // Counted but gone: the converter has nothing to convert.
     site.terms[0].count = 1;
     assert!(error(&site));
+    // `wp_get_nav_menu_items()` finds no items of a menu that counts none.
+    let mut site = Menus::default();
+    site.menu(2, "Menu", "menu");
+    site.link(2, 1, 0, TWITTER);
+    site.terms[0].count = 0;
+    assert!(error(&site));
     // Items whose parents are not in the menu leave nothing at the top.
     let mut site = Menus::default();
     site.menu(2, "Menu", "menu");

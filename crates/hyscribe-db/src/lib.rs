@@ -2528,9 +2528,11 @@ impl Sql {
 mod tests;
 
 mod dialect;
+mod install;
 mod people;
 mod write;
 
+pub use install::{Installer, Rows};
 pub use write::{
     CommentFields, DB_VERSIONS, Meta, PostFields, TermRow, Unapproved, UserFields, Write, Writer,
 };

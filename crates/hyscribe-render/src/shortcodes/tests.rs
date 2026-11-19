@@ -56,6 +56,13 @@ impl Site for Library<'_> {
     /// orders the golden uses; MariaDB's ties are broken by ID.
     fn query(&self, query: &PostQuery) -> Vec<Post> {
         assert_eq!(query.post_types, ["attachment"]);
+        assert!(
+            query
+                .statuses
+                .iter()
+                .any(|status| status.status == "inherit")
+        );
+        assert!(!query.order.is_empty());
         let prefix = query.mime_types[0].trim_end_matches('%').to_string();
         let mut found: Vec<Post> = self
             .data
@@ -163,7 +170,7 @@ fn shortcodes_match_php() {
     ]
     .concat();
     assert_eq!(sha256(&printed), assets);
-    assert_eq!(cases, 118);
+    assert_eq!(cases, 119);
 }
 
 /// A plugin that changes everything it may, with `library` for the players'.
@@ -404,4 +411,17 @@ fn shortcodes_without_a_callback_stay_as_written() {
     // Escaped, they lose a bracket on each side as any shortcode does.
     let out = filtered(&(), 555, "[[playlist]]");
     assert_eq!(out, "<p>[playlist]</p>");
+}
+
+#[test]
+fn an_image_tag_without_its_end_is_no_image() {
+    assert_eq!(split_image(b"<a href=x> <img src=x"), None);
+    assert_eq!(split_image(b"<img src=x"), None);
+}
+
+#[test]
+fn an_image_tag_needs_a_character_before_its_end() {
+    assert_eq!(split_image(b"<img >x>"), None);
+    let found = split_image(b"<img x>cap");
+    assert_eq!(found, Some((b"<img x>".to_vec(), b"cap".to_vec())));
 }

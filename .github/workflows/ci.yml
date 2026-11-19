@@ -36,7 +36,6 @@ env:
 
 jobs:
   checks:
-    if: false
     runs-on: [self-hosted, hyscribe]
     container:
       image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
@@ -92,7 +91,6 @@ jobs:
         run: ./gitleaks git --no-banner --redact --verbose --exit-code 1 .
 
   coverage:
-    if: false
     runs-on: [self-hosted, hyscribe]
     container:
       image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
@@ -160,7 +158,6 @@ jobs:
           scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
 
   package:
-    if: false
     runs-on: [self-hosted, hyscribe]
     container:
       image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
@@ -207,6 +204,8 @@ jobs:
 
   switch-back:
     # The switch-back suite (MVP 8.5, GOALS S7, an open question), over both fixtures.
+    needs: [coverage]
+    if: ${{ !cancelled() && needs.coverage.result == 'success' }}
     runs-on: [self-hosted, hyscribe]
     container:
       image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
@@ -282,6 +281,8 @@ jobs:
 
   screenshots:
     # The screenshot comparison (GOALS S8, an open question): PHP and HyScribe, pixel by pixel.
+    needs: [coverage, switch-back]
+    if: ${{ !cancelled() && needs.coverage.result == 'success' }}
     runs-on: [self-hosted, hyscribe]
     container:
       image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
@@ -343,7 +344,8 @@ jobs:
 
   fuzz:
     # Last: one runner takes the jobs in turn, and the fuzz run is the longest.
-    if: false
+    needs: [checks, coverage, package, switch-back, screenshots]
+    if: ${{ !cancelled() }}
     runs-on: [self-hosted, hyscribe]
     container:
       image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100

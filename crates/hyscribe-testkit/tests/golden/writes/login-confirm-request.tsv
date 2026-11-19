@@ -1,0 +1,59 @@
+# The rows PHP WordPress writes for the action login-confirm-request (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 19:56:40 to 2026-11-18 19:56:40 UTC.
+# %wp_posts:1% is 5.
+# %wp_posts:2% is 6.
+# %wp_posts:3% is 7.
+# %wp_posts:4% is 8.
+# %wp_posts:5% is 9.
+# %wp_posts:6% is 10.
+# %wp_posts:7% is 11.
+# %wp_postmeta:1% is 3.
+# %wp_postmeta:2% is 4.
+# %wp_postmeta:3% is 5.
+# %wp_postmeta:4% is 6.
+# %wp_postmeta:5% is 7.
+# %wp_postmeta:6% is 8.
+# %wp_postmeta:7% is 9.
+# %wp_postmeta:8% is 10.
+# %wp_postmeta:9% is 11.
+wp_postmeta	%wp_postmeta:2%	+	meta_id	%wp_postmeta:2%
+wp_postmeta	%wp_postmeta:2%	+	meta_key	_wp_user_request_confirmed_timestamp
+wp_postmeta	%wp_postmeta:2%	+	meta_value	%unix%
+wp_postmeta	%wp_postmeta:2%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:3%	+	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	+	meta_key	_wp_admin_notified
+wp_postmeta	%wp_postmeta:3%	+	meta_value	1
+wp_postmeta	%wp_postmeta:3%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:4%	+	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	+	meta_key	_wp_user_request_confirmed_timestamp
+wp_postmeta	%wp_postmeta:4%	+	meta_value	%unix%
+wp_postmeta	%wp_postmeta:4%	+	post_id	%wp_posts:2%
+wp_postmeta	%wp_postmeta:5%	+	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	+	meta_key	_wp_admin_notified
+wp_postmeta	%wp_postmeta:5%	+	meta_value	1
+wp_postmeta	%wp_postmeta:5%	+	post_id	%wp_posts:2%
+wp_postmeta	%wp_postmeta:6%	+	meta_id	%wp_postmeta:6%
+wp_postmeta	%wp_postmeta:6%	+	meta_key	_wp_user_request_confirmed_timestamp
+wp_postmeta	%wp_postmeta:6%	+	meta_value	%unix%
+wp_postmeta	%wp_postmeta:6%	+	post_id	%wp_posts:3%
+wp_postmeta	%wp_postmeta:7%	+	meta_id	%wp_postmeta:7%
+wp_postmeta	%wp_postmeta:7%	+	meta_key	_wp_admin_notified
+wp_postmeta	%wp_postmeta:7%	+	meta_value	1
+wp_postmeta	%wp_postmeta:7%	+	post_id	%wp_posts:3%
+wp_postmeta	%wp_postmeta:8%	+	meta_id	%wp_postmeta:8%
+wp_postmeta	%wp_postmeta:8%	+	meta_key	_wp_admin_notified
+wp_postmeta	%wp_postmeta:8%	+	meta_value	1
+wp_postmeta	%wp_postmeta:8%	+	post_id	%wp_posts:4%
+wp_postmeta	%wp_postmeta:9%	+	meta_id	%wp_postmeta:9%
+wp_postmeta	%wp_postmeta:9%	+	meta_key	_wp_user_request_confirmed_timestamp
+wp_postmeta	%wp_postmeta:9%	+	meta_value	%unix%
+wp_postmeta	%wp_postmeta:9%	+	post_id	%wp_posts:7%
+wp_posts	%wp_posts:1%	~	post_modified	2020-01-01 00:00:00	%now%
+wp_posts	%wp_posts:1%	~	post_modified_gmt	2020-01-01 00:00:00	%now%
+wp_posts	%wp_posts:1%	~	post_status	request-pending	request-confirmed
+wp_posts	%wp_posts:2%	~	post_modified	2020-01-01 00:00:00	%now%
+wp_posts	%wp_posts:2%	~	post_modified_gmt	2020-01-01 00:00:00	%now%
+wp_posts	%wp_posts:2%	~	post_status	request-pending	request-confirmed
+wp_posts	%wp_posts:3%	~	post_modified	2020-01-01 00:00:00	%now%
+wp_posts	%wp_posts:3%	~	post_modified_gmt	2020-01-01 00:00:00	%now%
+wp_posts	%wp_posts:3%	~	post_status	request-failed	request-confirmed

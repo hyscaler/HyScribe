@@ -13,7 +13,9 @@ use axum::response::{IntoResponse, Response};
 use hyscribe_admin::assets::{Urls, admin_links, cookie_path};
 use hyscribe_admin::login::actions::{self, Action, Reset};
 use hyscribe_admin::login::authenticate::{Account, Authenticate};
-use hyscribe_admin::login::{self, Login, Notice, Request, Session, Site as LoginSite, User};
+use hyscribe_admin::login::{
+    self, Login, Notice, Request, Session, Site as LoginSite, User, UserRequest,
+};
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
 use hyscribe_auth::cookie::{generate_auth_cookie, parse_auth_cookie};
 use hyscribe_auth::sessions::Origin;
@@ -431,9 +433,17 @@ impl LoginSite for LoginReads<'_> {
         !Value::String(self.site.raw_option("users_can_register").to_vec()).is_empty()
     }
 
-    fn post_type(&self, id: u64) -> Option<String> {
+    fn user_request(&self, id: u64) -> Option<UserRequest> {
         let post = self.reads.wait(self.site.db.post(id))?;
-        Some(post.post_type)
+        (post.post_type == "user_request").then(|| UserRequest {
+            id,
+            email: post.title,
+            action_name: post.name,
+            status: post.status,
+            confirm_key: post.password,
+            // `strtotime( $post->post_modified_gmt )`; a date that is none is 0.
+            modified: hyscribe_render::date::strtotime(&post.modified_gmt).unwrap_or(0),
+        })
     }
 
     fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
@@ -643,8 +653,13 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
             let (answer, _mail) = reset::lost_password(&reads, &request, &action, &mut headers);
             return finished(site, reads, Some(answer), headers);
         }
-        // What the other actions' forms post is not ported.
-        _ if asked.post && action != "resetpass" && action != "rp" => {
+        "register" if asked.post && reads.can_register() => {
+            let (answer, _mail) = reset::register(&reads, &request, &mut headers);
+            return finished(site, reads, Some(answer), headers);
+        }
+        // What the other actions' forms post is not ported; a registration
+        // nobody may make is turned away as it is when asked for.
+        _ if asked.post && !["resetpass", "rp", "register"].contains(&action.as_str()) => {
             return response(StatusCode::NOT_IMPLEMENTED, headers, Vec::new());
         }
         _ => {
@@ -747,6 +762,7 @@ fn other_action(
                 reset::reset(reads, request, &request.action(), (id, &password));
             answer
         }
+        Action::ConfirmRequest(found, id) => reset::confirm(reads, request, (&found, id)).0,
         Action::NotPorted => (StatusCode::NOT_IMPLEMENTED, Vec::new()),
     }
 }

@@ -37,4 +37,28 @@ return array(
 			}
 		},
 	),
+	// The registration form: a user for a login and an address, and the
+	// refusals that write nothing: a login with a space before it, a taken
+	// login, a taken address, a login too long, an empty form. As
+	// wp-login.php runs it, outside the admin.
+	'login-register'     => array(
+		'setup'  => function () use ( $oracle_user ) {
+			return $oracle_user( 'oracle-taken' );
+		},
+		'action' => function () {
+			add_filter( 'pre_wp_mail', '__return_true' );
+			remove_action( 'user_register', array( 'WP_Internal_Pointers', 'dismiss_pointers_for_new_users' ) );
+			$cases = array(
+				array( 'oracle-new', 'oracle-new@example.test' ),
+				array( ' 10', 'ten@example.test' ),
+				array( 'oracle-taken', 'free@example.test' ),
+				array( 'oracle-fresh', 'oracle-taken@example.test' ),
+				array( str_repeat( 'a', 61 ), 'long@example.test' ),
+				array( '', '' ),
+			);
+			foreach ( $cases as $case ) {
+				register_new_user( $case[0], $case[1] );
+			}
+		},
+	),
 );

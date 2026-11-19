@@ -947,6 +947,26 @@ async fn the_site_editor_s_redirects_and_refusals() {
 }
 
 /// A user without the screen's capability gets `wp_die()`'s refusal.
+/// Who may not view Site Health is refused as PHP refuses, whatever the
+/// theme: the refusal comes before the theme the screens need.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_health_refuses_before_it_checks_the_theme() {
+    let mut site = Arc::try_unwrap(oracle_site().await).ok().unwrap();
+    site.options.insert("template".into(), b"gone".to_vec());
+    let site = Arc::new(site);
+    let handle = Handle::current();
+    let response = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+        let path = "/hs-admin/site-health";
+        let url = format!("http://h{path}");
+        screen(&admin, path, path, &url, "http://h", &Browser::default())
+    })
+    .await
+    .unwrap();
+    assert_eq!(response.map(|r| r.status()), Some(StatusCode::FORBIDDEN));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refusals() {
     let site = oracle_site().await;

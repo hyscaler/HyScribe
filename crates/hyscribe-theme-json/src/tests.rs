@@ -107,6 +107,16 @@ pub(crate) fn blocks() -> &'static blocks::Blocks {
 /// Checks `ours` against every case of `kind` in `cases.tsv`: PHP's
 /// `serialize()` of its result for the same JSON arguments.
 pub(crate) fn check(kind: &str, ours: impl Fn(&[Value]) -> Value) {
+    check_except(kind, ours, |_, expected| expected);
+}
+
+/// [`check`] where `meant` turns PHP's answer for the arguments into the
+/// one HyScribe means to give, for the deliberate differences.
+pub(crate) fn check_except(
+    kind: &str,
+    ours: impl Fn(&[Value]) -> Value,
+    meant: impl Fn(&[Value], Vec<u8>) -> Vec<u8>,
+) {
     let golden = String::from_utf8(golden("cases.tsv")).unwrap();
     let mut count = 0;
     let mut failures = Vec::new();
@@ -122,6 +132,7 @@ pub(crate) fn check(kind: &str, ours: impl Fn(&[Value]) -> Value) {
             .map(|(_, v)| v.clone())
             .collect();
         let got = encode(&ours(&args));
+        let expected = meant(&args, expected);
         if got != expected {
             failures.push(format!(
                 "{}\n  php:  {}\n  ours: {}",

@@ -1,0 +1,65 @@
+# The screens reference/screenshots/golden.sh photographs on both servers:
+# role<TAB>path as wp-admin spells it<TAB>selectors to mask (comma list, or -)
+# Roles: administrator, editor and subscriber log in with the password of
+# the fixture's admin; visitor does not. A path under wp-admin is asked of
+# HyScribe as /hs-admin/<file> without the .php, wp-login.php as /hs-login.
+# Masked boxes are painted over on both sides: what differs on purpose
+# (the time the server prints).
+visitor	/wp-login.php	-
+visitor	/wp-login.php?action=lostpassword	-
+administrator	/wp-admin/index.php	-
+administrator	/wp-admin/edit.php	-
+administrator	/wp-admin/edit.php?post_type=page	-
+administrator	/wp-admin/post.php?post=1&action=edit	-
+administrator	/wp-admin/post-new.php	-
+administrator	/wp-admin/post-new.php?post_type=page	-
+administrator	/wp-admin/edit.php?s=hello	-
+administrator	/wp-admin/upload.php	-
+administrator	/wp-admin/upload.php?mode=grid	-
+administrator	/wp-admin/upload.php?mode=list	-
+administrator	/wp-admin/media-new.php	.max-upload-size
+administrator	/wp-admin/edit-tags.php?taxonomy=category	-
+administrator	/wp-admin/edit-tags.php?taxonomy=post_tag	-
+administrator	/wp-admin/term.php?taxonomy=category&tag_ID=1	-
+administrator	/wp-admin/edit-comments.php	-
+administrator	/wp-admin/edit-comments.php?comment_status=approved	-
+administrator	/wp-admin/comment.php?action=editcomment&c=1	-
+administrator	/wp-admin/users.php	-
+administrator	/wp-admin/users.php?role=editor	-
+administrator	/wp-admin/user-new.php	#pass1,#pass1-text
+administrator	/wp-admin/user-edit.php?user_id=1	-
+administrator	/wp-admin/user-edit.php?user_id=2	-
+administrator	/wp-admin/profile.php	-
+administrator	/wp-admin/tools.php	-
+administrator	/wp-admin/import.php	-
+administrator	/wp-admin/export.php	-
+administrator	/wp-admin/export-personal-data.php	-
+administrator	/wp-admin/erase-personal-data.php	-
+administrator	/wp-admin/site-health.php	-
+administrator	/wp-admin/site-health.php?tab=debug	-
+administrator	/wp-admin/options-general.php	.timezone-info,fieldset:has(input[name="time_format"])
+administrator	/wp-admin/options-writing.php	kbd,p:has(> kbd)
+administrator	/wp-admin/options-reading.php	-
+administrator	/wp-admin/options-discussion.php	-
+administrator	/wp-admin/options-media.php	-
+administrator	/wp-admin/options-permalink.php	-
+administrator	/wp-admin/options-privacy.php	-
+administrator	/wp-admin/update-core.php	-
+administrator	/wp-admin/themes.php	-
+administrator	/wp-admin/plugins.php	-
+administrator	/wp-admin/site-editor.php	-
+editor	/wp-admin/index.php	-
+editor	/wp-admin/edit.php	-
+editor	/wp-admin/upload.php	-
+editor	/wp-admin/edit-comments.php	-
+editor	/wp-admin/edit-tags.php?taxonomy=category	-
+editor	/wp-admin/profile.php	-
+editor	/wp-admin/tools.php	-
+editor	/wp-admin/post-new.php	-
+editor	/wp-admin/media-new.php	.max-upload-size
+editor	/wp-admin/users.php	-
+editor	/wp-admin/options-general.php	-
+subscriber	/wp-admin/index.php	-
+subscriber	/wp-admin/profile.php	-
+subscriber	/wp-admin/edit.php	-
+subscriber	/wp-admin/tools.php	-

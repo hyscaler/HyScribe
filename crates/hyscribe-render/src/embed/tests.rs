@@ -284,15 +284,20 @@ fn hosts_outside_the_list_are_not_fetched() {
     }
 }
 
-/// The default is the providers, and nothing else.
+/// The setting's default is the providers; a site that names none allows
+/// nothing.
 #[test]
-fn default_allows_the_providers() {
+fn defaults_allow_the_providers_or_nothing() {
     let default = EmbedHosts::default();
     assert!(default.providers && default.hosts.is_empty());
     let site = DefaultInstall {
         home: b"http://127.0.0.1:8081".to_vec(),
     };
-    assert_eq!(*site.embed_hosts(), default);
+    let nowhere = EmbedHosts {
+        providers: false,
+        hosts: Vec::new(),
+    };
+    assert_eq!(*site.embed_hosts(), nowhere);
 }
 
 /// What is not ported fetches nothing: no post, the site's own host and

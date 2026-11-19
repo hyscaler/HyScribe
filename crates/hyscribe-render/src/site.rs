@@ -177,11 +177,14 @@ pub trait Site {
         false
     }
 
-    /// Where embeds may fetch from: the providers by default.
+    /// Where embeds may fetch from: nowhere, as sites without a
+    /// client fetch nothing.
     fn embed_hosts(&self) -> &EmbedHosts {
-        static PROVIDERS: std::sync::LazyLock<EmbedHosts> =
-            std::sync::LazyLock::new(EmbedHosts::default);
-        &PROVIDERS
+        static NOWHERE: EmbedHosts = EmbedHosts {
+            providers: false,
+            hosts: Vec::new(),
+        };
+        &NOWHERE
     }
 
     /// `update_post_meta( $post_id, $key, $value )`, which a page view

@@ -633,6 +633,8 @@ impl Renderer<'_> {
         else {
             return Vec::new();
         };
+        let siteurl = self.context.site.option("siteurl").unwrap_or_default();
+        let content = &crate::theme::under_site(content, &siteurl);
         if self.open_patterns.iter().any(|open| open == slug) {
             return Vec::new();
         }

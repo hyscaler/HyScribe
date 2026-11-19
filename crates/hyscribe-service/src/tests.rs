@@ -674,6 +674,6 @@ fn free_disk_space_is_counted_in_blocks() {
     let home = tempfile::tempdir().unwrap();
     let free = disk_free(home.path()).unwrap();
     let block = rustix::fs::statvfs(home.path()).unwrap().f_frsize;
-    assert!(block > 0 && free % block == 0);
+    assert!(block > 0 && free.is_multiple_of(block));
     assert_eq!(disk_free(&home.path().join("absent")), None);
 }

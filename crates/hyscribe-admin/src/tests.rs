@@ -99,6 +99,9 @@ fn admin(oracle: &Oracle) -> User {
     }
 }
 
+/// When the oracle's personal data request was last changed.
+pub const REQUESTED: i64 = 1_794_000_000;
+
 impl Site for Oracle {
     fn blogname(&self) -> String {
         "HyScribe Default Install".into()
@@ -147,8 +150,8 @@ impl Site for Oracle {
             email: b"reader@example.test".to_vec(),
             action_name: b"export_personal_data".to_vec(),
             status: "request-pending".into(),
-            confirm_key: Vec::new(),
-            modified: 0,
+            confirm_key: hyscribe_auth::wp_fast_hash(b"a-key").into_bytes(),
+            modified: REQUESTED,
         })
     }
     fn site_icon(&self, size: i64) -> Option<Vec<u8>> {

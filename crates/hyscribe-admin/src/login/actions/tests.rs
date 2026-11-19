@@ -5,7 +5,7 @@ use hyscribe_testkit::unhex;
 
 use super::*;
 use crate::login::Session;
-use crate::tests::{Oracle, first_difference};
+use crate::tests::{Oracle, REQUESTED, first_difference};
 
 /// What PHP's Set-Cookie headers did to the reset password cookie.
 fn reset(cookies: &str) -> Reset {
@@ -315,4 +315,25 @@ fn the_confirmed_page_names_the_action() {
         let paragraph = format!("<p class=\"success\">{text}</p>");
         assert!(page.contains(&paragraph), "{text}");
     }
+}
+
+/// A confirmation key is good for a day to the second.
+#[test]
+fn a_confirmation_key_lasts_a_day() {
+    let oracle = Oracle {
+        user_request: Some(7),
+        ..Oracle::default()
+    };
+    let query = parse_str(b"request_id=7&confirm_key=a-key");
+    let at = |now| {
+        action(
+            &oracle,
+            &request(&query, None),
+            "confirmaction",
+            (b"/", now),
+        )
+    };
+    let last = REQUESTED + 86_400;
+    assert!(matches!(at(last), Action::ConfirmRequest(found, 7) if found.id == 7));
+    assert!(matches!(at(last + 1), Action::Died(_)));
 }

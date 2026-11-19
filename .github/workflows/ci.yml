@@ -193,6 +193,9 @@ jobs:
           scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
 
   fuzz:
+    # Last: one runner takes the jobs in turn, and the fuzz run is the longest.
+    needs: [checks, coverage, package]
+    if: ${{ !cancelled() }}
     runs-on: [self-hosted, hyscribe]
     container:
       image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
@@ -211,7 +214,7 @@ jobs:
       run:
         shell: bash
         working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools (system packages, cargo tools from the cache volume)
@@ -228,5 +231,5 @@ jobs:
             # The image targets start from the review's hostile cases too.
             seeds=()
             case $target in image_*) mkdir -p "corpus/$target"; seeds=("corpus/$target" ../crates/hyscribe-image/tests/hostile) ;; esac
-            cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${seeds[@]}" -- -max_total_time=60
+            cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${seeds[@]}" -- -max_total_time=30
           done

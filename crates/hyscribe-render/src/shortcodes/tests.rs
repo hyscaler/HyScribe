@@ -56,6 +56,13 @@ impl Site for Library<'_> {
     /// orders the golden uses; MariaDB's ties are broken by ID.
     fn query(&self, query: &PostQuery) -> Vec<Post> {
         assert_eq!(query.post_types, ["attachment"]);
+        assert!(
+            query
+                .statuses
+                .iter()
+                .any(|status| status.status == "inherit")
+        );
+        assert!(!query.order.is_empty());
         let prefix = query.mime_types[0].trim_end_matches('%').to_string();
         let mut found: Vec<Post> = self
             .data

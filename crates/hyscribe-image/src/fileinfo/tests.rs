@@ -54,6 +54,14 @@ fn leaves_what_it_cannot_tell() {
     .unwrap();
     broken[at] = b'X';
     assert_eq!(finfo_candidates(&broken), Err(Unported));
+    // An end more than a comment's length from the end of the file is not
+    // looked for.
+    let mut trailing = docx.clone();
+    trailing.extend(vec![0; 0xffff + 22]);
+    assert_eq!(finfo_candidates(&trailing), Err(Unported));
+    let mut near = docx.clone();
+    near.extend(vec![0; 0xffff]);
+    assert!(finfo_candidates(&near).is_ok());
     // An archive with no end, and an OpenDocument `mimetype` compressed.
     assert_eq!(finfo_candidates(&docx[..docx.len() - 30]), Err(Unported));
     let mut compressed = corpus("sample.odt");

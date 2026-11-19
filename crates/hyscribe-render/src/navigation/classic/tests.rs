@@ -589,3 +589,19 @@ fn the_hooks_pass_on_by_default() {
     assert!(!().wp_navigation_should_create_fallback(false));
     assert!(().wp_navigation_should_create_fallback(true));
 }
+
+/// Mods without locations, or locations without `primary`, leave the newest;
+/// and a site that writes nothing takes the post as given.
+#[test]
+fn mods_without_a_primary_location_pick_the_newest() {
+    for mods in ["a:0:{}", "a:1:{s:18:\"nav_menu_locations\";a:0:{}}", "i:3;"] {
+        let mut site = two_menus();
+        site.options = vec![
+            ("stylesheet", "twentytwentyfive".into()),
+            ("theme_mods_twentytwentyfive", mods.into()),
+        ];
+        assert_eq!(made(&site).name, b"newer-menu", "{mods}");
+    }
+    let installed = crate::fixture::DefaultInstall { home: Vec::new() };
+    installed.insert_navigation_fallback(b"Title", b"slug", b"");
+}

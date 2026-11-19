@@ -25,6 +25,10 @@ pub(crate) const TRACKED: usize = 65_536;
 /// How many addresses an account is trusted from, the latest kept.
 const TRUSTED: usize = 8;
 
+/// How long an account created by registration counts against its
+/// address's cap.
+const REGISTRATION_WINDOW: i64 = 3600;
+
 /// One address's or account's failures in its window, and its refusals.
 #[derive(Clone, Copy, Debug, Default)]
 struct Counter {
@@ -88,6 +92,8 @@ struct State {
     trusted: HashMap<u64, Trust>,
     /// The addresses with a password check under way.
     busy: HashSet<IpAddr>,
+    /// When each address's accounts were created, within the hour.
+    registered: HashMap<IpAddr, Vec<i64>>,
 }
 
 /// The value of `key` in `map`; a new key in a full map first drops the
@@ -181,6 +187,33 @@ impl Limiter {
         !refused(state.addresses.get(&key))
             && (!refused(state.accounts.get(&user))
                 || trusted.is_some_and(|trust| trust.addresses.contains(&key)))
+    }
+
+    /// Whether `client` has created as many accounts in the last hour as
+    /// `REGISTRATION_LIMIT_ADDRESS` allows.
+    pub(crate) fn registrations_full(&self, client: Option<IpAddr>, now: i64) -> bool {
+        let Some(cap) = self.limits.registrations else {
+            return false;
+        };
+        let state = self.state();
+        let recent = state.registered.get(&network(client)).map_or(0, |times| {
+            times
+                .iter()
+                .filter(|at| now - **at < REGISTRATION_WINDOW)
+                .count()
+        });
+        recent >= cap as usize
+    }
+
+    /// An account `client` created at `now`; only the ones the last hour
+    /// holds are kept.
+    pub(crate) fn registered(&self, client: Option<IpAddr>, now: i64) {
+        let mut state = self.state();
+        let spent = |times: &Vec<i64>| times.iter().all(|at| now - *at >= REGISTRATION_WINDOW);
+        let age = |times: &Vec<i64>| times.last().copied().unwrap_or_default();
+        let times = slot(&mut state.registered, network(client), spent, age);
+        times.retain(|at| now - *at < REGISTRATION_WINDOW);
+        times.push(now);
     }
 
     /// A guess from `client`, with the accounts whose password was checked

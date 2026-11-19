@@ -420,9 +420,22 @@ async fn the_client_is_the_proxy_s_last_hop() {
     let direct = asked(&[b"198.51.100.7"], peer);
     assert_eq!(remote_addr(&site, &direct), b"192.0.2.1");
     assert_eq!(remote_addr(&site, &asked(&[], None)), b"");
-    let site = Arc::try_unwrap(site).ok().unwrap().with_proxy(true);
+    let site = Arc::try_unwrap(site)
+        .ok()
+        .unwrap()
+        .with_proxy(crate::tests::trusted("192.0.2.0/24"));
     assert_eq!(remote_addr(&site, &direct), b"198.51.100.7");
     assert_eq!(remote_addr(&site, &asked(&[], peer)), b"192.0.2.1");
+    // A peer outside `TRUSTED_PROXIES`, or none, names itself, not the header.
+    let stranger = Some([203, 0, 113, 50].into());
+    let forged = asked(&[b"198.51.100.7"], stranger);
+    assert_eq!(remote_addr(&site, &forged), b"203.0.113.50");
+    assert_eq!(remote_addr(&site, &asked(&[b"198.51.100.7"], None)), b"");
+    let mapped = Some("::ffff:192.0.2.9".parse().unwrap());
+    assert_eq!(
+        remote_addr(&site, &asked(&[b"198.51.100.7"], mapped)),
+        b"198.51.100.7"
+    );
     let cases: [(&[&str], &str); 8] = [
         (&["203.0.113.9, 2001:db8::1 "], "2001:db8::1"),
         (
@@ -483,7 +496,8 @@ async fn a_failed_read_is_the_database_error_page() {
         writer: writer.unwrap().map(Arc::new),
         defined: Vec::new(),
         public_users: true,
-        behind_proxy: false,
+        proxies: None,
+        time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(crate::login::limits::Limiter::new(Default::default())),
         uploads: None,

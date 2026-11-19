@@ -166,7 +166,9 @@ pub(super) fn register(
         .ok()
         .and_then(|client| limiter.turn(*client));
     let place = turn.as_ref().and_then(|_| limiter.checks.start());
-    if place.is_none() {
+    let client = reads.client.as_ref().ok().copied().flatten();
+    // Past the cap, PHP's own registration error, with nothing written.
+    if place.is_none() || limiter.registrations_full(client, reads.now) {
         let refused = [registration_failed(texts[4].as_bytes())];
         let refused = [(refused[0].code, refused[0].message.as_str())];
         return refusal(reads, request, &refused, (&login, &email));
@@ -184,6 +186,9 @@ pub(super) fn register(
         committed.map(|()| registered).map_err(Into::into)
     });
     drop(place);
+    if !fatal && matches!(registered, Ok(Ok(_))) {
+        limiter.registered(client, reads.now);
+    }
     let key = match registered {
         Ok(Ok(_)) if fatal => return ((StatusCode::NOT_IMPLEMENTED, Vec::new()), Vec::new()),
         Ok(Ok(key)) => key,
@@ -213,7 +218,6 @@ pub(super) fn register(
         .block_on(mailer.wp_mail(to_admin.clone(), kind, false));
     let to_user = hyscribe_mail::new_user_to_user(&mail_site(&texts), &user, key.key.as_bytes());
     // The key it carries is a password reset's: sent within their limits.
-    let client = reads.client.as_ref().ok().copied().flatten();
     let sent = mailer.retrieve_password(to_user.clone(), key.id, client);
     reads.reads.block_on(sent);
     let location = wp_safe_redirect(reads.site, &to, &reads.admin_url(""));

@@ -311,7 +311,11 @@ async fn the_forwarded_client_is_counted_only_behind_a_proxy() {
     let same_peer = post_from(&site, "192.0.2.1", "203.0.113.8", RIGHT).await;
     assert_eq!(same_peer.status, StatusCode::OK);
     let site = login_site(Some(dir.path())).await;
-    let site = Arc::new(Arc::try_unwrap(site).unwrap().with_proxy(true));
+    let site = Arc::new(
+        Arc::try_unwrap(site)
+            .unwrap()
+            .with_proxy(crate::tests::trusted("192.0.2.0/24")),
+    );
     for _ in 0..5 {
         post_from(&site, "192.0.2.1", "198.51.100.1, 203.0.113.9", WRONG).await;
     }
@@ -321,6 +325,27 @@ async fn the_forwarded_client_is_counted_only_behind_a_proxy() {
     assert_eq!(other_client.status, StatusCode::FOUND);
 }
 
+/// A peer outside `TRUSTED_PROXIES` cannot name its client: its guesses
+/// count against its own address however many addresses it names.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_untrusted_peer_cannot_name_its_client() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = login_site(Some(dir.path())).await;
+    let site = Arc::new(
+        Arc::try_unwrap(site)
+            .unwrap()
+            .with_proxy(crate::tests::trusted("192.0.2.0/24")),
+    );
+    for forged in 0..5 {
+        let named = format!("198.51.100.{forged}");
+        post_from(&site, "203.0.113.50", &named, WRONG).await;
+    }
+    let limited = post_from(&site, "203.0.113.50", "198.51.100.99", RIGHT).await;
+    assert_eq!(limited.status, StatusCode::OK);
+    let trusted = post_from(&site, "192.0.2.1", "198.51.100.99", RIGHT).await;
+    assert_eq!(trusted.status, StatusCode::FOUND);
+}
+
 /// Behind a proxy that appends its own `X-Forwarded-For` line, a line the
 /// client forged names no new address; an entry that names none refuses
 /// the guess, without counting it against the proxy every client shares.
@@ -328,7 +353,11 @@ async fn the_forwarded_client_is_counted_only_behind_a_proxy() {
 async fn the_proxy_s_own_line_names_the_client() {
     let dir = tempfile::tempdir().unwrap();
     let site = login_site(Some(dir.path())).await;
-    let site = Arc::new(Arc::try_unwrap(site).unwrap().with_proxy(true));
+    let site = Arc::new(
+        Arc::try_unwrap(site)
+            .unwrap()
+            .with_proxy(crate::tests::trusted("192.0.2.0/24")),
+    );
     for forged in 0..5 {
         let lines = format!("198.51.100.{forged}\n203.0.113.9:4321");
         post_from(&site, "192.0.2.1", &lines, WRONG).await;

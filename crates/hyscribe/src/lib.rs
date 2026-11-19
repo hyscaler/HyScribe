@@ -339,7 +339,15 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                     .with_salts(config.salts.clone())
                     .with_public_users(config.rest_public_users)
                     .with_constants(config.constants)
-                    .with_proxy(config.server.behind_proxy)
+                    .with_proxy(
+                        config
+                            .server
+                            .behind_proxy
+                            .then(|| config.trusted_proxies.clone()),
+                    )
+                    .with_time_limit(std::time::Duration::from_secs(u64::from(
+                        config.request_time_limit,
+                    )))
                     .with_login_limits(config.login_limits)
                     .with_uploads(hyscribe_http::Uploads::new(
                         uploads_dir(&config, home),

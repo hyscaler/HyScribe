@@ -745,3 +745,86 @@ async fn a_confirmation_mails_the_admin_once() {
         assert!(reply.body.contains(text), "{primary}");
     }
 }
+
+/// Registrations are capped per client address and hour: past the
+/// cap, PHP's registration error and nothing written; only accounts really
+/// created count, and `-1` lifts the cap.
+#[tokio::test(flavor = "multi_thread")]
+async fn registrations_are_capped_per_address() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = loaded("").await;
+    let dir = tempfile::tempdir().unwrap();
+    let limits = |registrations| hyscribe_config::LoginLimits {
+        registrations,
+        ..Default::default()
+    };
+    let capped = [limits(Some(2)), limits(None)];
+    let mut sites = Vec::new();
+    for limits in capped {
+        let open = Arc::try_unwrap(site(&db, dir.path(), true).await).unwrap();
+        sites.push(registering(Arc::new(open.with_login_limits(limits)), true));
+    }
+    let handle = Handle::current();
+    let answers = tokio::task::spawn_blocking(move || {
+        let client: std::net::IpAddr = "192.0.2.9".parse().unwrap();
+        let query = parse_str(b"");
+        let mut statuses = Vec::new();
+        for (site, forms) in sites.iter().zip([
+            &[
+                // Refused by PHP's own checks: not created, not counted.
+                "user_login=&user_email=",
+                // Made, but never committed: not counted.
+                "user_login=cap-fatal&user_email=cap-fatal@example.test&redirect_to[]=x",
+                "user_login=cap-a&user_email=cap-a@example.test",
+                "user_login=cap-b&user_email=cap-b@example.test",
+                "user_login=cap-c&user_email=cap-c@example.test",
+            ][..],
+            &[
+                "user_login=cap-d&user_email=cap-d@example.test",
+                "user_login=cap-e&user_email=cap-e@example.test",
+                "user_login=cap-f&user_email=cap-f@example.test",
+                "user_login=cap-g&user_email=cap-g@example.test",
+            ][..],
+        ]) {
+            for form in forms {
+                let mut reads = LoginReads::new(site, handle.clone(), crate::now());
+                reads.client = Ok(Some(client));
+                let form = parse_str(form.as_bytes());
+                let ((status, page), _) = register(&reads, &posted(&query, &form), &mut Vec::new());
+                let page = String::from_utf8(page).unwrap();
+                statuses.push((status, page.contains("Could not register you")));
+            }
+        }
+        statuses
+    })
+    .await
+    .unwrap();
+    let ok = (StatusCode::FOUND, false);
+    let page = (StatusCode::OK, true);
+    assert_eq!(
+        answers,
+        [
+            (StatusCode::OK, false),
+            (StatusCode::NOT_IMPLEMENTED, false),
+            ok,
+            ok,
+            page,
+            ok,
+            ok,
+            ok,
+            ok,
+        ]
+    );
+    let writer = Writer::open(&db, Mode::Primary).await.unwrap().unwrap();
+    let mut write = writer.begin().await.unwrap();
+    for (login, made) in [
+        (&b"cap-a"[..], true),
+        (b"cap-b", true),
+        (b"cap-c", false),
+        (b"cap-fatal", false),
+        (b"cap-g", true),
+    ] {
+        let found = write.user_id_by_login(login).await.unwrap();
+        assert_eq!(found.is_some(), made, "{}", String::from_utf8_lossy(login));
+    }
+}

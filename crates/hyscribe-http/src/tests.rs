@@ -3153,9 +3153,8 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
 
 /// The default install's requests of `reference/pages/default.list`: query
 /// variants, previews as a visitor, comment pages, and redirects of slashes
-/// and case under plain and pretty permalinks. Known to differ: a bad
-/// preview nonce, which PHP refuses on every request (`_show_post_preview()`),
-/// an array search, and an unknown feed, `wp_die()`'s XML in PHP.
+/// and case under plain and pretty permalinks, and a bad preview nonce, which
+/// PHP refuses on every request (`_show_post_preview()`). Nothing differs.
 #[tokio::test]
 async fn listed_pages_match_php() {
     let golden = include_str!("../tests/golden/pages-default.tsv");

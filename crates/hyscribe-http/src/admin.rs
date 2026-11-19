@@ -1796,6 +1796,9 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
                 reads.act_as(id, token);
                 let user = reads.reads.wait(site.db.user(id)).unwrap_or_default();
                 let mut admin = Admin::new(&reads, site, user);
+                if let Some(writer) = &site.writer {
+                    views::scheduled(writer, now);
+                }
                 let get = parse_str(uri.query().unwrap_or_default().as_bytes());
                 let asked = action_request(site, asking, &get, raw_uri.as_bytes(), (id, now));
                 let name = uri.path().strip_prefix("/hs-admin/").unwrap_or_default();

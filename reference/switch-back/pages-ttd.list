@@ -13,6 +13,8 @@ admin	/wp-admin/options-general.php	200	Saved by HyScribe
 admin	/wp-admin/upload.php?mode=list	200	REST image
 admin	/wp-admin/upload.php?mode=list	200	REST png
 admin	/wp-admin/upload.php?mode=list	200	orient-6
+admin	/wp-admin/upload.php?mode=list	200	Edited by REST
+admin	/wp-admin/post.php?post=%rest-media-edit%&action=edit	200	Alt after
 admin	/wp-admin/post.php?post=%rest-media%&action=edit	200	A wide REST picture
 visitor	/?attachment_id=%rest-media%	301	-
 visitor	/?p=%rest-post%	200	wide-768x256.jpg

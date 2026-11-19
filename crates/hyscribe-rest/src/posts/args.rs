@@ -171,19 +171,26 @@ pub(crate) fn save(kind: Kind) -> Vec<Arg> {
             "status",
             r#"{"type":"string","enum":["publish","future","draft","pending","private"]}"#,
         ),
-        value("password", r#"{"type":"string"}"#),
     ];
+    // The attachments' schema has no password.
+    if kind != Kind::Attachment {
+        args.push(value("password", r#"{"type":"string"}"#));
+    }
     if kind == Kind::Page {
         args.push(value("parent", INTEGER));
     }
-    args.extend([given("title"), given("content")]);
-    if content {
+    args.push(given("title"));
+    // Attachments have a description and a caption in their place.
+    if kind != Kind::Attachment {
+        args.push(given("content"));
+    }
+    if content || kind == Kind::Attachment {
         args.push(value("author", INTEGER));
     }
-    if kind != Kind::Navigation {
+    if !matches!(kind, Kind::Navigation | Kind::Attachment) {
         args.push(given("excerpt"));
     }
-    if content {
+    if content || kind == Kind::Attachment {
         args.extend([
             value("featured_media", INTEGER),
             value("comment_status", OPEN),
@@ -215,9 +222,27 @@ pub(crate) fn save(kind: Kind) -> Vec<Arg> {
     match kind {
         Kind::Post => args.extend([value("categories", IDS), value("tags", IDS)]),
         Kind::Block => args.push(value("wp_pattern_category", IDS)),
+        Kind::Attachment => args.extend([
+            arg(
+                "alt_text",
+                r#"{"type":"string"}"#,
+                true,
+                Sanitize::TextField,
+            ),
+            given_object("caption"),
+            given_object("description"),
+            value("post", INTEGER),
+        ]),
         _ => {}
     }
     args
+}
+
+/// An attachment's `caption` or `description`: an object of a `raw` text,
+/// neither validated nor sanitized (`prepare_item_for_database()` does).
+fn given_object(name: &'static str) -> Arg {
+    const RAW: &str = r#"{"type":"object","properties":{"raw":{"type":"string"}}}"#;
+    arg(name, RAW, false, Sanitize::Endpoint)
 }
 
 /// A delete: `force`, false unless given.

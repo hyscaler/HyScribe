@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The themes reads that write (reference/rest/golden.sh records them as
+# theme-writes.tsv): the active theme's links name its global styles post,
+# which prepare_links() creates when the site has none, on the default
+# install, which has none. Each request is sent as every identity, the
+# database put back after each; the same reads without links write nothing.
+GET	/?rest_route=/wp/v2/themes&status=active	restore
+GET	/?rest_route=/wp/v2/themes&status=active&context=edit	restore
+GET	/?rest_route=/wp/v2/themes&status=active&_fields=stylesheet,_links	restore
+GET	/?rest_route=/wp/v2/themes&status=active&_fields=stylesheet	restore
+GET	/?rest_route=/wp/v2/themes/twentytwentyfive	restore
+GET	/?rest_route=/wp/v2/themes/twentytwentyfive&context=edit	restore
+GET	/?rest_route=/wp/v2/themes/twentytwentyfive&_fields=_links	restore
+GET	/?rest_route=/wp/v2/themes/twentytwentyfive&_fields=stylesheet	restore
+HEAD	/?rest_route=/wp/v2/themes/twentytwentyfive	restore

@@ -107,6 +107,9 @@ impl hyscribe_rest::Site for Rest<'_> {
     fn uses_trash(&self) -> bool {
         self.site.constants.empty_trash_days != 0
     }
+    fn uses_media_trash(&self) -> bool {
+        self.uses_trash() && self.site.constants.media_trash
+    }
 
     fn reads(&self) -> &dyn RenderSite {
         &self.reads.reads

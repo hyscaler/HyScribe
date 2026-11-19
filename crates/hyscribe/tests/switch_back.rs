@@ -377,7 +377,8 @@ const BROKEN: [&str; 4] = ["database error", "Fatal error", "Warning:", "Notice:
 #[test]
 #[ignore = "writes to the fixture database: run by reference/switch-back/run.sh"]
 fn writes_for_php_to_read() {
-    let mut server = Server::start("");
+    // Only `hyscribe cron run` runs the cron: an event that is due now is the CRON line's.
+    let mut server = Server::start("DISABLE_WP_CRON=true\n");
     let (mut cookies, mut token) = log_in(server.port);
     let list = match std::env::var("HYSCRIBE_SWITCH_BACK_LIST") {
         Ok(path) => std::fs::read_to_string(path).unwrap(),

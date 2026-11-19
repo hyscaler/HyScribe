@@ -84,6 +84,9 @@ pub struct Save {
     pub tax_input: Vec<(&'static str, Vec<u8>)>,
     /// `meta_input`, which `wp_insert_post()` updates.
     pub meta_input: Vec<(&'static str, Value)>,
+    /// After the terms and meta, of an attachment: `update_post_meta( $id,
+    /// '_wp_attachment_image_alt', $alt_text )`.
+    pub alt_text: Option<Vec<u8>>,
 }
 
 /// What an upload to the media collection saves besides its file: the
@@ -113,6 +116,9 @@ pub enum Write {
     Trash(u64),
     /// `wp_delete_post( $id, true )`.
     Delete(u64),
+    /// `wp_delete_post( $id, true )` of an attachment, which is
+    /// `wp_delete_attachment( $id, true )`: its files go once it commits.
+    DeleteAttachment(u64),
     /// Creates or updates a term.
     Term(Box<crate::terms::write::TermSave>),
     /// `wp_delete_term( $id, $taxonomy )`.
@@ -133,6 +139,10 @@ pub enum Write {
     /// `WP_REST_Autosaves_Controller::create_item()`'s autosave of the post
     /// the save names, with the fields it gives.
     Autosave(Box<Save>),
+    /// `WP_Theme_JSON_Resolver::get_user_global_styles_post_id()`'s
+    /// creation of the global styles post of the theme with this
+    /// stylesheet, `None` where the read has one to link and writes nothing.
+    StylesPost(Option<String>),
 }
 
 /// A write whose checks passed.
@@ -176,9 +186,11 @@ impl Plan {
         Response::new(deleted, 200)
     }
 
-    /// Whether the plan writes nothing: an update giving no setting.
+    /// Whether the plan writes nothing: an update giving no setting, or a
+    /// read with no post to create.
     pub(crate) fn writes_nothing(&self) -> bool {
         matches!(&self.write, Write::Settings(save) if save.options.is_empty())
+            || self.write == Write::StylesPost(None)
     }
 }
 
@@ -192,6 +204,10 @@ pub enum Outcome {
     /// the validated dates never have), or
     /// `rest_cannot_delete` where trashing or deleting did nothing.
     Refused(&'static str),
+    /// An attachment deleted, with the files, as paths under the uploads
+    /// folder and the folder each must be within, to delete once the rows
+    /// are committed: `hyscribe-http` does, and answers `Written`.
+    Deleted(u64, Vec<(Vec<u8>, Vec<u8>)>),
     /// An upload's refusal: its code, message and status.
     Failed(&'static str, String, u16),
     /// `wp_insert_term()`'s `term_exists`, with the term that has the name.
@@ -242,9 +258,12 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
     let save = Writing {
         // `check_template()` takes a list as an array key, which PHP refuses.
         unported: |params| {
-            params
-                .get("template")
-                .is_some_and(|t| t.as_array().is_some_and(|t| !t.is_empty()))
+            let featured =
+                Kind::of(params.route) == Kind::Attachment && params.has("featured_media");
+            featured
+                || params
+                    .get("template")
+                    .is_some_and(|t| t.as_array().is_some_and(|t| !t.is_empty()))
         },
         args: status_args,
         plan: plan_save,
@@ -273,12 +292,7 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
 /// `create_item()` of the media collection up to its upload: the parent
 /// checked, and the fields `prepare_item_for_database()` takes.
 fn plan_upload(context: &Context, params: &Params) -> Result<Plan, RestError> {
-    let post = params.get("post").map_or(0, Value::to_int).unsigned_abs();
-    let parent = (post != 0).then(|| context.site.post(post)).flatten();
-    if parent.is_some_and(|parent| ["revision", "attachment"].contains(&parent.post_type.as_str()))
-    {
-        return Err(invalid("rest_invalid_param", "Invalid parent type."));
-    }
+    let post = checked_parent(context, params)?;
     let upload = Upload {
         title: raw(params, "title")?,
         caption: raw(params, "caption")?,
@@ -288,6 +302,17 @@ fn plan_upload(context: &Context, params: &Params) -> Result<Plan, RestError> {
     };
     let write = Write::Upload(Box::new(upload));
     Ok(Plan::new(context, write, Value::Null))
+}
+
+/// An attachment's `post`, its parent: neither a revision nor an attachment.
+fn checked_parent(context: &Context, params: &Params) -> Result<u64, RestError> {
+    let post = params.get("post").map_or(0, Value::to_int).unsigned_abs();
+    let parent = (post != 0).then(|| context.site.post(post)).flatten();
+    if parent.is_some_and(|parent| ["revision", "attachment"].contains(&parent.post_type.as_str()))
+    {
+        return Err(invalid("rest_invalid_param", "Invalid parent type."));
+    }
+    Ok(post)
 }
 
 /// `check_status()`: the post's own status is valid whatever the schema
@@ -398,15 +423,27 @@ pub(crate) fn planned_save(
         None => None,
     };
     let id = existing.as_ref().map_or(0, |post| post.id);
+    if kind == Kind::Attachment {
+        checked_parent(context, params)?;
+    }
+    // Without a `content` of its own, a type's description and caption are
+    // its content and excerpt (an attachment's).
+    let (content, excerpt) = match field(kind, "content") {
+        false => (raw(params, "description")?, raw(params, "caption")?),
+        true => (
+            raw(params, "content")?,
+            match field(kind, "excerpt") {
+                true => raw(params, "excerpt")?,
+                false => None,
+            },
+        ),
+    };
     let mut save = Save {
         id,
         post_type: kind.name().into(),
         title: raw(params, "title")?,
-        content: raw(params, "content")?,
-        excerpt: match field(kind, "excerpt") {
-            true => raw(params, "excerpt")?,
-            false => None,
-        },
+        content,
+        excerpt,
         ..Save::default()
     };
     let can_publish = if id == 0 {
@@ -432,6 +469,14 @@ pub(crate) fn planned_save(
         save.author = Some(author.ok_or_else(invalid)?);
     }
     protection(context, params, (kind, id), &mut save)?;
+    if kind == Kind::Attachment {
+        if let Some(post) = params.get("post").map(Value::to_int) {
+            // A negative parent is a database error.
+            let post = u64::try_from(post).map_err(|_| RestError::not_ported())?;
+            save.parent = Some(post);
+        }
+        save.alt_text = params.get("alt_text").map(Value::to_php_string);
+    }
     if kind == Kind::Page {
         if let Some(parent) = params.get("parent").map(Value::to_int) {
             let found = u64::try_from(parent)
@@ -450,7 +495,8 @@ pub(crate) fn planned_save(
     };
     save.comment_status = status_of("comment_status");
     save.ping_status = status_of("ping_status");
-    if let (Some(post), Some(content)) = (&existing, &save.content) {
+    if let (Some(post), Some(content), false) = (&existing, &save.content, kind == Kind::Attachment)
+    {
         // `update_ignored_hooked_blocks_postmeta()`, where no block is hooked.
         let ignored = context.site.post_meta(post.id, "_wp_ignored_hooked_blocks");
         if ignored.is_some_and(|ignored| !is_empty_string(&ignored)) {
@@ -478,6 +524,13 @@ pub(crate) fn planned_save(
     let save = crate::hooks::apply_filters(&hook, save, &[params]);
     let unfiltered_html = context.can("unfiltered_html");
     answerable(context, &save, existing.as_ref(), unfiltered_html)?;
+    // What the answer of an attachment reads of its file is not ported in
+    // every case: found out before anything is written.
+    if let (Kind::Attachment, Some(post)) = (kind, &existing) {
+        let mut edit = params.clone();
+        edit.set("context", text("edit"));
+        prepared(context, &edit, kind, post)?;
+    }
     Ok(Plan {
         user: context.user,
         can_publish,
@@ -521,7 +574,8 @@ fn protection(
     save: &mut Save,
 ) -> Result<(), RestError> {
     let sticky = kind == Kind::Post && set(params, "sticky");
-    if let Some(password) = params.get("password").map(Value::to_php_string) {
+    let password = params.get("password").filter(|_| field(kind, "password"));
+    if let Some(password) = password.map(Value::to_php_string) {
         if !password.is_empty() && sticky {
             let message = "A post can not be sticky and have a password.";
             return Err(invalid("rest_invalid_field", message));
@@ -700,16 +754,28 @@ fn plan_delete(context: &Context, params: &Params) -> Result<Plan, RestError> {
     // The permission check found the post.
     let post = get_post(context, params, kind).unwrap_or_default();
     let force = params.get("force").is_some_and(|force| !force.is_empty());
+    let media = kind == Kind::Attachment;
+    let trashes = match media {
+        true => context.site.uses_media_trash(),
+        false => context.site.uses_trash(),
+    };
     let (write, previous) = if force {
         let mut edit = params.clone();
         edit.set("context", text("edit"));
+        let write = match media {
+            true => Write::DeleteAttachment(post.id),
+            false => Write::Delete(post.id),
+        };
         (
-            Write::Delete(post.id),
+            write,
             Some((post.clone(), prepared(context, &edit, kind, &post)?.data)),
         )
-    } else if !context.site.uses_trash() {
+    } else if !trashes {
         let message = "The post does not support trashing. Set 'force=true' to delete.";
         return Err(RestError::status("rest_trash_not_supported", message, 501));
+    } else if media {
+        // A trashed attachment's own writes are not ported.
+        return Err(RestError::not_ported());
     } else if post.status == "trash" {
         let message = "The post has already been deleted.";
         return Err(RestError::status("rest_already_trashed", message, 410));
@@ -790,7 +856,9 @@ fn finish(
     let action = |name: &str, args: &[&dyn std::any::Any]| {
         crate::hooks::do_action(&format!("{name}_{}", kind.name()), args);
     };
-    if let (Write::Delete(_), Some(post)) = (&plan.write, plan.deleted.clone()) {
+    if let (Write::Delete(_) | Write::DeleteAttachment(_), Some(post)) =
+        (&plan.write, plan.deleted.clone())
+    {
         let response = plan.deleted();
         action("rest_delete", &[&post, &response, params]);
         return Ok(response);

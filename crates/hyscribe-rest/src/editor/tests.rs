@@ -124,9 +124,6 @@ fn preloads_match_php() {
         php.sort();
         assert_eq!(rest_headers(&served.headers), php, "{what}");
         let body = if case.flag("hash") {
-            if sha256_hex(&served.body) != case.body {
-                std::fs::write(format!("/tmp/dump-{}.json", case.who), &served.body).unwrap();
-            }
             sha256_hex(&served.body)
         } else {
             served.body

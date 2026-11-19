@@ -533,3 +533,81 @@ async fn events_are_scheduled_found_and_unscheduled_by_name() {
     })
     .await;
 }
+
+/// The events of `hooks` cleared, as `wp_clear_scheduled_hook( $hook )` does.
+async fn cleared(write: &mut Write<'_>, hooks: &[&str]) -> Result<()> {
+    let mut crons = _get_cron_array(write).await?;
+    for hook in hooks {
+        remove(&mut crons, None, hook, &key(&args(None)));
+    }
+    _set_cron_array(write, crons).await.map(drop)
+}
+
+/// What a page view of the admin schedules, by hook.
+const VIEW_EVENTS: [&str; 4] = [
+    "wp_privacy_delete_old_export_files",
+    "wp_privacy_personal_data_cleanup_requests",
+    "wp_scheduled_delete",
+    "delete_expired_transients",
+];
+
+#[tokio::test]
+async fn an_admin_page_view_schedules_its_events_as_php_does() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let none = Value::Array(Vec::new());
+    let view = async |conn: &mut Connection, ()| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            schedule_admin_events(w, ctx.now).await
+        })
+        .await
+    };
+    check(
+        "cron-schedule-events",
+        async |conn| {
+            act(writer, conn, &admin(), async |w, _| {
+                cleared(w, &VIEW_EVENTS).await
+            })
+            .await
+        },
+        view,
+    )
+    .await;
+    // One event scheduled for later keeps its time; the others are scheduled now.
+    check(
+        "cron-schedule-events-some",
+        async |conn| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                cleared(w, &VIEW_EVENTS).await?;
+                let at = ctx.now + 3_600;
+                wp_schedule_event(w, at, "daily", "delete_expired_transients", &none).await?;
+                Ok(())
+            })
+            .await
+        },
+        view,
+    )
+    .await;
+    // With all four scheduled, a view writes nothing.
+    check(
+        "cron-schedule-events-present",
+        async |conn| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                cleared(w, &VIEW_EVENTS).await?;
+                schedule_admin_events(w, ctx.now).await
+            })
+            .await
+        },
+        view,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn scheduling_an_admin_page_view_s_events_stops_at_a_database_error() {
+    fails_at_each_step(
+        async |w| cleared(w, &VIEW_EVENTS).await.unwrap(),
+        async |w, ()| schedule_admin_events(w, NOW).await,
+    )
+    .await;
+}

@@ -1,0 +1,18 @@
+# The rows PHP WordPress writes for the action rest-media-update-slug (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 20:31:35 to 2026-11-18 20:31:35 UTC.
+# %wp_posts:1% is 9300.
+# %wp_posts:2% is 9301.
+# %wp_postmeta:1% is 17.
+# %wp_postmeta:2% is 18.
+# %wp_postmeta:3% is 19.
+# %wp_postmeta:4% is 20.
+# %wp_postmeta:5% is 21.
+# %wp_postmeta:6% is 22.
+# %wp_postmeta:7% is 23.
+# %wp_postmeta:8% is 24.
+# %wp_postmeta:9% is 25.
+wp_postmeta	%wp_postmeta:9%	+	meta_id	%wp_postmeta:9%
+wp_postmeta	%wp_postmeta:9%	+	meta_key	_wp_old_slug
+wp_postmeta	%wp_postmeta:9%	+	meta_value	a-write-oracle-picture
+wp_postmeta	%wp_postmeta:9%	+	post_id	%wp_posts:2%
+wp_posts	%wp_posts:2%	~	post_name	a-write-oracle-picture	taken-slug-2

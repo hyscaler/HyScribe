@@ -93,7 +93,7 @@ impl Kind {
     pub(crate) fn writes(self) -> bool {
         matches!(
             self,
-            Kind::Post | Kind::Page | Kind::Navigation | Kind::Block
+            Kind::Post | Kind::Page | Kind::Navigation | Kind::Block | Kind::Attachment
         )
     }
 

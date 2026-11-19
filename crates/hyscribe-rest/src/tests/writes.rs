@@ -38,6 +38,7 @@ struct Changed {
     meta: Vec<(u64, &'static str, &'static [u8])>,
     posts: Vec<Post>,
     trash: bool,
+    media_trash: bool,
 }
 
 impl Site for Changed {
@@ -137,6 +138,9 @@ impl Site for Changed {
     fn uses_trash(&self) -> bool {
         self.trash
     }
+    fn uses_media_trash(&self) -> bool {
+        self.media_trash
+    }
     fn reads(&self) -> &dyn Reads {
         self.oracle.reads()
     }
@@ -153,6 +157,7 @@ fn changed(options: Vec<(&'static str, &'static [u8])>, posts: Vec<Post>) -> Cha
         meta: Vec::new(),
         posts,
         trash: true,
+        media_trash: false,
     }
 }
 
@@ -1372,4 +1377,161 @@ fn roles_are_added_once_each() {
         panic!("not planned");
     };
     assert_eq!(save.roles, Some(vec![b"administrator".to_vec()]));
+}
+
+/// `reference/rest/media.sql`'s attachments, as `role` sees the site.
+fn media(role: &'static str) -> Oracle {
+    Oracle {
+        role,
+        fixture: site::Fixture {
+            ttd: false,
+            pretty: false,
+            extra: false,
+            state: Some(site::with_media(false)),
+        },
+        deny: &[],
+    }
+}
+
+/// The plan of `who`'s `method target` with the JSON `body` over the media.
+fn media_plan(who: &'static str, method: &'static str, target: &str, body: &str) -> Plan {
+    let asked = Asked::new(who, method, target, body);
+    on(&media(who), &asked, Outcome::Written(9131))
+        .0
+        .expect("a plan")
+}
+
+/// An attachment's update gives `wp_insert_post()` its description and
+/// caption as its content and excerpt, its `post` as the parent and its
+/// alt text, and leaves out what its schema does not have.
+#[test]
+fn a_media_update_plans_its_fields() {
+    let body = r#"{"title":"T","caption":"C","description":{"raw":"D"},"alt_text":"<b>A</b> alt","post":2,"slug":"s","password":"x","content":"c","excerpt":"e","comment_status":"closed"}"#;
+    let plan = media_plan("administrator", "POST", "/wp/v2/media/9131", body);
+    let Write::Save(save) = plan.write else {
+        panic!("{:?}", plan.write)
+    };
+    assert_eq!(
+        (save.id, save.post_type.as_str(), save.parent),
+        (9131, "attachment", Some(2))
+    );
+    assert_eq!(
+        (save.title, save.content, save.excerpt),
+        (
+            Some(b"T".to_vec()),
+            Some(b"D".to_vec()),
+            Some(b"C".to_vec())
+        )
+    );
+    assert_eq!(
+        (save.alt_text, save.slug, save.password),
+        (Some(b"A alt".to_vec()), Some(b"s".to_vec()), None)
+    );
+    assert_eq!(save.comment_status.as_deref(), Some("closed"));
+    // A caption that is a string, no description, and no parent.
+    let plan = media_plan(
+        "administrator",
+        "PATCH",
+        "/wp/v2/media/9131",
+        r#"{"caption":"C"}"#,
+    );
+    let Write::Save(save) = plan.write else {
+        panic!("{:?}", plan.write)
+    };
+    assert_eq!(
+        (save.excerpt, save.content, save.parent, save.alt_text),
+        (Some(b"C".to_vec()), None, None, None)
+    );
+}
+
+#[test]
+fn what_a_media_update_does_not_port_is_refused_before_it_writes() {
+    let who = "administrator";
+    let sent = |body: &str| {
+        let asked = Asked::new(who, "POST", "/wp/v2/media/9131", body);
+        on(&media(who), &asked, Outcome::Written(9131))
+    };
+    // `featured_media`, and a negative parent.
+    for body in [r#"{"featured_media":1}"#, r#"{"post":-5}"#] {
+        let (plan, served) = sent(body);
+        assert!(
+            plan.is_none() && served.status == 501 && served.body.is_empty(),
+            "{body}"
+        );
+    }
+    // A description or caption whose `raw` is no text.
+    for body in [r#"{"description":{"raw":5}}"#, r#"{"caption":{"raw":[]}}"#] {
+        let (plan, served) = sent(body);
+        assert!(plan.is_none() && served.status == 501, "{body}");
+    }
+    // A parent that is an attachment.
+    let (plan, served) = sent(r#"{"post":9132}"#);
+    assert!(plan.is_none() && served.status == 400, "{served:?}");
+    assert!(text_of(&served).contains("Invalid parent type."));
+    // An answer the file's metadata would make unported: 9152 has no file size.
+    let asked = Asked::new(who, "POST", "/wp/v2/media/9152", r#"{"title":"T"}"#);
+    let (plan, served) = on(&media(who), &asked, Outcome::Written(9152));
+    assert!(plan.is_none() && served.status == 501 && served.body.is_empty());
+}
+
+/// A media delete is forced, or refused as MEDIA_TRASH is off; with it on,
+/// the trash is not ported.
+#[test]
+fn media_deletes_are_forced() {
+    let plan = media_plan(
+        "administrator",
+        "DELETE",
+        "/wp/v2/media/9131&force=true",
+        "",
+    );
+    assert_eq!(plan.write, Write::DeleteAttachment(9131));
+    let (plan, served) = on(
+        &media("administrator"),
+        &Asked::new("administrator", "DELETE", "/wp/v2/media/9131", ""),
+        Outcome::Written(9131),
+    );
+    assert!(plan.is_none() && served.status == 501);
+    assert!(text_of(&served).contains("rest_trash_not_supported"));
+    let mut site = changed(Vec::new(), Vec::new());
+    site.media_trash = true;
+    let asked = Asked::new("administrator", "DELETE", "/wp/v2/media/95", "");
+    let (plan, served) = on(&site, &asked, Outcome::Written(95));
+    assert!(plan.is_none() && served.status == 501 && served.body.is_empty());
+    // A deleted attachment's answer is its own, as it was.
+    let asked = Asked::new("administrator", "DELETE", "/wp/v2/media/9131&force=1", "");
+    let (_, served) = on(&media("administrator"), &asked, Outcome::Written(9131));
+    assert!(text_of(&served).starts_with(r#"{"deleted":true,"previous":{"id":9131,"#));
+}
+
+/// A themes read plans the global styles post of the bundled theme where
+/// the site has none and its links are wanted, and plans no write else.
+#[test]
+fn themes_reads_plan_the_global_styles_post() {
+    let who = "administrator";
+    let planned = |target: &str| {
+        let asked = Asked::new(who, "GET", target, "");
+        on(&oracle(who, &[]), &asked, Outcome::Written(1)).0
+    };
+    let creates = Write::StylesPost(Some("twentytwentyfive".into()));
+    for target in [
+        "/wp/v2/themes&status[]=active",
+        "/wp/v2/themes&status[]=active&context=edit",
+        "/wp/v2/themes/twentytwentyfive",
+        "/wp/v2/themes/twentytwentyfive&_fields=_links",
+    ] {
+        assert_eq!(
+            planned(target).map(|plan| plan.write),
+            Some(creates.clone()),
+            "{target}"
+        );
+    }
+    // No links, another status, another theme: nothing to write.
+    for target in [
+        "/wp/v2/themes&status[]=active&_fields=stylesheet",
+        "/wp/v2/themes&status[]=inactive",
+        "/wp/v2/themes/twentytwentyfour",
+        "/wp/v2/themes/twentytwentyfive&_fields=stylesheet",
+    ] {
+        assert!(planned(target).is_none(), "{target}");
+    }
 }

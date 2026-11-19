@@ -1,0 +1,8 @@
+# The rows PHP WordPress writes for the action rest-media-update-trashed (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 20:31:36 to 2026-11-18 20:31:36 UTC.
+# %wp_posts:1% is 9301.
+# %wp_postmeta:1% is 31.
+# %wp_postmeta:2% is 32.
+# %wp_postmeta:3% is 33.
+# %wp_postmeta:4% is 34.
+wp_posts	%wp_posts:1%	~	post_title	A write oracle picture	Renamed in the trash

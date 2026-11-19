@@ -1248,6 +1248,11 @@ async fn what_hyscribe_does_not_port_is_refused() {
         ..oracle_post("inherit")
     };
     assert!(unported(insert_rolled_back(attachment).await));
+    let menu_item = PostArgs {
+        post_type: "nav_menu_item".into(),
+        ..oracle_post("publish")
+    };
+    assert!(unported(insert_rolled_back(menu_item).await));
     for date in ["", "2026-01-01 00:00:00"] {
         let gmt = PostArgs {
             date: date.into(),

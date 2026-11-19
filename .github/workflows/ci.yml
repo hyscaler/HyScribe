@@ -249,6 +249,8 @@ jobs:
           test -f target/fixtures/theme-test-data/7.1.3/database.sql
       - name: Fixture network and port forwards
         run: scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" "28994=db:3306" "8094=$HYSCRIBE_PHP_CONTAINER:80"
+      - name: Docker for the tests' SQL steps (they run as the ordinary user)
+        run: scripts/ci-docker-proxy.sh
       - name: Switch back to PHP WordPress, default install
         run: |
           # World writable folders: HyScribe's test runs as the ordinary user.

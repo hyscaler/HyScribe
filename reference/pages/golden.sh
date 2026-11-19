@@ -8,7 +8,8 @@
 # must-use plugin for the run and removed after) and the body is hex, or
 # over the Theme Test Data, whose content is not ours to commit, the
 # SHA-256 of the page without its RSD link, with the page itself in
-# target/pages/ttd.tsv for reading differences.
+# target/pages/ttd.tsv for reading differences (reference/pages/ttd-body.py
+# says how a page with a gallery in random order is hashed, an open question).
 #   default: reference/default-install/php.sh up
 #   ttd:     HYSCRIBE_PHP_DB=wordpress_saves HYSCRIBE_PHP_UPLOADS=$PWD/target/fixtures/theme-test-data/7.1.3/uploads reference/default-install/php.sh up
 #   over the Theme Test Data fixture loaded into wordpress_saves with
@@ -43,10 +44,15 @@ cleanup() {
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-options.php"
 }
 trap cleanup EXIT
+if [ "$LIST" = ttd ]; then
+  # The RSS blocks read the test site, as HyScribe's test does.
+  . "$ROOT/reference/url-details/serve.sh"
+  trap 'cleanup; serve_cleanup' EXIT
+fi
 "$DOCKER" exec "$NAME" mkdir -p "$MU"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-options.php" < "$ROOT/reference/pages/options.php"
 if [ "$LIST" = ttd ]; then
-  cat "$ROOT/target/fixtures/theme-test-data/7.1.3/database.sql" "$ROOT/reference/pages/ttd-ties.sql" |
+  cat "$ROOT/target/fixtures/theme-test-data/7.1.3/database.sql" "$ROOT/reference/pages/ttd-ties.sql" "$ROOT/reference/pages/ttd-feeds.sql" |
     "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "$DATABASE"
 fi
 if [ "$LIST" = site-edits ]; then
@@ -72,9 +78,8 @@ while IFS= read -r line; do
   location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)
   key=$(printf '%s' "$path" | xxd -p | tr -d '\n')
   if [ "$LIST" = ttd ]; then
-    page=$(python3 -I -c 'import re, sys; sys.stdout.write(re.sub(rb"<link rel=\"EditURI\"[^\n]*?/>\n", b"", open(sys.argv[1], "rb").read()).hex())' "$TMP")
+    { read -r page; read -r body; } < <(python3 -I "$ROOT/reference/pages/ttd-body.py" "$TMP")
     printf '%s\t%s\t%s\t%s\t%s\n' "$options" "$key" "$status" "$location" "$page" >> "$RAW"
-    body=$(printf '%s' "$page" | xxd -r -p | sha256sum | cut -d ' ' -f 1)
   else
     body=$(xxd -p "$TMP" | tr -d '\n')
   fi

@@ -2984,17 +2984,14 @@ const TTD_PAGES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/pages
 /// Each request of a `reference/pages/golden.sh` list over `database`,
 /// served with the options it names, against PHP's status, location and
 /// page, or with `hashed` the page's hash, the page itself in `TTD_PAGES`.
-/// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ;
-/// those whose `why` says `rand` show a gallery in random order, which may
-/// match by chance and which no golden can pin.
+/// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ.
 /// Author archives are off (docs/SECURITY_MODEL.md): their count is returned.
 async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: &str) -> usize {
-    let known: Vec<(&str, &str, &str)> = known
+    let known: Vec<(&str, &str)> = known
         .lines()
         .map(|line| {
             let mut fields = line.split('\t');
-            let (options, path) = (fields.next().unwrap(), fields.next().unwrap());
-            (options, path, fields.next().unwrap_or_default())
+            (fields.next().unwrap(), fields.next().unwrap())
         })
         .collect();
     let mut sites: HashMap<String, Arc<Site>> = HashMap::new();
@@ -3036,6 +3033,16 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
                 site.hooks = Arc::new(NoFallback);
             }
             site.build_rewriter();
+            // Feeds and nothing else are fetched, from the test site.
+            let pages = Arc::new(crate::rest::tests::url_details::Pages::default());
+            let client = hyscribe_fetch::Client::new(
+                hyscribe_fetch::RootCertStore::empty(),
+                pages,
+                Arc::new(()),
+            );
+            let site = site
+                .with_fetch(Some(client))
+                .with_feed_hosts(&["pages.test".to_string()]);
             sites.insert(named.clone(), Arc::new(site));
         }
         let path = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
@@ -3052,16 +3059,26 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
             .map_or("", |v| v.to_str().unwrap());
         let php = |hex: &str| as_hyscribe(String::from_utf8(hyscribe_testkit::unhex(hex)).unwrap());
         let same = if hashed {
-            admin::tests::sha256(&as_wordpress(reply.body.clone())) == fields[4]
+            // A page with the gallery of `orderby="rand"` is compared by its
+            // items in any order, nothing else loosened.
+            let (hash, page) = match fields[4].strip_prefix("unshuffled:") {
+                Some(hash) => {
+                    let page = as_wordpress(reply.body.clone());
+                    let sorted = hyscribe_testkit::unshuffle::unshuffle(page.as_bytes());
+                    (hash, String::from_utf8(sorted).unwrap())
+                }
+                None => (fields[4], as_wordpress(reply.body.clone())),
+            };
+            admin::tests::sha256(&page) == hash
         } else {
             php(fields[4]) == reply.body
         };
         let same = same && reply.status.as_str() == fields[2] && location == fields[3];
         let listed = known
             .iter()
-            .find(|(options, listed, _)| *options == fields[0] && *listed == path);
-        if let Some((.., why)) = listed {
-            if same && !why.contains("rand") {
+            .any(|(options, listed)| *options == fields[0] && *listed == path);
+        if listed {
+            if same {
                 failures.push(format!("{} {path} matches: no longer known", fields[0]));
             }
         } else if !same {
@@ -3117,9 +3134,11 @@ async fn listed_pages_match_php() {
 /// to commit, loaded into `wordpress_saves` with the terms of one name told
 /// apart (`reference/pages/ttd-ties.sql`), as MariaDB orders them
 /// differently from run to run. The known differences name what is not
-/// ported: oEmbed, the RSS block, image loading priorities, the player of
-/// an attachment page for audio, the navigation fallback from a classic
-/// menu; and galleries `orderby="rand"`, which no two runs repeat.
+/// ported: oEmbed, image loading priorities, the player of an attachment
+/// page for audio, the navigation fallback from a classic menu. The RSS
+/// blocks read the test site both sides fetch from, and the gallery
+/// `orderby="rand"`, which no two runs repeat, is compared by its items in
+/// any order.
 #[tokio::test(flavor = "multi_thread")]
 async fn theme_test_data_pages_match_php() {
     let _saves = admin::tests::SAVES.lock().await;
@@ -3129,6 +3148,9 @@ async fn theme_test_data_pages_match_php() {
     };
     let dump = std::fs::read_to_string(hyscribe_testkit::writes::THEME_TEST_DATA).unwrap();
     hyscribe_testkit::writes::load_theme_test_data(&db, &dump)
+        .await
+        .unwrap();
+    hyscribe_testkit::writes::point_feeds_at_test_site(&db)
         .await
         .unwrap();
     let golden = include_str!("../tests/golden/pages-ttd.tsv");

@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 pub mod pages;
+pub mod unshuffle;
 pub mod writes;
 
 /// A column value from an `INSERT` statement.

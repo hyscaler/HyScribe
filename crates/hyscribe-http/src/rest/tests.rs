@@ -16,7 +16,7 @@ use super::*;
 
 mod golden;
 mod uploads;
-mod url_details;
+pub(crate) mod url_details;
 mod writes;
 use crate::router;
 use crate::tests::oracle_site;

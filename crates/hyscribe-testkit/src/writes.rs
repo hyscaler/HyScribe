@@ -735,5 +735,17 @@ pub async fn load_theme_test_data(
     Ok(())
 }
 
+/// The Theme Test Data in `db` with its RSS blocks reading the test site of
+/// `reference/url-details` (`reference/pages/ttd-feeds.sql`, an open question), as the
+/// page goldens of `reference/pages/golden.sh ttd` are recorded over it.
+pub async fn point_feeds_at_test_site(db: &hyscribe_config::Database) -> Result<(), sqlx::Error> {
+    let feeds = include_str!("../../../reference/pages/ttd-feeds.sql");
+    let mut conn = MySqlConnection::connect_with(&options(db)).await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(feeds.to_string()))
+        .execute(&mut conn)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

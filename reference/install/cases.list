@@ -3,3 +3,4 @@ quoted|Tom & Jerry's <b>Site</b> "quoted"|Jane.Doe-1_x@y z|Jane@Example.COM|0|p@
 unicode|Café ✓ Ünïcode 日本語|Zoe|zoe@example.org|1||http://localhost:8080|wp_
 untitled||admin2|a2@example.net|1|secret-two|http://192.168.0.7:8090|wp_
 prefixed|Prefixed Site|Pat Lee|pat@example.com|1|pw one|http://prefixed.test|blog2_
+subfolder|Subfolder Site|Sam|sam@install.example|1|sub pass|http://sub.install.test/blog|wp_

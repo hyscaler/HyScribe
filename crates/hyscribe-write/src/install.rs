@@ -6,9 +6,10 @@
 //! `reference/install/golden.sh` with the values that depend on the
 //! answers or the time masked as `%name%`; [`Plan::install`] fills those in.
 //! The questions and their refusals are `wp-admin/install.php`'s and
-//! `wp_insert_user()`'s. Not done: the pretty permalink probe (a request to
-//! the site itself, which is not serving yet, so plain permalinks stay, as
-//! when PHP's probe fails) and the notification mail (no mail is set up).
+//! `wp_insert_user()`'s. The site is installed as PHP leaves one whose pretty
+//! permalink probe succeeds: `permalink_structure` and
+//! `rewrite_rules` are set, the rules differing for a site address with a
+//! path. Not done: the notification mail (no mail is set up).
 
 use hyscribe_config::Database;
 use hyscribe_db::{DbError, Installer, Rows};
@@ -20,6 +21,10 @@ use hyscribe_render::formatting::{is_email, sanitize_email, sanitize_title, sani
 const SCHEMA: &str = include_str!("install/schema.sql");
 /// The rows, each table as `@table<TAB>column...` and a line per row.
 const ROWS: &str = include_str!("install/rows.tsv");
+/// The `rewrite_rules` value of a site address with a path, which has no
+/// rules for `robots.txt`, `favicon.ico` and the sitemap (`rows.tsv` has the
+/// value of one without).
+const SUBFOLDER_RULES: &str = include_str!("install/rewrite_rules_subfolder.txt");
 /// The length of the password made for an empty one, as WordPress makes it.
 const GENERATED_LENGTH: usize = 12;
 
@@ -267,6 +272,7 @@ impl Plan {
         let tables = tables(
             &|token| self.fill(token, &hash, prefix),
             generated.is_some(),
+            has_path(&self.home),
         );
         let statements: Vec<&str> = SCHEMA.split(";\n").filter(|s| !s.is_empty()).collect();
         let existing = db.existing().await?;
@@ -345,6 +351,12 @@ impl Plan {
     }
 }
 
+/// Whether the site address `home` (as [`site_address`] leaves it) has a path.
+fn has_path(home: &str) -> bool {
+    home.split_once("://")
+        .is_some_and(|(_, rest)| rest.contains('/'))
+}
+
 /// `text` with each `%token%` `fill` knows replaced, in one pass, so no
 /// answer is read as a token.
 fn expand(text: &str, fill: &dyn Fn(&str) -> Option<String>) -> String {
@@ -394,9 +406,10 @@ fn unescape(value: &str, fill: &dyn Fn(&str) -> Option<String>) -> Option<String
     Some(expand(&out, fill))
 }
 
-/// The tables of `rows.tsv`, with the masks filled in by `fill`, and
-/// `default_password_nag` among the user's meta when `nag`.
-fn tables(fill: &dyn Fn(&str) -> Option<String>, nag: bool) -> Vec<Rows> {
+/// The tables of `rows.tsv`, with the masks filled in by `fill`,
+/// `default_password_nag` among the user's meta when `nag`, and the rewrite
+/// rules of a site address with a path when `subfolder`.
+fn tables(fill: &dyn Fn(&str) -> Option<String>, nag: bool, subfolder: bool) -> Vec<Rows> {
     // A value never holds a raw newline, so `\n@` starts each table; what
     // comes before the first is the file's comment.
     let sections = ROWS.split("\n@").skip(1);
@@ -421,7 +434,25 @@ fn tables(fill: &dyn Fn(&str) -> Option<String>, nag: bool) -> Vec<Rows> {
     if nag {
         password_nag(&mut tables);
     }
+    if subfolder {
+        subfolder_rules(&mut tables, fill);
+    }
     tables
+}
+
+/// The value of the `rewrite_rules` option replaced by `SUBFOLDER_RULES`.
+fn subfolder_rules(tables: &mut [Rows], fill: &dyn Fn(&str) -> Option<String>) {
+    let rules = unescape(SUBFOLDER_RULES.trim_end_matches('\n'), fill);
+    for table in tables.iter_mut().filter(|table| table.table == "options") {
+        // The columns are option_id, option_name, option_value and autoload.
+        for row in &mut table.rows {
+            if let [_, Some(name), value, _] = row.as_mut_slice()
+                && name == "rewrite_rules"
+            {
+                value.clone_from(&rules);
+            }
+        }
+    }
 }
 
 /// `update_user_meta( $user_id, 'default_password_nag', true )`, which

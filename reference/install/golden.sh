@@ -6,9 +6,13 @@
 # password, URL and table prefix, separated by |), as install.php writes it:
 # the `default` case, with the values that depend on the answers masked,
 # becomes the data HyScribe's installer copies,
-# crates/hyscribe-write/src/install/schema.sql and rows.tsv; the others, with
-# their answers as stored, crates/hyscribe-write/tests/golden/install/<case>.tsv
+# crates/hyscribe-write/src/install/schema.sql and rows.tsv; the `subfolder`
+# case, a site with a path, also gives rewrite_rules_subfolder.txt there, the
+# one value that differs with a path (no robots.txt, favicon or sitemap
+# rules); the others, with their answers as stored, crates/hyscribe-write/tests/golden/install/<case>.tsv
 # and <case>.sql (the tables as SHOW CREATE TABLE prints them).
+# Every case is installed as a site that is serving, whose pretty permalink
+# probe succeeds (ADR 0021): permalink_structure and rewrite_rules are set.
 # Each case runs twice and must come out the same, which keeps a clock that
 # ticks over between two events from changing the masked cron option.
 # Needs only the PHP image and the database server: it makes and drops its own
@@ -59,6 +63,9 @@ while IFS='|' read -r name title login email public password url prefix; do
     cp "$TMP/a.rows" "$DATA/rows.tsv"
   else
     cp "$TMP/a.rows" "$OUT/$name.tsv"
+    if [ "$name" = subfolder ]; then
+      awk -F'\t' '$2 == "rewrite_rules" { print $3 }' "$TMP/a.rows" > "$DATA/rewrite_rules_subfolder.txt"
+    fi
     cp "$TMP/a.schema" "$OUT/$name.sql"
   fi
   echo "$name: $(grep -vc '^[#@]' "$TMP/a.rows") rows"

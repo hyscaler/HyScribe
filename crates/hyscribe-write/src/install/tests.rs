@@ -65,6 +65,10 @@ fn golden(case: &Case) -> (&'static str, &'static str) {
             include_str!("../../tests/golden/install/prefixed.tsv"),
             include_str!("../../tests/golden/install/prefixed.sql"),
         ),
+        "subfolder" => (
+            include_str!("../../tests/golden/install/subfolder.tsv"),
+            include_str!("../../tests/golden/install/subfolder.sql"),
+        ),
         other => panic!("no golden for {other}"),
     }
 }
@@ -506,7 +510,7 @@ fn only_the_known_masks_are_filled_in() {
     assert_eq!(site.fill("unix", "hash", "wp_"), Some("1700000000".into()));
     // An answer that looks like a mask is not filled in again.
     let tricky = plan(|a| a.title = "%password%").unwrap();
-    let rows = tables(&|token| tricky.fill(token, "HASH", "wp_"), false);
+    let rows = tables(&|token| tricky.fill(token, "HASH", "wp_"), false, false);
     let options = rows.iter().find(|t| t.table == "options").unwrap();
     let blogname = options
         .rows
@@ -517,7 +521,7 @@ fn only_the_known_masks_are_filled_in() {
 
 #[test]
 fn the_data_is_whole() {
-    let rows = tables(&|_| Some(String::new()), false);
+    let rows = tables(&|_| Some(String::new()), false, false);
     let names: Vec<&str> = rows.iter().map(|t| t.table.as_str()).collect();
     assert_eq!(
         names,
@@ -544,7 +548,7 @@ fn the_data_is_whole() {
 #[test]
 fn a_made_password_adds_the_nag_before_the_welcome_panel() {
     let meta = |nag: bool| {
-        let rows = tables(&|_| Some(String::new()), nag);
+        let rows = tables(&|_| Some(String::new()), nag, false);
         let meta = rows.into_iter().find(|t| t.table == "usermeta").unwrap();
         let keys = meta.rows.iter().map(|row| (row[0].clone(), row[2].clone()));
         keys.skip(14).collect::<Vec<_>>()
@@ -643,7 +647,7 @@ async fn every_statement_of_an_install_can_fail() {
         generate: made_password,
         hash: cheap_hash,
     };
-    let rows: usize = tables(&|_| Some(String::new()), false)
+    let rows: usize = tables(&|_| Some(String::new()), false, false)
         .iter()
         .map(|table| table.rows.len())
         .sum();

@@ -16,6 +16,7 @@
 
 list( , $schema_file, $rows_file, $title, $login, $email, $public, $password, $url, $mask_site ) = $argv;
 
+
 define( 'WP_INSTALLING', true );
 define( 'DISABLE_WP_CRON', true );
 // The constants win over wp-config.php's (the second define only warns).
@@ -30,8 +31,19 @@ error_reporting( E_ALL & ~E_WARNING );
 require '/var/www/html/wp-load.php';
 require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
-// No pretty permalink probe reaches a server and no mail leaves.
-add_filter( 'pre_http_request', fn() => new WP_Error( 'none' ) );
+// The pretty permalink probe is answered as a serving site answers it, with
+// the X-Pingback header, so the structure stays, as it will for HyScribe's
+// own site (ADR 0021); no mail leaves.
+add_filter(
+	'pre_http_request',
+	fn() => array(
+		'headers'  => array( 'X-Pingback' => get_bloginfo( 'pingback_url' ) ),
+		'body'     => '',
+		'response' => array( 'code' => 200, 'message' => 'OK' ),
+		'cookies'  => array(),
+		'filename' => null,
+	)
+);
 add_filter( 'pre_wp_mail', '__return_false' );
 
 $start = time();

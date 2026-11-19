@@ -23,7 +23,7 @@ async fn emptied(prefix: &str) -> Installer {
     let tables = sqlx::query(
         "SELECT TABLE_NAME AS name FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
     )
-    .fetch_all(&mut *installer.conn)
+    .fetch_all(&installer.pool)
     .await
     .unwrap();
     for table in tables {
@@ -49,9 +49,9 @@ fn rows(table: &str, columns: &[&str], rows: &[&[Option<&str>]]) -> Rows {
 }
 
 /// How many rows `table` has.
-async fn count(installer: &mut Installer, table: &str) -> i64 {
+async fn count(installer: &Installer, table: &str) -> i64 {
     sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
-        .fetch_one(&mut *installer.conn)
+        .fetch_one(&installer.pool)
         .await
         .unwrap()
 }
@@ -71,9 +71,9 @@ async fn tables_are_made_filled_and_dropped() {
         )])
         .await
         .unwrap();
-    assert_eq!(count(&mut installer, "ins_things").await, 2);
+    assert_eq!(count(&installer, "ins_things").await, 2);
     // A prefix is matched whatever its case, so a table of `INS_` counts.
-    let mut upper = Installer::open(&config("INS_")).await.unwrap();
+    let upper = Installer::open(&config("INS_")).await.unwrap();
     assert_eq!(upper.existing().await.unwrap(), ["ins_things"]);
     installer.undo().await.unwrap();
     assert!(installer.existing().await.unwrap().is_empty());
@@ -164,8 +164,35 @@ async fn a_failed_insert_leaves_no_rows() {
         &[&[Some("2"), None], &[Some("2"), None]],
     );
     assert!(installer.insert(&[good, twice]).await.is_err());
-    assert_eq!(count(&mut installer, "ins_things").await, 0);
+    assert_eq!(count(&installer, "ins_things").await, 0);
     installer.undo().await.unwrap();
+}
+
+/// Every statement can fail, and each failure is reported.
+#[tokio::test]
+async fn every_statement_can_fail() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let all = async |installer: &mut Installer| -> Result<(), DbError> {
+        installer.existing().await?;
+        installer.create(THINGS).await?;
+        let two = rows("things", &["id"], &[&[Some("1")], &[Some("2")]]);
+        installer.insert(&[two]).await?;
+        installer.undo().await
+    };
+    // Counted statements: the listing, the create, the begin, two rows, the
+    // commit and the drop.
+    for spent in 0..7 {
+        let mut installer = emptied("ins_").await;
+        installer.fail_after(Some(spent));
+        let err = all(&mut installer).await.unwrap_err();
+        assert_eq!(err.to_string(), "the test's statement budget is spent");
+        installer.fail_after(None);
+        installer.undo().await.unwrap();
+        assert!(installer.existing().await.unwrap().is_empty());
+    }
+    let mut installer = emptied("ins_").await;
+    installer.fail_after(Some(7));
+    all(&mut installer).await.unwrap();
 }
 
 #[tokio::test]

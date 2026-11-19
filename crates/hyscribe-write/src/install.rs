@@ -75,6 +75,12 @@ pub struct Installed {
     pub tables: Vec<String>,
 }
 
+/// Where an install draws the password it makes and the hash it stores.
+struct Secrets {
+    generate: fn(usize, bool) -> std::io::Result<String>,
+    hash: fn(&[u8]) -> std::io::Result<String>,
+}
+
 /// The made password is not printed, whatever prints it.
 impl std::fmt::Debug for Installed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -233,21 +239,36 @@ impl Plan {
     /// which must have no table of its prefix. A failure drops the tables
     /// made, so the database is as it was.
     pub async fn install(&self, config: &Database) -> Result<Installed, Failure> {
+        let mut db = Installer::open(config).await?;
+        let secrets = Secrets {
+            generate: hyscribe_auth::generate_password,
+            hash: hyscribe_auth::hash_password,
+        };
+        self.install_on(&mut db, config, &secrets).await
+    }
+
+    /// [`Plan::install`] over an open installer and the `secrets` it draws
+    /// its password and hash from, which tests make fail.
+    async fn install_on(
+        &self,
+        db: &mut Installer,
+        config: &Database,
+        secrets: &Secrets,
+    ) -> Result<Installed, Failure> {
         // The password and its hash come first: nothing is made without them.
         let generated = if self.password.is_empty() {
-            Some(hyscribe_auth::generate_password(GENERATED_LENGTH, false)?)
+            Some((secrets.generate)(GENERATED_LENGTH, false)?)
         } else {
             None
         };
         let password = generated.as_deref().unwrap_or(&self.password);
-        let hash = hyscribe_auth::hash_password(password.as_bytes())?;
+        let hash = (secrets.hash)(password.as_bytes())?;
         let prefix = config.prefix.as_str();
         let tables = tables(
             &|token| self.fill(token, &hash, prefix),
             generated.is_some(),
         );
         let statements: Vec<&str> = SCHEMA.split(";\n").filter(|s| !s.is_empty()).collect();
-        let mut db = Installer::open(config).await?;
         let existing = db.existing().await?;
         if !existing.is_empty() {
             return Err(Failure(format!(
@@ -259,7 +280,7 @@ impl Plan {
                 existing.join(", ")
             )));
         }
-        let made = Self::make(&mut db, &statements, &tables).await;
+        let made = Self::make(db, &statements, &tables).await;
         match made {
             Ok(names) => Ok(Installed {
                 generated,
@@ -276,7 +297,14 @@ impl Plan {
     /// failed, so the database is as it was.
     pub async fn remove(config: &Database, installed: &Installed) -> Result<(), Failure> {
         let mut db = Installer::open(config).await?;
-        Ok(db.drop_tables(&installed.tables).await?)
+        Self::remove_on(&mut db, installed).await
+    }
+
+    /// [`Plan::remove`] over an open installer.
+    async fn remove_on(db: &mut Installer, installed: &Installed) -> Result<(), Failure> {
+        db.drop_tables(&installed.tables)
+            .await
+            .map_err(Failure::from)
     }
 
     async fn make(
@@ -369,21 +397,27 @@ fn unescape(value: &str, fill: &dyn Fn(&str) -> Option<String>) -> Option<String
 /// The tables of `rows.tsv`, with the masks filled in by `fill`, and
 /// `default_password_nag` among the user's meta when `nag`.
 fn tables(fill: &dyn Fn(&str) -> Option<String>, nag: bool) -> Vec<Rows> {
-    let mut tables: Vec<Rows> = Vec::new();
-    for line in ROWS.lines().filter(|line| !line.starts_with('#')) {
-        if let Some(header) = line.strip_prefix('@') {
-            let mut names = header.split('\t');
-            tables.push(Rows {
+    // A value never holds a raw newline, so `\n@` starts each table; what
+    // comes before the first is the file's comment.
+    let sections = ROWS.split("\n@").skip(1);
+    let mut tables: Vec<Rows> = sections
+        .map(|section| {
+            let mut lines = section.lines();
+            let mut names = lines.next().unwrap_or_default().split('\t');
+            Rows {
                 table: names.next().unwrap_or_default().into(),
                 columns: names.map(String::from).collect(),
-                rows: Vec::new(),
-            });
-        } else if let Some(table) = tables.last_mut() {
-            let values = line.split('\t').map(|value| unescape(value, fill));
-            table.rows.push(values.collect());
-        }
-    }
-    tables.retain(|table| !table.rows.is_empty());
+                rows: lines
+                    .map(|line| {
+                        line.split('\t')
+                            .map(|value| unescape(value, fill))
+                            .collect()
+                    })
+                    .collect(),
+            }
+        })
+        .filter(|table| !table.rows.is_empty())
+        .collect();
     if nag {
         password_nag(&mut tables);
     }

@@ -577,3 +577,114 @@ fn the_rows_file_s_escapes_are_undone() {
     );
     assert_eq!(unescape("", &fill).as_deref(), Some(""));
 }
+
+fn made_password(_: usize, _: bool) -> std::io::Result<String> {
+    Ok("a made password".into())
+}
+
+fn cheap_hash(_: &[u8]) -> std::io::Result<String> {
+    Ok("$wp$cheap".into())
+}
+
+fn no_random(_: usize, _: bool) -> std::io::Result<String> {
+    Err(std::io::Error::other("no entropy"))
+}
+
+fn no_hash(_: &[u8]) -> std::io::Result<String> {
+    Err(std::io::Error::other("no hash"))
+}
+
+/// A password or a hash that cannot be made stops the install before any
+/// table is.
+#[tokio::test]
+async fn no_table_is_made_without_a_password() {
+    let _one = SAVES.lock().await;
+    let config = config("wp_");
+    emptied(&config).await;
+    let mut db = Installer::open(&config).await.unwrap();
+    let made = Plan::new(&answers(&cases()[2]), NOW).unwrap();
+    assert!(cases()[2].password.is_empty());
+    let secrets = Secrets {
+        generate: no_random,
+        hash: cheap_hash,
+    };
+    let err = made
+        .install_on(&mut db, &config, &secrets)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the kernel's random source failed: no entropy"
+    );
+    let secrets = Secrets {
+        generate: made_password,
+        hash: no_hash,
+    };
+    let err = made
+        .install_on(&mut db, &config, &secrets)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "the kernel's random source failed: no hash"
+    );
+    assert!(db.existing().await.unwrap().is_empty());
+}
+
+/// Every statement of an install can fail, and none leaves a table behind
+/// once the failure is cleared.
+#[tokio::test]
+async fn every_statement_of_an_install_can_fail() {
+    let _one = SAVES.lock().await;
+    let case = &cases()[0];
+    let config = config(case.prefix);
+    let plan = Plan::new(&answers(case), NOW).unwrap();
+    let secrets = Secrets {
+        generate: made_password,
+        hash: cheap_hash,
+    };
+    let rows: usize = tables(&|_| Some(String::new()), false)
+        .iter()
+        .map(|table| table.rows.len())
+        .sum();
+    // The listing, the twelve tables, the begin, every row and the commit.
+    let statements = 1 + 12 + 1 + rows + 1;
+    for spent in 0..statements {
+        let mut conn = emptied(&config).await;
+        let mut db = Installer::open(&config).await.unwrap();
+        db.fail_after(Some(spent));
+        let err = plan
+            .install_on(&mut db, &config, &secrets)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("the test's statement budget is spent"),
+            "{err}"
+        );
+        db.fail_after(None);
+        db.undo().await.unwrap();
+        let left =
+            "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()";
+        assert!(
+            text_of(&mut conn, left.into(), 0).await.is_empty(),
+            "{spent}"
+        );
+    }
+    let mut conn = emptied(&config).await;
+    let mut db = Installer::open(&config).await.unwrap();
+    db.fail_after(Some(statements));
+    let installed = plan.install_on(&mut db, &config, &secrets).await.unwrap();
+    assert_eq!(installed.tables.len(), 12);
+    // Removing it fails at the first drop and at every later one.
+    for spent in 0..12 {
+        let mut db = Installer::open(&config).await.unwrap();
+        db.fail_after(Some(spent));
+        let err = Plan::remove_on(&mut db, &installed).await.unwrap_err();
+        assert!(err.to_string().contains("budget is spent"), "{err}");
+    }
+    let mut db = Installer::open(&config).await.unwrap();
+    Plan::remove_on(&mut db, &installed).await.unwrap();
+    let left = "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()";
+    assert!(text_of(&mut conn, left.into(), 0).await.is_empty());
+}

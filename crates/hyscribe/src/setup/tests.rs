@@ -679,7 +679,9 @@ fn stopped_anywhere(install: &Install, answers: &str, result: &Result<String, St
                 tty: None,
             },
         );
-        if ran != Err("closed".into()) {
+        // A new site's tables dropped again add their own words to it.
+        let closed = matches!(&ran, Err(err) if err == "closed" || err.starts_with("closed; "));
+        if !closed {
             assert_eq!(&ran, result);
             return;
         }
@@ -1048,4 +1050,18 @@ async fn tables_that_cannot_be_dropped_are_reported() {
         err.starts_with("failed; dropping the new site's tables failed too: "),
         "{err}"
     );
+}
+
+/// Every question of a new site, one refused and asked again, can end the
+/// wizard: the input, or the output that shows what it says.
+#[test]
+fn every_new_site_question_can_stop_the_wizard() {
+    let _one = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    empty_saves();
+    let install = Install::new(None);
+    let refused = "T\nbad/name\npw\npw\na@b.co\n\n\n";
+    let site = format!("{refused}{}", good_site("pw"));
+    let answers = new_site_answers("", "", &site);
+    stopped_anywhere(&install, &answers, &Ok(install.written()));
+    empty_saves();
 }

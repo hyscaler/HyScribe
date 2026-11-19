@@ -6,7 +6,7 @@
 # updates of a user and of oneself (`me`), deletes with `reassign`, with
 # the checks of the permission checks, the arguments' own checks,
 # check_role_update(), update_item() and wp_insert_user(), and what
-# HyScribe does not port (meta, one's own password, which logs one in
+# HyScribe does not port (one's own password, which logs one in
 # again).
 POST	/?rest_route=/wp/v2/users	json,restore	{"username":"newbie","email":"newbie@example.test","password":"secret-pass","name":"New Bie","first_name":"New","last_name":"Bie","url":"https://newbie.example.test","description":"<b>Hi</b><script>x()</script>","nickname":"nb","slug":"New Bie","locale":"en_US"}
 POST	/?rest_route=/wp/v2/users	json,restore	{"username":"roled","email":"roled@example.test","password":"pw","roles":["editor","author"]}
@@ -33,6 +33,26 @@ POST	/?rest_route=/wp/v2/users/999	json,restore	{"name":"Gone"}
 POST	/?rest_route=/wp/v2/users/me	json,restore	{"nickname":"Me","last_name":"Myself"}
 POST	/?rest_route=/wp/v2/users/me	json,restore	{"password":"my-new-secret"}
 POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{"core/edit-post":{"fixedToolbar":true,"welcomeGuide":false},"core":{"editorMode":"visual"},"_modified":"2026-11-19T09:30:00.123Z"}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{"note":"it's \"q\" \\ \u00e9 <b>","_modified":"2026-11-19T09:30:00.123Z"}}}
+POST	/?rest_route=/wp/v2/users/702	json,restore	{"meta":{"persisted_preferences":{"a":1}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"nickname":"MetaNick","meta":{"persisted_preferences":{"a":[1,2,{"b":null}],"c":1.5,"d":true}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":[]}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":[1,2]}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":"x"}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{"_modified":5}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{"_modified":"nope"}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"nickname":"Both","meta":{"persisted_preferences":"x"}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":null}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"other":1}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":"x"}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":null}
+POST	/?rest_route=/wp/v2/users/me	json,put,restore	{"meta":{"persisted_preferences":{"core":{"editorMode":"text"},"_modified":"2026-11-19T09:31:00.000Z"}}}
+PUT	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{"a":"b"}}}
+POST	/?rest_route=/wp/v2/users/me	form,restore	meta%5Bpersisted_preferences%5D%5Ba%5D=b&meta%5Bpersisted_preferences%5D%5B_modified%5D=2026-11-19T09%3A32%3A00Z
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"prefs","email":"prefs@example.test","password":"pw","meta":{"persisted_preferences":{"a":1}}}
+POST	/?rest_route=/wp/v2/users	json,restore	{"username":"prefsbad","email":"prefsbad@example.test","password":"pw","meta":{"persisted_preferences":"x"}}
 DELETE	/?rest_route=/wp/v2/users/704&force=true	restore
 DELETE	/?rest_route=/wp/v2/users/704&reassign=1	restore
 DELETE	/?rest_route=/wp/v2/users/704&force=true&reassign=1	restore

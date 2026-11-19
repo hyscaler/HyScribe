@@ -59,7 +59,7 @@ pub use comments::write::CommentSave;
 pub use posts::write::{Outcome, Plan, Save, Upload, Write};
 pub use settings::{Setting, SettingsSave};
 pub use terms::write::TermSave;
-pub use users::write::UserSave;
+pub use users::write::{Preferences, UserSave};
 
 /// What the REST API reads from the site.
 pub trait Site {

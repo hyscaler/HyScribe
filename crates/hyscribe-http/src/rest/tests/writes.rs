@@ -682,8 +682,10 @@ async fn writes_match_php(
         let from = at.saturating_sub(80);
         assert_eq!(ours.get(from..), php.get(from..), "{what}");
         // Connections opened before the tables were loaded again can
-        // refuse them (1412), so the site connects afresh too.
-        if status.is_success() {
+        // refuse them (1412), so the site connects afresh too. A `meta`
+        // PHP refuses answers an error once the user is written.
+        let meta_refused = sent.contains(r#""meta":"#);
+        if status.is_success() || meta_refused {
             fresh_with(state).await;
             site = uploading(dir.path(), uploads.path()).await;
         }
@@ -1195,7 +1197,7 @@ async fn comment_notes_are_php_s() {
 }
 
 /// PHP's answers to the users' writes, as [`post_writes_match_php`]
-/// replays them: `meta` and a password of one's own answer 501.
+/// replays them: a password of one's own answers 501.
 #[tokio::test(flavor = "multi_thread")]
 async fn user_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/user-writes.tsv");
@@ -1207,15 +1209,19 @@ async fn user_writes_match_php() {
         "subscriber",
     ];
     let unported = [
-        (
-            r#"{"username":"meta","email":"meta@example.test","password":"pw","meta":{}}"#,
-            &[][..],
-        ),
-        (r#"{"meta":{"persisted_preferences":{}}}"#, &[][..]),
         (r#"{"password":"my-new-secret"}"#, &logged_in[..]),
         (r#"{"password":"new-secret"}"#, &["author"][..]),
     ];
-    assert_eq!(writes_match_php(golden, "", &unported).await, (6 * 33, 18));
+    assert_eq!(writes_match_php(golden, "", &unported).await, (6 * 53, 6));
+}
+
+/// PHP's answers to the persisted preferences' writes over rows that
+/// `user-preferences.sql` stores, as [`post_writes_match_php`] replays them.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_preferences_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/user-preferences.tsv");
+    let state = include_str!("../../../../../reference/rest/user-preferences.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 11, 0));
 }
 
 /// PHP's answers to the settings' writes, as [`post_writes_match_php`]
@@ -1259,6 +1265,58 @@ async fn comment_writes_are_php_s() {
         ),
     ];
     planned_writes_are_php_s(&site, &writes).await;
+}
+
+/// The persisted preferences' writes leave the rows PHP's leave, as the
+/// administrator's own (`users/me`): stored, changed and deleted.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_preferences_are_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let target = "/?rest_route=/wp/v2/users/me";
+    let set = (
+        "rest-users-preferences",
+        "POST",
+        target,
+        r#"{"meta":{"persisted_preferences":{"note":"it's \"q\" \\ \u00e9 <b>","core":{"editorMode":"visual"},"_modified":"2026-11-19T09:30:00.123Z"}}}"#,
+    );
+    planned_writes_are_php_s(&site, &[set]).await;
+    // Stored before the plan is made: planned by hand over what it finds.
+    let pending = planned(&site, "POST", target, "{}").await;
+    let changed = r#"{"core":{"editorMode":"text"},"_modified":"2026-11-19T04:17:00.000Z"}"#;
+    let stored = r#"a:2:{s:4:"core";a:1:{s:10:"editorMode";s:6:"visual";}s:9:"_modified";s:24:"2026-11-18T10:00:00.000Z";}"#;
+    for (golden, value) in [
+        ("rest-users-preferences-update", Some(changed)),
+        ("rest-users-preferences-reset", None),
+    ] {
+        let value = value.map(|json| hyscribe_phpser::json_decode(json.as_bytes()).unwrap());
+        let save = hyscribe_rest::UserSave {
+            id: 1,
+            preferences: Some(hyscribe_rest::Preferences {
+                key: "wp_persisted_preferences".into(),
+                value,
+            }),
+            ..hyscribe_rest::UserSave::default()
+        };
+        let mut plan = pending.plan.clone();
+        plan.write = hyscribe_rest::Write::User(Box::new(save));
+        let setup = async |conn: &mut hyscribe_db::Connection| {
+            let insert = "INSERT INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'wp_persisted_preferences', ?)";
+            sqlx::query(insert)
+                .bind(stored)
+                .execute(&mut *conn)
+                .await
+                .unwrap();
+            Ok::<_, String>(())
+        };
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let ctx = crate::rest::writes::context(&site, &plan, now());
+            assert_eq!(acted(conn, &plan, &ctx).await, Outcome::Written(1));
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), golden, setup, action).await;
+        report.unwrap();
+    }
 }
 
 /// The users' writes leave the rows PHP's leave; the update and delete

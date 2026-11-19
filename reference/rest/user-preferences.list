@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The block editor's persisted preferences saves (MVP 4.3) over rows that
+# user-preferences.sql stores, that reference/rest/golden.sh records as
+# user-preferences.tsv over the default install: each request sent as
+# every identity, the database put back after each. A value that equals the
+# stored one is not written, a null deletes the row, and the subscriber's
+# stored string has an invalid stored value that null cannot replace.
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{"core":{"editorMode":"visual"},"_modified":"2026-11-18T10:00:00.000Z"}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{"_modified":"2026-11-18T10:00:00.000Z","core":{"editorMode":"visual"}}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{"core":{"editorMode":"text"},"_modified":"2026-11-19T04:17:00.000Z"}}}
+POST	/?rest_route=/wp/v2/users/me	json,put,restore	{"meta":{"persisted_preferences":{"core":{"editorMode":"text"},"_modified":"2026-11-19T04:17:00.000Z"}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":{}}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"meta":{"persisted_preferences":null}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{"nickname":"Gone","meta":{"persisted_preferences":null}}
+POST	/?rest_route=/wp/v2/users/me	json,restore	{}
+POST	/?rest_route=/wp/v2/users/704	json,restore	{"meta":{"persisted_preferences":null}}
+POST	/?rest_route=/wp/v2/users/704	json,restore	{"meta":{"persisted_preferences":{"core":{"editorMode":"text"},"_modified":"2026-11-19T04:17:00.000Z"}}}
+POST	/?rest_route=/wp/v2/users/702	json,restore	{"meta":{"persisted_preferences":{"core":{"editorMode":"text"},"_modified":"2026-11-19T04:17:00.000Z"}}}

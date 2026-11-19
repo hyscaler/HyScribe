@@ -11,11 +11,11 @@ use std::sync::Arc;
 
 use hyscribe_db::{DbError, Meta, Write};
 use hyscribe_phpser::Value;
-use hyscribe_phpser::addslashes;
+use hyscribe_phpser::{addslashes, wp_slash};
 use hyscribe_render::date::Zone;
 use hyscribe_rest::{
-    Answer, CommentSave, Outcome, Pending, Plan, Request, Save, Served, Setting, SettingsSave,
-    TermSave, UserSave,
+    Answer, CommentSave, Outcome, Pending, Plan, Preferences, Request, Save, Served, Setting,
+    SettingsSave, TermSave, UserSave,
 };
 use hyscribe_write::Error;
 use hyscribe_write::comments::{
@@ -305,6 +305,19 @@ async fn user_saved(
     };
     for role in save.roles.iter().flatten() {
         add_role(write, id, role).await?;
+    }
+    if let Some(Preferences { key, value }) = &save.preferences {
+        let any = Value::String(Vec::new());
+        match value {
+            Some(value) => {
+                // `update_value()` slashes what `update_metadata()` unslashes.
+                let value = wp_slash(value.clone());
+                update_metadata(write, Meta::User, id, key, &value, &any).await?;
+            }
+            None => {
+                delete_metadata(write, Meta::User, id, key, &any, false).await?;
+            }
+        }
     }
     Ok(Outcome::Written(id))
 }

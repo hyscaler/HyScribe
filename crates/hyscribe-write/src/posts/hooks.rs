@@ -90,19 +90,7 @@ async fn fresh_site_is_used(write: &mut Write<'_>) -> Result<()> {
     Ok(())
 }
 
-/// `wp_slash( $value )`: `addslashes()` on every string, in arrays too.
-pub(super) fn slash(value: Value) -> Value {
-    match value {
-        Value::String(text) => Value::String(hyscribe_phpser::addslashes(&text)),
-        Value::Array(entries) => Value::Array(
-            entries
-                .into_iter()
-                .map(|(key, value)| (key, slash(value)))
-                .collect(),
-        ),
-        other => other,
-    }
-}
+pub(super) use hyscribe_phpser::wp_slash as slash;
 
 /// `_publish_post_hook( $id )`.
 async fn publish_post(

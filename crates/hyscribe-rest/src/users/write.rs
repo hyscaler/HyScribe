@@ -4,19 +4,20 @@
 //! `delete_item()` of `WP_REST_Users_Controller`, and of `me`. A request
 //! whose checks pass gives the [`Plan`] `hyscribe-http` writes with
 //! `wp_insert_user()` or `wp_update_user()` and `WP_User::add_role()`, or
-//! `wp_delete_user()`. `meta`, and a new password of one's own, which logs
-//! one in again, are not ported; the mails PHP sends are not sent yet.
+//! `wp_delete_user()`. A new password of one's own, which logs one in
+//! again, is not ported; the mails PHP sends are not sent yet. `meta` is
+//! the persisted preferences only, as core registers it.
 
 use hyscribe_model::UserQuery;
-use hyscribe_phpser::{Key, Value};
+use hyscribe_phpser::{Key, Value, json_decode, lookup};
 use hyscribe_render::formatting::sanitize_user_strict;
 
-use super::{ITEM, ME, ROUTE, as_me, get_user, prepare};
+use super::{ITEM, ME, PREFERENCES, ROUTE, as_me, get_user, prepare};
 use crate::Context;
 use crate::posts::write::{Outcome, Plan, Write, Writing, invalid};
 use crate::request::{Arg, Params, Sanitize, arg, force_arg, slug, typed};
-use crate::response::{Response, RestError, text};
-use crate::schema::{Checked, Refusal};
+use crate::response::{Response, RestError, list, object, text};
+use crate::schema::{Checked, Refusal, sanitize_value_from_schema, validate_value_from_schema};
 
 /// What a create or update saves, unslashed: `$prepared_user` where the
 /// request gives it.
@@ -48,6 +49,20 @@ pub struct UserSave {
     pub locale: Option<Vec<u8>>,
     /// `role` false, then each of these roles added.
     pub roles: Option<Vec<Vec<u8>>>,
+    /// After the roles: the persisted preferences' write, if any.
+    pub preferences: Option<Preferences>,
+    /// What PHP answers after writing the rest, once `update_value()` has
+    /// refused the `meta`.
+    pub meta_error: Option<Response>,
+}
+
+/// A write of the persisted preferences meta, `update_value()`'s.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Preferences {
+    /// The meta key, with the table prefix.
+    pub key: String,
+    /// The sanitized value to store, `None` to delete the row.
+    pub value: Option<Value>,
 }
 
 /// The ported write of the route `regex`'s endpoint `index`, if any.
@@ -62,7 +77,7 @@ pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
 }
 
 /// `get_endpoint_args_for_item_schema()` of a create (`required` names)
-/// or an update; `meta` is not ported.
+/// or an update.
 pub(super) fn save_args(create: bool) -> Vec<Arg> {
     let required = |schema: &str| match create {
         true => schema.replacen('{', r#"{"required":true,"#, 1),
@@ -113,7 +128,7 @@ pub(super) fn save_args(create: bool) -> Vec<Arg> {
             true,
             Sanitize::Site(password),
         ),
-        arg("meta", r#"{"type":"object"}"#, false, Sanitize::NotPorted),
+        arg("meta", r#"{"type":"object"}"#, false, Sanitize::IsArray),
     ]
 }
 
@@ -208,6 +223,67 @@ fn check_roles(context: &Context, user: Option<u64>, roles: &[Vec<u8>]) -> Resul
     Ok(())
 }
 
+/// The error `update_value()` answers: `data` a last status and, where
+/// `add_data()` replaced some, that kept as `additional_data`.
+fn meta_refused(code: &str, message: &str, (status, earlier): (u16, Value)) -> Response {
+    let mut entries = vec![
+        ("code", text(code)),
+        ("message", text(message)),
+        ("data", object([("status", Value::Int(i64::from(status)))])),
+    ];
+    if earlier != Value::Null {
+        entries.push(("additional_data", list(vec![earlier])));
+    }
+    let data = Value::Array(
+        entries
+            .into_iter()
+            .map(|(k, v)| (Key::String(k.as_bytes().to_vec()), v))
+            .collect(),
+    );
+    Response::new(data, status)
+}
+
+/// `update_value()` of the `meta` for `user` (none for a new one): what
+/// it writes, or the error PHP answers once the user is written.
+fn meta_update(
+    context: &Context,
+    params: &Params,
+    user: Option<u64>,
+) -> (Option<Preferences>, Option<Response>) {
+    let meta = params.get("meta").and_then(Value::as_array);
+    let Some(given) = meta.and_then(|meta| lookup(meta, "persisted_preferences")) else {
+        return (None, None);
+    };
+    let key = format!("{}persisted_preferences", context.site.table_prefix());
+    let schema = json_decode(PREFERENCES.as_bytes()).unwrap_or_default();
+    let stored = user.and_then(|user| context.site.user_meta(user, &key));
+    let stored = stored.as_deref().map(crate::unserialized);
+    if *given == Value::Null {
+        let current = stored.clone().unwrap_or_else(|| text(""));
+        if validate_value_from_schema(&current, &schema, "").is_err() {
+            let message = "The persisted_preferences property has an invalid stored value, and cannot be updated to null.";
+            let error = meta_refused("rest_invalid_stored_value", message, (500, Value::Null));
+            return (None, Some(error));
+        }
+        let delete = stored.map(|_| Preferences { key, value: None });
+        return (delete, None);
+    }
+    // The schema has nothing the validator leaves out, so its refusal is PHP's.
+    let name = "meta.persisted_preferences";
+    if let Err(Refusal(Some(error))) = validate_value_from_schema(given, &schema, name) {
+        let refused = meta_refused(error.code, &error.message, (400, error.data));
+        return (None, Some(refused));
+    }
+    let value = sanitize_value_from_schema(given, &schema, "").unwrap_or_default();
+    // Not written again when it is what the row holds already.
+    let same = stored.as_ref() == Some(&value);
+    let write = (!same).then_some(Preferences {
+        key,
+        value: Some(value),
+    });
+    (write, None)
+}
+
 /// `prepare_item_for_database()`.
 fn prepared(params: &Params, id: u64) -> UserSave {
     let given = |name| params.get(name).map(Value::to_php_string);
@@ -225,6 +301,7 @@ fn prepared(params: &Params, id: u64) -> UserSave {
         url: given("url"),
         locale: given("locale"),
         roles: roles(params),
+        ..UserSave::default()
     }
 }
 
@@ -235,7 +312,8 @@ fn plan_create(context: &Context, params: &Params) -> Result<Plan, RestError> {
     }
     let roles = roles(params).unwrap_or_default();
     check_roles(context, None, &roles)?;
-    let save = prepared(params, 0);
+    let mut save = prepared(params, 0);
+    (save.preferences, save.meta_error) = meta_update(context, params, None);
     Ok(Plan::new(context, Write::User(Box::new(save)), Value::Null))
 }
 
@@ -300,7 +378,8 @@ fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
     if user.id == context.user && params.get("password").is_some() {
         return Err(RestError::not_ported());
     }
-    let save = prepared(params, user.id);
+    let mut save = prepared(params, user.id);
+    (save.preferences, save.meta_error) = meta_update(context, params, Some(user.id));
     Ok(Plan::new(context, Write::User(Box::new(save)), Value::Null))
 }
 
@@ -384,6 +463,11 @@ fn finish(
     };
     if let Write::DeleteUser(..) = plan.write {
         return Ok(plan.deleted());
+    }
+    if let Write::User(save) = &plan.write
+        && let Some(error) = &save.meta_error
+    {
+        return Ok(error.clone());
     }
     params.set("context", text("edit"));
     let user = context.site.user(id).unwrap_or_default();

@@ -48,7 +48,7 @@ fn parsed_attributes_match_php() {
     let cases = matches_php("atts", |text| {
         encode(&Value::Array(shortcode_parse_atts(text)))
     });
-    assert_eq!(cases, 40);
+    assert_eq!(cases, 42);
 }
 
 #[test]

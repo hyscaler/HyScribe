@@ -7,11 +7,12 @@
 
 use std::sync::OnceLock;
 
+use hyscribe_phpser::{Key, Value};
 use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
 
 use crate::templates::tests::CREDIT;
 use crate::tests::content::{Content, default_install_with};
-use crate::tests::{serve_case, serve_over, sha256_hex};
+use crate::tests::{changed, get, serve_case, serve_over, sha256_hex};
 
 /// The identities PHP lets read the editors' registries.
 const EDITORS: [&str; 4] = ["administrator", "editor", "author", "contributor"];
@@ -46,7 +47,7 @@ fn not_ported(case: &RestCase) {
 #[test]
 fn answers_match_php() {
     let cases = rest_cases(include_str!("../../tests/golden/editor.tsv"));
-    assert_eq!(cases.len(), 317);
+    assert_eq!(cases.len(), 314);
     for case in &cases {
         if case.status == 0 {
             EDITORS
@@ -134,6 +135,76 @@ fn preloads_match_php() {
     assert_eq!(unported, 6 * UNDESCRIBED.len());
 }
 
+/// The registered patterns, as PHP gives them with the pattern directory out
+/// of reach (the theme footer's credit names HyScribe), as each identity.
+#[test]
+fn block_patterns_match_php() {
+    let cases = rest_cases(include_str!("../../tests/golden/block-patterns.tsv"));
+    assert_eq!(cases.len(), 144);
+    for case in &cases {
+        let served = serve_case(case);
+        let what = format!("{} {} {}", case.who, case.method, case.target);
+        assert_eq!(served.status, case.status, "{what}");
+        let mut php = case.headers.clone();
+        php.sort();
+        assert_eq!(rest_headers(&served.headers), php, "{what}");
+        let body = String::from_utf8_lossy(&case.body).replace(CREDIT[0], CREDIT[1]);
+        assert_eq!(String::from_utf8_lossy(&served.body), body, "{what}");
+    }
+}
+
+/// The old core categories PHP renames, which no registered pattern has
+/// but `query`.
+#[test]
+fn old_categories_are_migrated() {
+    let name =
+        |at: usize, name: &str| (Key::Int(at as i64), Value::String(name.as_bytes().to_vec()));
+    let old = Value::Array(vec![
+        name(0, "buttons"),
+        name(1, "columns"),
+        name(2, "query"),
+        name(3, "text"),
+    ]);
+    let new = Value::Array(vec![
+        name(0, "call-to-action"),
+        name(1, "text"),
+        name(2, "posts"),
+        name(3, "text"),
+    ]);
+    assert_eq!(super::patterns::migrated(&old), new);
+    assert_eq!(
+        super::patterns::migrated(&Value::Bool(true)),
+        Value::Bool(true)
+    );
+}
+
+/// Theme file URLs in pattern content, nested patterns included, are the
+/// site's own, whatever address the theme export ran under.
+#[test]
+fn pattern_urls_follow_the_site() {
+    let site = changed(&[("siteurl", b"https://wp.test")]);
+    let target = "/?rest_route=/wp/v2/block-patterns/patterns&_fields=content";
+    let served = get(site, "administrator", target);
+    let body = String::from_utf8_lossy(&served.body);
+    let own = r"https:\/\/wp.test\/wp-content\/themes\/twentytwentyfive\/assets\/images\/";
+    assert!(body.contains(own));
+    assert!(!body.contains("127.0.0.1"));
+}
+
+/// A pattern naming a pattern that is not the theme's (core's or the pattern
+/// directory's) is not ported.
+#[test]
+fn a_foreign_pattern_block_is_not_ported() {
+    let content = "<!-- wp:pattern {\"slug\":\"core/nope\"} /-->";
+    let pattern = Value::Array(vec![(
+        Key::String(b"content".to_vec()),
+        Value::String(content.as_bytes().to_vec()),
+    )]);
+    let wanted = vec![b"content".to_vec()];
+    let served = super::patterns::prepared(&[&pattern], &wanted, b"http://example.test");
+    assert!(served.is_err());
+}
+
 /// Another theme active, which HyScribe does not have, is not ported.
 #[test]
 fn another_theme_is_not_ported() {
@@ -142,6 +213,8 @@ fn another_theme_is_not_ported() {
     for target in [
         "/?rest_route=/wp/v2/themes&status=active&_fields=stylesheet",
         "/?rest_route=/wp/v2/themes/twentytwentyfive&_fields=stylesheet",
+        "/?rest_route=/wp/v2/block-patterns/patterns",
+        "/?rest_route=/wp/v2/block-patterns/patterns&_fields=name",
     ] {
         let case = RestCase {
             who: "administrator".into(),

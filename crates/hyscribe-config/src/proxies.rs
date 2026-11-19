@@ -40,6 +40,12 @@ impl Cidr {
             Some(_) => return None,
             None => bits,
         };
+        // An IPv4-mapped entry with a prefix inside the mapped block names
+        // IPv4 addresses, as a peer's mapped address is read as IPv4.
+        let (ip, v6, length) = match ip.to_canonical() {
+            IpAddr::V4(v4) if v6 && length >= 96 => (IpAddr::V4(v4), false, length - 96),
+            _ => (ip, v6, length),
+        };
         let value = match ip {
             IpAddr::V4(ip) => u128::from(u32::from(ip)),
             IpAddr::V6(ip) => u128::from(ip),
@@ -57,11 +63,16 @@ impl Cidr {
     /// Whether `ip` is in the range; an IPv4-mapped IPv6 address counts as
     /// its IPv4 address.
     pub fn contains(&self, ip: IpAddr) -> bool {
-        let (value, v6) = match ip.to_canonical() {
-            IpAddr::V4(ip) => (u128::from(u32::from(ip)), false),
-            IpAddr::V6(ip) => (u128::from(ip), true),
+        let matches = |ip: IpAddr| {
+            let (value, v6) = match ip {
+                IpAddr::V4(ip) => (u128::from(u32::from(ip)), false),
+                IpAddr::V6(ip) => (u128::from(ip), true),
+            };
+            v6 == self.v6 && value & self.mask == self.network
         };
-        v6 == self.v6 && value & self.mask == self.network
+        // A mapped address also stays an IPv6 address, for an IPv6 range
+        // wider than the mapped block.
+        matches(ip.to_canonical()) || matches(ip)
     }
 }
 

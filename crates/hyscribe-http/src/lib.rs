@@ -56,6 +56,8 @@ mod login;
 mod mail;
 mod multipart;
 mod outbound;
+mod preview_nonce;
+use preview_nonce::Entry;
 pub mod query;
 mod reads;
 mod redirect;
@@ -900,7 +902,13 @@ async fn page(
         }
     }
     let peer = peer.map(|axum::Extension(Peer(ip))| ip);
+    // `_show_post_preview()` runs on `init`, before the entry point's work.
     if uri.path() == login::PATH && page_method {
+        if let Some(refused) =
+            preview_nonce::refuse(&site, &headers, uri.query(), post, Entry::Page).await
+        {
+            return refused;
+        }
         let form = if post {
             trackback::form(&headers, &body)
         } else {
@@ -917,6 +925,13 @@ async fn page(
     }
     let siteurl = site.option("siteurl");
     if uri.path().strip_prefix(home_path(&siteurl)) == Some(comment_post::PATH) {
+        // Only a POST gets as far as loading WordPress.
+        if post
+            && let Some(refused) =
+                preview_nonce::refuse(&site, &headers, uri.query(), post, Entry::Page).await
+        {
+            return refused;
+        }
         let asked = comment_post::Asked {
             post,
             headers,
@@ -930,6 +945,16 @@ async fn page(
         return loaders::load(loader, uri.query(), &headers, now() as u64);
     }
     if admin::is_admin(uri.path()) && page_method {
+        let entry = if uri.path() == "/hs-admin/admin-ajax" {
+            Entry::Ajax
+        } else {
+            Entry::Page
+        };
+        if let Some(refused) =
+            preview_nonce::refuse(&site, &headers, uri.query(), post, entry).await
+        {
+            return refused;
+        }
         let max = site.upload_max();
         let multipart = uploads::takes_upload(&uri)
             .then(|| uploads::form(&headers, &body, max))
@@ -956,6 +981,12 @@ async fn page(
     let get = parse_str(uri.query().unwrap_or_default().as_bytes());
     if get.get_str("s").is_some_and(|s| s.as_array().is_some()) {
         query.insert("s".into(), String::new());
+    }
+    // Before the REST API or a query.
+    let rpc = uri.path().strip_prefix(home_path(&siteurl)) == Some("/xmlrpc.php");
+    let entry = if rpc { Entry::XmlRpc } else { Entry::Page };
+    if let Some(refused) = preview_nonce::refuse(&site, &headers, uri.query(), post, entry).await {
+        return refused;
     }
     let (uri, query) = match pretty_request(&site, uri, query).await {
         Ok(request) => request,

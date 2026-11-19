@@ -705,6 +705,25 @@ fn templates_are_checked() {
     assert_eq!(own(b"default", "default"), 400);
 }
 
+/// A template whose content names a pattern that is not the theme's answers
+/// 501 before it is saved, as one that names none is planned.
+#[test]
+fn templates_naming_foreign_patterns_are_not_ported() {
+    let save = |content: &str| {
+        let body = format!(
+            r#"{{"slug":"hello","theme":"twentytwentyfive","title":"Hello","content":"{content}"}}"#
+        );
+        let site = oracle("administrator", &[]);
+        let asked = Asked::new("administrator", "POST", "/wp/v2/templates", &body);
+        on(&site, &asked, Outcome::Written(1))
+    };
+    let (plan, served) = save(r#"<!-- wp:pattern {\"slug\":\"core/nope\"} /-->"#);
+    assert!(plan.is_none());
+    assert_eq!(served.status, 501);
+    let (plan, _) = save("Plain");
+    assert!(plan.is_some());
+}
+
 /// A template the theme's custom templates cannot be listed past answers
 /// 501 before the other checks.
 #[test]

@@ -41,6 +41,26 @@ fn a_mapped_address_counts_as_its_ipv4_address() {
     assert!(!Cidr::parse("::1").unwrap().contains(ip("127.0.0.1")));
 }
 
+/// Found by the `trusted_proxies` fuzz target: a mapped entry names the
+/// IPv4 address its peers are read as, and a wider IPv6 range still holds
+/// the mapped address.
+#[test]
+fn a_mapped_entry_matches_its_own_address() {
+    let mapped = Cidr::parse("::ffff:04:0").unwrap();
+    assert_eq!(mapped, Cidr::parse("0.4.0.0").unwrap());
+    assert!(mapped.contains(ip("::ffff:04:0")));
+    assert!(mapped.contains(ip("0.4.0.0")));
+    let block = Cidr::parse("::ffff:192.0.2.0/120").unwrap();
+    assert_eq!(block, Cidr::parse("192.0.2.0/24").unwrap());
+    assert!(block.contains(ip("192.0.2.9")));
+    assert!(!block.contains(ip("192.0.3.9")));
+    let wide = Cidr::parse("::ffff:0:0/95").unwrap();
+    assert!(wide.contains(ip("::ffff:0:0")));
+    assert!(wide.contains(ip("::fffe:0:0")));
+    assert!(!wide.contains(ip("0.0.0.0")));
+    assert!(!wide.contains(ip("::1")));
+}
+
 #[test]
 fn bad_entries_are_refused() {
     for entry in [

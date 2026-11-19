@@ -22,7 +22,7 @@ mod people;
 mod posts;
 mod previews;
 mod search;
-mod site;
+pub(crate) mod site;
 mod widgets;
 mod writes;
 
@@ -317,6 +317,11 @@ pub(crate) fn serve_over(content: &'static Content, case: &RestCase) -> Served {
     serve_with(&Oracle::over(content, case.flag("pretty")), case)
 }
 
+/// `content` as rendering reads it.
+pub(crate) fn render_site(content: &'static Content) -> Box<dyn hyscribe_render::site::Site> {
+    Box::new(Oracle::over(content, false).fixture)
+}
+
 /// The role of `who` and its user, none for a visitor.
 pub(super) fn role(who: &str) -> (&'static str, u64) {
     let found = ROLES.iter().find(|(role, _)| *role == who);
@@ -601,7 +606,7 @@ fn arguments_use_ported_keywords() {
 }
 
 /// The default install with `options` changed.
-fn changed(options: &[(&str, &[u8])]) -> &'static Content {
+pub(crate) fn changed(options: &[(&str, &[u8])]) -> &'static Content {
     let default = content::default_install();
     let mut changed = default.options.clone();
     for (name, value) in options {
@@ -619,7 +624,7 @@ fn changed(options: &[(&str, &[u8])]) -> &'static Content {
     }))
 }
 
-fn get(content: &'static Content, who: &str, target: &str) -> Served {
+pub(crate) fn get(content: &'static Content, who: &str, target: &str) -> Served {
     let case = RestCase {
         who: who.into(),
         method: "GET".into(),

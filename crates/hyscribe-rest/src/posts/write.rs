@@ -143,6 +143,9 @@ pub enum Write {
     /// creation of the global styles post of the theme with this
     /// stylesheet, `None` where the read has one to link and writes nothing.
     StylesPost(Option<String>),
+    /// `WP_Navigation_Fallback::get_fallback()`'s `wp_insert_post()` of the
+    /// menu it makes, `None` where the read finds one.
+    NavigationFallback(Option<Box<hyscribe_render::Classic>>),
 }
 
 /// A write whose checks passed.
@@ -190,7 +193,10 @@ impl Plan {
     /// read with no post to create.
     pub(crate) fn writes_nothing(&self) -> bool {
         matches!(&self.write, Write::Settings(save) if save.options.is_empty())
-            || self.write == Write::StylesPost(None)
+            || matches!(
+                self.write,
+                Write::StylesPost(None) | Write::NavigationFallback(None)
+            )
     }
 }
 

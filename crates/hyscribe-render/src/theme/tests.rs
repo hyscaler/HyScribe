@@ -37,6 +37,16 @@ fn twentytwentyfive_is_built_in() {
 }
 
 #[test]
+fn pattern_urls_move_to_the_site() {
+    let exported =
+        br#"<img src="http://127.0.0.1:8081/wp-content/themes/t/a.webp"> http://127.0.0.1:8081/o"#;
+    let moved = under_site(exported, b"https://wp.test/sub");
+    let expected =
+        br#"<img src="https://wp.test/sub/wp-content/themes/t/a.webp"> http://127.0.0.1:8081/o"#;
+    assert_eq!(moved, expected);
+}
+
+#[test]
 fn malformed_theme_data_is_empty() {
     assert!(part_areas(b"not json").is_empty());
     assert!(

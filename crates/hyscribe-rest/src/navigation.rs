@@ -7,6 +7,10 @@
 
 use hyscribe_phpser::Value;
 
+mod fallback;
+
+pub(crate) use fallback::writing;
+
 use crate::posts::{Kind, type_endpoints};
 use crate::request::{Params, typed};
 use crate::response::{Response, RestError};
@@ -46,7 +50,7 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
                 ))
             }),
         }],
-        _ => return None,
+        _ => return fallback::endpoints(regex),
     })
 }
 

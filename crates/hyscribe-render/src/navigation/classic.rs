@@ -21,10 +21,14 @@ use item::Skip;
 
 /// What `wp_insert_post()` is given: the menu's name and slug and its
 /// blocks, as it unslashes them.
-pub(super) struct Classic {
-    pub(super) title: Vec<u8>,
-    pub(super) name: Vec<u8>,
-    pub(super) content: Vec<u8>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Classic {
+    /// `post_title`.
+    pub title: Vec<u8>,
+    /// `post_name`.
+    pub name: Vec<u8>,
+    /// `post_content`.
+    pub content: Vec<u8>,
 }
 
 /// What `WP_Navigation_Fallback::create_classic_menu_fallback()` makes.

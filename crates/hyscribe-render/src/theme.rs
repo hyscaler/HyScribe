@@ -288,10 +288,22 @@ impl Theme {
         Some((content, area))
     }
 
-    /// A registered pattern's block markup.
+    /// A registered pattern's block markup, as exported: its theme file URLs
+    /// are those of the export's site (see [`under_site`]).
     pub fn pattern(&self, slug: &[u8]) -> Option<&[u8]> {
         self.patterns.get(slug).map(Vec::as_slice)
     }
+}
+
+/// The content URL the theme export ran under, which PHP printed the URLs of
+/// the theme's files with.
+const EXPORTED_CONTENT_URL: &[u8] = b"http://127.0.0.1:8081/wp-content";
+
+/// An exported pattern's markup with its theme file URLs under the content
+/// URL of the site at `siteurl`, as `get_theme_file_uri()` prints them.
+pub fn under_site(content: &[u8], siteurl: &[u8]) -> Vec<u8> {
+    let own = [siteurl, b"/wp-content"].concat();
+    crate::template::replace(content, EXPORTED_CONTENT_URL, &own)
 }
 
 /// `registered.json`: each registered core block's `block.json`, in

@@ -133,7 +133,7 @@ fn visitor(site: &Site) -> Context {
 /// `WP_Navigation_Fallback::create_classic_menu_fallback()`'s and
 /// `create_default_fallback()`'s `wp_insert_post()`: the published
 /// `wp_navigation` post of a title, slug and content.
-async fn insert_navigation(
+pub(crate) async fn insert_navigation(
     write: &mut hyscribe_db::Write<'_>,
     ctx: &Context,
     [title, name, content]: [&[u8]; 3],
@@ -150,4 +150,4 @@ async fn insert_navigation(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

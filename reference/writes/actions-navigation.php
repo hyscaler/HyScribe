@@ -71,6 +71,26 @@ $navigation_page = function ( $id, $args ) {
 	wp_update_post( array( 'ID' => $id ) + $args );
 };
 
+// The REST route the site editor asks (WP_REST_Navigation_Fallback_Controller),
+// as the administrator, with the post php.sh's first page view wrote taken out:
+// the same post, by the current user.
+$navigation_rest = function () {
+	global $wpdb;
+	$wpdb->query( "DELETE FROM {$wpdb->posts} WHERE post_type = 'wp_navigation'" );
+	wp_cache_flush();
+};
+
+$navigation_rest_get = function () {
+	$request = new WP_REST_Request( 'GET', '/wp-block-editor/v1/navigation-fallback' );
+	$request->set_query_params( array( '_embed' => '1' ) );
+	$response = rest_do_request( $request );
+	$response = rest_get_server()->response_to_data( $response, true );
+	if ( ! isset( $response['id'] ) ) {
+		fwrite( STDERR, wp_json_encode( $response ) . "\n" );
+		exit( 1 );
+	}
+};
+
 $object = function ( $type, $object, $id, $extra = array() ) {
 	return array(
 		'menu-item-type'      => $type,
@@ -510,5 +530,18 @@ return array(
 			$navigation_visitor();
 		},
 		'action' => $navigation_get( '/?paged=2', array( 'paged' => 2 ) ),
+	),
+	// The REST route makes the post as the page view does, by the user who asks.
+	'rest-navigation-fallback-default'     => array(
+		'setup'  => $navigation_rest,
+		'action' => $navigation_rest_get,
+	),
+	'rest-navigation-fallback-classic'     => array(
+		'setup'  => function () use ( $navigation_menu, $navigation_rest, $plain ) {
+			$navigation_menu( 'An older menu', $plain );
+			$navigation_menu( 'Oracle Menu', array( $plain[0] ) );
+			$navigation_rest();
+		},
+		'action' => $navigation_rest_get,
 	),
 );

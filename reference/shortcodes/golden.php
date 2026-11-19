@@ -129,6 +129,7 @@ $cases = array(
 	array( 555, '[video src="https://www.youtube.com/watch?v=abc&feature=share"]' ),
 	array( 555, '[video src="http://youtu.be/abc"]' ),
 	array( 555, '[video src="https://vimeo.com/123?x=1" loop]' ),
+	array( 555, '[video src="https://vimeo.com/124" loop="1"]' ),
 	array( 555, '[video src="https://a.vimeo.com/123/456"]' ),
 	array( 555, '[video src="http://x.test/v.mov"]' ),
 	array( 555, '[video]' ),

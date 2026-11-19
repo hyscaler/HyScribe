@@ -163,7 +163,7 @@ fn shortcodes_match_php() {
     ]
     .concat();
     assert_eq!(sha256(&printed), assets);
-    assert_eq!(cases, 118);
+    assert_eq!(cases, 119);
 }
 
 /// A plugin that changes everything it may, with `library` for the players'.
@@ -404,4 +404,10 @@ fn shortcodes_without_a_callback_stay_as_written() {
     // Escaped, they lose a bracket on each side as any shortcode does.
     let out = filtered(&(), 555, "[[playlist]]");
     assert_eq!(out, "<p>[playlist]</p>");
+}
+
+#[test]
+fn an_image_tag_without_its_end_is_no_image() {
+    assert_eq!(split_image(b"<a href=x> <img src=x"), None);
+    assert_eq!(split_image(b"<img src=x"), None);
 }

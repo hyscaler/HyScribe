@@ -138,3 +138,52 @@ fn allows_html_and_scripts_only_with_unfiltered_html() {
     assert_eq!(wp_check_filetype("\u{7ce}", false), None);
     assert_eq!(wp_check_filetype("\u{e9}a", false), None);
 }
+
+/// The vetting by what `fileinfo` says: each of its special cases, as
+/// `wp_check_filetype_and_ext()` makes them.
+#[test]
+fn vets_a_type_by_the_real_one() {
+    // Nonspecific types fit application, video and audio types only.
+    for real in [
+        "application/octet-stream",
+        "application/encrypted",
+        "application/CDFV2-encrypted",
+        "application/zip",
+    ] {
+        assert!(stands("application/pdf", real), "{real}");
+        assert!(stands("video/mp4", real), "{real}");
+        assert!(stands("audio/mpeg", real), "{real}");
+        assert!(!stands("text/plain", real), "{real}");
+        assert!(!stands("image/jpeg", real), "{real}");
+    }
+    // Audio and video fit their own major type only.
+    assert!(stands("audio/mpeg", "audio/x-wav"));
+    assert!(stands("video/mp4", "video/quicktime"));
+    assert!(!stands("audio/mpeg", "video/mp4"));
+    assert!(!stands("application/pdf", "audio/x-wav"));
+    // Text, CSV and RTF fit the types WordPress lists.
+    for kind in [
+        "text/plain",
+        "text/csv",
+        "application/csv",
+        "text/richtext",
+        "text/tsv",
+        "text/vtt",
+    ] {
+        assert!(stands(kind, "text/plain"), "{kind}");
+    }
+    assert!(!stands("text/calendar", "text/plain"));
+    assert!(!stands("application/rtf", "text/plain"));
+    for kind in ["text/csv", "text/plain", "application/csv"] {
+        assert!(stands(kind, "application/csv"), "{kind}");
+    }
+    assert!(!stands("text/vtt", "application/csv"));
+    for kind in ["text/rtf", "text/plain", "application/rtf"] {
+        assert!(stands(kind, "text/rtf"), "{kind}");
+    }
+    assert!(!stands("text/csv", "text/rtf"));
+    // Everything else must match exactly.
+    assert!(stands("application/pdf", "application/pdf"));
+    assert!(!stands("application/pdf", "application/msword"));
+    assert!(!stands("text/plain", "text/x-php"));
+}

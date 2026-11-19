@@ -343,3 +343,25 @@ for pre in (b'', b'\n', b' ', b'\xef\xbb\xbf'):
     put('edge-vtt-before-%s.txt' % pre.hex(), pre + b'WEBVTT\n\n00:00.000 --> 00:01.000\nHi\n')
 for n in (1000, 1020, 1025, 1030):
     put('edge-pdf-text-%04d.txt' % n, b'Some words of text. ' * (n // 20) + b'%PDF-1.4\n')
+
+# ZIP entries with extra fields and comments, so a name's place in the
+# central directory depends on the sizes before it; and quotes with a
+# newline after an escaped one.
+def zx(name, entries, extra=b'', comment=b''):
+    with zipfile.ZipFile(os.path.join(out, name), 'w') as zf:
+        for n in entries:
+            info = zipfile.ZipInfo(n)
+            info.extra = extra
+            info.comment = comment
+            zf.writestr(info, b'<x/>' * 3, compress_type=D)
+
+
+field = struct.pack('<HH', 0xcafe, 4) + b'abcd'
+for tag, extra, comment in (('extra', field, b''), ('comment', b'', b'a comment here'), ('both', field, b'a comment here')):
+    zx('zip-spread-%s-word.zip' % tag, ['[Content_Types].xml', '_rels/.rels', 'docProps/app.xml', 'word/document.xml'], extra, comment)
+    zx('zip-spread-%s-xl.zip' % tag, ['[Content_Types].xml', 'docProps/core.xml', 'docProps/app.xml', 'xl/workbook.xml'], extra, comment)
+    zx('zip-spread-%s-plain.zip' % tag, ['one.txt', 'two.txt', 'three.txt', 'four.txt'], extra, comment)
+    zx('zip-spread-%s-meta.zip' % tag, ['a.txt', 'b.txt', 'META-INF/MANIFEST.MF'], extra, comment)
+put('quoted-escape-nl.txt', b'a,"x""\ny",b\nc,d\ne,f\n')
+put('quoted-escape-two.txt', b'a,"x""""y",b\nc,d,e\nf,g,h\n')
+put('quoted-escape-end.txt', b'a,"x""",b\nc,d,e\nf,g,h\n')

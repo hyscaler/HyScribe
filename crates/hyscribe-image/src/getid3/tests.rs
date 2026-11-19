@@ -59,3 +59,51 @@ fn matches_getid3() {
 
 /// How many golden files are read.
 const READ: usize = 20;
+
+/// A WAVE file of `size` bytes of 8 bit mono samples.
+fn wave(size: usize) -> Vec<u8> {
+    let data = size - 44;
+    let mut file = b"RIFF".to_vec();
+    file.extend(u32::try_from(size - 8).unwrap().to_le_bytes());
+    file.extend(b"WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x40\x1f\0\0\x01\0\x08\0data");
+    file.extend(u32::try_from(data).unwrap().to_le_bytes());
+    file.resize(size, 0x55);
+    file
+}
+
+/// The files too small for getID3 to read as it does are left, and what
+/// carries a tag; a format is read as audio or as video, not as both.
+#[test]
+fn leaves_small_and_tagged_files_and_the_wrong_kind() {
+    assert_eq!(wp_read_audio_metadata(&wave(511)), Err(Unported));
+    assert!(wp_read_audio_metadata(&wave(512)).is_ok());
+    let mut tagged = wave(600);
+    for tag in [&b"TAG"[..], b"APETAGEX", b"LYRICS"] {
+        let at = tagged.len() - 40;
+        tagged[at..at + tag.len()].copy_from_slice(tag);
+        assert_eq!(wp_read_audio_metadata(&tagged), Err(Unported), "{tag:?}");
+        tagged[at..at + tag.len()].fill(0x55);
+    }
+    // Tags farther back than the last 512 bytes are no tag at the end.
+    let mut far = wave(1200);
+    far[100..103].copy_from_slice(b"TAG");
+    assert!(wp_read_audio_metadata(&far).is_ok());
+    let padded = |head: &[u8]| [head, &[0; 600]].concat();
+    let midi = padded(b"MThd");
+    let mpeg = padded(&[0, 0, 1, 0xba]);
+    assert!(wp_read_audio_metadata(&midi).is_ok());
+    assert_eq!(wp_read_video_metadata(&midi), Err(Unported));
+    assert!(wp_read_video_metadata(&mpeg).is_ok());
+    assert_eq!(wp_read_audio_metadata(&mpeg), Err(Unported));
+    for head in [
+        &b"ADIF"[..],
+        &[0xff, 0xf1],
+        &[0xff, 0xf9],
+        &[0xff, 0xf0],
+        &[0xff, 0xf8],
+    ] {
+        assert!(wp_read_audio_metadata(&padded(head)).is_ok(), "{head:?}");
+        assert_eq!(wp_read_video_metadata(&padded(head)), Err(Unported));
+    }
+    assert_eq!(wp_read_audio_metadata(&padded(b"zzzz")), Err(Unported));
+}

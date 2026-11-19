@@ -64,7 +64,7 @@ const SMALL: usize = 512;
 
 /// Whether the file ends in a tag getID3 reads (ID3v1, APE, Lyrics3),
 /// which would add titles and the like to the metadata, or is too small.
-fn tagged(bytes: &[u8]) -> bool {
+fn untrusted(bytes: &[u8]) -> bool {
     if bytes.len() < SMALL {
         return true;
     }
@@ -80,7 +80,7 @@ fn tagged(bytes: &[u8]) -> bool {
 /// out of its copy (MIDI, AAC in ADTS or ADIF, MPEG video): it names the
 /// type and stops, so the metadata is the size and the type alone.
 fn without_module(bytes: &[u8]) -> Option<&'static str> {
-    if tagged(bytes) {
+    if untrusted(bytes) {
         return None;
     }
     match bytes {
@@ -103,7 +103,7 @@ fn named_only(bytes: &[u8], mime: &str) -> Vec<Entry> {
 /// array it stores; [`Unported`] for a file getID3 reads in ways not
 /// ported here.
 pub fn wp_read_audio_metadata(bytes: &[u8]) -> Result<Vec<Entry>, Unported> {
-    if bytes.starts_with(b"RIFF") && !tagged(bytes) {
+    if bytes.starts_with(b"RIFF") && !untrusted(bytes) {
         return wav::wav(bytes);
     }
     match without_module(bytes) {

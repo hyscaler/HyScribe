@@ -108,8 +108,14 @@ pub(super) fn zip(b: &[u8]) -> Result<Vec<&'static str>, Unported> {
             _ => Err(Unported),
         };
     }
-    match SPECIAL.iter().any(|special| has(special)) {
-        true => Err(Unported),
-        false => Ok(vec!["application/zip"]),
+    if SPECIAL.iter().any(|special| has(special)) {
+        return Err(Unported);
     }
+    // An extra field of the first entry that starts with 0xCAFE marks a JAR.
+    let cafe =
+        le16(b, 28).and_then(|extra| b.get(30 + first.len()..30 + first.len() + extra.min(2)));
+    Ok(vec![match cafe {
+        Some(b"\xfe\xca") => "application/java-archive",
+        _ => "application/zip",
+    }])
 }

@@ -25,7 +25,7 @@ fn id3(b: &[u8]) -> bool {
     if !matches!(major, Some(2..=4)) || size.iter().any(|s| s & 0x80 != 0) {
         return false;
     }
-    let size = size.iter().fold(0usize, |n, s| n << 7 | usize::from(*s));
+    let size = size.iter().fold(0usize, |n, s| n * 128 + usize::from(*s));
     // A tag with a footer is not one libmagic skips.
     let footer = head.get(5).is_some_and(|f| f & 0x10 != 0);
     !footer && b.get(10 + size..).is_some_and(mpeg_frame)

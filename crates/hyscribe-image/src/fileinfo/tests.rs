@@ -36,7 +36,7 @@ fn agrees_with_libmagic() {
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
-    assert!(answered * 2 > total, "{answered} of {total}");
+    assert_eq!((answered, total), ANSWERED, "files answered, of all");
 }
 
 /// What the golden cannot hold: no bytes, and archives cut or altered
@@ -60,6 +60,10 @@ fn leaves_what_it_cannot_tell() {
     compressed[8] = 8;
     assert_eq!(finfo_candidates(&compressed), Err(Unported));
 }
+
+/// How many golden files are answered, of how many: every family the
+/// reader knows, so a rule that stops answering shows here.
+const ANSWERED: (usize, usize) = (1068, 1791);
 
 /// Text is read up to the limit libmagic reads, and no further.
 #[test]

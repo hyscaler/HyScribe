@@ -1133,6 +1133,46 @@ async fn routes_give_the_request_state() {
     assert!(missing.request.not_found && missing.request.now > recent);
 }
 
+/// `get_attachment_template()`'s names lead an attachment's hierarchy.
+#[tokio::test]
+async fn an_attachments_template_names_follow_its_mime_type() {
+    let site = fixture_site(None).await;
+    let post = site.db.post(1).await.unwrap().unwrap();
+    let names = |post: Post| single_page(&site, post, Paging::default()).candidates;
+    let tail = ["single-attachment-hello-world", "single-attachment"];
+    let mut attachment = post.clone();
+    attachment.post_type = "attachment".into();
+    attachment.name = b"hello-world".to_vec();
+    attachment.mime_type = "image/png".into();
+    let want = ["image-png", "png", "image", "attachment"];
+    assert_eq!(names(attachment.clone())[..4], want);
+    assert_eq!(names(attachment.clone())[4..6], tail);
+    attachment.mime_type = "image".into();
+    let got = names(attachment.clone());
+    assert_eq!(got[..2], ["image", "attachment"]);
+    assert_eq!(got[2..4], tail);
+    assert!(!names(post).contains(&"attachment".to_string()));
+}
+
+/// `get_post_meta( $id, $key )` answers every value, as the feed's
+/// enclosures read it.
+#[tokio::test(flavor = "multi_thread")]
+async fn reads_give_every_post_meta_value() {
+    use hyscribe_render::site::Site as _;
+    let site = fixture_site(None).await;
+    let handle = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || {
+        let reads = Reads::new(&site, handle);
+        assert_eq!(
+            reads.post_meta_all(2, "_wp_page_template"),
+            [b"default".to_vec()]
+        );
+        assert!(reads.post_meta_all(1, "_thumbnail_id").is_empty());
+    })
+    .await
+    .unwrap();
+}
+
 /// A read that fails answers its type's default and keeps the error; the
 /// site's global styles fail to load.
 #[tokio::test(flavor = "multi_thread")]

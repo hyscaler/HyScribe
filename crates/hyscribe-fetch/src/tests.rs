@@ -261,6 +261,67 @@ async fn answering(answer: &'static [u8]) -> SocketAddr {
     address
 }
 
+/// A listener redirecting its first request to `http://two.test/` and
+/// answering every later one with a page.
+async fn redirecting_once() -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut first = true;
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut buffer = [0; 1024];
+            let _ = stream.read(&mut buffer).await;
+            let answer: &[u8] = if first {
+                b"HTTP/1.1 302 Found\r\nLocation: http://two.test/\r\n\r\n"
+            } else {
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+            };
+            first = false;
+            let _ = stream.write_all(answer).await;
+        }
+    });
+    address
+}
+
+/// Every redirect hop must be on the caller's list, checked before the
+/// host is resolved or connected to; the other checks still hold.
+#[tokio::test]
+async fn redirects_stay_on_the_allowed_hosts() {
+    let allow = |hosts: &'static [&'static str]| move |host: &str| hosts.contains(&host);
+    // To a host off the list: stopped, and only the first host dialed.
+    let table = Table::new(redirecting_once().await);
+    let client = super::tests::client(Arc::clone(&table));
+    let only = allow(&["pages.test"]);
+    let stopped = client
+        .get_within(b"http://pages.test/", b"", args(), &only)
+        .await;
+    assert_eq!(stopped, failed(Kind::Disallowed, 1));
+    assert_eq!(table.dialed().len(), 1);
+    // To another host on it: followed.
+    let table = Table::new(redirecting_once().await);
+    let client = super::tests::client(Arc::clone(&table));
+    let both = allow(&["pages.test", "two.test"]);
+    let followed = client
+        .get_within(b"http://pages.test/", b"", args(), &both)
+        .await;
+    assert_eq!(followed.unwrap().body, b"ok");
+    assert_eq!(table.dialed().len(), 2);
+    // Within the same host, on the list: followed as without a list.
+    let client = super::tests::client(Table::new(site()));
+    let same = client
+        .get_within(b"http://pages.test/redirect-twice", b"", args(), &only)
+        .await;
+    assert_eq!(same.unwrap().status, 200);
+    // On the list, a hop to a private address is still refused.
+    let to_private = answering(b"HTTP/1.1 302 Found\r\nLocation: http://private.test/\r\n\r\n");
+    let client = super::tests::client(Table::new(to_private.await));
+    let listed = allow(&["pages.test", "private.test"]);
+    let refused = client
+        .get_within(b"http://pages.test/", b"", args(), &listed)
+        .await;
+    assert_eq!(refused, failed(Kind::Refused, 1));
+}
+
 /// A body read to its limit stops there: no more is awaited, and the
 /// connection is closed, however much more the server says it sends.
 #[tokio::test]

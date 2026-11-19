@@ -24,7 +24,7 @@ use crate::core_blocks::prepared;
 use crate::date::{Zone, format_unix, site_zone};
 use crate::excerpt::wp_trim_words;
 use crate::formatting::{html_entity_decode_quotes, untrailingslashit};
-use crate::outbound::{Get, get_site_transient};
+use crate::outbound::{Get, NOT_ALLOWED, Redirects, get_site_transient};
 use crate::site::Site;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
@@ -217,10 +217,12 @@ fn fetch_feed(site: &dyn Site, url: &[u8], now: i64) -> Result<Value, Vec<u8>> {
     }
     let get = Get {
         timeout: 10,
+        redirects: Redirects::Feeds,
         ..Get::new(site)
     };
     let response = match site.remote_get(url, &get) {
         None => return Err(UNREACHABLE.to_vec()),
+        Some(Err(message)) if message == NOT_ALLOWED => return Err(UNREACHABLE.to_vec()),
         Some(Err(message)) => return Err([&b"WP HTTP Error: "[..], &message].concat()),
         Some(Ok(response)) => response,
     };

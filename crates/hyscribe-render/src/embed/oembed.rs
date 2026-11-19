@@ -13,7 +13,7 @@ use hyscribe_phpser::{
 };
 
 use crate::kses::{AllowedHtml, wp_kses, wp_kses_hair};
-use crate::outbound::{Get, Response, Size};
+use crate::outbound::{Get, NOT_ALLOWED, Redirects, Response, Size};
 use crate::site::Site;
 use crate::template::replace;
 use crate::xml::{Event, Parser};
@@ -140,14 +140,35 @@ fn get_provider(site: &dyn Site, url: &[u8]) -> Option<Vec<u8>> {
     Some(endpoint.replace("{format}", "json").into_bytes())
 }
 
+/// The hosts of the providers' endpoints, in lower case.
+fn provider_hosts() -> impl Iterator<Item = Vec<u8>> {
+    PROVIDERS
+        .iter()
+        .filter_map(|provider| url_host(provider.endpoint.as_bytes()))
+        .map(|host| host.to_ascii_lowercase())
+}
+
+/// The hosts an embed's redirects may lead to: the listed hosts,
+/// and the providers' when those are allowed.
+fn redirect_hosts(site: &dyn Site) -> Vec<Vec<u8>> {
+    let allowed = site.embed_hosts();
+    let providers = allowed.providers.then(provider_hosts).into_iter().flatten();
+    allowed.hosts.iter().cloned().chain(providers).collect()
+}
+
 /// `wp_safe_remote_get()` with WordPress's defaults and `limit`: `None`
-/// while fetches are off, the body (empty after an error) otherwise.
+/// while fetches are off or a redirect left the allowed hosts, the body
+/// (empty after an error) otherwise.
 fn remote_get(site: &dyn Site, url: &[u8], limit: Option<usize>) -> Option<Response> {
     let get = Get {
         limit,
+        redirects: Redirects::Hosts(redirect_hosts(site)),
         ..Get::new(site)
     };
-    Some(site.remote_get(url, &get)?.unwrap_or_default())
+    match site.remote_get(url, &get)? {
+        Err(message) if message == NOT_ALLOWED => None,
+        answer => Some(answer.unwrap_or_default()),
+    }
 }
 
 /// `WP_oEmbed::discover()`: the page's oEmbed endpoint, JSON first.

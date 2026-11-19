@@ -130,7 +130,8 @@ fn the_automatic_update_message_is_php_s() {
     );
 }
 
-/// The plugin folder of the PHP oracle's image.
+/// The plugin folder of the PHP oracle's image is the one place the page
+/// differs: it names HyScribe's folder instead.
 #[test]
 fn plugins_are_php_s() {
     let mut failures = Vec::new();
@@ -138,7 +139,12 @@ fn plugins_are_php_s() {
     let canonical = format!("{SITE}/hs-admin/plugins");
     let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
     for (role, php) in &rows {
-        let ours = plugins(role, "/var/www/html/wp-content/plugins", &request).unwrap();
+        let php = php.as_ref().map(|php| {
+            let path = "<code>/var/www/html/wp-content/plugins</code>";
+            assert!(php.contains(path));
+            php.replace(path, &format!("<code>{PLUGIN_DIR}</code>"))
+        });
+        let ours = plugins(role, &request).unwrap();
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -189,5 +195,5 @@ fn a_screen_with_plugins_to_repair_is_not_ported() {
     let canonical = format!("{SITE}/hs-admin/plugins");
     let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
     let site = Role("o36bad:administrator");
-    assert_eq!(plugins(&site, "/plugins", &request), None);
+    assert_eq!(plugins(&site, &request), None);
 }

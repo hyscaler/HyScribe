@@ -324,8 +324,12 @@ pub(crate) fn missing_plugins(stored: Option<Vec<u8>>) -> Option<String> {
     Some(notices.collect())
 }
 
-/// `plugins.php` with no plugin installed, its help naming `plugin_dir`.
-pub fn plugins(site: &dyn PostsSite, plugin_dir: &str, request: &Request) -> Option<Answer> {
+/// Where the Troubleshooting help names the plugins folder: relative to the
+/// HyScribe folder, in place of PHP's `WP_PLUGIN_DIR`.
+pub const PLUGIN_DIR: &str = "hyscribe/plugins/";
+
+/// `plugins.php` with no plugin installed.
+pub fn plugins(site: &dyn PostsSite, request: &Request) -> Option<Answer> {
     let missing = missing_plugins(site.option("active_plugins"))?;
     let hidden = hidden_columns(site, "plugins");
     let hidden: Vec<&str> = hidden.iter().map(String::as_str).collect();
@@ -382,7 +386,7 @@ pub fn plugins(site: &dyn PostsSite, plugin_dir: &str, request: &Request) -> Opt
         site.nonce("screen-options-nonce"),
     );
     let troubleshooting = format!(
-        "<p>Most of the time, plugins play nicely with the core of WordPress and with other plugins. Sometimes, though, a plugin&#8217;s code will get in the way of another plugin, causing compatibility issues. If your site starts doing strange things, this may be the problem. Try deactivating all your plugins and re-activating them in various combinations until you isolate which one(s) caused the issue.</p><p>If something goes wrong with a plugin and you cannot use WordPress, delete or rename that file in the <code>{plugin_dir}</code> directory and it will be automatically deactivated.</p>"
+        "<p>Most of the time, plugins play nicely with the core of WordPress and with other plugins. Sometimes, though, a plugin&#8217;s code will get in the way of another plugin, causing compatibility issues. If your site starts doing strange things, this may be the problem. Try deactivating all your plugins and re-activating them in various combinations until you isolate which one(s) caused the issue.</p><p>If something goes wrong with a plugin and you cannot use WordPress, delete or rename that file in the <code>{PLUGIN_DIR}</code> directory and it will be automatically deactivated.</p>"
     );
     let help = [
         HelpTab {

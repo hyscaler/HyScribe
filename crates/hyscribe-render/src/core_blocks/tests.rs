@@ -72,6 +72,7 @@ fn post(row: &Value) -> Post {
         comment_status: text(row, "comment_status"),
         title: row.get_str("post_title").unwrap().to_php_string(),
         status: text(row, "post_status"),
+        parent: row.get_str("post_parent").map_or(0, |v| v.to_int() as u64),
         password: row.get_str("post_password").unwrap().to_php_string(),
         post_type: text(row, "post_type"),
         date: text(row, "post_date"),
@@ -502,6 +503,7 @@ fn post_navigation_links_match_php() {
         };
         let request = Request {
             singular: state.get_str("singular") == Some(&Value::Bool(true)),
+            attachment: state.get_str("attachment") == Some(&Value::Bool(true)),
             ..Request::default()
         };
         let context = Context {

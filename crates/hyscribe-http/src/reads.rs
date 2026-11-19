@@ -109,6 +109,10 @@ impl RenderSite for Reads<'_> {
         self.site.feed_hosts.iter().any(|allowed| allowed == host)
     }
 
+    fn embed_hosts(&self) -> &hyscribe_render::site::EmbedHosts {
+        &self.site.embed_hosts
+    }
+
     fn update_post_meta(&self, post_id: u64, key: &str, value: &[u8]) {
         write(self.site, self, Write::Meta(post_id, key, value));
         if self.site.writer.is_some() {

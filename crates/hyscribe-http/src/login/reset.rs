@@ -5,11 +5,16 @@
 
 use axum::http::{StatusCode, header};
 use hyscribe_admin::assets::Urls;
-use hyscribe_admin::login::actions::{lost_password as lost_password_page, password_reset};
-use hyscribe_admin::login::{READ_ONLY, Request};
-use hyscribe_mail::{Mail, User};
+use hyscribe_admin::login::actions::{
+    lost_password as lost_password_page, password_reset, registration, request_confirmed,
+};
+use hyscribe_admin::login::{READ_ONLY, Request, Site as _, UserRequest};
+use hyscribe_mail::{Action as PrivacyAction, Mail, User};
 use hyscribe_phpser::{Value, addslashes, is_empty_string};
-use hyscribe_write::users::{ResetKey, reset_password, retrieve_password};
+use hyscribe_write::privacy::{admin_notified, user_request_action_confirmed};
+use hyscribe_write::users::{
+    ResetKey, register_new_user, registration_failed, reset_password, retrieve_password,
+};
 
 use super::{LoginReads, PATH, redirected};
 use crate::mail::EMAIL_FAILURE;
@@ -132,6 +137,156 @@ pub(super) fn lost_password(
     }
     let location = wp_safe_redirect(reads.site, &to, &reads.admin_url(""));
     (redirected(headers, location), vec![mail])
+}
+
+/// A posted registration form: `register_new_user()` of `$_POST`'s login
+/// and address, then PHP's check your email redirect, or `redirect_to`
+/// kept on the site; else the form with PHP's errors. The new user's
+/// bcrypt hash makes this a password check for the login limits: it takes
+/// its address's one turn and a place under the site wide cap, or is
+/// refused as a failure to register, with nothing written.
+pub(super) fn register(
+    reads: &LoginReads,
+    request: &Request,
+    headers: &mut Vec<(header::HeaderName, String)>,
+) -> Written {
+    let Some(writer) = &reads.site.writer else {
+        return read_only(reads);
+    };
+    let text = |key| match request.posted(key) {
+        Some(Value::String(text)) => text.clone(),
+        _ => Vec::new(),
+    };
+    let (login, email) = (text("user_login"), text("user_email"));
+    let texts = mail_texts(reads);
+    let limiter = &reads.site.limiter;
+    let turn = reads
+        .client
+        .as_ref()
+        .ok()
+        .and_then(|client| limiter.turn(*client));
+    let place = turn.as_ref().and_then(|_| limiter.checks.start());
+    if place.is_none() {
+        let refused = [registration_failed(texts[4].as_bytes())];
+        let refused = [(refused[0].code, refused[0].message.as_str())];
+        return refusal(reads, request, &refused, (&login, &email));
+    }
+    let redirect_to = request.posted("redirect_to");
+    // `wp_safe_redirect()` of an array (never empty from a form) is PHP's fatal
+    // error, after the write.
+    let fatal = matches!(redirect_to, Some(Value::Array(_)));
+    let url = reads.login_url("");
+    let registered = reads.reads.block_on(async {
+        let mut write = writer.begin().await?;
+        let registered = register_new_user(&mut write, (&login, &email), &url).await?;
+        // A refusal wrote nothing, so committing it changes nothing.
+        let committed = if fatal { Ok(()) } else { write.commit().await };
+        committed.map(|()| registered).map_err(Into::into)
+    });
+    drop(place);
+    let key = match registered {
+        Ok(Ok(_)) if fatal => return ((StatusCode::NOT_IMPLEMENTED, Vec::new()), Vec::new()),
+        Ok(Ok(key)) => key,
+        Ok(Err(refused)) => {
+            let refused: Vec<_> = refused
+                .iter()
+                .map(|e| (e.code, e.message.as_str()))
+                .collect();
+            return refusal(reads, request, &refused, (&login, &email));
+        }
+        Err(err) => return failed(reads, &err),
+    };
+    let to = match redirect_to.and_then(Value::as_bytes) {
+        Some(to) if !is_empty_string(to) => addslashes(to),
+        // Relative, as PHP's `wp-login.php?checkemail=registered`.
+        _ => format!("{}?checkemail=registered", PATH.trim_start_matches('/')).into_bytes(),
+    };
+    let user = User {
+        login: &key.login,
+        email: &key.email,
+    };
+    let to_admin = hyscribe_mail::new_user_to_admin(&mail_site(&texts), &user);
+    let mailer = &reads.site.mailer;
+    let kind = "wp_new_user_notification";
+    reads
+        .reads
+        .block_on(mailer.wp_mail(to_admin.clone(), kind, false));
+    let to_user = hyscribe_mail::new_user_to_user(&mail_site(&texts), &user, key.key.as_bytes());
+    // The key it carries is a password reset's: sent within their limits.
+    let client = reads.client.as_ref().ok().copied().flatten();
+    let sent = mailer.retrieve_password(to_user.clone(), key.id, client);
+    reads.reads.block_on(sent);
+    let location = wp_safe_redirect(reads.site, &to, &reads.admin_url(""));
+    (redirected(headers, location), vec![to_admin, to_user])
+}
+
+/// The registration form shown again with `refused`.
+fn refusal(
+    reads: &LoginReads,
+    request: &Request,
+    refused: &[(&'static str, &str)],
+    values: (&[u8], &[u8]),
+) -> Written {
+    let page = registration(reads, request, refused, values);
+    ((StatusCode::OK, page), Vec::new())
+}
+
+/// A good confirmation link: `user_request_action_confirmed` for the
+/// request, then PHP's page; the admin is mailed when the request is
+/// confirmed and they were not told, and told so once the mail is sent.
+pub(super) fn confirm(
+    reads: &LoginReads,
+    request: &Request,
+    (found, request_id): (&UserRequest, i64),
+) -> Written {
+    let Some(writer) = &reads.site.writer else {
+        return read_only(reads);
+    };
+    let ctx = hyscribe_write::posts::Context {
+        user: 0,
+        can_publish: false,
+        home: reads.site.home.as_bytes().to_vec(),
+        upload_host: hyscribe_render::link::host(reads.site.raw_option("siteurl")),
+        unfiltered_html: false,
+        constants: reads.site.constants,
+        now: reads.now,
+    };
+    let confirmed = reads.reads.block_on(async {
+        let mut write = writer.begin().await?;
+        let notice = user_request_action_confirmed(&mut write, &ctx, request_id).await?;
+        write.commit().await.map(|()| notice).map_err(Into::into)
+    });
+    let notice = match confirmed {
+        Ok(notice) => notice,
+        Err(err) => return failed(reads, &err),
+    };
+    let mut mails = Vec::new();
+    if let Some(confirmed) = notice {
+        // Only requests of the two actions reach this, as `confirm_action()` sees.
+        let action = match &confirmed.action_name[..] {
+            b"export_personal_data" => PrivacyAction::Export,
+            _ => PrivacyAction::Erase,
+        };
+        let texts = mail_texts(reads);
+        let mail = hyscribe_mail::request_confirmed(&mail_site(&texts), &confirmed.email, action);
+        let kind = "wp_privacy_request_confirmed";
+        let sent = reads
+            .reads
+            .block_on(reads.site.mailer.wp_mail(mail.clone(), kind, false));
+        mails.push(mail);
+        if sent {
+            let told = reads.reads.block_on(async {
+                let mut write = writer.begin().await?;
+                admin_notified(&mut write, found.id).await?;
+                write.commit().await.map_err(hyscribe_write::Error::from)
+            });
+            if let Err(err) = told {
+                return failed(reads, &err);
+            }
+        }
+    }
+    let page = request_confirmed(reads, request, &found.action_name);
+    ((StatusCode::OK, page), mails)
 }
 
 /// A reset password form that passed: `reset_password()`, the user's

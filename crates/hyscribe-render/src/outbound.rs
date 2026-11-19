@@ -33,6 +33,27 @@ impl Get {
     }
 }
 
+/// Where embeds may fetch from (`EMBED_ALLOWED_HOSTS`, an open question): the
+/// providers of WordPress's list, and further hosts, in lower case, whose
+/// pages may also be discovered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbedHosts {
+    /// Whether the providers of WordPress's list are allowed.
+    pub providers: bool,
+    /// The further hosts.
+    pub hosts: Vec<Vec<u8>>,
+}
+
+/// The providers only, as the setting's default.
+impl Default for EmbedHosts {
+    fn default() -> EmbedHosts {
+        EmbedHosts {
+            providers: true,
+            hosts: Vec::new(),
+        }
+    }
+}
+
 /// A response: status, headers (names in lower case) and body.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Response {

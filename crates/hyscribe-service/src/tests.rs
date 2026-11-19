@@ -666,3 +666,14 @@ fn hold_waits_out_a_brief_reader() {
     drop(hold(&paths).unwrap());
     release.join().unwrap();
 }
+
+/// Free space is whole blocks of the file system, and an absent path has
+/// none to report.
+#[test]
+fn free_disk_space_is_counted_in_blocks() {
+    let home = tempfile::tempdir().unwrap();
+    let free = disk_free(home.path()).unwrap();
+    let block = rustix::fs::statvfs(home.path()).unwrap().f_frsize;
+    assert!(block > 0 && free.is_multiple_of(block));
+    assert_eq!(disk_free(&home.path().join("absent")), None);
+}

@@ -864,9 +864,18 @@ fn adjacent_post_link(
     let Some(current) = context.post() else {
         return Vec::new();
     };
-    // The previous link of an attachment page goes to its parent, but
-    // attachment pages are not routed yet, so is_attachment() is false.
-    let Some(post) = adjacent_post(context, &current, previous, taxonomy) else {
+    // The previous link of an attachment page goes to its parent, where
+    // `get_post( 0 )` is the attachment itself.
+    let attachment = previous && context.request.attachment;
+    let post = if attachment {
+        match current.parent {
+            0 => Some(current),
+            parent => context.site.post(parent),
+        }
+    } else {
+        adjacent_post(context, &current, previous, taxonomy)
+    };
+    let Some(post) = post else {
         return Vec::new();
     };
     let title: &[u8] = match (is_empty_string(&post.title), previous) {

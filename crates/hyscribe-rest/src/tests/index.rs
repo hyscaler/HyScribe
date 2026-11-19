@@ -124,6 +124,7 @@ fn local_hosts_are_secure_contexts() {
             uri: b"/",
             parameters: false,
             remote_addr: b"",
+            postpass: false,
             user_agent: None,
             host,
             now: 0,

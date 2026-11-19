@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Records the PHP oracle's Site Health Info tab (site-health.php?tab=debug)
-# for each role, on the site reference/site-health/variants.php describes,
+# and Status tab (site-health.php) for each role, on the site reference/site-health/variants.php describes,
 # as crates/hyscribe-admin/tests/golden/site-health.tsv:
 #   screen<TAB>role<TAB>hex(page)
 # A refusal is kept as 403<TAB>page. Masks as reference/profile/golden.sh.
@@ -49,5 +49,6 @@ record() {
 : > "$OUT"
 for role in administrator editor; do
   record 'site-health.php?tab=debug' "$role"
+  record 'site-health.php' "$role"
 done
 wc -l "$OUT"

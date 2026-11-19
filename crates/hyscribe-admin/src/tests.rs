@@ -15,7 +15,7 @@ use hyscribe_testkit::SqlValue;
 use crate::admin_bar::Browser;
 use crate::assets::{Urls, admin_links};
 use crate::login::authenticate::Account;
-use crate::login::{Notice, Site, User};
+use crate::login::{Notice, Site, User, UserRequest};
 use crate::menu::{MenuUser, link};
 use crate::page::{PageSite, Request};
 
@@ -100,6 +100,9 @@ fn admin(oracle: &Oracle) -> User {
     }
 }
 
+/// When the oracle's personal data request was last changed.
+pub const REQUESTED: i64 = 1_794_000_000;
+
 impl Site for Oracle {
     fn blogname(&self) -> String {
         "HyScribe Default Install".into()
@@ -142,8 +145,15 @@ impl Site for Oracle {
     fn can_register(&self) -> bool {
         self.register
     }
-    fn post_type(&self, id: u64) -> Option<String> {
-        (Some(id) == self.user_request).then(|| "user_request".into())
+    fn user_request(&self, id: u64) -> Option<UserRequest> {
+        (Some(id) == self.user_request).then(|| UserRequest {
+            id,
+            email: b"reader@example.test".to_vec(),
+            action_name: b"export_personal_data".to_vec(),
+            status: "request-pending".into(),
+            confirm_key: hyscribe_auth::wp_fast_hash(b"a-key").into_bytes(),
+            modified: REQUESTED,
+        })
     }
     fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
         crate::media::site_icon_url(&Role(self.icon?), size)
@@ -2089,6 +2099,24 @@ impl crate::site_health::HealthSite for Role {
             "11.8.9-MariaDB-ubu2404".into(),
             "utf8mb4_unicode_520_ci".into(),
         )
+    }
+    /// A healthy machine, or in `t34bad` one with every check failing.
+    fn environment(&self) -> crate::site_health::Environment {
+        use crate::site_health::{EnvFile, Environment};
+        if self.variant() == "t34bad" {
+            return Environment {
+                env_file: EnvFile::Mode(0o644),
+                disk_free: Some(1 << 20),
+                service_pid: None,
+                pid: 4242,
+            };
+        }
+        Environment {
+            env_file: EnvFile::Mode(0o600),
+            disk_free: Some(5 << 30),
+            service_pid: Some(4242),
+            pid: 4242,
+        }
     }
 }
 

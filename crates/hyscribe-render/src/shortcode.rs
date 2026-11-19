@@ -392,7 +392,7 @@ pub fn shortcode_parse_atts(text: &[u8]) -> Vec<(Key, Value)> {
     };
     let text = replace_spaces(text);
     let mut at = 0;
-    while at < text.len() {
+    while text.get(at).is_some() {
         let Some((token, end)) = attribute_at(&text, at) else {
             at += 1;
             continue;
@@ -459,12 +459,9 @@ fn is_space(b: u8) -> bool {
 /// offset after it and its one space.
 fn attribute_at(text: &[u8], at: usize) -> Option<(Token<'_>, usize)> {
     let byte = |i: usize| text.get(i).copied();
-    // `(?:\s|$)`: one space, or the end.
-    let end_after = |i: usize| match byte(i) {
-        None => Some(i),
-        Some(b) if is_space(b) => Some(i + 1),
-        _ => None,
-    };
+    // `(?:\s|$)`: a space, or the end; the space itself is skipped by the
+    // caller's next step.
+    let boundary = |i: usize| byte(i).is_none_or(is_space);
     let skip = |mut i: usize| {
         while byte(i).is_some_and(is_space) {
             i += 1;
@@ -485,10 +482,10 @@ fn attribute_at(text: &[u8], at: usize) -> Option<(Token<'_>, usize)> {
             for quote in *b"\"'" {
                 if byte(start) == Some(quote)
                     && let Some(close) = find(text, start + 1, &[quote])
-                    && let Some(end) = end_after(close + 1)
+                    && boundary(close + 1)
                 {
                     let value = text.get(start + 1..close).unwrap_or_default();
-                    return Some((Token::Named(name, value), end));
+                    return Some((Token::Named(name, value), close + 1));
                 }
             }
             let len = text
@@ -497,21 +494,19 @@ fn attribute_at(text: &[u8], at: usize) -> Option<(Token<'_>, usize)> {
                 .iter()
                 .take_while(|&&b| !is_space(b) && b != b'\'' && b != b'"')
                 .count();
-            if len > 0
-                && let Some(end) = end_after(start + len)
-            {
+            if len > 0 && boundary(start + len) {
                 let value = text.get(start..start + len).unwrap_or_default();
-                return Some((Token::Named(name, value), end));
+                return Some((Token::Named(name, value), start + len));
             }
         }
     }
     for quote in *b"\"'" {
         if byte(at) == Some(quote)
             && let Some(close) = find(text, at + 1, &[quote])
-            && let Some(end) = end_after(close + 1)
+            && boundary(close + 1)
         {
             let value = text.get(at + 1..close).unwrap_or_default();
-            return Some((Token::Positional(value), end));
+            return Some((Token::Positional(value), close + 1));
         }
     }
     let len = text
@@ -521,10 +516,7 @@ fn attribute_at(text: &[u8], at: usize) -> Option<(Token<'_>, usize)> {
         .take_while(|&&b| !is_space(b))
         .count();
     let word = text.get(at..at + len).filter(|word| !word.is_empty())?;
-    Some((
-        Token::Positional(word),
-        end_after(at + len).unwrap_or(at + len),
-    ))
+    Some((Token::Positional(word), at + len))
 }
 
 /// `$atts[ $key ] = $value`: in place if the key is there.
@@ -551,14 +543,9 @@ fn push(atts: &mut Vec<(Key, Value)>, value: Vec<u8>) {
 /// `1 === preg_match( '/^[^<]*+(?:<[^>]*+>[^<]*+)*+$/', $value )`: every
 /// `<` closed by a `>` before the next `<`.
 fn balanced_angle_brackets(text: &[u8]) -> bool {
-    let mut at = 0;
-    while let Some(open) = find(text, at, b"<") {
-        let Some(close) = find(text, open + 1, b">") else {
-            return false;
-        };
-        at = close + 1;
-    }
-    true
+    // Each `<` runs to the next `>`, so all are closed if the last is.
+    let last = text.iter().rposition(|&b| b == b'<');
+    last.is_none_or(|at| text.get(at..).is_some_and(|rest| rest.contains(&b'>')))
 }
 
 /// `stripcslashes( $text )`.
@@ -580,7 +567,6 @@ pub fn stripcslashes(text: &[u8]) -> Vec<u8> {
             b'v' => out.push(0x0b),
             b'b' => out.push(8),
             b'f' => out.push(0x0c),
-            b'\\' => out.push(b'\\'),
             b'x' if text.get(i).is_some_and(|b| b.is_ascii_hexdigit()) => {
                 let digits = text
                     .get(i..)
@@ -611,7 +597,7 @@ pub fn stripcslashes(text: &[u8]) -> Vec<u8> {
                         std::str::from_utf8(text.get(from..from + digits).unwrap_or_default());
                     // `(char) strtol()`: modulo 256.
                     out.push(
-                        (u32::from_str_radix(octal.unwrap_or("0"), 8).unwrap_or(0) % 256) as u8,
+                        (u32::from_str_radix(octal.unwrap_or("0"), 8).unwrap_or(0) & 0xff) as u8,
                     );
                     i = from + digits;
                 }

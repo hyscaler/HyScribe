@@ -56,6 +56,13 @@ impl Site for Library<'_> {
     /// orders the golden uses; MariaDB's ties are broken by ID.
     fn query(&self, query: &PostQuery) -> Vec<Post> {
         assert_eq!(query.post_types, ["attachment"]);
+        assert!(
+            query
+                .statuses
+                .iter()
+                .any(|status| status.status == "inherit")
+        );
+        assert!(!query.order.is_empty());
         let prefix = query.mime_types[0].trim_end_matches('%').to_string();
         let mut found: Vec<Post> = self
             .data
@@ -134,13 +141,15 @@ fn shortcodes_match_php() {
             next.video_instances = renderer.video_instances;
             next.prefixed_ids = renderer.prefixed_ids.clone();
             next.assets = renderer.assets;
+            // The count of images in the content goes on too.
+            next.context.loading = renderer.context.loading.clone();
             renderer = next;
             feeding = true;
         }
         let id: u64 = fields[1].parse().unwrap();
         renderer.context.post_id = (id != 0).then_some(id);
         let content = unhex(fields[2]);
-        let ours = renderer.content_filtered(&content);
+        let ours = renderer.the_content_filters(&content);
         cases += 1;
         if sha256(&ours) != fields[3] {
             failures.push(format!("{id} {}", String::from_utf8_lossy(&content)));
@@ -163,7 +172,7 @@ fn shortcodes_match_php() {
     ]
     .concat();
     assert_eq!(sha256(&printed), assets);
-    assert_eq!(cases, 118);
+    assert_eq!(cases, 119);
 }
 
 /// A plugin that changes everything it may, with `library` for the players'.
@@ -277,7 +286,7 @@ fn filtered(hooks: &dyn Hooks, id: u64, content: &str) -> String {
     let request = Request::default();
     let mut renderer = Renderer::new(&theme, &site, &request);
     renderer.context.post_id = Some(id);
-    let out = renderer.content_filtered(content.as_bytes());
+    let out = renderer.the_content_filters(content.as_bytes());
     String::from_utf8(out).unwrap().trim().to_string()
 }
 
@@ -391,7 +400,7 @@ fn an_attachment_without_a_file_makes_no_player() {
     let mut renderer = Renderer::new(&theme, &Bare, &request);
     renderer.context.post_id = Some(1);
     for tag in ["audio", "video"] {
-        let out = renderer.content_filtered(format!("[{tag}]").as_bytes());
+        let out = renderer.the_content_filters(format!("[{tag}]").as_bytes());
         assert_eq!(out.trim_ascii(), b"");
     }
 }
@@ -404,4 +413,17 @@ fn shortcodes_without_a_callback_stay_as_written() {
     // Escaped, they lose a bracket on each side as any shortcode does.
     let out = filtered(&(), 555, "[[playlist]]");
     assert_eq!(out, "<p>[playlist]</p>");
+}
+
+#[test]
+fn an_image_tag_without_its_end_is_no_image() {
+    assert_eq!(split_image(b"<a href=x> <img src=x"), None);
+    assert_eq!(split_image(b"<img src=x"), None);
+}
+
+#[test]
+fn an_image_tag_needs_a_character_before_its_end() {
+    assert_eq!(split_image(b"<img >x>"), None);
+    let found = split_image(b"<img x>cap");
+    assert_eq!(found, Some((b"<img x>".to_vec(), b"cap".to_vec())));
 }

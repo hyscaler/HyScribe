@@ -36,6 +36,7 @@ pub(crate) fn to_data(
         uri: context.uri,
         parameters: false,
         remote_addr: context.remote_addr,
+        postpass: context.postpass,
         user_agent: context.user_agent,
         host: context.host,
         now: context.now,

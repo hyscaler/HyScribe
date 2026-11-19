@@ -11,9 +11,9 @@ use hyscribe_model::hooks::{apply_filters, do_action};
 use hyscribe_phpser::{
     Value, addslashes, hash_equals, is_empty_string, php_trim, remove_query_arg, string_to_number,
 };
-use hyscribe_render::formatting::sanitize_user;
+use hyscribe_render::formatting::{sanitize_text_field, sanitize_user};
 
-use super::{Frame, Notice, Request, Site, User, as_text, error, message, url};
+use super::{Frame, Notice, Request, Site, User, UserRequest, as_text, error, message, url};
 
 /// What one of these actions answers.
 #[derive(Debug, PartialEq, Eq)]
@@ -27,6 +27,9 @@ pub enum Action {
     /// `reset_password()` of this user with this password, slashed, then
     /// the page [`password_reset`] shows.
     ResetPassword(u64, Vec<u8>),
+    /// A good confirmation link: confirm this request, under the `(int)` of
+    /// the link's `request_id`, then show [`request_confirmed`].
+    ConfirmRequest(UserRequest, i64),
     /// What this port does not answer: the action writes, or PHP fails
     /// with a `TypeError`.
     NotPorted,
@@ -157,25 +160,44 @@ fn register(site: &dyn Site, request: &Request) -> Action {
         let to = site.login_url("?registration=disabled");
         return Action::Redirect(to.into_bytes(), Reset::Keep);
     }
+    Action::Page(registration(site, request, &[], (b"", b"")))
+}
+
+/// The registration form of a site anyone may register on, with the errors
+/// `register_new_user()` gave a posted one (each a code and message) and the
+/// login and address as posted.
+pub fn registration(
+    site: &dyn Site,
+    request: &Request,
+    refused: &[(&'static str, &str)],
+    (login, email): (&[u8], &[u8]),
+) -> Vec<u8> {
+    let errors: Vec<Notice> = refused
+        .iter()
+        .map(|&(code, text)| error(code, text.into()))
+        .collect();
+    let redirect = apply_filters("registration_redirect", redirect_to(request), &[]);
     let lost = format!(
         "<a class=\"wp-login-lost-password\" href=\"{}\">Lost your password?</a>",
         url(&site.login_url("?action=lostpassword"))
     );
     let body = format!(
-        "\t\t<form name=\"registerform\" id=\"registerform\" action=\"{}\" method=\"post\" novalidate=\"novalidate\">\n\t\t\t<p>\n\t\t\t\t<label for=\"user_login\">Username</label>\n\t\t\t\t<input type=\"text\" name=\"user_login\" id=\"user_login\" class=\"input ltr\" value=\"\" size=\"20\" autocapitalize=\"off\" autocomplete=\"username\" required=\"required\" />\n\t\t\t</p>\n\t\t\t<p>\n\t\t\t\t<label for=\"user_email\">Email</label>\n\t\t\t\t<input type=\"email\" name=\"user_email\" id=\"user_email\" class=\"input\" value=\"\" size=\"25\" autocomplete=\"email\" required=\"required\" />\n\t\t\t</p>\n\t\t\t\t\t\t<p id=\"reg_passmail\">\n\t\t\t\tRegistration confirmation will be emailed to you.\t\t\t</p>\n\t\t\t<input type=\"hidden\" name=\"redirect_to\" value=\"{}\" />\n\t\t\t<p class=\"submit\">\n\t\t\t\t<input type=\"submit\" name=\"wp-submit\" id=\"wp-submit\" class=\"button button-primary button-large\" value=\"Register\" />\n\t\t\t</p>\n\t\t</form>\n{}",
+        "\t\t<form name=\"registerform\" id=\"registerform\" action=\"{}\" method=\"post\" novalidate=\"novalidate\">\n\t\t\t<p>\n\t\t\t\t<label for=\"user_login\">Username</label>\n\t\t\t\t<input type=\"text\" name=\"user_login\" id=\"user_login\" class=\"input ltr\" value=\"{}\" size=\"20\" autocapitalize=\"off\" autocomplete=\"username\" required=\"required\" />\n\t\t\t</p>\n\t\t\t<p>\n\t\t\t\t<label for=\"user_email\">Email</label>\n\t\t\t\t<input type=\"email\" name=\"user_email\" id=\"user_email\" class=\"input\" value=\"{}\" size=\"25\" autocomplete=\"email\" required=\"required\" />\n\t\t\t</p>\n\t\t\t\t\t\t<p id=\"reg_passmail\">\n\t\t\t\tRegistration confirmation will be emailed to you.\t\t\t</p>\n\t\t\t<input type=\"hidden\" name=\"redirect_to\" value=\"{}\" />\n\t\t\t<p class=\"submit\">\n\t\t\t\t<input type=\"submit\" name=\"wp-submit\" id=\"wp-submit\" class=\"button button-primary button-large\" value=\"Register\" />\n\t\t\t</p>\n\t\t</form>\n{}",
         url(&site.login_url("?action=register")),
-        esc_attr(&redirect_to(request)),
+        esc_attr(login),
+        esc_attr(email),
+        esc_attr(&redirect),
         nav(site, Some(lost))
     );
-    Action::Page(frame(
+    frame(
         site,
         request,
         ("Registration Form", "register"),
         &info(" register", "Register For This Site"),
-        &[],
+        &errors,
         &body,
         "user_login",
-    ))
+    )
 }
 
 /// `explode( ':', $text, 2 )` of a text with a colon.
@@ -390,24 +412,96 @@ fn check_email(site: &dyn Site, request: &Request) -> Action {
     ))
 }
 
-/// A personal data request's confirmation: refused unless the request
-/// exists, whose confirmation writes.
-fn confirm_action(site: &dyn Site, request: &Request) -> Action {
-    let text = match (
+/// `wp_die()`'s page for a refused link, with a 500.
+fn refused(site: &dyn Site, text: &str) -> Action {
+    Action::Died(crate::die::page(
+        site.public(),
+        "WordPress &rsaquo; Error",
+        text,
+    ))
+}
+
+/// A personal data request's confirmation link: refused unless the request
+/// is pending or failed, and the key is the one mailed and under a day old
+/// (`wp_validate_user_request_key()`); else the request, whose confirmation
+/// writes.
+fn confirm_action(site: &dyn Site, request: &Request, now: i64) -> Action {
+    let (id, key) = match (
         request.query.get_str("request_id"),
         request.query.get_str("confirm_key"),
     ) {
-        (None, _) => "Missing request ID.",
-        (_, None) => "Missing confirm key.",
-        (Some(id), _)
-            if site.post_type(id.to_int().unsigned_abs()).as_deref() == Some("user_request") =>
-        {
-            return Action::NotPorted;
-        }
-        _ => "Invalid personal data request.",
+        (None, _) => return refused(site, "Missing request ID."),
+        (_, None) => return refused(site, "Missing confirm key."),
+        (Some(id), Some(key)) => (id, key),
     };
-    let page = crate::die::page(site.public(), "WordPress &rsaquo; Error", text);
-    Action::Died(page)
+    // `sanitize_text_field()` of an array is an empty text.
+    let key = match key {
+        Value::String(key) => sanitize_text_field(key),
+        _ => Vec::new(),
+    };
+    let found = site.user_request(id.to_int().unsigned_abs());
+    let Some(found) = found.filter(|r| !is_empty_string(&r.confirm_key) && r.modified != 0) else {
+        return refused(site, "Invalid personal data request.");
+    };
+    if found.status != "request-pending" && found.status != "request-failed" {
+        return refused(site, "This personal data request has expired.");
+    }
+    if is_empty_string(&key) {
+        return refused(
+            site,
+            "The confirmation key is missing from this personal data request.",
+        );
+    }
+    let duration = apply_filters("user_request_key_expiration", 86_400, &[]);
+    if !wp_verify_fast_hash(&key, &found.confirm_key) {
+        return refused(
+            site,
+            "The confirmation key is invalid for this personal data request.",
+        );
+    }
+    if now > found.modified + duration {
+        return refused(
+            site,
+            "The confirmation key has expired for this personal data request.",
+        );
+    }
+    // The mails of any other action are not ported.
+    match &found.action_name[..] {
+        b"export_personal_data" | b"remove_personal_data" => {
+            Action::ConfirmRequest(found, id.to_int())
+        }
+        _ => Action::NotPorted,
+    }
+}
+
+/// The page of a confirmed request, as `_wp_privacy_account_request_confirmed_message()`
+/// words it for the request's action.
+pub fn request_confirmed(site: &dyn Site, request: &Request, action_name: &[u8]) -> Vec<u8> {
+    let (thanks, then) = match action_name {
+        b"export_personal_data" => (
+            "Thanks for confirming your export request.",
+            "The site administrator has been notified. You will receive a link to download your export via email when they fulfill your request.",
+        ),
+        b"remove_personal_data" => (
+            "Thanks for confirming your erasure request.",
+            "The site administrator has been notified. You will receive an email confirmation when they erase your data.",
+        ),
+        _ => (
+            "Action has been confirmed.",
+            "The site administrator has been notified and will fulfill your request as soon as possible.",
+        ),
+    };
+    let message = format!("<p class=\"success\">{thanks}</p><p>{then}</p>");
+    let message = apply_filters("user_request_action_confirmed_message", message, &[]);
+    frame(
+        site,
+        request,
+        ("User action confirmed.", "confirmaction"),
+        &message,
+        &[],
+        "",
+        "",
+    )
 }
 
 /// `action` for a GET of `request_uri`, slashed, at `now`, or for a POST
@@ -425,7 +519,7 @@ pub fn action(
         "register" => register(site, request),
         "resetpass" | "rp" => reset_password(site, request, (action, request_uri), now),
         "checkemail" => check_email(site, request),
-        "confirmaction" => confirm_action(site, request),
+        "confirmaction" => confirm_action(site, request, now),
         _ => Action::NotPorted,
     }
 }

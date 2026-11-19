@@ -1376,6 +1376,22 @@ async fn sticky_posts_come_first_and_formats_filter() {
     assert_eq!(db.count_posts(&one).await.unwrap(), 2);
 }
 
+/// An attachment by its name, whatever its status; a post of that name is
+/// none.
+#[tokio::test]
+async fn attachments_by_name() {
+    let db = named("wordpress_ttd").await;
+    let found = db.attachment_by_name("canola2").await.unwrap().unwrap();
+    assert_eq!((found.id, found.post_type.as_str()), (611, "attachment"));
+    assert!(
+        db.attachment_by_name("hello-world")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(db.attachment_by_name("no-such").await.unwrap().is_none());
+}
+
 #[tokio::test]
 async fn posts_by_name_path_and_guess() {
     let db = fixture().await;

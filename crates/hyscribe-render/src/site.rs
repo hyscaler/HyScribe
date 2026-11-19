@@ -7,7 +7,7 @@ use hyscribe_model::{
 };
 use hyscribe_phpser::Value;
 
-pub use crate::outbound::{Get, Hooks, Response};
+pub use crate::outbound::{EmbedHosts, Get, Hooks, Response};
 
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
@@ -177,6 +177,16 @@ pub trait Site {
         false
     }
 
+    /// Where embeds may fetch from: nowhere, as sites without a
+    /// client fetch nothing.
+    fn embed_hosts(&self) -> &EmbedHosts {
+        static NOWHERE: EmbedHosts = EmbedHosts {
+            providers: false,
+            hosts: Vec::new(),
+        };
+        &NOWHERE
+    }
+
     /// `update_post_meta( $post_id, $key, $value )`, which a page view
     /// writes in primary mode only: shadow mode and tests write nothing.
     fn update_post_meta(&self, _post_id: u64, _key: &str, _value: &[u8]) {}
@@ -227,6 +237,9 @@ pub struct Request {
     pub search_query: Vec<u8>,
     /// `is_singular()`: the main query's one post is the queried object.
     pub singular: bool,
+    /// `is_attachment()`: an attachment asked for as one, or one without a
+    /// parent; an attached one found by `name` is only a single post.
+    pub attachment: bool,
     /// `is_404()`
     pub not_found: bool,
     /// `is_preview()`

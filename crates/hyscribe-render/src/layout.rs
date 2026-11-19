@@ -98,7 +98,7 @@ fn unique_id(data: &Value, prefix: &str) -> String {
 }
 
 /// `block_has_support( $block_type, $feature, false )`.
-fn has_support(block_type: &BlockType, feature: &[&str]) -> bool {
+pub(crate) fn has_support(block_type: &BlockType, feature: &[&str]) -> bool {
     matches!(
         block_type.supports.get_path(feature),
         Some(Value::Bool(true) | Value::Array(_))

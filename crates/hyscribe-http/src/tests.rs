@@ -265,6 +265,7 @@ async fn database_errors_show_no_details() {
         install: unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
+        embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
@@ -280,6 +281,9 @@ async fn database_errors_show_no_details() {
         "/?error=404&p=1&feed=rss2",
         "/?name=x",
         "/?pagename=x",
+        "/?attachment=x",
+        "/?subpost=x",
+        "/?name=x&post_type=attachment",
         "/?attachment_id=1",
         // Past a route that reads nothing, sitemaps fail.
         "/?author=1&sitemap=index",
@@ -1008,6 +1012,7 @@ async fn the_front_page_links_to_home() {
         install: unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
+        embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     // Search results list the front page with a link to it.
@@ -1151,6 +1156,7 @@ async fn failed_reads_answer_defaults() {
         install: unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
+        embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     // The site's global styles, read on each reload.
@@ -3093,9 +3099,9 @@ async fn listed_pages_match_php() {
 /// to commit, loaded into `wordpress_saves` with the terms of one name told
 /// apart (`reference/pages/ttd-ties.sql`), as MariaDB orders them
 /// differently from run to run. The known differences name what is not
-/// ported: attachment pages and their redirect to the file, duotone, oEmbed,
-/// the RSS block, image loading priorities, the navigation fallback from a
-/// classic menu; and galleries `orderby="rand"`, which no two runs repeat.
+/// ported: oEmbed, the RSS block, image loading priorities, the player of
+/// an attachment page for audio, the navigation fallback from a classic
+/// menu; and galleries `orderby="rand"`, which no two runs repeat.
 #[tokio::test(flavor = "multi_thread")]
 async fn theme_test_data_pages_match_php() {
     let _saves = admin::tests::SAVES.lock().await;
@@ -3364,4 +3370,122 @@ fn the_rules_compile_once_per_options() {
     assert!(Arc::ptr_eq(&postname, &again));
     let dated = compiled.rewriter(&settings("/%year%/%postname%/"));
     assert!(!Arc::ptr_eq(&postname, &dated));
+}
+
+/// The pages of `reference/attachment-page/golden.sh`: attachments by ID
+/// and by name, with attachment pages off and on, over the default install
+/// with the attachments of `reference/attachment-edit/content.sql` and
+/// `reference/attachment-page/extra.sql`, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn attachment_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    for rows in [
+        include_str!("../../../reference/attachment-edit/content.sql"),
+        include_str!("../../../reference/attachment-page/extra.sql"),
+    ] {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(rows))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    let golden = include_str!("../tests/golden/attachment-pages.tsv");
+    // The players of audio and video files need MediaElement.js.
+    let known = ["817", "818", "821", "825"]
+        .map(|id| format!("wp_attachment_pages_enabled=1\t/?attachment_id={id}\tmediaelement\n"))
+        .concat();
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, &known).await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 110);
+    // Without the table of its meta the file of an attachment is unread.
+    let tables = [
+        "options",
+        "posts",
+        "terms",
+        "term_taxonomy",
+        "term_relationships",
+        "users",
+        "usermeta",
+        "comments",
+        "commentmeta",
+        "termmeta",
+    ];
+    for table in tables {
+        let copy = format!("CREATE TABLE broken_{table} AS SELECT * FROM wp_{table}");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(copy))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    let config = Database {
+        prefix: hyscribe_config::Prefix::new("broken_").unwrap(),
+        ..db
+    };
+    let site = Site::load(Db::connect(&config).await.unwrap(), None, None).await;
+    let reply = match site {
+        Ok(site) => Some(request(&Arc::new(site), "GET", "/?attachment_id=801").await),
+        Err(_) => None,
+    };
+    for table in tables {
+        let drop = format!("DROP TABLE broken_{table}");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(drop))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        reply.expect("the site loads").status,
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+}
+
+/// The pages of `reference/duotone/page-golden.sh`: covers and an image with
+/// every kind of duotone filter, the footer's filters and the global
+/// styles' custom properties of presets, over the default install with the
+/// posts of `reference/duotone/page.sql`, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn duotone_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let rows = include_str!("../../../reference/duotone/page.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(rows))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/duotone-pages.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 2);
 }

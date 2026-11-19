@@ -1,0 +1,24 @@
+# The requests of reference/confirm-action/golden.sh, in order, as the query
+# of a GET to wp-login.php?action=confirmaction. The links that confirm a
+# request come last, as each ends the request's chance to be confirmed.
+action=confirmaction&request_id=951&confirm_key=wrong
+action=confirmaction&request_id=951&confirm_key=
+action=confirmaction&request_id=951&confirm_key%5B%5D=x
+action=confirmaction&request_id=951&confirm_key=0
+action=confirmaction&request_id=954&confirm_key=expiredkey0123456789
+action=confirmaction&request_id=955&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=956&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=957&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=1&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=0&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=x&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=999999&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id%5B%5D=951&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=951
+action=confirmaction&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=-951&confirm_key=%20freshkey0123456789AB%20
+action=confirmaction&request_id=951&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=952&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=953&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=959&confirm_key=freshkey0123456789AB
+action=confirmaction&request_id=952abc&confirm_key=freshkey0123456789AB

@@ -2,7 +2,8 @@
 
 //! Site Health's Info tab, `site-health.php?tab=debug`: the sections of
 //! `WP_Debug_Data::debug_data()` that hold for HyScribe, and HyScribe's own
-//! in place of PHP's server, PHP and Imagick details.
+//! in place of PHP's server, PHP and Imagick details; and its Status
+//! tab, [`status()`], with HyScribe's own checks.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
 use hyscribe_phpser::{Value, is_empty_string};
@@ -16,7 +17,12 @@ use crate::page::{HelpTab, Request, VERSION};
 use crate::text;
 use crate::tools::{Tool, tool_page};
 
+mod status;
+
+pub use status::{EnvFile, Environment};
+
 const INFO: &str = include_str!("site_health/info.html");
+const STATUS: &str = include_str!("site_health/status.html");
 
 const OVERVIEW: &str = "<p>This screen allows you to obtain a health diagnosis of your site, and displays an overall rating of the status of your installation.</p><p>In the Status tab, you can see critical information about your WordPress configuration, along with anything else that requires your attention.</p><p>In the Info tab, you will find all the details about the configuration of your WordPress site, server, and database. There is also an export feature that allows you to copy all of the information about your site to the clipboard, to help solve problems on your site when obtaining support.</p>";
 
@@ -60,6 +66,8 @@ pub trait HealthSite: DashboardSite {
     fn table_prefix(&self) -> String;
     /// The database server's `VERSION()` and the connection's collation.
     fn database_server(&self) -> (String, String);
+    /// The `.env` file, the disk and the service, as they are now.
+    fn environment(&self) -> Environment;
 }
 
 /// A field's `debug`, what the copied text says in place of its value.
@@ -406,7 +414,48 @@ pub fn info(site: &dyn HealthSite, request: &Request) -> Option<String> {
         screen_options: "",
         styles: &["site-health"],
         scripts: &["site-health"],
-        script_data: &[("site-health", site_health_data(site, "site-health"))],
+        script_data: &[(
+            "site-health",
+            site_health_data(site, "site-health", Vec::new()),
+        )],
+        admin_head: "",
+        content: &content,
+    };
+    tool_page(site, &tool, request)
+}
+
+/// `site-health.php`, the Status tab: the frame PHP prints, and HyScribe's
+/// checks as the results the page's script lists by status.
+pub fn status(site: &dyn HealthSite, request: &Request) -> Option<String> {
+    if !site.can("view_site_health_checks") {
+        return None;
+    }
+    let url = |path: &str| text(&esc_url(BarSite::admin_url(site, path).as_bytes()));
+    let content = fill(
+        STATUS,
+        &[
+            ("status_url", url("site-health.php?tab")),
+            ("info_url", url("site-health.php?tab=debug")),
+        ],
+    );
+    let results = status::checks(site).into_iter().map(|check| check.value());
+    let help = [HelpTab {
+        id: "overview",
+        title: "Overview",
+        content: OVERVIEW,
+    }];
+    let tool = Tool {
+        file: "site-health.php",
+        title: "Site Health - Status",
+        help: &help,
+        sidebar: SIDEBAR,
+        screen_options: "",
+        styles: &["site-health"],
+        scripts: &["site-health"],
+        script_data: &[(
+            "site-health",
+            site_health_data(site, "site-health", results.collect()),
+        )],
         admin_head: "",
         content: &content,
     };

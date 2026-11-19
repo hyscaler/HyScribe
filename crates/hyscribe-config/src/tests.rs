@@ -58,6 +58,10 @@ fn defaults_are_safe() {
             rest_public_users: true,
             http_outbound: false,
             rss_allowed_hosts: Vec::new(),
+            embed_allowed: EmbedAllowed {
+                providers: true,
+                hosts: Vec::new(),
+            },
             constants: Constants {
                 disallow_unfiltered_html: true,
                 allow_unfiltered_uploads: false,
@@ -320,6 +324,35 @@ fn reads_every_key() {
     .unwrap();
     assert!(on.rest_public_users);
     assert!(!on.http_outbound);
+}
+
+/// The embed allowlist: the providers by default, plus hosts, hosts alone,
+/// or nothing.
+#[test]
+fn embed_hosts_have_forms() {
+    let allowed =
+        |value: &str| from_map(&with(&[("EMBED_ALLOWED_HOSTS", value)])).map(|c| c.embed_allowed);
+    let of = |providers, hosts: &[&str]| EmbedAllowed {
+        providers,
+        hosts: hosts.iter().map(|h| h.to_string()).collect(),
+    };
+    assert_eq!(embed_allowed(None), Ok(of(true, &[])));
+    for value in ["", " , ", "providers", "Providers,providers"] {
+        assert_eq!(allowed(value), Ok(of(true, &[])), "{value:?}");
+    }
+    assert_eq!(
+        allowed("providers, Media.Example.org,media.example.org"),
+        Ok(of(true, &["media.example.org"]))
+    );
+    assert_eq!(
+        allowed("a.test,b.test"),
+        Ok(of(false, &["a.test", "b.test"]))
+    );
+    assert_eq!(allowed("none"), Ok(of(false, &[])));
+    assert_eq!(allowed("NONE,"), Ok(of(false, &[])));
+    for value in ["none,a.test", "https://a.test/", "a.test:8080"] {
+        assert!(allowed(value).is_err(), "{value:?}");
+    }
 }
 
 /// A socket as `wp-config.php` gives one in `DB_HOST`, only for `localhost`.

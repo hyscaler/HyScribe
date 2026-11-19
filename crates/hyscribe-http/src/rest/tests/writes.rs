@@ -298,6 +298,7 @@ const UPDATE: &str = r#"{"title":"<b>New</b> <script>x()</script>title","caption
 #[tokio::test(flavor = "multi_thread")]
 async fn media_writes_are_php_s() {
     let _saves = crate::admin::tests::SAVES.lock().await;
+    let _comments = crate::admin::tests::COMMENTS.lock().await;
     let media = |id: u64| format!("/?rest_route=/wp/v2/media/{id}");
     let force = |id: u64, force: &str| format!("/?rest_route=/wp/v2/media/{id}&force={force}");
     let (taken, id) = (9300, 9301);

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:atom="http://www.w3.org/2005/Atom"
+	xmlns:sy="http://purl.org/rss/1.0/modules/syndication/"
+	>
+<channel>
+	<title>Themes Team &#8211; Test Feed</title>
+	<atom:link href="http://pages.test:8080/themes/feed/" rel="self" type="application/rss+xml" />
+	<link>http://pages.test:8080/themes</link>
+	<description>News from the themes team</description>
+	<lastBuildDate>Mon, 16 Nov 2026 14:00:00 +0000</lastBuildDate>
+	<language>en-US</language>
+	<sy:updatePeriod>hourly</sy:updatePeriod>
+	<sy:updateFrequency>1</sy:updateFrequency>
+	<item>
+		<title>Theme review &#8211; the week in numbers</title>
+		<link>http://pages.test:8080/themes/1/</link>
+		<dc:creator><![CDATA[Rita Reviewer]]></dc:creator>
+		<pubDate>Fri, 13 Nov 2026 09:30:00 +0000</pubDate>
+		<category><![CDATA[Themes]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/themes/?p=1</guid>
+		<description><![CDATA[Forty themes were reviewed this week &amp; twelve were approved for the directory. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>Forty themes were reviewed this week &amp; twelve were approved for the directory.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>Block themes: a style guide</title>
+		<link>http://pages.test:8080/themes/2/</link>
+		<dc:creator><![CDATA[Sam Styler]]></dc:creator>
+		<pubDate>Wed, 11 Nov 2026 16:05:00 +0000</pubDate>
+		<category><![CDATA[Block Themes]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/themes/?p=2</guid>
+		<description><![CDATA[A short guide to <em>theme.json</em> settings, styles and custom templates. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>A short guide to <em>theme.json</em> settings, styles and custom templates.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>Accessibility ready: what changed</title>
+		<link>http://pages.test:8080/themes/3/</link>
+		<dc:creator><![CDATA[Ann Access]]></dc:creator>
+		<pubDate>Mon, 09 Nov 2026 08:00:00 +0000</pubDate>
+		<category><![CDATA[Accessibility]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/themes/?p=3</guid>
+		<description><![CDATA[The tag now needs a skip link, visible focus and a contrast check. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>The tag now needs a skip link, visible focus and a contrast check.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>Open call for the next team rep</title>
+		<link>http://pages.test:8080/themes/4/</link>
+		<dc:creator><![CDATA[Rita Reviewer]]></dc:creator>
+		<pubDate>Thu, 05 Nov 2026 12:45:00 +0000</pubDate>
+		<category><![CDATA[Community]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/themes/?p=4</guid>
+		<description><![CDATA[Nominations are open until the end of the month. Two terms of one year each. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>Nominations are open until the end of the month. Two terms of one year each.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>Template parts and patterns</title>
+		<link>http://pages.test:8080/themes/5/</link>
+		<dc:creator><![CDATA[Sam Styler]]></dc:creator>
+		<pubDate>Tue, 03 Nov 2026 10:10:00 +0000</pubDate>
+		<category><![CDATA[Block Themes]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/themes/?p=5</guid>
+		<description><![CDATA[When to use a part, when to use a pattern, and when to use neither. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>When to use a part, when to use a pattern, and when to use neither.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>An older post that is not shown</title>
+		<link>http://pages.test:8080/themes/6/</link>
+		<dc:creator><![CDATA[Ann Access]]></dc:creator>
+		<pubDate>Sat, 31 Oct 2026 07:00:00 +0000</pubDate>
+		<category><![CDATA[Themes]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/themes/?p=6</guid>
+		<description><![CDATA[Only the first five items of a feed are shown by default. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>Only the first five items of a feed are shown by default.</p>]]></content:encoded>
+	</item>
+</channel>
+</rss>

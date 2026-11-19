@@ -7,10 +7,18 @@
 // rewrite rules of a permalink structure are built without being saved,
 // so nothing is written to the database.
 // Pages do not depend on the network: every outbound request fails, as
-// HyScribe makes none. The navigation block's fallback does not
+// HyScribe makes none, but those to the test site pages.test, which
+// reference/url-details/serve.sh serves and the RSS block of the Theme Test
+// Data reads. The navigation block's fallback does not
 // create a post from a classic menu, which is not ported, unless the
 // options carry _fallback=1; names starting with _ are no options.
-add_filter( 'pre_http_request', fn() => new WP_Error( 'http_request_failed', 'Offline.' ) );
+add_filter(
+	'pre_http_request',
+	fn( $pre, $args, $url ) => 'pages.test' === wp_parse_url( $url, PHP_URL_HOST ) ? $pre : new WP_Error( 'http_request_failed', 'Offline.' ),
+	10,
+	3
+);
+add_filter( 'http_request_host_is_external', fn( $external, $host ) => $external || 'pages.test' === $host, 10, 2 );
 $hyscribe_options = array();
 if ( isset( $_SERVER['HTTP_X_HYSCRIBE_OPTIONS'] ) ) {
 	parse_str( $_SERVER['HTTP_X_HYSCRIBE_OPTIONS'], $hyscribe_options );

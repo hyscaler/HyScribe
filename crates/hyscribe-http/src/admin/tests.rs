@@ -1332,7 +1332,10 @@ fn the_environment_is_read_from_the_folder() {
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
         assert_eq!(env().env_file, EnvFile::Mode(mode));
     }
-    let _lock = hyscribe_service::hold(&hyscribe_service::Paths::new(dir.path())).unwrap();
+    let lock = hyscribe_service::hold(&hyscribe_service::Paths::new(dir.path())).unwrap();
+    // Starting, then listening.
+    assert_eq!(env().service_pid, Some(std::process::id()));
+    lock.listening();
     assert_eq!(env().service_pid, Some(std::process::id()));
     // A binary named alone is in the working folder, and a path through a
     // file cannot be read.

@@ -6,14 +6,13 @@
 //! and every row, with the times at [`NOW`].
 
 use super::*;
+use crate::tests::SAVES;
 use hyscribe_config::Prefix;
 use sqlx::{Connection as _, MySqlConnection, Row as _};
 
 /// 2023-11-14 22:13:20 UTC.
 const NOW: i64 = 1_700_000_000;
 const NOW_TEXT: &str = "2023-11-14 22:13:20";
-
-static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// A case of `reference/install/cases.list`.
 struct Case {
@@ -231,7 +230,7 @@ async fn snapshot(conn: &mut MySqlConnection, prefix: &str, golden: &[Table]) ->
 /// PHP's install, and HyScribe's, leave the same tables and rows.
 #[tokio::test]
 async fn the_install_leaves_what_php_s_does() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _one = SAVES.lock().await;
     for case in cases() {
         let config = config(case.prefix);
         let mut conn = emptied(&config).await;
@@ -276,7 +275,7 @@ async fn the_install_leaves_what_php_s_does() {
 /// A database that has the prefix's tables is not installed over.
 #[tokio::test]
 async fn an_existing_site_is_left_alone() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _one = SAVES.lock().await;
     let case = &cases()[0];
     let config = config(case.prefix);
     let mut conn = emptied(&config).await;
@@ -295,7 +294,7 @@ async fn an_existing_site_is_left_alone() {
 /// A site made can be taken out again, as when a later step fails.
 #[tokio::test]
 async fn an_install_can_be_removed() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _one = SAVES.lock().await;
     let case = &cases()[0];
     let config = config(case.prefix);
     let mut conn = emptied(&config).await;
@@ -314,7 +313,7 @@ async fn an_install_can_be_removed() {
 /// An install that stops halfway drops the tables it made.
 #[tokio::test]
 async fn a_failed_install_drops_its_tables() {
-    let _one = ONE_AT_A_TIME.lock().await;
+    let _one = SAVES.lock().await;
     // 47 characters: `term_relationships` is the first name over 64.
     let prefix = format!("{}_", "p".repeat(46));
     let config = config(&prefix);
@@ -419,6 +418,7 @@ fn the_answers_are_checked_as_php_checks_them() {
     });
     let shown = format!("{:?}", kept.unwrap());
     assert!(!shown.contains("s3cret"), "{shown}");
+    assert!(shown.contains("sentinelLogin"), "{shown}");
     // A space around the password is not part of it; the title is escaped.
     let made = plan(|a| {
         a.password = " secret ";

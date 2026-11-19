@@ -370,10 +370,7 @@ fn unescape(value: &str, fill: &dyn Fn(&str) -> Option<String>) -> Option<String
 /// `default_password_nag` among the user's meta when `nag`.
 fn tables(fill: &dyn Fn(&str) -> Option<String>, nag: bool) -> Vec<Rows> {
     let mut tables: Vec<Rows> = Vec::new();
-    for line in ROWS
-        .lines()
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-    {
+    for line in ROWS.lines().filter(|line| !line.starts_with('#')) {
         if let Some(header) = line.strip_prefix('@') {
             let mut names = header.split('\t');
             tables.push(Rows {

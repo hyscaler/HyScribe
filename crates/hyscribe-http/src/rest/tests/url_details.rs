@@ -23,7 +23,7 @@ use super::*;
 /// `pages.test` at a public address, other names unknown; connections
 /// counted, all to the test site.
 #[derive(Default)]
-struct Pages {
+pub(crate) struct Pages {
     dialed: AtomicUsize,
 }
 

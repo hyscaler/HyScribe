@@ -4,12 +4,13 @@
 # routes.tsv and pages/ beside this script inside the oracle container, by
 # PHP's built in server through router.php, as http://pages.test:8080 (an
 # /etc/hosts entry for 127.0.0.1), and takes it down when the script exits.
-# The oracle reaches no other site. Needs DOCKER, NAME and ROOT.
+# The oracle reaches no other site. Needs DOCKER, NAME and ROOT; a script
+# with its own trap calls serve_cleanup from it.
 SITE=/tmp/hs-url-details
-cleanup() {
+serve_cleanup() {
   "$DOCKER" exec "$NAME" sh -c "pkill -f '^php -S 127.0.0.1:8080' || true; rm -rf $SITE; sed '/ pages\.test\$/d' /etc/hosts > /tmp/hosts && cat /tmp/hosts > /etc/hosts"
 }
-trap cleanup EXIT
+trap serve_cleanup EXIT
 "$DOCKER" exec "$NAME" mkdir -p "$SITE/pages"
 for file in routes.tsv router.php; do
   "$DOCKER" exec -i "$NAME" sh -c "cat > $SITE/$file" < "$ROOT/reference/url-details/$file"

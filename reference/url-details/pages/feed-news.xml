@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:atom="http://www.w3.org/2005/Atom"
+	xmlns:sy="http://purl.org/rss/1.0/modules/syndication/"
+	>
+<channel>
+	<title>News &#8211; Test Feed</title>
+	<atom:link href="http://pages.test:8080/news/feed/" rel="self" type="application/rss+xml" />
+	<link>http://pages.test:8080/news</link>
+	<description>The news feed</description>
+	<lastBuildDate>Mon, 16 Nov 2026 14:00:00 +0000</lastBuildDate>
+	<language>en-US</language>
+	<sy:updatePeriod>hourly</sy:updatePeriod>
+	<sy:updateFrequency>1</sy:updateFrequency>
+	<item>
+		<title>WordPress 7.1.3 Maintenance Release</title>
+		<link>http://pages.test:8080/news/1/</link>
+		<dc:creator><![CDATA[Wendy Release]]></dc:creator>
+		<pubDate>Thu, 12 Nov 2026 15:00:00 +0000</pubDate>
+		<category><![CDATA[Releases]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/news/?p=1</guid>
+		<description><![CDATA[WordPress 7.1.3 is available, a maintenance release with 20 bug fixes. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>WordPress 7.1.3 is available, a maintenance release with 20 bug fixes.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>The Month in WordPress: October 2026</title>
+		<link>http://pages.test:8080/news/2/</link>
+		<dc:creator><![CDATA[Max Monthly]]></dc:creator>
+		<pubDate>Mon, 02 Nov 2026 11:30:00 +0000</pubDate>
+		<category><![CDATA[Month in WordPress]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/news/?p=2</guid>
+		<description><![CDATA[October brought a new editor release and a busy contributor day. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>October brought a new editor release and a busy contributor day.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>Meet the new design system</title>
+		<link>http://pages.test:8080/news/3/</link>
+		<dc:creator><![CDATA[Dana Designer]]></dc:creator>
+		<pubDate>Fri, 30 Oct 2026 09:00:00 +0000</pubDate>
+		<category><![CDATA[Design]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/news/?p=3</guid>
+		<description><![CDATA[Components, tokens and a shared set of icons, in the open. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>Components, tokens and a shared set of icons, in the open.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>A &#8220;quoted&#8221; title &amp; an ampersand</title>
+		<link>http://pages.test:8080/news/4/</link>
+		<dc:creator><![CDATA[Wendy Release]]></dc:creator>
+		<pubDate>Wed, 28 Oct 2026 13:20:00 +0000</pubDate>
+		<category><![CDATA[General]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/news/?p=4</guid>
+		<description><![CDATA[Titles can carry <strong>markup</strong> and entities that are decoded once. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>Titles can carry <strong>markup</strong> and entities that are decoded once.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>Learn WordPress: new workshops</title>
+		<link>http://pages.test:8080/news/5/</link>
+		<dc:creator><![CDATA[Max Monthly]]></dc:creator>
+		<pubDate>Mon, 26 Oct 2026 08:15:00 +0000</pubDate>
+		<category><![CDATA[Learn]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/news/?p=5</guid>
+		<description><![CDATA[Five new workshops for site builders and for plugin authors. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>Five new workshops for site builders and for plugin authors.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>Accessibility statement updated</title>
+		<link>http://pages.test:8080/news/6/</link>
+		<dc:creator><![CDATA[Dana Designer]]></dc:creator>
+		<pubDate>Fri, 23 Oct 2026 10:00:00 +0000</pubDate>
+		<category><![CDATA[General]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/news/?p=6</guid>
+		<description><![CDATA[The statement now lists the known gaps and the plan to close them. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>The statement now lists the known gaps and the plan to close them.</p>]]></content:encoded>
+	</item>
+	<item>
+		<title>Hosting survey results</title>
+		<link>http://pages.test:8080/news/7/</link>
+		<dc:creator><![CDATA[Wendy Release]]></dc:creator>
+		<pubDate>Tue, 20 Oct 2026 14:00:00 +0000</pubDate>
+		<category><![CDATA[Community]]></category>
+		<guid isPermaLink="false">http://pages.test:8080/news/?p=7</guid>
+		<description><![CDATA[Results of the yearly survey, with the data in the open. [&#8230;]]]></description>
+		<content:encoded><![CDATA[<p>Results of the yearly survey, with the data in the open.</p>]]></content:encoded>
+	</item>
+</channel>
+</rss>

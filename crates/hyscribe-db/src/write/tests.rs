@@ -14,8 +14,9 @@ use hyscribe_config::Secret;
 const MISSING: u64 = 1 << 40;
 
 /// Write tests run one at a time, so no action waits on another's rows
-/// and the engine test's table is never written meanwhile.
-static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// and the engine test's table is never written meanwhile. The installer's
+/// tests hold it too: they drop the tables of `wordpress_saves`.
+pub(crate) static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn writer() -> Writer {
     Writer::open(&fixture_config(), Mode::Primary)

@@ -6,7 +6,7 @@
 use super::*;
 use hyscribe_config::Prefix;
 
-static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+use crate::write::tests::ONE_AT_A_TIME;
 
 fn config(prefix: &str) -> Database {
     Database {

@@ -40,6 +40,11 @@ async fn uploads_are_served_never_run() {
         ("2026/11/notes.txt", b"notes"),
         ("2026/11/doc.pdf", b"%PDF-"),
         ("2026/11/archive.zip", b"PK"),
+        ("2026/11/song.mp3", b"ID3"),
+        ("2026/11/clip.mp4", b"ftyp"),
+        ("2026/11/sheet.csv", b"a,b"),
+        ("2026/11/letter.docx", b"PK"),
+        ("2026/11/captions.vtt", b"WEBVTT"),
         ("2026/11/run.php", b"<?php"),
         ("2026/11/image.svg", b"<svg/>"),
         ("2026/11/.hidden.jpg", b"secret"),
@@ -68,7 +73,22 @@ async fn uploads_are_served_never_run() {
     let pdf = get(&site, "/wp-content/uploads/2026/11/doc.pdf", None).await;
     assert_eq!(pdf.headers()[header::CONTENT_TYPE], "application/pdf");
     assert!(!pdf.headers().contains_key(header::CONTENT_DISPOSITION));
-    for download in ["page.html", "run.php", "image.svg", "archive.zip"] {
+    // Audio and video are shown with their type.
+    for (shown, kind) in [("song.mp3", "audio/mpeg"), ("clip.mp4", "video/mp4")] {
+        let path = format!("/wp-content/uploads/2026/11/{shown}");
+        let response = get(&site, &path, None).await;
+        assert_eq!(response.headers()[header::CONTENT_TYPE], kind, "{shown}");
+        assert!(!response.headers().contains_key(header::CONTENT_DISPOSITION));
+    }
+    for download in [
+        "page.html",
+        "run.php",
+        "image.svg",
+        "archive.zip",
+        "sheet.csv",
+        "letter.docx",
+        "captions.vtt",
+    ] {
         let path = format!("/wp-content/uploads/2026/11/{download}");
         let response = get(&site, &path, None).await;
         assert_eq!(response.status(), StatusCode::OK, "{download}");

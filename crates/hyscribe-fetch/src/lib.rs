@@ -93,6 +93,8 @@ pub enum Kind {
     Timeout,
     /// More redirects than allowed.
     Redirects,
+    /// A redirect led to a host the caller does not allow.
+    Disallowed,
     /// The server's answer was not HTTP the client reads.
     Protocol,
 }
@@ -140,6 +142,9 @@ impl std::fmt::Debug for Client {
     }
 }
 
+/// Which hosts a redirect may lead to, as the caller judges them.
+pub type Allowed<'a> = dyn Fn(&str) -> bool + Sync + 'a;
+
 /// A hop's outcome: the answer, or where it redirects.
 enum Hop {
     Done(Fetched),
@@ -170,6 +175,20 @@ impl Client {
 
     /// `wp_safe_remote_get( $url, $args )` on a site whose `home` is `home`.
     pub async fn get(&self, url: &[u8], home: &[u8], args: Args) -> Result<Fetched, Error> {
+        self.get_within(url, home, args, &|_| true).await
+    }
+
+    /// [`Client::get`] where every redirect must also lead to a host
+    /// `allowed` accepts (the host as the URL gives it), checked before it
+    /// is resolved; the URL itself is the caller's to check. Every other
+    /// check holds as it does for `get`.
+    pub async fn get_within(
+        &self,
+        url: &[u8],
+        home: &[u8],
+        args: Args,
+        allowed: &Allowed<'_>,
+    ) -> Result<Fetched, Error> {
         let args = self.filters.http_request_args(args, url);
         if let Some(answer) = self.filters.pre_http_request(&args, url) {
             return answer;
@@ -179,7 +198,8 @@ impl Client {
         let limit = args.limit_response_size.unwrap_or(MAX_BYTES).min(MAX_BYTES);
         let mut url = url.to_vec();
         for hop in 0..=args.redirection.min(MAX_REDIRECTS) {
-            let fetched = timeout_at(deadline, self.hop(&url, home, &args, limit)).await;
+            let check = (hop > 0).then_some(allowed);
+            let fetched = timeout_at(deadline, self.hop(&url, home, &args, (limit, check))).await;
             match fetched {
                 Err(_) => return fail(Kind::Timeout, hop),
                 Ok(Err(kind)) => return fail(kind, hop),
@@ -192,8 +212,17 @@ impl Client {
 
     /// One request: the URL checked, its host resolved and every address
     /// checked, then a GET to the first address that connects.
-    async fn hop(&self, url: &[u8], home: &[u8], args: &Args, limit: usize) -> Result<Hop, Kind> {
+    async fn hop(
+        &self,
+        url: &[u8],
+        home: &[u8],
+        args: &Args,
+        (limit, allowed): (usize, Option<&Allowed<'_>>),
+    ) -> Result<Hop, Kind> {
         let target = validate_url(url, home).ok_or(Kind::Invalid)?;
+        if allowed.is_some_and(|allowed| !allowed(&target.host)) {
+            return Err(Kind::Disallowed);
+        }
         let addresses = self
             .net
             .resolve(&target.host, target.port)

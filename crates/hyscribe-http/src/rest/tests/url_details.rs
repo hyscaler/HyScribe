@@ -33,7 +33,7 @@ impl Net for Pages {
         host: &'a str,
         port: u16,
     ) -> hyscribe_fetch::Boxed<'a, Vec<std::net::SocketAddr>> {
-        let known = host == "pages.test";
+        let known = host == "pages.test" || host == "other.test";
         Box::pin(async move {
             match known {
                 true => Ok(vec![std::net::SocketAddr::new(
@@ -256,7 +256,7 @@ async fn previews_are_not_ported_while_fetches_are_off() {
 /// transients, as `Reads` hands them to `hyscribe-write`.
 #[tokio::test(flavor = "multi_thread")]
 async fn rendering_fetches_and_caches_through_the_site() {
-    use hyscribe_render::outbound::Get;
+    use hyscribe_render::outbound::{Get, NOT_ALLOWED, Redirects};
     use hyscribe_render::site::Site as _;
     let _saves = crate::admin::tests::SAVES.lock().await;
     fresh().await;
@@ -292,6 +292,25 @@ async fn rendering_fetches_and_caches_through_the_site() {
             };
             let cut = reads.remote_get(b"http://pages.test:8080/page.html", &small);
             assert_eq!(cut.unwrap().unwrap().body, page.body[..10]);
+            // A redirect to another host must be on the list that fits the
+            // fetch: feeds', or the embeds' hosts the fetch carries.
+            let away = b"http://pages.test:8080/redirect-away";
+            let through = |redirects| Get {
+                redirects,
+                ..get.clone()
+            };
+            let hosts =
+                |names: &[&[u8]]| Redirects::Hosts(names.iter().map(|n| n.to_vec()).collect());
+            let stopped = [Redirects::Feeds, hosts(&[b"pages.test"]), hosts(&[])];
+            for redirects in stopped {
+                let answer = reads.remote_get(away, &through(redirects)).unwrap();
+                assert_eq!(answer.unwrap_err(), NOT_ALLOWED);
+            }
+            let both = hosts(&[b"pages.test", b"other.test"]);
+            let followed = reads.remote_get(away, &through(both)).unwrap();
+            assert_eq!(followed.unwrap().status, 200);
+            let any = reads.remote_get(away, &through(Redirects::Any)).unwrap();
+            assert_eq!(any.unwrap().status, 200);
             let refused = reads.remote_get(b"http://nowhere.test/", &get).unwrap();
             assert_eq!(refused.unwrap_err(), b"A valid URL was not provided.");
             reads.update_post_meta(1, "_oembed_x", b"<b>embed</b>");
@@ -335,6 +354,7 @@ fn rendering_asks_with_its_own_arguments() {
         timeout: 10,
         limit: Some(153_600),
         user_agent: b"WordPress/7.1.3; http://a.test".to_vec(),
+        redirects: hyscribe_render::outbound::Redirects::Any,
     };
     let args = crate::outbound::args(&get);
     assert_eq!(args.timeout, std::time::Duration::from_secs(10));
@@ -354,6 +374,7 @@ fn failures_read_as_wordpress_words_them() {
         Kind::Tls,
         Kind::Timeout,
         Kind::Redirects,
+        Kind::Disallowed,
         Kind::Protocol,
     ]
     .into_iter()
@@ -361,8 +382,9 @@ fn failures_read_as_wordpress_words_them() {
     .collect();
     assert_eq!(messages[..3], [&b"A valid URL was not provided."[..]; 3]);
     assert_eq!(messages[6], b"Too many redirects.");
+    assert_eq!(messages[7], hyscribe_render::outbound::NOT_ALLOWED);
     assert!(
-        messages[3..]
+        messages[3..7]
             .iter()
             .all(|m| m.starts_with(b"cURL error") || m.starts_with(b"Too"))
     );

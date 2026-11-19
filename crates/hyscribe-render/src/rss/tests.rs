@@ -7,7 +7,7 @@ use hyscribe_phpser::{Key, Value, decode, encode};
 use hyscribe_testkit::unhex;
 
 use crate::fixture::DefaultInstall;
-use crate::outbound::{Get, Hooks, Response, testing};
+use crate::outbound::{Get, Hooks, NOT_ALLOWED, Redirects, Response, testing};
 use crate::site::{Request, Site};
 use crate::template::Renderer;
 use crate::theme::twentytwentyfive;
@@ -23,6 +23,8 @@ pub(crate) struct Feeds {
     pub(crate) options: RefCell<Vec<(String, Vec<u8>)>>,
     pub(crate) hosts: Vec<Vec<u8>>,
     pub(crate) fetches: bool,
+    /// The error every fetch fails with, if any.
+    pub(crate) error: Option<&'static [u8]>,
     pub(crate) hooks: Box<dyn Hooks>,
 }
 
@@ -35,6 +37,7 @@ impl Feeds {
             options: RefCell::new(Vec::new()),
             hosts: vec![b"pages.test".to_vec()],
             fetches: true,
+            error: None,
             hooks: Box::new(()),
         }
     }
@@ -83,6 +86,10 @@ impl Site for Feeds {
 
     fn remote_get(&self, url: &[u8], args: &Get) -> Option<Result<Response, Vec<u8>>> {
         assert_eq!(args.timeout, 10);
+        assert_eq!(args.redirects, Redirects::Feeds);
+        if let Some(error) = self.error {
+            return Some(Err(error.to_vec()));
+        }
         self.fetches.then(|| testing::get(url, args.limit))
     }
 
@@ -293,6 +300,18 @@ fn unreachable_feeds_render_as_php_renders_them() {
         assert!(String::from_utf8_lossy(&html).contains(unreachable));
         assert!(site.options.borrow().is_empty());
     }
+    // A redirect off the list ends as an unreachable feed, nothing cached.
+    let mut away = Feeds::new();
+    away.error = Some(NOT_ALLOWED);
+    let html = Renderer::new(&theme, &away, &request).render(block);
+    assert!(String::from_utf8_lossy(&html).contains(unreachable));
+    assert!(away.options.borrow().is_empty());
+    // Any other failure keeps its own words.
+    let mut slow = Feeds::new();
+    slow.error = Some(b"cURL error 28: Operation timed out");
+    let html = Renderer::new(&theme, &slow, &request).render(block);
+    let html = String::from_utf8_lossy(&html);
+    assert!(html.contains("WP HTTP Error: cURL error 28: Operation timed out"));
     let mut refused = Feeds::new();
     refused.hosts = vec![b"nowhere.test".to_vec()];
     let block = br#"<!-- wp:rss {"feedURL":"http://nowhere.test/feed"} /-->"#;

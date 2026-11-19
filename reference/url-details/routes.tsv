@@ -69,3 +69,4 @@
 /feed/quotes.xml	200	feed-quotes.xml
 /feed/rss-quotes.xml	200	feed-rss-quotes.xml
 /feed/latin.xml	200	feed-latin.xml
+/redirect-away	302	http://other.test:8080/page.html

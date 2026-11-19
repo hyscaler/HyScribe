@@ -44,8 +44,12 @@ pub(crate) fn ruleset(selector: &str, declarations: &[Declaration]) -> String {
 }
 
 /// `is_safe_css_declaration( $name, $value )`: whether `safecss_filter_attr()`
-/// keeps anything of `name: value`.
+/// keeps anything of `name: value`. A value with `{` or `}` is unsafe, which
+/// PHP lets through when `;` splits it (an open question, a deliberate difference).
 pub(crate) fn is_safe(name: &str, value: &str) -> bool {
+    if value.contains(['{', '}']) {
+        return false;
+    }
     let filtered = safecss_filter_attr(format!("{name}: {value}").as_bytes());
     !trim(&esc_html(&filtered)).is_empty()
 }

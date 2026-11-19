@@ -25,8 +25,11 @@ use hyscribe_config::{Server, wpconfig};
 use hyscribe_phpser::{hash_equals, urldecode};
 use tokio::sync::{Mutex, Notify, oneshot};
 
-use super::{Choices, Content, Found, checked, from_file, from_text, manual, questions, write_env};
+use super::{
+    Choices, Content, Found, default_home, from_file, from_text, manual, questions, settle,
+};
 use crate::failed;
+use hyscribe_write::install::{Answers, Plan};
 
 /// How long setup mode waits for `.env` before it stops.
 pub(crate) const SETUP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -133,6 +136,7 @@ pub(crate) async fn setup_mode(
             tokens,
             signed_in: false,
             found: None,
+            new_site: false,
         }),
         done: Notify::new(),
     });
@@ -207,6 +211,8 @@ struct Wizard {
     signed_in: bool,
     /// The site read at step 2.
     found: Option<Found>,
+    /// Whether step 2 chose a new site, to install in an empty database.
+    new_site: bool,
 }
 
 /// Random tokens drawn at start, as the secret is.
@@ -318,7 +324,10 @@ impl Wizard {
     /// contents, or neither for manual entry.
     fn locate(&mut self, form: &Form) -> Response {
         let (path, contents) = (field(form, "path"), field(form, "contents"));
-        let found = if !contents.is_empty() {
+        self.new_site = field(form, "new") == "1";
+        let found = if self.new_site {
+            Ok(manual())
+        } else if !contents.is_empty() {
             from_text(contents.as_bytes())
         } else if path.is_empty() || path == "none" {
             Ok(manual())
@@ -358,7 +367,8 @@ impl Wizard {
         }
         let read_user = value("DB_READ_USER");
         let choices = Choices {
-            shadow: value("MODE") != "primary",
+            // A new site is written to, so it is never in shadow mode.
+            shadow: !self.new_site && value("MODE") != "primary",
             read_user: (!read_user.is_empty()).then(|| (read_user, value("DB_READ_PASSWORD"))),
             behind_proxy: value("BEHIND_PROXY") == "true",
             bind_host: value("BIND_HOST"),
@@ -366,11 +376,26 @@ impl Wizard {
             uploads: value("UPLOADS_DIR"),
         };
         choices.push(&mut values);
-        let written = checked(values, content.as_deref())
-            .await
-            .and_then(|(report, text)| {
-                write_env(&self.home, &text, false).map(|path| (report, path))
-            });
+        let answered = |name: &str| Some(field(form, name).to_string());
+        let refused = StatusCode::UNPROCESSABLE_ENTITY;
+        let plan = if self.new_site {
+            let answers = Answers {
+                title: &value("weblog_title"),
+                login: &value("user_name"),
+                password: &value("admin_password"),
+                repeat: &value("admin_password2"),
+                email: &value("admin_email"),
+                public: value("blog_public") != "0",
+                home: &value("site_address"),
+            };
+            match Plan::new(&answers, super::now()) {
+                Ok(plan) => Some(plan),
+                Err(refusal) => return details_page(self, found, refused, &refusal, &answered),
+            }
+        } else {
+            None
+        };
+        let written = settle(&self.home, values, content.as_deref(), plan.as_ref(), false).await;
         match written {
             Ok((report, path)) => {
                 self.signed_in = false;
@@ -383,11 +408,7 @@ impl Wizard {
                 done.notify_one();
                 page(StatusCode::OK, "HyScribe is set up", &body)
             }
-            Err(err) => {
-                let answered = |name: &str| Some(field(form, name).to_string());
-                let status = StatusCode::UNPROCESSABLE_ENTITY;
-                details_page(self, found, status, &err, &answered)
-            }
+            Err(err) => details_page(self, found, refused, &err, &answered),
         }
     }
 }
@@ -498,6 +519,8 @@ fn locate_page(wizard: &Wizard, status: StatusCode, error: &str) -> Response {
          <p><label for=\"contents\">Or paste the contents of wp-config.php</label>\n\
          <textarea id=\"contents\" name=\"contents\" rows=\"12\"></textarea></p>\n\
          <p>Leave both empty to enter the database details by hand.</p>\n\
+         <p><label><input type=\"checkbox\" name=\"new\" value=\"1\"> This is a new site: \
+         install WordPress in an empty database, as its own installer would</label></p>\n\
          <p><button>Continue</button></p>\n</form>\n",
         notice(error),
         hidden(&wizard.tokens.csrf),
@@ -547,18 +570,31 @@ fn details_page(
         }
     }
     let primary = value("MODE", "shadow") == "primary";
+    let (mode, title) = if wizard.new_site {
+        (
+            new_site_fields(wizard, answered),
+            "Step 3 of 3: new site, database and network",
+        )
+    } else {
+        (
+            format!(
+                "<fieldset><legend>Mode</legend>\n{}{}</fieldset>\n",
+                choice("shadow", "Shadow mode (read only), to start with", !primary),
+                choice("primary", "Primary mode (writes)", primary)
+            ),
+            "Step 3 of 3: database, mode and network",
+        )
+    };
     let proxy = value("BEHIND_PROXY", &wizard.listen.behind_proxy.to_string()) == "true";
     let body = format!(
         "{}<pre>{}</pre>\n<form method=\"post\" action=\"{STEP_3}\">\n{}{fields}\
-         <fieldset><legend>Mode</legend>\n{}{}</fieldset>\n{}{}\
+         {mode}{}{}\
          <p><label><input type=\"checkbox\" name=\"BEHIND_PROXY\" value=\"true\"{}> Running \
          HyScribe behind a proxy</label></p>\n{}{}{}\
          <p><button>Check and write .env</button></p>\n</form>\n",
         notice(error),
         escape(&notes),
         hidden(&wizard.tokens.csrf),
-        choice("shadow", "Shadow mode (read only), to start with", !primary),
-        choice("primary", "Primary mode (writes)", primary),
         input(
             "DB_READ_USER",
             "Database user granted only SELECT, for every read (empty for none)",
@@ -586,7 +622,55 @@ fn details_page(
             false
         ),
     );
-    page(status, "Step 3 of 3: database, mode and network", &body)
+    page(status, title, &body)
+}
+
+/// What PHP's install screen asks, for a new site: the site's title and
+/// address, and the first administrator, whose password is never sent back.
+fn new_site_fields(wizard: &Wizard, answered: &dyn Fn(&str) -> Option<String>) -> String {
+    let value = |name: &str, default: &str| answered(name).unwrap_or_else(|| default.into());
+    let home = default_home(
+        &wizard.listen.bind_host.to_string(),
+        &wizard.listen.port.to_string(),
+    );
+    let hidden = value("blog_public", "1") == "0";
+    format!(
+        "<fieldset><legend>The new site</legend>\n{}{}{}{}{}{}\
+         <p><label><input type=\"checkbox\" name=\"blog_public\" value=\"0\"{}> Discourage \
+         search engines from indexing this site</label></p></fieldset>\n",
+        input(
+            "weblog_title",
+            "Site title",
+            &value("weblog_title", ""),
+            false
+        ),
+        input(
+            "user_name",
+            "Administrator user name",
+            &value("user_name", ""),
+            false
+        ),
+        input(
+            "admin_password",
+            "Administrator password (empty for a generated one)",
+            "",
+            true
+        ),
+        input("admin_password2", "Password again", "", true),
+        input(
+            "admin_email",
+            "Administrator email address",
+            &value("admin_email", ""),
+            false
+        ),
+        input(
+            "site_address",
+            "Site address, where visitors will open it",
+            &value("site_address", &home),
+            false
+        ),
+        if hidden { " checked" } else { "" },
+    )
 }
 
 fn notice(error: &str) -> String {

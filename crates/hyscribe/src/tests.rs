@@ -1040,9 +1040,9 @@ fn setup_mode_hands_over_to_the_site() {
     assert_eq!(service("stop", &env).code, 0);
 }
 
-/// Answers setup mode's pages in `home`, listening on `port`, for the site
-/// in `wordpress`.
-fn through_the_wizard(home: &std::path::Path, port: u16, wordpress: &std::path::Path) {
+/// Signs in to setup mode's pages in `home`, listening on `port`, with the
+/// secret it gave: the session cookie and the token of the forms after it.
+fn wizard_session(home: &std::path::Path, port: u16) -> (String, String) {
     let open = std::fs::read_to_string(home.join("logs/setup-secret")).unwrap();
     let secret = open
         .strip_prefix(&format!(
@@ -1059,13 +1059,166 @@ fn through_the_wizard(home: &std::path::Path, port: u16, wordpress: &std::path::
     assert!(page.starts_with("HTTP/1.1 303 See Other"), "{page}");
     let session = format!("hyscribe_setup={}", between(&page, "hyscribe_setup=", ';'));
     let page = http_form(port, "GET", "/installation/step-2", &session, "");
-    let csrf = between(&page, "name=\"_csrf\" value=\"", '"');
+    let csrf = between(&page, "name=\"_csrf\" value=\"", '"').to_string();
+    (session, csrf)
+}
+
+/// Answers setup mode's pages in `home`, listening on `port`, for the site
+/// in `wordpress`.
+fn through_the_wizard(home: &std::path::Path, port: u16, wordpress: &std::path::Path) {
+    let (session, csrf) = wizard_session(home, port);
     let sent = format!("_csrf={csrf}&path={}", wordpress.display());
     let page = http_form(port, "POST", "/installation/step-2", &session, &sent);
     assert!(page.contains("location: /installation/step-3"), "{page}");
     let sent = format!("_csrf={csrf}&MODE=shadow&PORT={port}");
     let page = http_form(port, "POST", "/installation/step-3", &session, &sent);
     assert!(page.contains("<h1>HyScribe is set up</h1>"), "{page}");
+}
+
+/// Drops every table of `wordpress_saves`, the scratch database.
+pub(crate) fn empty_saves() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        use sqlx::{Connection as _, Row as _};
+        let mut conn = saves_connection().await;
+        let sql = "SELECT TABLE_NAME AS name FROM information_schema.TABLES \
+                   WHERE TABLE_SCHEMA = DATABASE()";
+        for row in sqlx::raw_sql(sql).fetch_all(&mut conn).await.unwrap() {
+            let name = String::from_utf8(row.get::<Vec<u8>, _>("name")).unwrap();
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!("DROP TABLE {name}")))
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+        conn.close().await.unwrap();
+    });
+}
+
+async fn saves_connection() -> sqlx::MySqlConnection {
+    use sqlx::Connection as _;
+    let db = hyscribe_testkit::fixture_database();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database("wordpress_saves")
+        .username(&db.user)
+        .password(db.password.expose())
+        .charset("utf8mb4");
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    // A table a test left locked fails the test, not waits for ever.
+    let wait = sqlx::raw_sql("SET SESSION lock_wait_timeout = 30");
+    wait.execute(&mut conn).await.unwrap();
+    conn
+}
+
+/// The first column of the first row `sql` gives over `wordpress_saves`.
+pub(crate) async fn saves_value(sql: &str) -> Option<String> {
+    use sqlx::Row as _;
+    let mut conn = saves_connection().await;
+    let rows = sqlx::raw_sql(sqlx::AssertSqlSafe(sql.to_string()))
+        .fetch_all(&mut conn)
+        .await
+        .unwrap();
+    let bytes = rows.first()?.try_get_unchecked::<Option<Vec<u8>>, _>(0);
+    bytes
+        .unwrap()
+        .map(|bytes| String::from_utf8(bytes).unwrap())
+}
+
+/// [`saves_value`] outside a runtime.
+pub(crate) fn saves_scalar(sql: &str) -> Option<String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(saves_value(sql))
+}
+
+/// GOALS.md S4: the wizard goes from an empty database to a running site in
+/// under five minutes. Setup mode installs a new site through its pages, and
+/// the same process then answers its home page with 200.
+#[test]
+fn the_new_site_wizard_reaches_a_home_page_within_s4_s_time() {
+    let _saves = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    empty_saves();
+    let started = std::time::Instant::now();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("hyscribe");
+    std::fs::create_dir(&home).unwrap();
+    let port = site_port(&home);
+    let env: HashMap<String, String> = site_env(&home)
+        .into_iter()
+        .filter(|(key, _)| !key.starts_with("DB_"))
+        .collect();
+    let service = |command: &str| {
+        let args = ["service", command];
+        run_as(&args, env.clone(), &home, USER, child_server())
+    };
+    let begun = service("start");
+    assert_eq!(begun.code, 0, "{}", begun.err);
+    let (session, csrf) = wizard_session(&home, port);
+    let page = http_form(
+        port,
+        "POST",
+        "/installation/step-2",
+        &session,
+        &format!("_csrf={csrf}&new=1"),
+    );
+    assert!(page.contains("location: /installation/step-3"), "{page}");
+    let page = http_form(port, "GET", "/installation/step-3", &session, "");
+    assert!(page.contains("name=\"weblog_title\""), "{page}");
+    assert!(!page.contains("Shadow mode"), "{page}");
+    let db = hyscribe_testkit::fixture_database();
+    let fields = [
+        ("_csrf", csrf.as_str()),
+        ("DB_NAME", "wordpress_saves"),
+        ("DB_USER", db.user.as_str()),
+        ("DB_PASSWORD", db.password.expose()),
+        ("DB_HOST", db.host.as_str()),
+        ("DB_PORT", &db.port.to_string()),
+        ("weblog_title", "A New Site"),
+        ("user_name", "owner"),
+        ("admin_password", "correct horse battery"),
+        ("admin_password2", "correct horse battery"),
+        ("admin_email", "owner@example.org"),
+        ("site_address", &format!("http://127.0.0.1:{port}")),
+        ("PORT", &port.to_string()),
+    ];
+    let sent: Vec<String> = fields
+        .iter()
+        .map(|(name, value)| {
+            let value = hyscribe_phpser::urlencode(value.as_bytes());
+            format!("{name}={}", String::from_utf8(value).unwrap())
+        })
+        .collect();
+    let page = http_form(
+        port,
+        "POST",
+        "/installation/step-3",
+        &session,
+        &sent.join("&"),
+    );
+    assert!(page.contains("<h1>HyScribe is set up</h1>"), "{page}");
+    assert!(
+        page.contains("tables and first content in wordpress_saves"),
+        "{page}"
+    );
+    assert!(!page.contains("shown once"), "{page}");
+    logged(
+        &home,
+        &format!("in primary mode, listening on http://127.0.0.1:{port}"),
+    );
+    let page = http_get(port, "/");
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+    assert!(page.contains("A New Site"), "{page}");
+    assert!(page.contains("Hello world!"), "{page}");
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(5 * 60), "{took:?}");
+    assert_eq!(service("stop").code, 0);
+    empty_saves();
 }
 
 /// Uploads go to `UPLOADS_DIR`, else to `uploads/` in the installation's folder.

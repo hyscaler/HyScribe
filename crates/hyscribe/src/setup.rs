@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 
 use hyscribe_config::setup::{self, Setting};
 use hyscribe_config::wpconfig::{self, Value};
-use hyscribe_config::{Config, ENV_FILE, Mode, SALT_KEYS};
+use hyscribe_config::{Config, Database, ENV_FILE, Mode, SALT_KEYS};
 use hyscribe_db::{DB_VERSIONS, Db, DbError};
+use hyscribe_write::install::{Answers, Installed, Plan};
 use rustix::termios::{LocalModes, OptionalActions, isatty, tcgetattr, tcsetattr};
 
 use crate::failed;
@@ -359,10 +360,11 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<Option<PathBuf
         return Ok(None);
     }
     let answer = term.ask(
-        "Path to the WordPress folder or its wp-config.php (none if there is none)",
+        "Path to the WordPress folder or its wp-config.php (none if there is none, new for a new site)",
         &find_wordpress(home),
     )?;
-    let found = if answer.is_empty() || answer == "none" {
+    let new_site = answer == "new";
+    let found = if answer.is_empty() || answer == "none" || new_site {
         manual()
     } else {
         from_file(&answer)?
@@ -393,7 +395,8 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<Option<PathBuf
             term.say(&format!("  {}\n", not_copied(key)))?;
         }
     }
-    let shadow = term.yes("Start in shadow mode (read only) first", true)?;
+    // A new site is written to, so it starts in primary mode.
+    let shadow = !new_site && term.yes("Start in shadow mode (read only) first", true)?;
     let read_user = term.ask(
         "Database user granted only SELECT, for every read (empty for none)",
         "",
@@ -406,6 +409,11 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<Option<PathBuf
     let behind_proxy = term.yes("Running HyScribe behind a proxy", false)?;
     let bind_host = term.ask("Address to listen on", "127.0.0.1")?;
     let port = term.ask("Port to listen on", "8080")?;
+    let plan = if new_site {
+        Some(ask_new_site(term, &default_home(&bind_host, &port))?)
+    } else {
+        None
+    };
     let uploads = term.ask(
         "The site's uploads folder (empty for hyscribe/uploads)",
         &site_uploads,
@@ -419,21 +427,105 @@ pub(crate) fn run(home: &Path, term: &mut Terminal<'_>) -> Result<Option<PathBuf
         uploads,
     };
     choices.push(&mut values);
-    let (report, text) = tokio::runtime::Builder::new_current_thread()
+    let (report, path) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(failed("cannot start the runtime".into()))
-        .and_then(|runtime| runtime.block_on(checked(values, content.as_deref())))?;
+        .and_then(|runtime| {
+            let settled = settle(home, values, content.as_deref(), plan.as_ref(), replace);
+            runtime.block_on(settled)
+        })?;
     term.say(&report)?;
-    write_env(home, &text, replace).map(Some)
+    Ok(Some(path))
+}
+
+/// The site address offered for a site listening on `bind_host` and `port`:
+/// where a browser on this machine opens it.
+pub(crate) fn default_home(bind_host: &str, port: &str) -> String {
+    let host = match bind_host {
+        "0.0.0.0" | "::" => "127.0.0.1".to_string(),
+        host if host.contains(':') => format!("[{host}]"),
+        host => host.to_string(),
+    };
+    match port {
+        "80" => format!("http://{host}"),
+        port => format!("http://{host}:{port}"),
+    }
+}
+
+/// PHP's `time()`.
+pub(crate) fn now() -> i64 {
+    let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+    since.map_or(0, |since| since.as_secs() as i64)
+}
+
+/// What PHP's install screen asks, three times at most: the answers that
+/// pass its checks, as the plan of the install.
+fn ask_new_site(term: &mut Terminal<'_>, home: &str) -> Result<Plan, String> {
+    for _ in 0..3 {
+        let title = term.ask("Site title", "")?;
+        let login = term.ask("Administrator user name", "")?;
+        let password = term.secret("Administrator password (empty for a generated one)")?;
+        let repeat = term.secret("Password again")?;
+        let email = term.ask("Administrator email address", "")?;
+        let hidden = term.yes("Discourage search engines from indexing this site", false)?;
+        let home = term.ask("Site address, where visitors will open it", home)?;
+        let answers = Answers {
+            title: &title,
+            login: &login,
+            password: &password,
+            repeat: &repeat,
+            email: &email,
+            public: !hidden,
+            home: &home,
+        };
+        match Plan::new(&answers, now()) {
+            Ok(plan) => return Ok(plan),
+            Err(refusal) => term.say(&format!("  {refusal}\n"))?,
+        }
+    }
+    Err("setup stopped: the new site's answers were refused three times".into())
+}
+
+/// A new site's tables, which a later failure drops again.
+type Made = (Database, Installed);
+
+/// Drops the tables of `made`, if any, after the failure `err`: the failure,
+/// and what became of them.
+async fn unmade(made: Option<Made>, err: String) -> String {
+    let Some((database, installed)) = made else {
+        return err;
+    };
+    match Plan::remove(&database, &installed).await {
+        Ok(()) => format!("{err}; the new site's tables were dropped"),
+        Err(more) => format!("{err}; dropping the new site's tables failed too: {more}"),
+    }
+}
+
+/// Checks the configuration, installs the new site if there is one, and
+/// writes `.env`: what the checks found, and where `.env` went. A failure
+/// after the install drops the new site's tables again.
+pub(crate) async fn settle(
+    home: &Path,
+    values: Vec<(&'static str, String)>,
+    content: Option<&Path>,
+    new: Option<&Plan>,
+    replace: bool,
+) -> Result<(String, PathBuf), String> {
+    let (report, text, made) = checked(values, content, new).await?;
+    match write_env(home, &text, replace) {
+        Ok(path) => Ok((report, path)),
+        Err(err) => Err(unmade(made, err).await),
+    }
 }
 
 /// Generates the keys and salts not copied and checks the configuration:
 /// what the checks found, and the text of `.env`.
-pub(crate) async fn checked(
+async fn checked(
     mut values: Vec<(&'static str, String)>,
     content: Option<&Path>,
-) -> Result<(String, String), String> {
+    new: Option<&Plan>,
+) -> Result<(String, String, Option<Made>), String> {
     let copied = SALT_KEYS
         .iter()
         .filter(|key| values.iter().any(|(k, _)| k == *key))
@@ -457,7 +549,27 @@ pub(crate) async fn checked(
         "  Keys and salts: {copied} copied, {} generated\n",
         SALT_KEYS.len() - copied
     );
-    report.push_str(&check(&config).await?);
+    let text = setup::render(&values)
+        .ok_or("an answer holds a carriage return, which .env cannot hold")?;
+    let mut made = None;
+    if let Some(plan) = new {
+        let installed = plan.install(&config.database).await?;
+        report.push_str(&format!(
+            "  Installed WordPress 7.1.3's {} tables and first content in {}\n",
+            installed.tables.len(),
+            config.database.name
+        ));
+        if let Some(password) = &installed.generated {
+            report.push_str(&format!(
+                "  Administrator password, shown once: {password}\n"
+            ));
+        }
+        made = Some((config.database.clone(), installed));
+    }
+    match check(&config).await {
+        Ok(found) => report.push_str(&found),
+        Err(err) => return Err(unmade(made, err).await),
+    }
     // A site that never had an upload has no uploads folder yet.
     if let Some(dir) = config.uploads_dir.as_ref().filter(|dir| !dir.is_dir()) {
         report.push_str(&format!(
@@ -475,9 +587,7 @@ pub(crate) async fn checked(
             cache.display()
         ));
     }
-    let text = setup::render(&values)
-        .ok_or("an answer holds a carriage return, which .env cannot hold")?;
-    Ok((report, text))
+    Ok((report, text, made))
 }
 
 /// Writes `text` to `home`'s `.env`, replacing one only when `replace`.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::*;
-use crate::tests::{SAVES, saves_with};
+use crate::tests::{SAVES, empty_saves, saves_scalar, saves_with};
 use hyscribe_config::{Constants, Secret};
 use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt;
@@ -137,8 +137,8 @@ fn an_existing_site_is_copied() {
     assert_eq!(
         ran.out,
         format!(
-            "? Path to the WordPress folder or its wp-config.php (none if there is none) \
-             [{site}]:   Read {site}/wp-config.php\n\
+            "? Path to the WordPress folder or its wp-config.php (none if there is none, \
+             new for a new site) [{site}]:   Read {site}/wp-config.php\n\
              ? Start in shadow mode (read only) first? [Y/n]: \
              ? Database user granted only SELECT, for every read (empty for none): \
              ? Running HyScribe behind a proxy? [y/N]: ? Address to listen on [127.0.0.1]: \
@@ -361,7 +361,8 @@ fn everything_is_asked_without_wp_config() {
     assert_eq!(ran.result, Ok(install.written()));
     assert_no_secrets(&ran.out);
     for expected in [
-        "? Path to the WordPress folder or its wp-config.php (none if there is none): ",
+        "? Path to the WordPress folder or its wp-config.php (none if there is none, new for a new \
+         site): ",
         "? Database name: ",
         "? Database password: ",
         "? Database host [localhost]: ",
@@ -829,4 +830,222 @@ fn passwords_are_read_with_echo_off() {
         tty: Some(null.as_fd()),
     };
     assert_eq!(terminal.secret("Password"), Ok("open".into()));
+}
+
+/// The answers of a new site in `wordpress_saves`, from the path question to
+/// the uploads folder: the database details and `prefix`, the optional read
+/// user, the default network, and `site` for the site's own questions.
+fn new_site_answers(prefix: &str, read_user: &str, site: &str) -> String {
+    let db = hyscribe_testkit::fixture_database();
+    format!(
+        "new\nwordpress_saves\n{}\n{}\n{}\n{}\n{prefix}\n{read_user}\n{}\n\n\n{site}\n",
+        db.user,
+        db.password.expose(),
+        db.host,
+        db.port,
+        if read_user.is_empty() {
+            ""
+        } else {
+            "reference-only\n"
+        },
+    )
+}
+
+/// The site questions' answers of a good site, with `password` twice.
+fn good_site(password: &str) -> String {
+    format!("My Site\nowner\n{password}\n{password}\nowner@example.org\n\n\n")
+}
+
+#[test]
+fn a_new_site_is_installed_in_an_empty_database() {
+    let _one = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    empty_saves();
+    let install = Install::new(Some(&wp_config("")));
+    let ran = wizard(
+        &install.home,
+        &new_site_answers("", "", &good_site("pass phrase")),
+    );
+    assert_eq!(ran.result, Ok(install.written()), "{}", ran.out);
+    assert_no_secrets(&ran.out);
+    for expected in [
+        "? Site title: ",
+        "? Administrator user name: ",
+        "? Administrator password (empty for a generated one): ",
+        "? Password again: ",
+        "? Administrator email address: ",
+        "? Discourage search engines from indexing this site? [y/N]: ",
+        "? Site address, where visitors will open it [http://127.0.0.1:8080]: ",
+        "  Installed WordPress 7.1.3's 12 tables and first content in wordpress_saves\n",
+        "  Connected to wordpress_saves on ",
+    ] {
+        assert!(ran.out.contains(expected), "{expected}\n{}", ran.out);
+    }
+    // A new site is written to: no shadow question, primary mode.
+    assert!(!ran.out.contains("shadow mode"), "{}", ran.out);
+    assert!(!ran.out.contains("shown once"), "{}", ran.out);
+    assert_eq!(install.config().mode, Mode::Primary);
+    let option = |name: &str| {
+        saves_scalar(&format!(
+            "SELECT option_value FROM wp_options WHERE option_name = '{name}'"
+        ))
+    };
+    assert_eq!(option("blogname").as_deref(), Some("My Site"));
+    assert_eq!(option("siteurl").as_deref(), Some("http://127.0.0.1:8080"));
+    assert_eq!(option("blog_public").as_deref(), Some("1"));
+    let hash = saves_scalar("SELECT user_pass FROM wp_users WHERE user_login = 'owner'").unwrap();
+    assert!(hyscribe_auth::check_password(
+        b"pass phrase",
+        hash.as_bytes()
+    ));
+    empty_saves();
+}
+
+#[test]
+fn a_made_password_is_shown_once_and_works() {
+    let _one = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    empty_saves();
+    let install = Install::new(None);
+    // Discouraging search engines, at another address, in another prefix.
+    let site = "\nowner\n\n\nowner@example.org\ny\nhttps://example.org/blog/\n";
+    let ran = wizard(&install.home, &new_site_answers("fresh_", "", site));
+    assert_eq!(ran.result, Ok(install.written()), "{}", ran.out);
+    let shown = ran
+        .out
+        .split("Administrator password, shown once: ")
+        .nth(1)
+        .unwrap();
+    let password = shown.lines().next().unwrap();
+    assert_eq!(password.len(), 12, "{password}");
+    let hash = saves_scalar("SELECT user_pass FROM fresh_users").unwrap();
+    assert!(hyscribe_auth::check_password(
+        password.as_bytes(),
+        hash.as_bytes()
+    ));
+    let blog_public = "SELECT option_value FROM fresh_options WHERE option_name = 'blog_public'";
+    assert_eq!(saves_scalar(blog_public).as_deref(), Some("0"));
+    let home = "SELECT option_value FROM fresh_options WHERE option_name = 'home'";
+    assert_eq!(
+        saves_scalar(home).as_deref(),
+        Some("https://example.org/blog")
+    );
+    let nag = "SELECT meta_value FROM fresh_usermeta WHERE meta_key = 'default_password_nag'";
+    assert_eq!(saves_scalar(nag).as_deref(), Some("1"));
+    assert_eq!(install.config().database.prefix.as_str(), "fresh_");
+    empty_saves();
+}
+
+#[test]
+fn a_new_site_asks_again_after_a_refusal() {
+    let _one = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    empty_saves();
+    let install = Install::new(None);
+    let refused = "T\nbad/name\npw\npw\na@b.co\n\n\n";
+    let site = format!("{refused}{}", good_site("pw"));
+    let ran = wizard(&install.home, &new_site_answers("", "", &site));
+    assert_eq!(ran.result, Ok(install.written()), "{}", ran.out);
+    assert!(
+        ran.out
+            .contains("  The username you provided has invalid characters.\n"),
+        "{}",
+        ran.out
+    );
+    empty_saves();
+    // Three refusals stop it, and nothing is made.
+    let install = Install::new(None);
+    let site = format!("{refused}{refused}{refused}");
+    let ran = wizard(&install.home, &new_site_answers("", "", &site));
+    assert_eq!(
+        ran.result,
+        Err("setup stopped: the new site's answers were refused three times".into())
+    );
+    assert_eq!(
+        saves_scalar(
+            "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()"
+        )
+        .as_deref(),
+        Some("0")
+    );
+}
+
+#[test]
+fn a_new_site_is_not_installed_over_tables() {
+    let _one = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    saves_with(&[]);
+    let install = Install::new(None);
+    let ran = wizard(&install.home, &new_site_answers("", "", &good_site("pw")));
+    let err = ran.result.unwrap_err();
+    assert!(
+        err.contains("already has tables with the prefix wp_: wp_commentmeta"),
+        "{err}"
+    );
+    assert!(!install.env().exists());
+    // The site that was there is as it was.
+    assert_eq!(
+        saves_scalar("SELECT COUNT(*) FROM wp_posts").as_deref(),
+        Some("3")
+    );
+    saves_with(&[]);
+}
+
+#[test]
+fn a_failure_after_the_install_drops_the_new_site() {
+    let _one = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    empty_saves();
+    let tables = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()";
+    let install = Install::new(None);
+    // A read user that cannot connect fails the checks.
+    let site = good_site("pw");
+    let ran = wizard(&install.home, &new_site_answers("", "nobody", &site));
+    let err = ran.result.unwrap_err();
+    assert!(
+        err.starts_with("cannot connect to wordpress_saves on "),
+        "{err}"
+    );
+    assert!(
+        err.ends_with("; the new site's tables were dropped"),
+        "{err}"
+    );
+    assert_eq!(saves_scalar(tables).as_deref(), Some("0"));
+    // So does an `.env` that cannot be written.
+    std::fs::set_permissions(&install.home, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let ran = wizard(&install.home, &new_site_answers("", "", &site));
+    std::fs::set_permissions(&install.home, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let err = ran.result.unwrap_err();
+    assert!(err.starts_with("cannot write "), "{err}");
+    assert!(
+        err.ends_with("; the new site's tables were dropped"),
+        "{err}"
+    );
+    assert_eq!(saves_scalar(tables).as_deref(), Some("0"));
+}
+
+#[test]
+fn the_site_address_offered_is_where_a_browser_opens_it() {
+    for (host, port, home) in [
+        ("127.0.0.1", "8080", "http://127.0.0.1:8080"),
+        ("0.0.0.0", "80", "http://127.0.0.1"),
+        ("::", "8080", "http://127.0.0.1:8080"),
+        ("::1", "8080", "http://[::1]:8080"),
+        ("example.org", "80", "http://example.org"),
+    ] {
+        assert_eq!(default_home(host, port), home);
+    }
+}
+
+#[tokio::test]
+async fn tables_that_cannot_be_dropped_are_reported() {
+    let unreachable = Database {
+        port: 1,
+        ..hyscribe_testkit::fixture_database()
+    };
+    let installed = Installed {
+        generated: None,
+        tables: vec!["options".into()],
+    };
+    assert_eq!(unmade(None, "failed".into()).await, "failed");
+    let err = unmade(Some((unreachable, installed)), "failed".into()).await;
+    assert!(
+        err.starts_with("failed; dropping the new site's tables failed too: "),
+        "{err}"
+    );
 }

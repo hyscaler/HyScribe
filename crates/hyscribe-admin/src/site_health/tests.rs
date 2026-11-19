@@ -21,6 +21,16 @@ fn golden(role: &str) -> String {
     String::from_utf8(unhex(row.rsplit('\t').next().unwrap())).unwrap()
 }
 
+/// The golden of the Status tab for `role`.
+fn status_golden(role: &str) -> String {
+    let golden = include_str!("../../tests/golden/site-health.tsv");
+    let row = golden
+        .lines()
+        .find(|line| line.starts_with(&format!("site-health.php\t{role}\t")))
+        .unwrap();
+    String::from_utf8(unhex(row.rsplit('\t').next().unwrap())).unwrap()
+}
+
 /// The Info tab of `role`'s site.
 fn ours(role: &'static str) -> Option<String> {
     let canonical = format!("{SITE}/hs-admin/site-health?tab=debug");
@@ -267,4 +277,63 @@ fn sections_print_as_php_s() {
     assert!(html.contains("\t\t\t\t\t\tA &amp; B\t\t\t\t\t\t\t\t\t\t\t</span>"));
     assert!(html.contains("<tr><th scope=\"row\">&lt;A&gt;</th><td>x &amp; y</td></tr>"));
     assert!(html.contains("<tr><th scope=\"row\">F</th><td>secret</td></tr>"));
+}
+
+/// The Status tab's page without the results its script receives: PHP's
+/// own checks, and the tests it leaves to the browser.
+fn without_results(page: &str) -> String {
+    let (head, rest) = page.split_once("\"direct\":").unwrap();
+    let (_, tail) = rest.split_once(",\"issues\":").unwrap();
+    format!("{head}\"direct\":[],\"issues\":{tail}")
+}
+
+/// The Status tab's frame, text, tabs and script data are PHP's byte for
+/// byte; only the results differ, as HyScribe runs its own checks.
+#[test]
+fn the_status_tab_is_php_s() {
+    let php = hs_admin_page(&status_golden("administrator"));
+    let canonical = format!("{SITE}/hs-admin/site-health");
+    let request = request(&canonical, "/hs-admin/site-health", &BROWSER);
+    let page = status(&Role("administrator"), &request).unwrap();
+    let (php, page) = (without_results(&php), without_results(&page));
+    assert!(page == php, "{}", first_difference(&php, &page));
+    assert!(page.contains("<title>Site Health - Status &lsaquo;"));
+    assert!(page.contains("class=\"health-check-tab active\">Status</a>"));
+}
+
+/// The results the script receives: HyScribe's six checks, as its `direct`
+/// list, and none left to run later.
+#[test]
+fn the_status_tab_sends_hyscribe_s_checks() {
+    let canonical = format!("{SITE}/hs-admin/site-health");
+    let request = request(&canonical, "/hs-admin/site-health", &BROWSER);
+    let page = status(&Role("t34bad:administrator"), &request).unwrap();
+    let (_, rest) = page.split_once("\"direct\":").unwrap();
+    let (direct, rest) = rest.split_once(",\"async\":").unwrap();
+    assert_eq!(rest.split_once(",\"issues\":").unwrap().0, "[]");
+    for test in [
+        "hyscribe_version",
+        "sql_server",
+        "https_status",
+        "hyscribe_env_permissions",
+        "available_updates_disk_space",
+        "hyscribe_service",
+    ] {
+        let name = format!("\"test\":\"{test}\"");
+        assert_eq!(direct.matches(&name).count(), 1, "{test}");
+    }
+    assert!(direct.starts_with("[{\"label\":\"Your version of HyScribe"));
+    assert!(direct.contains("\"status\":\"critical\""));
+    // The Info tab sends none.
+    let info = ours("administrator").unwrap();
+    assert!(info.contains("\"direct\":[],\"async\":[]"));
+}
+
+/// Who may not view the checks is refused as PHP refuses.
+#[test]
+fn the_status_tab_refuses_others() {
+    assert!(status_golden("editor").starts_with("403\t"));
+    let canonical = format!("{SITE}/hs-admin/site-health");
+    let request = request(&canonical, "/hs-admin/site-health", &BROWSER);
+    assert_eq!(status(&Role("editor"), &request), None);
 }

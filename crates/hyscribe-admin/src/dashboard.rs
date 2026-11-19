@@ -7,7 +7,7 @@ use hyscribe_kses::{
 };
 use hyscribe_model::{Comment, Post, User};
 use hyscribe_phpser::is_empty_string;
-use hyscribe_phpser::{Maybe, Value, json_decode, maybe_unserialize, parse_str};
+use hyscribe_phpser::{Key, Maybe, Value, json_decode, maybe_unserialize, parse_str};
 use hyscribe_render::date::{self, Zone};
 use hyscribe_render::formatting::convert_chars;
 use hyscribe_render::{comment_avatar, number_format, wp_trim_words};
@@ -962,7 +962,10 @@ pub fn dashboard(site: &dyn DashboardSite, request: &Request) -> Option<String> 
         format!("var communityEventsData = {};", json(&community)),
     )];
     if site.can("view_site_health_checks") {
-        script_data.push(("site-health", site_health_data(site, "dashboard")));
+        script_data.push((
+            "site-health",
+            site_health_data(site, "dashboard", Vec::new()),
+        ));
     }
     let footer_scripts = if tables > 0 {
         editor_footer(site)
@@ -1042,8 +1045,13 @@ fn help_content(site: &dyn DashboardSite) -> String {
     help
 }
 
-/// The `site-health` script's `SiteHealth` on `screen`, with no test to run.
-pub(crate) fn site_health_data(site: &dyn DashboardSite, screen: &str) -> String {
+/// The `site-health` script's `SiteHealth` on `screen`, with the `direct`
+/// results of the tests the Status tab ran, and no test to run later.
+pub(crate) fn site_health_data(
+    site: &dyn DashboardSite,
+    screen: &str,
+    direct: Vec<Value>,
+) -> String {
     let health = object(vec![
         ("screen", text(screen)),
         (
@@ -1059,7 +1067,10 @@ pub(crate) fn site_health_data(site: &dyn DashboardSite, screen: &str) -> String
         (
             "site_status",
             object(vec![
-                ("direct", Value::Array(Vec::new())),
+                (
+                    "direct",
+                    Value::Array((0..).map(Key::Int).zip(direct).collect()),
+                ),
                 ("async", Value::Array(Vec::new())),
                 ("issues", issue_counts(site)),
             ]),

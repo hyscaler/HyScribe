@@ -2100,6 +2100,24 @@ impl crate::site_health::HealthSite for Role {
             "utf8mb4_unicode_520_ci".into(),
         )
     }
+    /// A healthy machine, or in `t34bad` one with every check failing.
+    fn environment(&self) -> crate::site_health::Environment {
+        use crate::site_health::{EnvFile, Environment};
+        if self.variant() == "t34bad" {
+            return Environment {
+                env_file: EnvFile::Mode(0o644),
+                disk_free: Some(1 << 20),
+                service_pid: None,
+                pid: 4242,
+            };
+        }
+        Environment {
+            env_file: EnvFile::Mode(0o600),
+            disk_free: Some(5 << 30),
+            service_pid: Some(4242),
+            pid: 4242,
+        }
+    }
 }
 
 /// The post meta of the site icons `reference/site-icon/content.sql` adds.

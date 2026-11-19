@@ -306,6 +306,14 @@ async fn redirects_stay_on_the_allowed_hosts() {
         .await;
     assert_eq!(followed.unwrap().body, b"ok");
     assert_eq!(table.dialed().len(), 2);
+    // The URL itself is the caller's to check: only hops are judged.
+    let table = Table::new(redirecting_once().await);
+    let client = super::tests::client(Arc::clone(&table));
+    let later = allow(&["two.test"]);
+    let started = client
+        .get_within(b"http://pages.test/", b"", args(), &later)
+        .await;
+    assert_eq!(started.unwrap().body, b"ok");
     // Within the same host, on the list: followed as without a list.
     let client = super::tests::client(Table::new(site()));
     let same = client

@@ -23,8 +23,8 @@ pub(crate) struct Feeds {
     pub(crate) options: RefCell<Vec<(String, Vec<u8>)>>,
     pub(crate) hosts: Vec<Vec<u8>>,
     pub(crate) fetches: bool,
-    /// Whether every fetch is stopped by a redirect off the list.
-    pub(crate) away: bool,
+    /// The error every fetch fails with, if any.
+    pub(crate) error: Option<&'static [u8]>,
     pub(crate) hooks: Box<dyn Hooks>,
 }
 
@@ -37,7 +37,7 @@ impl Feeds {
             options: RefCell::new(Vec::new()),
             hosts: vec![b"pages.test".to_vec()],
             fetches: true,
-            away: false,
+            error: None,
             hooks: Box::new(()),
         }
     }
@@ -87,8 +87,8 @@ impl Site for Feeds {
     fn remote_get(&self, url: &[u8], args: &Get) -> Option<Result<Response, Vec<u8>>> {
         assert_eq!(args.timeout, 10);
         assert_eq!(args.redirects, Redirects::Feeds);
-        if self.away {
-            return Some(Err(NOT_ALLOWED.to_vec()));
+        if let Some(error) = self.error {
+            return Some(Err(error.to_vec()));
         }
         self.fetches.then(|| testing::get(url, args.limit))
     }
@@ -302,10 +302,16 @@ fn unreachable_feeds_render_as_php_renders_them() {
     }
     // A redirect off the list ends as an unreachable feed, nothing cached.
     let mut away = Feeds::new();
-    away.away = true;
+    away.error = Some(NOT_ALLOWED);
     let html = Renderer::new(&theme, &away, &request).render(block);
     assert!(String::from_utf8_lossy(&html).contains(unreachable));
     assert!(away.options.borrow().is_empty());
+    // Any other failure keeps its own words.
+    let mut slow = Feeds::new();
+    slow.error = Some(b"cURL error 28: Operation timed out");
+    let html = Renderer::new(&theme, &slow, &request).render(block);
+    let html = String::from_utf8_lossy(&html);
+    assert!(html.contains("WP HTTP Error: cURL error 28: Operation timed out"));
     let mut refused = Feeds::new();
     refused.hosts = vec![b"nowhere.test".to_vec()];
     let block = br#"<!-- wp:rss {"feedURL":"http://nowhere.test/feed"} /-->"#;

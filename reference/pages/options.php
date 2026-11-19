@@ -10,8 +10,8 @@
 // HyScribe makes none, but those to the test site pages.test, which
 // reference/url-details/serve.sh serves and the RSS block of the Theme Test
 // Data reads. The navigation block's fallback does not
-// create a post from a classic menu, which is not ported, unless the
-// options carry _fallback=1; names starting with _ are no options.
+// create a post (WP_Navigation_Fallback) unless the options carry
+// _fallback=1; names starting with _ are no options.
 add_filter(
 	'pre_http_request',
 	fn( $pre, $args, $url ) => 'pages.test' === wp_parse_url( $url, PHP_URL_HOST ) ? $pre : new WP_Error( 'http_request_failed', 'Offline.' ),

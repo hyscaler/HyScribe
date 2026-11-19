@@ -143,6 +143,9 @@ pub struct Site {
     embed_hosts: Arc<hyscribe_render::site::EmbedHosts>,
     /// The mail transport (ADR 0016), off until [`Site::with_mail`].
     mailer: Arc<hyscribe_mail::Mailer>,
+    /// The filters rendering runs, under WordPress's names: none attached
+    /// until the extension runtime (M6).
+    hooks: Arc<dyn hyscribe_render::site::Hooks + Send + Sync>,
 }
 
 /// A transport that sends nothing.
@@ -202,6 +205,7 @@ impl Site {
             feed_hosts: Arc::default(),
             embed_hosts: Arc::default(),
             mailer: Arc::new(mail_off()),
+            hooks: Arc::new(()),
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
             if let Some(url) = url {
@@ -251,6 +255,7 @@ impl Site {
             feed_hosts: Arc::clone(&self.feed_hosts),
             embed_hosts: Arc::clone(&self.embed_hosts),
             mailer: Arc::clone(&self.mailer),
+            hooks: Arc::clone(&self.hooks),
         };
         site.build_rewriter();
         Ok(site)

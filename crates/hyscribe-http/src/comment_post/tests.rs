@@ -506,6 +506,7 @@ async fn a_failed_read_is_the_database_error_page() {
         feed_hosts: Arc::default(),
         embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
+        hooks: Arc::new(()),
     });
     let cookie = format!(
         "hyscribe_logged_in_{}=admin%7C9999999999%7Ctoken%7Chmac",

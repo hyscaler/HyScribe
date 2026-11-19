@@ -4,6 +4,7 @@ use super::*;
 use crate::embed::tests::Embeds;
 
 /// `oembed_result` sees every embed and can drop one.
+#[derive(Debug)]
 struct Dropping;
 
 impl crate::outbound::Hooks for Dropping {

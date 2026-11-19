@@ -132,6 +132,7 @@ impl Site for Embeds {
 }
 
 /// The golden script's plugin: the YouTube provider pointed at the test site.
+#[derive(Debug)]
 struct TestSite;
 
 impl Hooks for TestSite {

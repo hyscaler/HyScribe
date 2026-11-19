@@ -133,6 +133,14 @@ impl RenderSite for Reads<'_> {
         self.forget_transient(name);
     }
 
+    fn hooks(&self) -> &dyn hyscribe_render::site::Hooks {
+        &*self.site.hooks
+    }
+
+    fn insert_navigation_fallback(&self, title: &[u8], name: &[u8], content: &[u8]) {
+        write(self.site, self, Write::Navigation(title, name, content));
+    }
+
     fn wp_hash(&self, data: &[u8]) -> Option<String> {
         let salt = self.site.salt("auth", |name| self.option(name))?;
         Some(hyscribe_phpser::hash_hmac_md5(data, &salt))

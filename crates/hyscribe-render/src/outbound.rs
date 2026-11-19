@@ -98,7 +98,7 @@ pub struct Size {
 /// WordPress's names and in its argument order; each returns its first argument unless a
 /// plugin changes it. None skips a check: the fetch client's rules hold
 /// for whatever URL they give.
-pub trait Hooks {
+pub trait Hooks: std::fmt::Debug {
     /// `oembed_fetch_url`: the provider URL with its arguments.
     fn oembed_fetch_url(&self, provider: Vec<u8>, _url: &[u8], _args: Size) -> Vec<u8> {
         provider
@@ -230,6 +230,21 @@ pub trait Hooks {
     /// `wp_mediaelement_fallback`: the no-script fallback of a player.
     fn wp_mediaelement_fallback(&self, output: Vec<u8>, _url: &[u8]) -> Vec<u8> {
         output
+    }
+
+    /// `wp_navigation_should_create_fallback`.
+    fn wp_navigation_should_create_fallback(&self, create: bool) -> bool {
+        create
+    }
+
+    /// `nav_menu_attr_title`: a classic menu item's title attribute.
+    fn nav_menu_attr_title(&self, title: Vec<u8>) -> Vec<u8> {
+        title
+    }
+
+    /// `nav_menu_description`: a classic menu item's description.
+    fn nav_menu_description(&self, description: Vec<u8>) -> Vec<u8> {
+        description
     }
 
     /// `wp_audio_shortcode`, `wp_video_shortcode`: a player's markup.

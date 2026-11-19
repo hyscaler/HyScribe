@@ -61,6 +61,8 @@ async fn tables_are_made_filled_and_dropped() {
     let _one = ONE_AT_A_TIME.lock().await;
     let mut installer = emptied("ins_").await;
     assert!(installer.existing().await.unwrap().is_empty());
+    // One connection, so the session's lock wait limit holds for every statement.
+    assert_eq!(installer.pool.options().get_max_connections(), 1);
     assert_eq!(installer.create(THINGS).await.unwrap(), "things");
     assert_eq!(installer.existing().await.unwrap(), ["ins_things"]);
     installer

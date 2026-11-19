@@ -899,6 +899,10 @@ fn a_new_site_is_installed_in_an_empty_database() {
         b"pass phrase",
         hash.as_bytes()
     ));
+    // The rows carry the time of the install.
+    let age = "SELECT TIMESTAMPDIFF(MINUTE, user_registered, UTC_TIMESTAMP()) FROM wp_users";
+    let minutes: i64 = saves_scalar(age).unwrap().parse().unwrap();
+    assert!((0..5).contains(&minutes), "{minutes}");
     empty_saves();
 }
 

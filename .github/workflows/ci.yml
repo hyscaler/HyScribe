@@ -49,6 +49,7 @@ jobs:
         - hyscribe-sccache:/cache/sccache
     defaults:
       run:
+        shell: bash
         working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
     timeout-minutes: 40
     env:
@@ -103,6 +104,7 @@ jobs:
         - hyscribe-sccache:/cache/sccache
     defaults:
       run:
+        shell: bash
         working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
     timeout-minutes: 90
     env:
@@ -157,6 +159,7 @@ jobs:
         - hyscribe-sccache:/cache/sccache
     defaults:
       run:
+        shell: bash
         working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
     timeout-minutes: 40
     env:
@@ -200,6 +203,7 @@ jobs:
         - hyscribe-sccache:/cache/sccache
     defaults:
       run:
+        shell: bash
         working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
     timeout-minutes: 60
     steps:

@@ -32,6 +32,7 @@ jobs:
         - hyscribe-cargo:/cache/cargo
     defaults:
       run:
+        shell: bash
         working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
     timeout-minutes: 120
     env:
@@ -69,7 +70,7 @@ jobs:
       - name: Switch back to PHP WordPress (MVP 8.5, GOALS S7)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
-          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" "8093=$HYSCRIBE_PHP_CONTAINER:80" || true
+          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" "8093=$HYSCRIBE_PHP_CONTAINER:80"
           reference/switch-back/run.sh
       - name: Remove the fixture containers
         if: always() && matrix.target == 'x86_64-unknown-linux-musl'
@@ -103,6 +104,7 @@ jobs:
         - hyscribe-cargo:/cache/cargo
     defaults:
       run:
+        shell: bash
         working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
     timeout-minutes: 30
     permissions:

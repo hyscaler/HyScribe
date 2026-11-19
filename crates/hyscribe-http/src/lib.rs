@@ -134,6 +134,8 @@ pub struct Site {
     fetch: Option<Arc<hyscribe_fetch::Client>>,
     /// The hosts the RSS block may fetch from (`RSS_ALLOWED_HOSTS`).
     feed_hosts: Arc<Vec<Vec<u8>>>,
+    /// Where embeds may fetch from (`EMBED_ALLOWED_HOSTS`).
+    embed_hosts: Arc<hyscribe_render::site::EmbedHosts>,
     /// The mail transport (ADR 0016), off until [`Site::with_mail`].
     mailer: Arc<hyscribe_mail::Mailer>,
 }
@@ -192,6 +194,7 @@ impl Site {
             install: unconfigured(),
             fetch: None,
             feed_hosts: Arc::default(),
+            embed_hosts: Arc::default(),
             mailer: Arc::new(mail_off()),
         };
         for ((name, constant), url) in URL_CONSTANTS.into_iter().zip([home, siteurl]) {
@@ -239,6 +242,7 @@ impl Site {
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
             feed_hosts: Arc::clone(&self.feed_hosts),
+            embed_hosts: Arc::clone(&self.embed_hosts),
             mailer: Arc::clone(&self.mailer),
         };
         site.build_rewriter();
@@ -335,6 +339,16 @@ impl Site {
         let hosts = hosts.iter().map(|host| host.as_bytes().to_vec()).collect();
         Site {
             feed_hosts: Arc::new(hosts),
+            ..self
+        }
+    }
+
+    /// The site with the hosts embeds may fetch from.
+    pub fn with_embed_hosts(self, providers: bool, hosts: &[String]) -> Site {
+        let hosts = hosts.iter().map(|host| host.as_bytes().to_vec()).collect();
+        let embed_hosts = Arc::new(hyscribe_render::site::EmbedHosts { providers, hosts });
+        Site {
+            embed_hosts,
             ..self
         }
     }

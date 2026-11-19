@@ -6,7 +6,7 @@ use hyscribe_model::{Post, PostQuery, Term};
 use hyscribe_testkit::unhex;
 
 use crate::fixture::DefaultInstall;
-use crate::outbound::{Get, Hooks, Response, Size, testing};
+use crate::outbound::{EmbedHosts, Get, Hooks, Response, Size, testing};
 use crate::site::{Request, Site};
 use crate::template::Renderer;
 use crate::theme::twentytwentyfive;
@@ -21,6 +21,7 @@ pub(crate) struct Embeds {
     pub(crate) hooks: Box<dyn Hooks>,
     pub(crate) asked: RefCell<Vec<Vec<u8>>>,
     pub(crate) limits: RefCell<Vec<Option<usize>>>,
+    pub(crate) allowed: EmbedHosts,
 }
 
 impl Embeds {
@@ -35,6 +36,14 @@ impl Embeds {
             hooks: Box::new(()),
             asked: RefCell::new(Vec::new()),
             limits: RefCell::new(Vec::new()),
+            allowed: EmbedHosts {
+                providers: true,
+                hosts: vec![
+                    b"pages.test".to_vec(),
+                    b"nowhere.example".to_vec(),
+                    b".mp3".to_vec(),
+                ],
+            },
         }
     }
 
@@ -106,6 +115,10 @@ impl Site for Embeds {
 
     fn hooks(&self) -> &dyn Hooks {
         self.hooks.as_ref()
+    }
+
+    fn embed_hosts(&self) -> &EmbedHosts {
+        &self.allowed
     }
 }
 
@@ -229,6 +242,57 @@ fn fetches_off_leave_urls() {
     }
     assert!(site.meta.borrow().is_empty());
     assert_eq!(site.asked.borrow().len(), 2);
+}
+
+/// A host outside the list makes no request and writes no cache row; a
+/// provider needs the providers on or its host listed.
+#[test]
+fn hosts_outside_the_list_are_not_fetched() {
+    let theme = twentytwentyfive();
+    let request = Request {
+        post: Some(1),
+        ..Request::default()
+    };
+    let page = &b"http://pages.test:8080/oembed/rich.html"[..];
+    let provider = &b"https://www.youtube.com/watch?v=x"[..];
+    let cases = [
+        // (providers, hosts, url, fetches)
+        (true, &[][..], page, false),
+        (true, &["Elsewhere.test"][..], page, false),
+        (false, &["pages.test"][..], page, true),
+        (true, &["pages.test"][..], page, true),
+        (false, &[][..], provider, false),
+        (false, &["other.test"][..], provider, false),
+        (true, &[][..], provider, true),
+        (false, &["www.youtube.com"][..], provider, true),
+    ];
+    for (providers, hosts, url, fetches) in cases {
+        let mut site = Embeds::new();
+        site.fetches = false;
+        site.allowed = EmbedHosts {
+            providers,
+            hosts: hosts
+                .iter()
+                .map(|h| h.to_ascii_lowercase().into_bytes())
+                .collect(),
+        };
+        let ours = Renderer::new(&theme, &site, &request).autoembed(url);
+        assert_eq!(ours, url);
+        let asked = site.asked.borrow().len();
+        assert_eq!(asked > 0, fetches, "{providers} {hosts:?} {url:?}");
+        assert!(site.meta.borrow().is_empty());
+    }
+}
+
+/// The default is the providers, and nothing else.
+#[test]
+fn default_allows_the_providers() {
+    let default = EmbedHosts::default();
+    assert!(default.providers && default.hosts.is_empty());
+    let site = DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    assert_eq!(*site.embed_hosts(), default);
 }
 
 /// What is not ported fetches nothing: no post, the site's own host and

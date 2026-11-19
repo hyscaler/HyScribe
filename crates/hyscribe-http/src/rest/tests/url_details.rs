@@ -266,7 +266,8 @@ async fn rendering_fetches_and_caches_through_the_site() {
         let site = Arc::new(
             Arc::into_inner(site)
                 .unwrap()
-                .with_feed_hosts(&["pages.test".to_string()]),
+                .with_feed_hosts(&["pages.test".to_string()])
+                .with_embed_hosts(false, &["embed.test".to_string()]),
         );
         let handle = tokio::runtime::Handle::current();
         let checked = Arc::clone(&site);
@@ -274,6 +275,13 @@ async fn rendering_fetches_and_caches_through_the_site() {
             let reads = crate::reads::Reads::new(&checked, handle);
             assert!(reads.feed_allowed(b"pages.test"));
             assert!(!reads.feed_allowed(b"other.test"));
+            let tuned = hyscribe_render::site::EmbedHosts {
+                providers: false,
+                hosts: vec![b"embed.test".to_vec()],
+            };
+            assert_eq!(reads.embed_hosts(), &tuned);
+            let default = hyscribe_render::site::EmbedHosts::default();
+            assert_eq!(reads.embed_hosts(), &default);
             let get = Get::new(&reads);
             let page = reads.remote_get(b"http://pages.test:8080/page.html", &get);
             let page = page.unwrap().unwrap();

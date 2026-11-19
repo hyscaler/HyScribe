@@ -379,3 +379,10 @@ path = "fuzz_targets/xml_reader.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "config_host_lists"
+path = "fuzz_targets/config_host_lists.rs"
+test = false
+doc = false
+bench = false

@@ -262,6 +262,8 @@ pub struct Config {
     /// comma separated, lower case; none by default (the decision
     /// of 2026-11-10).
     pub rss_allowed_hosts: Vec<String>,
+    /// `EMBED_ALLOWED_HOSTS`: where embeds may fetch from.
+    pub embed_allowed: EmbedAllowed,
     /// The capability constants.
     pub constants: Constants,
     /// The login rate limits.
@@ -420,22 +422,8 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
     let rest_public_users = boolean(get("REST_PUBLIC_USERS"), "REST_PUBLIC_USERS", true)?;
     let http_outbound = boolean(get("HTTP_OUTBOUND"), "HTTP_OUTBOUND", false)?;
 
-    let mut rss_allowed_hosts = Vec::new();
-    for host in get("RSS_ALLOWED_HOSTS").unwrap_or_default().split(',') {
-        let host = host.trim().to_ascii_lowercase();
-        let plain = host
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_'));
-        if !plain {
-            return Err(invalid(
-                "RSS_ALLOWED_HOSTS",
-                "must be host names separated by commas, without schemes, ports or paths",
-            ));
-        }
-        if !host.is_empty() && !rss_allowed_hosts.contains(&host) {
-            rss_allowed_hosts.push(host);
-        }
-    }
+    let rss_allowed_hosts = host_list("RSS_ALLOWED_HOSTS", get("RSS_ALLOWED_HOSTS"))?;
+    let embed_allowed = embed_allowed(get("EMBED_ALLOWED_HOSTS"))?;
 
     if boolean(get("MULTISITE"), "MULTISITE", false)? {
         return Err(invalid("MULTISITE", "multisite networks are not supported"));
@@ -514,6 +502,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         rest_public_users,
         http_outbound,
         rss_allowed_hosts,
+        embed_allowed,
         constants,
         login_limits,
         disable_wp_cron: boolean(get("DISABLE_WP_CRON"), "DISABLE_WP_CRON", false)?,
@@ -634,6 +623,60 @@ fn db_host(value: &str) -> Result<(String, Option<PathBuf>), ConfigError> {
             "a socket is given as localhost:/path/to/socket",
         )),
     }
+}
+
+/// Where embeds may fetch from: WordPress's oEmbed providers, and these
+/// hosts besides.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbedAllowed {
+    /// Whether the providers of WordPress's list are allowed.
+    pub providers: bool,
+    /// Further hosts, lower case; embeds there may use discovery.
+    pub hosts: Vec<String>,
+}
+
+/// Comma separated host names, lower case and without repeats; empty
+/// entries are skipped.
+fn host_list(key: &'static str, value: Option<&str>) -> Result<Vec<String>, ConfigError> {
+    let mut hosts = Vec::new();
+    for host in value.unwrap_or_default().split(',') {
+        let host = host.trim().to_ascii_lowercase();
+        let plain = host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_'));
+        if !plain {
+            return Err(invalid(
+                key,
+                "must be host names separated by commas, without schemes, ports or paths",
+            ));
+        }
+        if !host.is_empty() && !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    }
+    Ok(hosts)
+}
+
+/// `EMBED_ALLOWED_HOSTS`: unset, empty or `providers` allows the providers
+/// only; `providers,a.test` adds hosts; hosts alone drop the providers;
+/// `none` allows nothing.
+fn embed_allowed(value: Option<&str>) -> Result<EmbedAllowed, ConfigError> {
+    let mut hosts = host_list("EMBED_ALLOWED_HOSTS", value)?;
+    if hosts.is_empty() {
+        return Ok(EmbedAllowed {
+            providers: true,
+            hosts,
+        });
+    }
+    let none = hosts.iter().any(|host| host == "none");
+    hosts.retain(|host| host != "none");
+    if none && !hosts.is_empty() {
+        return Err(invalid("EMBED_ALLOWED_HOSTS", "none cannot be combined"));
+    }
+    let listed = hosts.len();
+    hosts.retain(|host| host != "providers");
+    let providers = hosts.len() < listed;
+    Ok(EmbedAllowed { providers, hosts })
 }
 
 fn invalid(key: &'static str, reason: &str) -> ConfigError {

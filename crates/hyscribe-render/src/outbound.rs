@@ -10,6 +10,23 @@ use hyscribe_phpser::{Key, Maybe, Value, maybe_unserialize};
 use crate::shortcode::Shortcode;
 use crate::site::Site;
 
+/// The message of a fetch stopped because a redirect left the allowed
+/// hosts, which no PHP request has: the embed stays a plain link
+/// and the feed is unreachable, and nothing is cached.
+pub const NOT_ALLOWED: &[u8] = b"A redirect left the allowed hosts.";
+
+/// Where a fetch's redirects may lead.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Redirects {
+    /// Anywhere the client allows.
+    #[default]
+    Any,
+    /// To a host `RSS_ALLOWED_HOSTS` names.
+    Feeds,
+    /// To one of these hosts, in lower case.
+    Hosts(Vec<Vec<u8>>),
+}
+
 /// `wp_safe_remote_get()`'s arguments that rendering sets.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Get {
@@ -19,6 +36,8 @@ pub struct Get {
     pub limit: Option<usize>,
     /// `user-agent`.
     pub user_agent: Vec<u8>,
+    /// Where redirects may lead: a deliberate difference from PHP.
+    pub redirects: Redirects,
 }
 
 impl Get {
@@ -29,6 +48,7 @@ impl Get {
             timeout: 5,
             limit: None,
             user_agent: [&b"WordPress/7.1.3; "[..], &site.home_url()].concat(),
+            redirects: Redirects::Any,
         }
     }
 }

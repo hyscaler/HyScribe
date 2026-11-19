@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use hyscribe_fetch::{Args, Kind};
 use hyscribe_phpser::{Value, decode};
-use hyscribe_render::outbound::{Get, Response};
+use hyscribe_render::outbound::{Get, NOT_ALLOWED, Redirects, Response};
 use hyscribe_write::options::{Meta, expire_site_transient, set_site_transient, update_metadata};
 
 use crate::Site;
@@ -22,6 +22,7 @@ pub(crate) fn message(kind: Kind) -> &'static [u8] {
     match kind {
         Kind::Invalid | Kind::Refused | Kind::Resolve => b"A valid URL was not provided.",
         Kind::Redirects => b"Too many redirects.",
+        Kind::Disallowed => NOT_ALLOWED,
         Kind::Timeout => b"cURL error 28: Operation timed out",
         Kind::Connect => b"cURL error 7: Couldn't connect to server",
         Kind::Tls => b"cURL error 60: SSL certificate problem",
@@ -46,7 +47,15 @@ pub(crate) fn remote_get(
     get: &Get,
 ) -> Option<Result<Response, Vec<u8>>> {
     let client = site.fetch.as_ref()?;
-    let fetched = reads.block_on(client.get(url, site.home.as_bytes(), args(get)));
+    let allowed = |host: &str| {
+        let host = host.to_ascii_lowercase().into_bytes();
+        match &get.redirects {
+            Redirects::Any => true,
+            Redirects::Feeds => site.feed_hosts.contains(&host),
+            Redirects::Hosts(hosts) => hosts.contains(&host),
+        }
+    };
+    let fetched = reads.block_on(client.get_within(url, site.home.as_bytes(), args(get), &allowed));
     Some(match fetched {
         Ok(fetched) => Ok(Response {
             status: fetched.status,

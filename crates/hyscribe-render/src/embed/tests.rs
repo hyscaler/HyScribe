@@ -6,7 +6,7 @@ use hyscribe_model::{Post, PostQuery, Term};
 use hyscribe_testkit::unhex;
 
 use crate::fixture::DefaultInstall;
-use crate::outbound::{EmbedHosts, Get, Hooks, Response, Size, testing};
+use crate::outbound::{EmbedHosts, Get, Hooks, NOT_ALLOWED, Redirects, Response, Size, testing};
 use crate::site::{Request, Site};
 use crate::template::Renderer;
 use crate::theme::twentytwentyfive;
@@ -22,6 +22,9 @@ pub(crate) struct Embeds {
     pub(crate) asked: RefCell<Vec<Vec<u8>>>,
     pub(crate) limits: RefCell<Vec<Option<usize>>>,
     pub(crate) allowed: EmbedHosts,
+    /// Whether every fetch is stopped by a redirect off the list.
+    pub(crate) away: bool,
+    pub(crate) redirects: RefCell<Vec<Redirects>>,
 }
 
 impl Embeds {
@@ -36,6 +39,8 @@ impl Embeds {
             hooks: Box::new(()),
             asked: RefCell::new(Vec::new()),
             limits: RefCell::new(Vec::new()),
+            away: false,
+            redirects: RefCell::new(Vec::new()),
             allowed: EmbedHosts {
                 providers: true,
                 hosts: vec![
@@ -95,6 +100,10 @@ impl Site for Embeds {
     fn remote_get(&self, url: &[u8], args: &Get) -> Option<Result<Response, Vec<u8>>> {
         self.asked.borrow_mut().push(url.to_vec());
         self.limits.borrow_mut().push(args.limit);
+        self.redirects.borrow_mut().push(args.redirects.clone());
+        if self.away {
+            return Some(Err(NOT_ALLOWED.to_vec()));
+        }
         assert!(
             args.user_agent
                 .starts_with(b"WordPress/7.1.3; http://127.0.0.1:8081")
@@ -282,6 +291,47 @@ fn hosts_outside_the_list_are_not_fetched() {
         assert_eq!(asked > 0, fetches, "{providers} {hosts:?} {url:?}");
         assert!(site.meta.borrow().is_empty());
     }
+}
+
+/// A fetch stopped by a redirect off the list leaves the URL as it is and
+/// writes no cache row, not even the failure's; the hosts redirects
+/// may reach are the listed ones and, when allowed, the providers'.
+#[test]
+fn redirects_off_the_list_leave_urls_uncached() {
+    let theme = twentytwentyfive();
+    let request = Request {
+        post: Some(1),
+        ..Request::default()
+    };
+    for url in [
+        &b"http://pages.test:8080/oembed/rich.html"[..],
+        b"https://www.youtube.com/watch?v=x",
+    ] {
+        let mut site = Embeds::new();
+        site.away = true;
+        let ours = Renderer::new(&theme, &site, &request).autoembed(url);
+        assert_eq!(ours, url);
+        assert!(site.meta.borrow().is_empty());
+        let seen = site.redirects.borrow();
+        let Some(Redirects::Hosts(hosts)) = seen.first() else {
+            panic!("embeds restrict redirects to hosts");
+        };
+        assert!(hosts.contains(&b"pages.test".to_vec()));
+        assert!(hosts.contains(&b"www.youtube.com".to_vec()));
+    }
+    let mut site = Embeds::new();
+    site.away = true;
+    site.allowed.providers = false;
+    Renderer::new(&theme, &site, &request).autoembed(b"http://pages.test:8080/x");
+    let seen = site.redirects.borrow();
+    assert_eq!(
+        seen.first(),
+        Some(&Redirects::Hosts(vec![
+            b"pages.test".to_vec(),
+            b"nowhere.example".to_vec(),
+            b".mp3".to_vec(),
+        ]))
+    );
 }
 
 /// The setting's default is the providers; a site that names none allows

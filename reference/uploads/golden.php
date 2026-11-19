@@ -27,7 +27,8 @@ $dir = "$base/2026/11";
 $names = array_map('basename', glob("$corpus/*"));
 sort($names);
 foreach ($names as $name) {
-	if (str_ends_with($name, '.php')) {
+	// The corpus also holds the files that are not images (media-corpus.sh).
+	if (!preg_match('/\.(jpe?g|png|gif|webp|avif|bmp|tiff?)$/', $name)) {
 		continue;
 	}
 	$file = "$dir/$name";
@@ -90,6 +91,54 @@ $renamed = [
 	['photo.jpg', 'photo.php'], ['photo.jpg', 'photo.svg'], ['photo.jpg', 'photo'], ['photo.jpg', 'photo.jpg.php'],
 	['photo.jpg', 'photo.php.jpg'], ['photo.jpg', 'photo.ico'], ['photo.jpg', 'photo.jpe'], ['rgb.png', 'rgb.PnG'], ['photo.bmp', 'photo.jpg'],
 ];
+// Files that are not images, under their own names and others.
+$kinds = [
+	'plain.txt' => ['txt', 'csv', 'vtt', 'ics', 'rtf', 'pdf', 'docx', 'mp3', 'mp4', 'jpg', 'zip', 'psd', 'doc'],
+	'words.csv' => ['csv', 'txt', 'tsv', 'vtt', 'pdf'],
+	'commas.txt' => ['txt', 'csv', 'rtx'],
+	'captions.vtt' => ['vtt', 'txt', 'srt', 'csv'],
+	'event.ics' => ['ics', 'txt', 'vtt'],
+	'script.txt' => ['txt', 'csv'],
+	'not-a-picture.bin' => ['jpg', 'png', 'txt', 'pdf', 'mp3', 'docx'],
+	'random.bin' => ['jpg', 'txt', 'pdf', 'mp3', 'mp4', 'docx', 'psd', 'zip'],
+	'one-byte.bin' => ['txt', 'mp3', 'pdf', 'jpg'],
+	'sample.pdf' => ['pdf', 'doc', 'txt', 'mp3', 'jpg', 'docx', 'zip'],
+	'sample.rtf' => ['rtf', 'txt', 'doc', 'pdf'],
+	'sample.zip' => ['zip', 'docx', 'xlsx', 'odt', 'pdf', 'txt', 'mp3', 'psd', 'gz'],
+	'sample.tar' => ['tar', 'zip', 'gz'],
+	'sample.gz' => ['gz', 'gzip', 'zip', 'tar'],
+	'sample.docx' => ['docx', 'xlsx', 'zip', 'doc', 'odt', 'pdf', 'docm', 'dotx', 'txt'],
+	'sample.xlsx' => ['xlsx', 'docx', 'pptx', 'xlsm', 'zip'],
+	'sample.odt' => ['odt', 'ods', 'docx', 'zip', 'pdf'],
+	'sample.ods' => ['ods', 'odt', 'xlsx'],
+	'sample.doc' => ['doc', 'xls', 'docx', 'pdf'],
+	'sample.xls' => ['xls', 'doc', 'xlsx'],
+	'cbr.mp3' => ['mp3', 'm4a', 'wav', 'ogg', 'mp4', 'txt', 'pdf', 'docx', 'jpg', 'aac'],
+	'noxing.mp3' => ['mp3', 'wav'],
+	'tagged.mp3' => ['mp3', 'mp4'],
+	'tone.wav' => ['wav', 'mp3', 'ogg', 'mp4', 'txt', 'pdf'],
+	'tone.flac' => ['flac', 'mp3', 'wav', 'mp4'],
+	'tone.ogg' => ['ogg', 'oga', 'mp3', 'ogv', 'mp4'],
+	'tone.m4a' => ['m4a', 'mp3', 'mp4', 'wav', 'm4b'],
+	'tone.aac' => ['aac', 'mp3', 'm4a'],
+	'tone.wma' => ['wma', 'wmv', 'mp3', 'asf', 'wax'],
+	'tune.mid' => ['mid', 'midi', 'mp3', 'wav'],
+	'clip.mp4' => ['mp4', 'm4v', 'mov', 'qt', 'webm', 'mp3', 'wav', 'txt', 'pdf', '3gp', 'avi', 'ogv'],
+	'clip-audio.mp4' => ['mp4', 'mov', 'mp3'],
+	'clip.mov' => ['mov', 'mp4', 'mp3'],
+	'clip.avi' => ['avi', 'divx', 'mp4', 'mp3'],
+	'clip.webm' => ['webm', 'mkv', 'mp4', 'mp3'],
+	'clip.mkv' => ['mkv', 'webm', 'mka', 'mp4'],
+	'clip.3gp' => ['3gp', '3gpp', '3g2', 'mp4', 'mp3'],
+	'clip.wmv' => ['wmv', 'asf', 'wma', 'mp4'],
+	'clip.flv' => ['flv', 'mp4', 'mp3'],
+	'clip.mpg' => ['mpg', 'mpeg', 'mpe', 'mp4', 'mp3'],
+];
+foreach ($kinds as $name => $exts) {
+	foreach ($exts as $ext) {
+		$renamed[] = [$name, 'upload.' . $ext];
+	}
+}
 foreach ($renamed as [$name, $upload]) {
 	$checked = wp_check_filetype_and_ext("$corpus/$name", $upload);
 	echo implode("\t", ['check', $name, $upload, var_export($checked['ext'], true), var_export($checked['type'], true), var_export($checked['proper_filename'], true)]), "\n";

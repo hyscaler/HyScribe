@@ -166,9 +166,14 @@ async fn uploads_are_refused_as_php_refuses_them() {
         refused(sent("a.php", corpus("small.jpg")), unfiltered),
         Refused::Unported
     );
-    // A type PHP checks with `fileinfo`.
+    // A type PHP checks with `fileinfo`: a JPEG named as text is refused as
+    // PHP refuses it, bytes libmagic gives no type are not decided.
     assert_eq!(
         refused(sent("a.txt", corpus("small.jpg")), WHO),
+        message(NOT_ALLOWED)
+    );
+    assert_eq!(
+        refused(sent("a.mp3", corpus("random.bin")), WHO),
         Refused::Unported
     );
     for (name, value) in [

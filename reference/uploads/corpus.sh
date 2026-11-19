@@ -8,6 +8,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# `corpus.sh media`: only the files that are not images, media-corpus.sh.
+[ "${1:-}" = media ] && exec "$ROOT/reference/uploads/media-corpus.sh"
 OUT="$ROOT/crates/hyscribe-image/tests/corpus"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -87,4 +89,4 @@ convert photo.ppm -resize 160x120! "$OUT/photo.bmp"
 convert photo.ppm -resize 80x60! "$OUT/photo.tif"
 # Over the oracle's ImageMagick area limit by its header alone.
 php -r 'echo "\x89PNG\r\n\x1a\n" . pack("N", 13) . "IHDR" . pack("NNCCCCC", 40000, 40000, 8, 2, 0, 0, 0) . "\0\0\0\0" . pack("N", 0) . "IEND" . "\xAE\x42\x60\x82";' > "$OUT/huge.png"
-ls "$OUT"
+"$ROOT/reference/uploads/media-corpus.sh" "$OUT"

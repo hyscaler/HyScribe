@@ -21,4 +21,9 @@ fn returns_each_value_unchanged_with_nothing_attached() {
             .intermediate_image_sizes_advanced(Vec::new(), &meta, 1)
             .is_empty()
     );
+    assert_eq!(NoHooks.wp_read_audio_metadata(meta.clone(), None), meta);
+    assert_eq!(
+        NoHooks.wp_read_video_metadata(meta.clone(), Some("mp4")),
+        meta
+    );
 }

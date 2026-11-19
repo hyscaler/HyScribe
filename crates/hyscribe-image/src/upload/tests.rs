@@ -7,6 +7,9 @@ use crate::tests::corpus;
 
 const GOLDEN: &str = include_str!("../../tests/golden/uploads.tsv");
 
+/// The type checks of the golden this does not read (see the test).
+const UNPORTED: usize = 26;
+
 fn lines(kind: &str) -> Vec<Vec<&'static str>> {
     GOLDEN
         .lines()
@@ -45,12 +48,16 @@ fn names_uploads_as_wordpress_does() {
 fn checks_types_as_wordpress_does() {
     let php = |v: &str| v.trim_matches('\'').to_string();
     let checks = lines("check");
-    assert_eq!(checks.len(), 25);
+    assert_eq!(checks.len(), 222);
+    let mut unported = Vec::new();
     for fields in checks {
         let [_, corpus_name, upload, ext, kind, proper] = fields[..] else {
             unreachable!()
         };
-        let checked = wp_check_filetype_and_ext(&corpus(corpus_name), upload, false).unwrap();
+        let Ok(checked) = wp_check_filetype_and_ext(&corpus(corpus_name), upload, false) else {
+            unported.push(format!("{corpus_name} as {upload}"));
+            continue;
+        };
         let ours = checked
             .ext_type
             .map_or(("false".into(), "false".into()), |(e, t)| {
@@ -63,6 +70,8 @@ fn checks_types_as_wordpress_does() {
             "{upload}"
         );
     }
+    // What fileinfo may name two ways, or a type this does not read.
+    assert_eq!(unported.len(), UNPORTED, "{unported:?}");
 }
 
 #[test]
@@ -77,15 +86,11 @@ fn allows_html_and_scripts_only_with_unfiltered_html() {
         Some("application/javascript")
     );
     assert_eq!(wp_check_filetype("a.exe", true), None);
-    // Not an image by its extension: PHP asks fileinfo.
-    assert_eq!(
-        wp_check_filetype_and_ext(b"x", "a.pdf", false),
-        Err(Unported)
-    );
-    assert_eq!(
-        wp_check_filetype_and_ext(b"x", "a.jpg", false),
-        Err(Unported)
-    );
+    // Not an image by its extension, or not one by its header: fileinfo.
+    let pdf = wp_check_filetype_and_ext(b"x", "a.pdf", false).unwrap();
+    assert_eq!(pdf.ext_type, Some(("pdf".into(), "application/pdf")));
+    let jpg = wp_check_filetype_and_ext(b"x", "a.jpg", false).unwrap();
+    assert_eq!(jpg.ext_type, None);
     assert_eq!(sanitize_file_name(b"x.html.jpg", true), "x.html.jpg");
     assert_eq!(sanitize_file_name(b"x.html.jpg", false), "x.html_.jpg");
     // A HEIC named as one renames to .heic.

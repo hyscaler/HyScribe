@@ -9,7 +9,7 @@ use super::*;
 
 /// The cell of `column` of the new post in the golden of a write oracle
 /// `case`, unescaped as the oracle escapes its values.
-fn golden(case: &str, column: &str) -> Vec<u8> {
+pub(crate) fn golden(case: &str, column: &str) -> Vec<u8> {
     let path = format!(
         "{}/../hyscribe-testkit/tests/golden/writes/{case}.tsv",
         env!("CARGO_MANIFEST_DIR")
@@ -88,7 +88,7 @@ async fn the_navigation_fallback_is_written_as_php_writes_it() {
 
 /// How many posts the oracle's action's post follows: the number its
 /// header names, as `%wp_posts:n%`.
-fn golden_new_posts(case: &str) -> usize {
+pub(crate) fn golden_new_posts(case: &str) -> usize {
     let path = format!(
         "{}/../hyscribe-testkit/tests/golden/writes/{case}.tsv",
         env!("CARGO_MANIFEST_DIR")

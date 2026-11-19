@@ -5,6 +5,7 @@
 //! the goldens make answered as MariaDB answers them. `hyscribe-http`
 //! replays the post routes over the databases too.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -254,7 +255,30 @@ impl Fixture {
     }
 }
 
+thread_local! {
+    /// Whether the test's thread has `wp_navigation_should_create_fallback`
+    /// return false.
+    pub(crate) static DECLINE_FALLBACK: Cell<bool> = const { Cell::new(false) };
+}
+
+/// A hook that declines to make the navigation fallback.
+#[derive(Debug)]
+struct Declined;
+
+impl hyscribe_render::site::Hooks for Declined {
+    fn wp_navigation_should_create_fallback(&self, _create: bool) -> bool {
+        false
+    }
+}
+
 impl Site for Fixture {
+    fn hooks(&self) -> &dyn hyscribe_render::site::Hooks {
+        match DECLINE_FALLBACK.get() {
+            true => &Declined,
+            false => &(),
+        }
+    }
+
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         if self.pretty && name == "permalink_structure" {
             return Some(b"/%postname%/".to_vec());
@@ -282,6 +306,18 @@ impl Site for Fixture {
         let terms = self.data().terms.iter();
         let mut found = terms.filter(|((_, tax), _)| tax == taxonomy.as_bytes());
         found.find_map(|(_, list)| list.iter().find(|term| term.id == id).cloned())
+    }
+
+    /// The terms of `taxonomy` some post has, once each.
+    fn taxonomy_terms(&self, taxonomy: &str) -> Vec<Term> {
+        let terms = self.data().terms.iter();
+        let mut found: Vec<Term> = terms
+            .filter(|((_, tax), _)| tax == taxonomy.as_bytes())
+            .flat_map(|(_, list)| list.iter().cloned())
+            .collect();
+        found.sort_by_key(|term| term.id);
+        found.dedup_by_key(|term| term.id);
+        found
     }
 
     fn user(&self, id: u64) -> Option<User> {

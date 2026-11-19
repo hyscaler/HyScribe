@@ -22,14 +22,59 @@ use crate::core_blocks::{merged, prepared};
 use crate::formatting::find;
 use crate::kses::wp_kses_post;
 use crate::pages::add_child;
-use crate::site::{Archive, Site};
+use crate::site::{Archive, Request, Site};
 use crate::supports::forced_colors;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
 
 mod classic;
 
+pub use classic::Classic;
 use classic::Conversion;
+
+/// What `WP_Navigation_Fallback::get_fallback()` finds or makes, for a
+/// request.
+pub enum Fallback {
+    /// The most recently published `wp_navigation` post: its ID and content.
+    Latest(u64, Vec<u8>),
+    /// There is none, and this is the post `wp_insert_post()` makes: a
+    /// classic menu's, else a page list, as the function is given it.
+    Create(Classic),
+    /// There is none, and the `wp_navigation_should_create_fallback` filter
+    /// declines to make one.
+    Declined,
+    /// There is none, and the classic menu that would make it is not
+    /// ported, so no post is made.
+    NotPorted,
+}
+
+/// `WP_Navigation_Fallback::get_fallback()` over `site`, as the page
+/// `request` asks for it (the classic menu's items take their classes from
+/// it): nothing is written, a post to make is given back.
+pub fn navigation_fallback(site: &dyn Site, request: &Request) -> Fallback {
+    let create = site.hooks().wp_navigation_should_create_fallback(true);
+    let latest = site.query(&PostQuery {
+        post_types: vec!["wp_navigation".to_string()],
+        limit: 1,
+        ..PostQuery::default()
+    });
+    if let Some(menu) = latest.into_iter().next() {
+        return Fallback::Latest(menu.id, menu.content);
+    }
+    if !create {
+        return Fallback::Declined;
+    }
+    match classic::classic_menu(site, request) {
+        Conversion::Made(classic) => Fallback::Create(classic),
+        // `create_default_fallback()`.
+        Conversion::Error => Fallback::Create(Classic {
+            title: b"Navigation".to_vec(),
+            name: b"navigation".to_vec(),
+            content: b"<!-- wp:page-list /-->".to_vec(),
+        }),
+        Conversion::NotPorted => Fallback::NotPorted,
+    }
+}
 
 /// Blocks that `get_markup_for_inner_block()` wraps in a list item.
 const LISTABLE: [&str; 3] = ["core/site-title", "core/site-logo", "core/social-links"];
@@ -706,44 +751,19 @@ impl Renderer<'_> {
             inner_content: Vec::new(),
         }];
         let site = self.context.site;
-        let create = site.hooks().wp_navigation_should_create_fallback(true);
-        let latest = site.query(&PostQuery {
-            post_types: vec!["wp_navigation".to_string()],
-            limit: 1,
-            ..PostQuery::default()
-        });
-        let content = match latest.first() {
-            Some(menu) => menu.content.clone(),
-            None => match create.then(|| self.created_fallback()).flatten() {
-                Some(content) => content,
-                None => return page_list,
-            },
+        let content = match navigation_fallback(site, self.context.request) {
+            Fallback::Latest(_, content) => content,
+            Fallback::Create(post) => {
+                site.insert_navigation_fallback(&post.title, &post.name, &post.content);
+                wp_kses_post(&post.content, &self.context.upload_host())
+            }
+            Fallback::Declined | Fallback::NotPorted => return page_list,
         };
         let blocks = menu_blocks(&content);
         if blocks.is_empty() {
             return page_list;
         }
         blocks
-    }
-
-    /// `WP_Navigation_Fallback::get_fallback()` with no navigation post: the
-    /// post it inserts, written in primary mode, and its content as
-    /// `wp_insert_post()` stores it for a visitor. A classic menu makes it,
-    /// else a page list, else (for a menu not ported) no post is made.
-    fn created_fallback(&self) -> Option<Vec<u8>> {
-        let site = self.context.site;
-        let (title, name, content) = match classic::classic_menu(site, self.context.request) {
-            Conversion::Made(classic) => (classic.title, classic.name, classic.content),
-            // `create_default_fallback()`.
-            Conversion::Error => (
-                b"Navigation".to_vec(),
-                b"navigation".to_vec(),
-                b"<!-- wp:page-list /-->".to_vec(),
-            ),
-            Conversion::NotPorted => return None,
-        };
-        site.insert_navigation_fallback(&title, &name, &content);
-        Some(wp_kses_post(&content, &self.context.upload_host()))
     }
 
     /// `render_block_core_page_list()`.

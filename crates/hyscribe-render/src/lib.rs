@@ -29,6 +29,7 @@ mod elements;
 mod embed;
 mod excerpt;
 pub use excerpt::{the_excerpt, wp_trim_words};
+pub use navigation::{Classic, Fallback, navigation_fallback};
 pub mod feed;
 mod file_block;
 #[cfg(test)]

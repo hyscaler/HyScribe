@@ -179,6 +179,86 @@ async fn theme_reads_create_the_styles_post_as_php() {
     assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 9, 0));
 }
 
+/// PHP's answers to the navigation fallback route over a site without a
+/// menu (`reference/rest/navigation-fallback.list`) for a visitor and every
+/// role: the administrator's read makes the menu, and the editor, who may
+/// not edit theme options, is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_navigation_fallback_route_writes_as_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/navigation-fallback.tsv");
+    let state = include_str!("../../../../../reference/rest/navigation-fallback.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 15, 0));
+}
+
+/// The same route over a site with menus answers the newest published one
+/// and writes nothing (`reference/rest/navigation-fallback-existing.list`).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_navigation_fallback_route_finds_the_newest_menu_as_php() {
+    let golden =
+        include_str!("../../../../hyscribe-rest/tests/golden/navigation-fallback-existing.tsv");
+    let state = include_str!("../../../../../reference/rest/navigation-fallback-existing.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 15, 0));
+}
+
+/// A navigation fallback read makes the `wp_navigation` post row for row as
+/// PHP does, by the user who asks (`rest-navigation-fallback-*`), nothing
+/// when a statement fails part way; a read that finds a menu writes none.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_navigation_fallback_read_writes_the_post_as_php() {
+    use crate::outbound::tests::{golden, golden_new_posts};
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let target = "/?rest_route=/wp-block-editor/v1/navigation-fallback";
+    let mut pending = planned(&site, "GET", target, "").await;
+    for case in [
+        "rest-navigation-fallback-default",
+        "rest-navigation-fallback-classic",
+    ] {
+        let post = hyscribe_render::Classic {
+            title: golden(case, "post_title"),
+            name: golden(case, "post_name"),
+            content: golden(case, "post_content"),
+        };
+        let write = hyscribe_rest::Write::NavigationFallback(Some(Box::new(post)));
+        // Over a site without a menu the plan is the page list, as the oracle's default.
+        if case.ends_with("default") {
+            assert_eq!(pending.plan.write, write, "{case}");
+        }
+        pending.plan.write = write;
+        // The oracle's setup made the classic menus' items, as posts of their own.
+        let setup = async |conn: &mut hyscribe_db::Connection| {
+            let row = "INSERT INTO wp_posts (post_author, post_content, post_title, post_excerpt, \
+                post_status, post_name, post_type, to_ping, pinged, post_content_filtered) \
+                VALUES (1, '', '', '', 'publish', '', 'nav_menu_item', '', '', '')";
+            for _ in 1..golden_new_posts(case) {
+                let inserted = sqlx::query(row).execute(&mut *conn).await;
+                inserted.map_err(|err| err.to_string())?;
+            }
+            Ok(())
+        };
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+            let outcome = acted(conn, &pending.plan, &ctx).await;
+            assert!(matches!(outcome, Outcome::Written(id) if id != 0), "{case}");
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), case, setup, action).await;
+        report.unwrap();
+    }
+    // A menu found is written as nothing.
+    pending.plan.write = hyscribe_rest::Write::NavigationFallback(None);
+    let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+    let writer = Writer::open(&saves(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome =
+        crate::rest::writes::act(writer.begin().await, &pending.plan, &ctx, outbox()).await;
+    assert_eq!(outcome.unwrap(), Outcome::Written(0));
+}
+
 /// PHP's answers to the media's updates and deletes
 /// (`reference/rest/media-writes.list`) for a visitor and every role, over
 /// `reference/rest/media-writes.sql`: a body that names `featured_media` or

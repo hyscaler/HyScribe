@@ -13,9 +13,3 @@ INSERT INTO wp_usermeta (user_id, meta_key, meta_value) VALUES
 (2, 'wp_capabilities', 'a:1:{s:6:"editor";b:1;}'), (2, 'wp_user_level', '7'),
 (3, 'nickname', 'subscriber'), (3, 'first_name', 'Sam'), (3, 'last_name', 'Subscriber'),
 (3, 'wp_capabilities', 'a:1:{s:10:"subscriber";b:1;}'), (3, 'wp_user_level', '0');
--- The navigation menu PHP writes the first time a block editor user or the
--- site renders a navigation block (the fallback of an empty install). HyScribe
--- does not write it at the same page view yet (the navigation fallback route),
--- so both sides start with it, and the posts' IDs stay equal.
-INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status, comment_status, ping_status, post_password, post_name, to_ping, pinged, post_modified, post_modified_gmt, post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, comment_count)
-VALUES (4, 0, '2026-01-01 00:00:00', '2026-01-01 00:00:00', '<!-- wp:page-list /-->', 'Navigation', '', 'publish', 'closed', 'closed', '', 'navigation', '', '', '2026-01-01 00:00:00', '2026-01-01 00:00:00', '', 0, 'http://wp.test/?p=4', 0, 'wp_navigation', '', 0);

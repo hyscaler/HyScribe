@@ -399,6 +399,7 @@ fn writing(regex: &str, index: usize) -> Option<posts::write::Writing> {
         .or_else(|| revisions::writing(regex, index))
         .or_else(|| editor::global_styles::writing(regex, index))
         .or_else(|| editor::themes::writing(regex, index))
+        .or_else(|| navigation::writing(regex, index))
 }
 
 /// `maybe_unserialize()` of a stored option or meta value: `false` where

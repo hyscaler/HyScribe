@@ -6,8 +6,10 @@
 //! Ported: menus from inner blocks or a `wp_navigation` post (`ref`), the
 //! fallback (the latest published `wp_navigation` post, else a page list),
 //! the page list block and submenus with their directives, the responsive
-//! overlay and unique `aria-label`s. Not yet: creating the fallback's post,
-//! custom overlay template parts and the viewport layout classes.
+//! overlay and unique `aria-label`s, and the fallback's post made of a
+//! classic menu's custom links (`classic`). Not yet: the fallback's post
+//! made of any other menu or the page list, custom overlay template parts
+//! and the viewport layout classes.
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::{esc_attr, esc_url, safecss_filter_attr, wp_strip_all_tags};
@@ -25,6 +27,8 @@ use crate::site::{Archive, Site};
 use crate::supports::forced_colors;
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::Renderer;
+
+mod classic;
 
 /// Blocks that `get_markup_for_inner_block()` wraps in a list item.
 const LISTABLE: [&str; 3] = ["core/site-title", "core/site-logo", "core/social-links"];
@@ -690,7 +694,7 @@ impl Renderer<'_> {
     }
 
     /// `block_core_navigation_get_fallback_blocks()`: the blocks of the most
-    /// recently published menu, or a page list.
+    /// recently published menu, one made of a classic menu, or a page list.
     fn fallback_blocks(&self) -> Vec<Block> {
         let page_list = vec![Block {
             name: Some("core/page-list".to_string()),
@@ -699,19 +703,35 @@ impl Renderer<'_> {
             inner_html: Vec::new(),
             inner_content: Vec::new(),
         }];
-        let latest = self.context.site.query(&PostQuery {
+        let site = self.context.site;
+        let create = site.hooks().wp_navigation_should_create_fallback(true);
+        let latest = site.query(&PostQuery {
             post_types: vec!["wp_navigation".to_string()],
             limit: 1,
             ..PostQuery::default()
         });
-        let Some(menu) = latest.first() else {
-            return page_list;
+        let content = match latest.first() {
+            Some(menu) => menu.content.clone(),
+            None => match create.then(|| self.classic_fallback()).flatten() {
+                Some(content) => content,
+                None => return page_list,
+            },
         };
-        let blocks = menu_blocks(&menu.content);
+        let blocks = menu_blocks(&content);
         if blocks.is_empty() {
             return page_list;
         }
         blocks
+    }
+
+    /// `WP_Navigation_Fallback::create_classic_menu_fallback()`: the
+    /// `wp_navigation` post it inserts, written in primary mode, and its
+    /// content as `wp_insert_post()` stores it for a visitor.
+    fn classic_fallback(&self) -> Option<Vec<u8>> {
+        let site = self.context.site;
+        let classic = classic::classic_menu(site, self.context.request)?;
+        site.insert_navigation_fallback(&classic.title, &classic.name, &classic.content);
+        Some(wp_kses_post(&classic.content, &self.context.upload_host()))
     }
 
     /// `render_block_core_page_list()`.

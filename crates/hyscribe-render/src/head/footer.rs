@@ -31,25 +31,35 @@ pub fn wp_footer(site: &dyn Site, assets: &Assets) -> Vec<u8> {
     };
     out.extend(modules.footer());
     out.extend(modules.data(&assets.state));
-    // wp_print_footer_scripts()
-    if assets.scripts.iter().any(|h| h == "comment-reply") {
-        let src =
-            esc_url_raw(format!("{siteurl}{COMMENT_REPLY}?ver={}", WP_VERSION.trim()).as_bytes());
-        out.extend(tag(
-            b"script",
-            &[
-                (b"src", Some(&src)),
-                (b"id", Some(b"comment-reply-js")),
-                (b"async", None),
-                (b"data-wp-strategy", Some(b"async")),
-                (b"fetchpriority", Some(b"low")),
-            ],
-            None,
-        ));
-    }
-    out.extend(mediaelement_scripts(&siteurl, &assets.scripts));
+    // wp_print_footer_scripts(), in the order the scripts were enqueued.
+    let at = |handles: &[&str]| {
+        let wanted = |h: &String| handles.contains(&h.as_str());
+        assets.scripts.iter().position(wanted)
+    };
+    let reply = at(&["comment-reply"]).map(|at| (at, comment_reply(&siteurl)));
+    let media = at(&["wp-mediaelement", "mediaelement-vimeo"])
+        .map(|at| (at, mediaelement_scripts(&siteurl, &assets.scripts)));
+    let mut printed: Vec<(usize, Vec<u8>)> = reply.into_iter().chain(media).collect();
+    printed.sort_by_key(|(at, _)| *at);
+    out.extend(printed.into_iter().flat_map(|(_, script)| script));
     out.extend(emoji_detection_script(&siteurl));
     out
+}
+
+/// The `comment-reply` script's tag.
+fn comment_reply(siteurl: &str) -> Vec<u8> {
+    let src = esc_url_raw(format!("{siteurl}{COMMENT_REPLY}?ver={}", WP_VERSION.trim()).as_bytes());
+    tag(
+        b"script",
+        &[
+            (b"src", Some(&src)),
+            (b"id", Some(b"comment-reply-js")),
+            (b"async", None),
+            (b"data-wp-strategy", Some(b"async")),
+            (b"fetchpriority", Some(b"low")),
+        ],
+        None,
+    )
 }
 
 /// MediaElement's `mejsL10n` for locale en_US, as `wp_default_scripts()`

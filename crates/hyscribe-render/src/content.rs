@@ -130,7 +130,13 @@ impl Renderer<'_> {
         let content = shortcode_unautop(&content, &CORE_SHORTCODE_TAGS);
         let content = match &self.attachment {
             Some(post) => [
-                prepend_attachment(site, &self.context.loading, post, &self.audio_instances),
+                prepend_attachment(
+                    site,
+                    &self.context.loading,
+                    post,
+                    &self.audio_instances,
+                    &mut self.assets,
+                ),
                 content,
             ]
             .concat(),

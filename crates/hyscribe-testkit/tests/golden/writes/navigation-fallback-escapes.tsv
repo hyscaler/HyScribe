@@ -1,0 +1,46 @@
+# The rows PHP WordPress writes for the action navigation-fallback-escapes (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-19 10:05:53 to 2026-11-19 10:05:53 UTC.
+# %wp_posts:1% is 13.
+# %wp_posts:2% is 14.
+# %wp_posts:3% is 15.
+# %wp_postmeta:1% is 59.
+# %wp_postmeta:2% is 60.
+# %wp_postmeta:3% is 61.
+# %wp_postmeta:4% is 62.
+# %wp_postmeta:5% is 63.
+# %wp_postmeta:6% is 64.
+# %wp_postmeta:7% is 65.
+# %wp_postmeta:8% is 66.
+# %wp_postmeta:9% is 67.
+# %wp_postmeta:10% is 68.
+# %wp_postmeta:11% is 69.
+# %wp_postmeta:12% is 70.
+# %wp_postmeta:13% is 71.
+# %wp_postmeta:14% is 72.
+# %wp_postmeta:15% is 73.
+# %wp_postmeta:16% is 74.
+# %wp_terms:1% is 4.
+# %wp_term_taxonomy:1% is 4.
+wp_posts	%wp_posts:3%	+	ID	%wp_posts:3%
+wp_posts	%wp_posts:3%	+	comment_count	0
+wp_posts	%wp_posts:3%	+	comment_status	closed
+wp_posts	%wp_posts:3%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:3%
+wp_posts	%wp_posts:3%	+	menu_order	0
+wp_posts	%wp_posts:3%	+	ping_status	closed
+wp_posts	%wp_posts:3%	+	pinged	
+wp_posts	%wp_posts:3%	+	post_author	0
+wp_posts	%wp_posts:3%	+	post_content	<!-- wp:navigation-link {"className":" menu-item menu-item-type-custom menu-item-object-custom","description":"","id":null,"kind":"custom","label":"twitter.com","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"https://twitter.com/wordpress"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-custom menu-item-object-custom","description":"","id":null,"kind":"custom","label":"Docs u0026amp; u0022Newsu0022 u003cbu003eboldu003c/bu003e u002du002d Ελληνικά","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"https://example.test/docs?a=1u0026b=2#top"} /-->
+wp_posts	%wp_posts:3%	+	post_content_filtered	
+wp_posts	%wp_posts:3%	+	post_date	%now%
+wp_posts	%wp_posts:3%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:3%	+	post_excerpt	
+wp_posts	%wp_posts:3%	+	post_mime_type	
+wp_posts	%wp_posts:3%	+	post_modified	%now%
+wp_posts	%wp_posts:3%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:3%	+	post_name	escapes
+wp_posts	%wp_posts:3%	+	post_parent	0
+wp_posts	%wp_posts:3%	+	post_password	
+wp_posts	%wp_posts:3%	+	post_status	publish
+wp_posts	%wp_posts:3%	+	post_title	Escapes
+wp_posts	%wp_posts:3%	+	post_type	wp_navigation
+wp_posts	%wp_posts:3%	+	to_ping	

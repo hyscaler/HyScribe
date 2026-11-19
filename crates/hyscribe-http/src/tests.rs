@@ -273,6 +273,7 @@ async fn database_errors_show_no_details() {
         feed_hosts: Arc::default(),
         embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
+        hooks: Arc::new(()),
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
     for uri in [
@@ -1021,6 +1022,7 @@ async fn the_front_page_links_to_home() {
         feed_hosts: Arc::default(),
         embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
+        hooks: Arc::new(()),
     });
     // Search results list the front page with a link to it.
     let reply = request(&site, "GET", "/?s=sample").await;
@@ -1166,6 +1168,7 @@ async fn failed_reads_answer_defaults() {
         feed_hosts: Arc::default(),
         embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
+        hooks: Arc::new(()),
     });
     // The site's global styles, read on each reload.
     assert!(site.styled_theme().await.is_err());
@@ -3025,6 +3028,13 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
                 let value = hyscribe_phpser::urldecode(value.as_bytes());
                 site.options.insert(name.into(), value);
             }
+            // `options.php` declines the fallback post unless `_fallback` is set.
+            if !named
+                .split('&')
+                .any(|option| option.starts_with("_fallback="))
+            {
+                site.hooks = Arc::new(NoFallback);
+            }
             site.build_rewriter();
             sites.insert(named.clone(), Arc::new(site));
         }
@@ -3128,6 +3138,69 @@ async fn theme_test_data_pages_match_php() {
         10
     );
     assert_eq!(golden.lines().count(), 747);
+}
+
+/// A visitor's page view over the Theme Test Data, which has classic menus
+/// and no `wp_navigation` post, in primary mode: the navigation block's
+/// fallback shows the newest classic menu and writes the post PHP writes
+/// for it, once (the write itself is the oracle's `navigation-fallback-*`).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_view_writes_the_classic_menu_fallback() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    let dump = std::fs::read_to_string(hyscribe_testkit::writes::THEME_TEST_DATA).unwrap();
+    hyscribe_testkit::writes::load_theme_test_data(&db, &dump)
+        .await
+        .unwrap();
+    let oracle = Some("http://127.0.0.1:8081".to_string());
+    let site = Site::load(Db::connect(&db).await.unwrap(), oracle.clone(), oracle)
+        .await
+        .unwrap();
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary).await;
+    let site = Arc::new(site.with_writer(writer.unwrap()));
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let posts = "SELECT CONCAT_WS('|', post_author, post_status, post_title, post_name, \
+        post_content) FROM wp_posts WHERE post_type = 'wp_navigation'";
+    for visit in 0..2 {
+        let reply = request(&site, "GET", "/").await;
+        assert_eq!(reply.status, StatusCode::OK);
+        assert!(
+            reply
+                .body
+                .contains("<span class=\"wp-block-navigation-item__label\">twitter.com</span>")
+        );
+        let written: Vec<String> = sqlx::query_scalar(posts)
+            .fetch_all(&mut conn)
+            .await
+            .unwrap();
+        // The first view wrote the one post; the second found it.
+        assert_eq!(written.len(), 1, "view {visit}");
+        let content = "<!-- wp:navigation-link {\"className\":\" menu-item menu-item-type-custom menu-item-object-custom\"";
+        let label = "\"label\":\"twitter.com\"";
+        assert!(written[0].starts_with(&format!("0|publish|Social menu|social-menu|{content}")));
+        assert!(written[0].contains(label), "{}", written[0]);
+    }
+}
+
+/// `wp_navigation_should_create_fallback` returning false, as the page
+/// goldens' `options.php` has it unless a request sets `_fallback`.
+#[derive(Debug)]
+struct NoFallback;
+
+impl hyscribe_render::site::Hooks for NoFallback {
+    fn wp_navigation_should_create_fallback(&self, _create: bool) -> bool {
+        false
+    }
 }
 
 /// The pages of `reference/pages/site-edits.list` over the site editor's
@@ -3413,7 +3486,7 @@ async fn attachment_pages_match_php() {
     }
     let golden = include_str!("../tests/golden/attachment-pages.tsv");
     // The players of audio and video files need MediaElement.js.
-    let known = ["817", "818", "821", "825"]
+    let known = ["818", "821", "825"]
         .map(|id| format!("wp_attachment_pages_enabled=1\t/?attachment_id={id}\tmediaelement\n"))
         .concat();
     assert_eq!(

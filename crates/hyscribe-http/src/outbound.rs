@@ -11,6 +11,7 @@ use hyscribe_fetch::{Args, Kind};
 use hyscribe_phpser::{Value, decode};
 use hyscribe_render::outbound::{Get, NOT_ALLOWED, Redirects, Response};
 use hyscribe_write::options::{Meta, expire_site_transient, set_site_transient, update_metadata};
+use hyscribe_write::posts::{Context, PostArgs, wp_insert_post};
 
 use crate::Site;
 use crate::reads::Reads;
@@ -75,6 +76,9 @@ pub(crate) enum Write<'a> {
     Transient(&'a str, &'a [u8], i64),
     /// `delete_site_transient()`.
     Expire(&'a str),
+    /// `wp_insert_post()` of the navigation fallback's post, from its
+    /// title, slug and content.
+    Navigation(&'a [u8], &'a [u8], &'a [u8]),
 }
 
 /// Makes `write` on `site`'s writer, if it has one.
@@ -101,8 +105,49 @@ pub(crate) fn write(site: &Site, reads: &Reads<'_>, write: Write<'_>) {
                         .map_err(|_| ())
                 }
                 Write::Expire(name) => expire_site_transient(&mut tx, name).await.map_err(|_| ()),
+                Write::Navigation(title, name, content) => {
+                    let ctx = visitor(site);
+                    let post = [title, name, content];
+                    let inserted = insert_navigation(&mut tx, &ctx, post).await;
+                    inserted.map(|_| ()).map_err(|_| ())
+                }
             };
             let _ = tx.commit().await;
         }
     });
 }
+
+/// The posts' context of a visitor's page view, which writes as no user.
+fn visitor(site: &Site) -> Context {
+    Context {
+        user: 0,
+        can_publish: false,
+        home: site.home.as_bytes().to_vec(),
+        upload_host: hyscribe_render::link::host(site.raw_option("siteurl")),
+        unfiltered_html: false,
+        constants: site.constants,
+        now: crate::now(),
+    }
+}
+
+/// `WP_Navigation_Fallback::create_classic_menu_fallback()`'s
+/// `wp_insert_post()`: the published `wp_navigation` post of a menu's
+/// title, slug and content.
+async fn insert_navigation(
+    write: &mut hyscribe_db::Write<'_>,
+    ctx: &Context,
+    [title, name, content]: [&[u8]; 3],
+) -> Result<u64, hyscribe_write::Error> {
+    let args = PostArgs {
+        title: title.to_vec(),
+        name: Some(name.to_vec()),
+        content: content.to_vec(),
+        status: "publish".into(),
+        post_type: "wp_navigation".into(),
+        ..PostArgs::default()
+    };
+    wp_insert_post(write, ctx, args).await
+}
+
+#[cfg(test)]
+mod tests;

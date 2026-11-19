@@ -176,6 +176,7 @@ fn shortcodes_match_php() {
 }
 
 /// A plugin that changes everything it may, with `library` for the players'.
+#[derive(Debug)]
 struct Plugin {
     library: &'static str,
 }

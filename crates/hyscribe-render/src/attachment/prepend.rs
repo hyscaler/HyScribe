@@ -12,6 +12,7 @@ use hyscribe_model::Post;
 use hyscribe_phpser::{add_query_arg, is_empty_string, php_trim, wp_basename};
 
 use super::{ImageOptions, attachment_url, wp_get_attachment_image};
+use crate::head::Assets;
 use crate::media::Loading;
 use crate::site::Site;
 
@@ -82,12 +83,14 @@ pub fn plays_video(site: &dyn Site, post: &Post) -> bool {
 }
 
 /// The HTML `prepend_attachment()` puts before `post`'s content, and a
-/// newline; `audio` counts `wp_audio_shortcode()`'s instances.
+/// newline; `audio` counts `wp_audio_shortcode()`'s instances, and a
+/// player enqueues MediaElement in `assets`.
 pub(crate) fn prepend_attachment(
     site: &dyn Site,
     loading: &Loading,
     post: &Post,
     audio: &Cell<u64>,
+    assets: &mut Assets,
 ) -> Vec<u8> {
     let url = attachment_url(site, post.id).unwrap_or_default();
     let file = attached_file(site, post);
@@ -95,7 +98,15 @@ pub(crate) fn prepend_attachment(
         // `wp_video_shortcode()` of a file no player plays.
         embedded("video", &url)
     } else if is_audio(&file, &post.mime_type) {
-        audio_shortcode(post.id, &url, audio).unwrap_or_else(|| embedded("audio", &url))
+        audio_shortcode(post.id, &url, audio).map_or_else(
+            || embedded("audio", &url),
+            |player| {
+                assets.enqueue_style("mediaelement");
+                assets.enqueue_style("wp-mediaelement");
+                assets.enqueue_script("wp-mediaelement");
+                player
+            },
+        )
     } else {
         format!(
             "<p class=\"attachment\">{}</p>",
@@ -200,6 +211,7 @@ mod tests {
     use hyscribe_model::{Post, PostQuery, Term};
 
     use super::{file_is, is_audio, is_video, prepend_attachment, video_shortcode};
+    use crate::head::Assets;
     use crate::media::Loading;
     use crate::site::Site;
 
@@ -260,8 +272,9 @@ mod tests {
     #[test]
     fn attachments_are_prepended() {
         let audio = Cell::new(0);
-        let prepend = |post: &Post| {
-            let html = prepend_attachment(&Files, &Loading::default(), post, &audio);
+        let mut assets = Assets::default();
+        let mut prepend = |post: &Post| {
+            let html = prepend_attachment(&Files, &Loading::default(), post, &audio, &mut assets);
             String::from_utf8(html).unwrap()
         };
         // No `siteurl`: the uploads sit at the root.
@@ -313,6 +326,9 @@ mod tests {
             assert_eq!(prepend(&post), html, "{}", post.id);
         }
         assert_eq!(audio.get(), 2);
+        // The song's player enqueued MediaElement once; its link did not.
+        assert_eq!(assets.styles, ["mediaelement", "wp-mediaelement"]);
+        assert_eq!(assets.scripts, ["wp-mediaelement"]);
         // Only a file a player plays is a video player, which is not ported.
         assert!(super::plays_video(&Files, &attachment(7, "video/mp4", "")));
         assert!(!super::plays_video(

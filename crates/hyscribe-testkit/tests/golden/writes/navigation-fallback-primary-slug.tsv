@@ -1,0 +1,48 @@
+# The rows PHP WordPress writes for the action navigation-fallback-primary-slug (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-19 10:05:53 to 2026-11-19 10:05:53 UTC.
+# %wp_posts:1% is 19.
+# %wp_posts:2% is 20.
+# %wp_posts:3% is 21.
+# %wp_postmeta:1% is 91.
+# %wp_postmeta:2% is 92.
+# %wp_postmeta:3% is 93.
+# %wp_postmeta:4% is 94.
+# %wp_postmeta:5% is 95.
+# %wp_postmeta:6% is 96.
+# %wp_postmeta:7% is 97.
+# %wp_postmeta:8% is 98.
+# %wp_postmeta:9% is 99.
+# %wp_postmeta:10% is 100.
+# %wp_postmeta:11% is 101.
+# %wp_postmeta:12% is 102.
+# %wp_postmeta:13% is 103.
+# %wp_postmeta:14% is 104.
+# %wp_postmeta:15% is 105.
+# %wp_postmeta:16% is 106.
+# %wp_terms:1% is 7.
+# %wp_terms:2% is 8.
+# %wp_term_taxonomy:1% is 7.
+# %wp_term_taxonomy:2% is 8.
+wp_posts	%wp_posts:3%	+	ID	%wp_posts:3%
+wp_posts	%wp_posts:3%	+	comment_count	0
+wp_posts	%wp_posts:3%	+	comment_status	closed
+wp_posts	%wp_posts:3%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:3%
+wp_posts	%wp_posts:3%	+	menu_order	0
+wp_posts	%wp_posts:3%	+	ping_status	closed
+wp_posts	%wp_posts:3%	+	pinged	
+wp_posts	%wp_posts:3%	+	post_author	0
+wp_posts	%wp_posts:3%	+	post_content	<!-- wp:navigation-link {"className":" menu-item menu-item-type-custom menu-item-object-custom","description":"","id":null,"kind":"custom","label":"twitter.com","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"https://twitter.com/wordpress"} /-->
+wp_posts	%wp_posts:3%	+	post_content_filtered	
+wp_posts	%wp_posts:3%	+	post_date	%now%
+wp_posts	%wp_posts:3%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:3%	+	post_excerpt	
+wp_posts	%wp_posts:3%	+	post_mime_type	
+wp_posts	%wp_posts:3%	+	post_modified	%now%
+wp_posts	%wp_posts:3%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:3%	+	post_name	primary
+wp_posts	%wp_posts:3%	+	post_parent	0
+wp_posts	%wp_posts:3%	+	post_password	
+wp_posts	%wp_posts:3%	+	post_status	publish
+wp_posts	%wp_posts:3%	+	post_title	Primary
+wp_posts	%wp_posts:3%	+	post_type	wp_navigation
+wp_posts	%wp_posts:3%	+	to_ping	

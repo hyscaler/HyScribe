@@ -343,6 +343,28 @@ fn page_footers_match_php() {
     assert_eq!(checked, 12);
 }
 
+/// The footer scripts print in the order they were enqueued: the player's
+/// of a song in the content of an attachment page, which renders before
+/// the comments' reply script, and the reply script first where the
+/// comments come first.
+#[test]
+fn footer_scripts_print_in_enqueue_order() {
+    let site = oracle_site();
+    let ids = |scripts: &[&str]| {
+        let assets = Assets {
+            scripts: scripts.iter().map(|handle| handle.to_string()).collect(),
+            ..Assets::default()
+        };
+        let footer = String::from_utf8(wp_footer(&site, &assets)).unwrap();
+        let at = |id: &str| footer.find(&format!("id=\"{id}\"")).unwrap();
+        (at("comment-reply-js"), at("wp-mediaelement-js"))
+    };
+    let (reply, media) = ids(&["wp-mediaelement", "comment-reply"]);
+    assert!(media < reply);
+    let (reply, media) = ids(&["comment-reply", "wp-mediaelement"]);
+    assert!(reply < media);
+}
+
 /// `wp_maybe_inline_styles()` inlines up to the limit itself: two halves
 /// fit, and one byte more does not.
 #[test]

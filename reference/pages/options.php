@@ -8,8 +8,8 @@
 // so nothing is written to the database.
 // Pages do not depend on the network: every outbound request fails, as
 // HyScribe makes none. The navigation block's fallback does not
-// create a post from a classic menu, which is not ported, unless the
-// options carry _fallback=1; names starting with _ are no options.
+// create a post (WP_Navigation_Fallback) unless the options carry
+// _fallback=1; names starting with _ are no options.
 add_filter( 'pre_http_request', fn() => new WP_Error( 'http_request_failed', 'Offline.' ) );
 $hyscribe_options = array();
 if ( isset( $_SERVER['HTTP_X_HYSCRIBE_OPTIONS'] ) ) {

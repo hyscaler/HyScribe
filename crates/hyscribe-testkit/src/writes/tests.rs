@@ -28,6 +28,10 @@ async fn the_default_install_loads_afresh() {
     load_theme_test_data(&saves, &dump).await.unwrap();
     assert!(load_theme_test_data(&read_only, &dump).await.is_err());
     assert!(load_theme_test_data(&closed, &dump).await.is_err());
+    // Its RSS blocks then read the test site.
+    point_feeds_at_test_site(&saves).await.unwrap();
+    assert!(point_feeds_at_test_site(&read_only).await.is_err());
+    assert!(point_feeds_at_test_site(&closed).await.is_err());
 }
 
 async fn run(conn: &mut MySqlConnection, sql: &'static str) -> Result<(), String> {

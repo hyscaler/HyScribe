@@ -152,7 +152,7 @@ pub fn wp_check_filetype_and_ext(
     }
     let verdicts: Vec<bool> = finfo_candidates(bytes)?
         .into_iter()
-        .map(|real| stands(&kind, real))
+        .map(|real| stands(kind, real))
         .collect();
     if verdicts.iter().all(|stands| *stands) {
         Ok(checked)

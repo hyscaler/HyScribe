@@ -590,8 +590,8 @@ pub(crate) fn html_elements(text: &[u8]) -> Vec<(usize, usize)> {
             gt.from(start)
         };
         let last = last.unwrap_or(text.len() - 1);
-        elements.push((start, last + 1));
         at = last + 1;
+        elements.push((start, at));
     }
     elements
 }

@@ -677,3 +677,19 @@ fn embed_secrets_are_drawn_from_letters_and_digits() {
         assert!(all.as_bytes().iter().any(kind));
     }
 }
+
+#[test]
+fn mediaelement_styles_are_linked_as_wordpress_registers_them() {
+    let player = block_style("mediaelement", "http://x.test");
+    assert_eq!(
+        player.src.as_deref(),
+        Some("/wp-includes/js/mediaelement/mediaelementplayer-legacy.min.css")
+    );
+    assert_eq!(player.version.as_deref(), Some("4.2.17"));
+    let shortcode = block_style("wp-mediaelement", "http://x.test");
+    assert_eq!(
+        shortcode.src.as_deref(),
+        Some("/wp-includes/js/mediaelement/wp-mediaelement.min.css")
+    );
+    assert_eq!(shortcode.version, None);
+}

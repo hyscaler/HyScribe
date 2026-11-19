@@ -394,6 +394,37 @@ impl Site for Bare {
 }
 
 #[test]
+fn hook_defaults_leave_shortcodes_alone() {
+    let hooks = ();
+    assert!(hooks.img_caption_shortcode(&[], b"x").is_empty());
+    assert!(hooks.post_gallery(&[], 1).is_empty());
+    assert!(hooks.use_default_gallery_style(true));
+    assert!(!hooks.use_default_gallery_style(false));
+    assert!(
+        hooks
+            .media_shortcode_override("audio", &[], b"x", 1)
+            .is_empty()
+    );
+}
+
+#[test]
+fn autop_runs_after_the_shortcode_pass_once_blocks_restored_it() {
+    let theme = twentytwentyfive();
+    let request = Request::default();
+    let site = library(&());
+    let text = b"[playlist ids=\"1\"]";
+    let mut fresh = Renderer::new(&theme, &site, &request);
+    fresh.context.post_id = Some(555);
+    let early = fresh.the_content_filters(text);
+    let mut after = Renderer::new(&theme, &site, &request);
+    after.context.post_id = Some(555);
+    after.the_content_filters(b"<!-- wp:paragraph --><p>x</p><!-- /wp:paragraph -->");
+    let late = after.the_content_filters(text);
+    assert_eq!(early.trim_ascii(), text);
+    assert_eq!(late.trim_ascii(), b"<p>[playlist ids=\"1\"]</p>");
+}
+
+#[test]
 fn an_attachment_without_a_file_makes_no_player() {
     let theme = twentytwentyfive();
     let request = Request::default();

@@ -66,6 +66,9 @@ impl ActionSite for Open {
     fn lock_holder(&self, post: u64) -> Option<String> {
         (post % 2 == 1).then(|| "<b>editor</b>".into())
     }
+    fn user_option(&self, _: &str) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 const SCREENS: [&str; 11] = [

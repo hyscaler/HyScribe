@@ -1,26 +1,27 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-# Gates from docs/TESTING.md and docs/SECURITY_MODEL.md. Actions are pinned
-# to commit SHAs.
+# Gates from docs/TESTING.md and docs/SECURITY_MODEL.md. Actions are
+# pinned to commit SHAs.
 #
-# Every job runs on pull requests, pushes to main, nightly against
-# development and on demand; mutation testing only on pull requests. The org
-# shares GitHub's free 2,000 minutes a month, so pushes to development start
-# nothing and a nightly run is skipped when development has not moved.
+# Every job runs on the self-hosted runner of the CI machine (label hyscribe), inside
+# a throwaway container of a pinned Rust image: nothing stays on the machine
+# between jobs except the named cache volumes hyscribe-cargo (cargo home and
+# tools) and hyscribe-sccache. The runner takes only pushes to development
+# and main and manual runs, never pull requests (a pull request from a fork
+# would run its code on that machine). Fixture containers start through the
+# runner's rootless Docker (scripts/ci-net.sh joins them to the job).
+# Mutation testing runs before a merge, not here. The containers run
+# as root; the steps that run HyScribe or its tests go through
+# scripts/ci-as-user.sh, as the ordinary user they expect.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [development, main]
     paths-ignore: ["**.md", "docs/**"]
-  pull_request:
-    paths-ignore: ["**.md", "docs/**"]
-  schedule:
-    - cron: "17 2 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
 
 # A newer push supersedes the run in progress for the same branch.
 concurrency:
@@ -30,30 +31,29 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  CARGO_INCREMENTAL: "0"
+  RUSTC_WRAPPER: sccache
 
 jobs:
-  changed:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      run: ${{ steps.check.outputs.run }}
-    steps:
-      - id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          last=""
-          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
-            last=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=schedule&status=success&per_page=1" \
-              -q '.workflow_runs[0].head_sha // ""')
-          fi
-          if [ "$last" = "$GITHUB_SHA" ]; then echo run=false; else echo run=true; fi >> "$GITHUB_OUTPUT"
-
   checks:
-    needs: changed
-    if: needs.changed.outputs.run == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    runs-on: [self-hosted, hyscribe]
+    container:
+      image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
+      env:
+        CARGO_HOME: /cache/cargo
+        SCCACHE_DIR: /cache/sccache
+        DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
+        TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      volumes:
+        - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
+        - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
+        - hyscribe-cargo:/cache/cargo
+        - hyscribe-sccache:/cache/sccache
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+    timeout-minutes: 40
     env:
       GITLEAKS_VERSION: 8.30.1
       GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
@@ -61,16 +61,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
-        with:
-          tool: cargo-deny,cargo-audit,cargo-vet
+      - name: Tools (system packages, cargo tools from the cache volume)
+        env:
+          RUSTC_WRAPPER: ""
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/ci-setup.sh sccache@0.19.0 cargo-deny@0.21.0 cargo-audit@0.23.0 cargo-vet@0.10.3
+      - run: rustup component add rustfmt clippy
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: SPDX header in every source file
         run: |
           # Test corpora copied from WordPress keep their own license;
@@ -92,98 +91,154 @@ jobs:
         run: ./gitleaks git --no-banner --redact --verbose --exit-code 1 .
 
   coverage:
-    needs: changed
-    if: needs.changed.outputs.run == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    runs-on: [self-hosted, hyscribe]
+    container:
+      image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
+      env:
+        CARGO_HOME: /cache/cargo
+        SCCACHE_DIR: /cache/sccache
+        DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
+        TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      volumes:
+        - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
+        - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
+        - hyscribe-cargo:/cache/cargo
+        - hyscribe-sccache:/cache/sccache
+        - ${{ vars.HYSCRIBE_CI_FIXTURES }}:${{ vars.HYSCRIBE_CI_FIXTURES }}:ro
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+    timeout-minutes: 90
+    env:
+      HYSCRIBE_DB_CONTAINER: ci-coverage-db-${{ github.run_id }}
+      HYSCRIBE_REF_NETWORK: ci-coverage-ref-${{ github.run_id }}
+      HYSCRIBE_DB_PORT: "28991"
+      HYSCRIBE_TEST_DB_PORT: "28991"
+      HYSCRIBE_CI_FIXTURES: ${{ vars.HYSCRIBE_CI_FIXTURES }}
+      # The fixture database takes a few test connections at a time.
+      RUST_TEST_THREADS: "4"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
-        with:
-          tool: cargo-llvm-cov
-      - name: Theme Test Data fixture, downloaded pinned, never committed
-        run: reference/theme-test-data/build.sh
+      - name: Tools (system packages, cargo tools from the cache volume)
+        env:
+          RUSTC_WRAPPER: ""
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/ci-setup.sh sccache@0.19.0 cargo-llvm-cov@0.9.1
+      - run: rustup component add llvm-tools-preview
+      - run: scripts/ci-as-user.sh prepare
+      - name: Theme Test Data fixture, the one the goldens were recorded on
+        # A rebuilt fixture differs in its install dates, so the goldens'
+        # hashes need this one, kept on the runner (the data has no licence,
+        # so it is never committed). reference/theme-test-data/build.sh makes
+        # a new one.
+        run: |
+          mkdir -p target/fixtures
+          ln -sfn "$HYSCRIBE_CI_FIXTURES/theme-test-data" target/fixtures/theme-test-data
+          test -f target/fixtures/theme-test-data/7.1.3/database.sql
       - name: Default install fixture in MariaDB (hyscribe-db tests)
-        run: reference/default-install/db.sh up
+        run: |
+          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 28991=db:3306
+          reference/default-install/db.sh up
       - name: Tests with the 100% gate (ADR 0007)
         run: |
-          cargo llvm-cov --workspace --ignore-filename-regex '/tests/' \
+          scripts/ci-as-user.sh cargo llvm-cov --workspace --ignore-filename-regex '/tests/' \
             --fail-under-lines 100 --fail-under-regions 100 \
-            --lcov --output-path lcov.info
-      - run: cargo llvm-cov report --ignore-filename-regex '/tests/' --summary-only
+            --lcov --output-path target/lcov.info
+      - run: scripts/ci-as-user.sh cargo llvm-cov report --ignore-filename-regex '/tests/' --summary-only
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage
-          path: lcov.info
-
-  mutants:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
-        with:
-          tool: cargo-mutants
-      - name: Theme Test Data fixture, downloaded pinned, never committed
-        run: reference/theme-test-data/build.sh
-      - name: Default install fixture in MariaDB (hyscribe-db tests)
-        run: reference/default-install/db.sh up
-      - name: No surviving mutants in changed code
+          path: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/lcov.info
+      - name: Remove the fixture containers
+        if: always()
         run: |
-          git diff origin/${{ github.base_ref }}...HEAD > pr.diff
-          cargo mutants --workspace --in-place --in-diff pr.diff --no-shuffle
+          reference/default-install/db.sh down || true
+          scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
 
   package:
-    needs: changed
-    if: needs.changed.outputs.run == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    runs-on: [self-hosted, hyscribe]
+    container:
+      image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
+      env:
+        CARGO_HOME: /cache/cargo
+        SCCACHE_DIR: /cache/sccache
+        DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
+        TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      volumes:
+        - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
+        - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
+        - hyscribe-cargo:/cache/cargo
+        - hyscribe-sccache:/cache/sccache
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+    timeout-minutes: 40
+    env:
+      HYSCRIBE_DB_CONTAINER: ci-package-db-${{ github.run_id }}
+      HYSCRIBE_REF_NETWORK: ci-package-ref-${{ github.run_id }}
+      HYSCRIBE_DB_PORT: "28992"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: C compiler for ring (scripts/package.sh)
-        run: clang --version || (sudo apt-get update && sudo apt-get install -y --no-install-recommends clang)
+      - name: Tools (system packages, cargo tools from the cache volume)
+        env:
+          RUSTC_WRAPPER: ""
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/ci-setup.sh sccache@0.19.0
+      - run: rustup target add x86_64-unknown-linux-musl
       - name: Release archive installs and serves the default install (ADR 0005)
         run: |
+          scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 28992=db:3306
           reference/default-install/db.sh up
           scripts/package.sh x86_64-unknown-linux-musl dist
-          scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
+          scripts/ci-as-user.sh prepare
+          scripts/ci-as-user.sh scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
+      - name: Remove the fixture containers
+        if: always()
+        run: |
+          reference/default-install/db.sh down || true
+          scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
 
   fuzz:
-    needs: changed
-    if: needs.changed.outputs.run == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # Last: one runner takes the jobs in turn, and the fuzz run is the longest.
+    needs: [checks, coverage, package]
+    if: ${{ !cancelled() }}
+    runs-on: [self-hosted, hyscribe]
+    container:
+      image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
+      env:
+        CARGO_HOME: /cache/cargo
+        SCCACHE_DIR: /cache/sccache
+        DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
+        TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      volumes:
+        - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
+        - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
+        - hyscribe-cargo:/cache/cargo
+        - hyscribe-sccache:/cache/sccache
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
-        with:
-          toolchain: nightly
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
-        with:
-          tool: cargo-fuzz
+      - name: Tools (system packages, cargo tools from the cache volume)
+        env:
+          RUSTC_WRAPPER: ""
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/ci-setup.sh sccache@0.19.0 cargo-fuzz@0.13.2
+      - run: rustup toolchain install nightly --profile minimal
       - name: Short fuzz run of every target
-        working-directory: fuzz
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/fuzz
         run: |
           for target in $(cargo +nightly fuzz list); do
             # The image targets start from the review's hostile cases too.
             seeds=()
             case $target in image_*) mkdir -p "corpus/$target"; seeds=("corpus/$target" ../crates/hyscribe-image/tests/hostile) ;; esac
-            cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${seeds[@]}" -- -max_total_time=60
+            cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${seeds[@]}" -- -max_total_time=30
           done

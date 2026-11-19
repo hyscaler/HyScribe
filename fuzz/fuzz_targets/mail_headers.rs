@@ -11,8 +11,16 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     let Some(headers) = parse_headers(data) else {
-        let unix = data.split(|&b| b == b'\n');
-        assert!(unix.flat_map(|line| line.strip_suffix(b"\r").unwrap_or(line)).any(|&b| b == b'\r' || b == 0));
+        // A CR ends a line only before an LF, so the last line keeps its own.
+        let lines: Vec<&[u8]> = data.split(|&b| b == b'\n').collect();
+        let stray = lines.iter().enumerate().any(|(at, line)| {
+            let line = match at + 1 < lines.len() {
+                true => line.strip_suffix(b"\r").unwrap_or(line),
+                false => line,
+            };
+            line.iter().any(|&b| b == b'\r' || b == 0)
+        });
+        assert!(stray);
         return;
     };
     let kept = [&headers.from_name, &headers.from_email, &headers.content_type, &headers.charset];

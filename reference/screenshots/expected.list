@@ -4,5 +4,4 @@ administrator-wp-admin-site-health-php-tab-debug	Site Health's Info lists PHP's 
 administrator-wp-admin-post-new-php-post-type-page	The block patterns list answers 501 (it fetches the wordpress.org pattern directory, an open question), so the editor shows no start patterns dialog
 administrator-wp-admin-post-new-php	The block patterns list answers 501
 editor-wp-admin-post-new-php	The block patterns list answers 501
-administrator-wp-admin-site-editor-php	The navigation fallback route answers 501: PHP writes a wp_navigation post there, which HyScribe does not
 administrator-wp-admin-upload-php-mode-grid	The URL prefix (ADR 0008): the grid's Backbone router matches upload.php, which hs-admin prints as upload, so its address stays upload?mode=grid

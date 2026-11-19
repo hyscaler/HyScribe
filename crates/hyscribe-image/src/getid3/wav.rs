@@ -7,30 +7,23 @@
 use hyscribe_phpser::Value;
 
 use super::{Entry, divide, file_entries, key, text};
+use crate::fileinfo::{le16, le32};
 use crate::meta::Unported;
-
-fn le16(b: &[u8], at: usize) -> Option<i64> {
-    let bytes = b.get(at..at.checked_add(2)?)?;
-    Some(i64::from(u16::from_le_bytes(bytes.try_into().ok()?)))
-}
-
-fn le32(b: &[u8], at: usize) -> Option<usize> {
-    let bytes = b.get(at..at.checked_add(4)?)?;
-    usize::try_from(u32::from_le_bytes(bytes.try_into().ok()?)).ok()
-}
 
 /// The `fmt ` chunk's body and the length of the `data` chunk of a WAVE
 /// file whose chunks all lie inside it and are ones that add nothing.
 fn chunks(b: &[u8]) -> Option<(&[u8], usize)> {
-    if b.get(8..12)? != b"WAVE" || le32(b, 4)?.checked_add(8)? != b.len() {
+    let size = le32(b, 4).map(|size| size.saturating_add(8));
+    if b.get(8..12) != Some(b"WAVE") || size != Some(b.len()) {
         return None;
     }
     let (mut format, mut data) = (None, None);
     let mut at = 12;
     while at < b.len() {
-        let id = b.get(at..at + 4)?;
-        let len = le32(b, at + 4)?;
-        let body = b.get(at + 8..at.checked_add(8)?.checked_add(len)?)?;
+        // What the file cuts off reads as nothing, and fails as a chunk.
+        let id = b.get(at..at + 4).unwrap_or_default();
+        let len = le32(b, at + 4).unwrap_or(0);
+        let body = b.get(at + 8..at.saturating_add(8).saturating_add(len))?;
         match (id, &format, &data) {
             (b"fmt ", None, _) => format = Some(body),
             (b"data", _, None) => data = Some(len),
@@ -45,22 +38,21 @@ fn chunks(b: &[u8]) -> Option<(&[u8], usize)> {
 /// The metadata of a WAVE file as `wp_read_audio_metadata()` keeps it.
 pub(super) fn wav(b: &[u8]) -> Result<Vec<Entry>, Unported> {
     let (format, data) = chunks(b).ok_or(Unported)?;
-    let field = |at, wide: bool| match wide {
-        true => le32(format, at).and_then(|n| i64::try_from(n).ok()),
-        false => le16(format, at),
-    };
-    let (tag, channels) = (field(0, false), field(2, false));
-    let (rate, bytes_per_second) = (field(4, true), field(8, true));
-    let bits = field(14, false);
-    // PCM, one or two channels, and nothing a file leaves out.
-    let (Some(1), Some(channels @ (1 | 2)), Some(rate @ 1..), Some(bytes_per_second @ 1..)) =
-        (tag, channels, rate, bytes_per_second)
-    else {
+    let number = |value: Option<usize>| value.unwrap_or(0) as i64;
+    let (tag, channels) = (number(le16(format, 0)), number(le16(format, 2)));
+    let (rate, bytes_per_second) = (number(le32(format, 4)), number(le32(format, 8)));
+    let bits = number(le16(format, 14));
+    // PCM, one or two channels, samples, and nothing a file leaves out (an
+    // empty `data` chunk makes getID3 take the rest of the file for it).
+    if data == 0
+        || tag != 1
+        || !(1..=2).contains(&channels)
+        || rate < 1
+        || bytes_per_second < 1
+        || bits < 1
+    {
         return Err(Unported);
-    };
-    let Some(bits @ 1..) = bits else {
-        return Err(Unported);
-    };
+    }
     let bitrate = bytes_per_second * 8;
     let mode = if channels == 1 { "mono" } else { "stereo" };
     let mut entries: Vec<Entry> = vec![

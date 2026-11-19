@@ -67,6 +67,47 @@ fn leaves_what_it_cannot_tell() {
     let mut compressed = corpus("sample.odt");
     compressed[8] = 8;
     assert_eq!(finfo_candidates(&compressed), Err(Unported));
+    // Its text longer than the file, a name longer than the file, an end
+    // with no room for its fields, and a directory with too little to read.
+    let mut long = corpus("sample.odt");
+    long[22..26].copy_from_slice(&0x00ff_ffffu32.to_le_bytes());
+    assert_eq!(finfo_candidates(&long), Err(Unported));
+    let mut named = docx.clone();
+    let start = usize::try_from(u32::from_le_bytes(
+        named[end + 16..end + 20].try_into().unwrap(),
+    ))
+    .unwrap();
+    named[start + 28..start + 30].copy_from_slice(&0xffffu16.to_le_bytes());
+    assert_eq!(finfo_candidates(&named), Err(Unported));
+    let local = docx[..start].to_vec();
+    for room in [4, 9, 11, 13, 19] {
+        let cut = [
+            local.as_slice(),
+            b"PK\x05\x06".as_slice(),
+            &[0u8; 20][..room - 4],
+        ]
+        .concat();
+        assert_eq!(finfo_candidates(&cut), Err(Unported), "{room}");
+    }
+    // Entries cut at each of the three fields that follow their sizes.
+    for room in [29, 31, 33] {
+        let mut cut = local.clone();
+        let mut ending = b"PK\x05\x06\0\0\0\0\x01\0\x01\0\0\0\0\0".to_vec();
+        ending.extend(u32::try_from(local.len() + 22).unwrap().to_le_bytes());
+        ending.extend([0, 0]);
+        cut.extend(ending);
+        cut.extend(b"PK\x01\x02");
+        cut.resize(local.len() + 22 + room, 0);
+        assert_eq!(finfo_candidates(&cut), Err(Unported), "{room}");
+    }
+}
+
+/// An image header with a size is an image, and one without may be text.
+#[test]
+fn reads_images_that_have_a_size() {
+    let jpeg = corpus("small.jpg");
+    assert_eq!(finfo_candidates(&jpeg), Ok(vec!["image/jpeg"]));
+    assert_eq!(finfo_candidates(&jpeg[..4]), Err(Unported));
 }
 
 /// How many golden files are answered, of how many: every family the

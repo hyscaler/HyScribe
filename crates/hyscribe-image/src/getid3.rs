@@ -47,14 +47,12 @@ fn playtime_string(seconds: f64) -> String {
 
 /// The entries `wp_read_audio_metadata()` adds to what getID3 gives the
 /// audio: the file's size, getID3's type for it, and its length
-/// (`playtime_seconds`, as getID3 has it).
+/// (`playtime_seconds`, as getID3 has it, never zero).
 fn file_entries(entries: &mut Vec<Entry>, size: usize, mime: &str, seconds: f64) {
     entries.push((key("filesize"), Value::Int(size as i64)));
     entries.push((key("mime_type"), text(mime)));
-    if seconds != 0.0 {
-        entries.push((key("length"), Value::Int(seconds.round() as i64)));
-        entries.push((key("length_formatted"), text(&playtime_string(seconds))));
-    }
+    entries.push((key("length"), Value::Int(seconds.round() as i64)));
+    entries.push((key("length_formatted"), text(&playtime_string(seconds))));
 }
 
 /// The size below which getID3 stops on a file too small to hold the tags

@@ -94,13 +94,16 @@ fn keyword(line: &str) -> bool {
     KEYWORDS.contains(&word.as_str()) || (header && HEADERS.contains(&word.as_str()))
 }
 
-/// Whether libmagic sees `bytes` as text at all: UTF-8 with no control
-/// character but the tab and the line ends.
+/// Whether `text` holds no control character but the tab and the line
+/// ends.
+fn clean(text: &str) -> bool {
+    text.chars()
+        .all(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r'))
+}
+
+/// Whether libmagic sees `bytes` as text at all: UTF-8 that is [`clean`].
 pub(super) fn is_text(bytes: &[u8]) -> bool {
-    std::str::from_utf8(bytes).is_ok_and(|text| {
-        text.chars()
-            .all(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r'))
-    })
+    std::str::from_utf8(bytes).is_ok_and(clean)
 }
 
 /// Whether a line holds a tag, other than an address in angle brackets.
@@ -125,10 +128,10 @@ fn marked(line: &str) -> bool {
 /// The types libmagic gives `bytes` as plain text; `None` for text this
 /// does not decide, or a file that is not text.
 pub(super) fn text(bytes: &[u8]) -> Option<Vec<&'static str>> {
-    if bytes.len() > LIMIT || !is_text(bytes) {
+    if bytes.len() > LIMIT {
         return None;
     }
-    let text = std::str::from_utf8(bytes).ok()?;
+    let text = std::str::from_utf8(bytes).ok().filter(|text| clean(text))?;
     if text.trim().is_empty() || text.split(['\n', '\r']).any(marked) {
         return None;
     }

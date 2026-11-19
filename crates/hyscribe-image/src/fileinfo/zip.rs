@@ -3,6 +3,7 @@
 //! ZIP files: OpenDocument and EPUB by their stored `mimetype` entry,
 //! Office Open XML by the folders of its parts, any other archive as ZIP.
 
+use super::{le16, le32};
 use crate::meta::Unported;
 
 /// The OpenDocument types WordPress allows, by their `mimetype` entry.
@@ -41,30 +42,25 @@ const SPECIAL: [&str; 5] = [
     "_rels/",
 ];
 
-fn le16(b: &[u8], at: usize) -> Option<usize> {
-    let bytes = b.get(at..at + 2)?;
-    Some(usize::from(u16::from_le_bytes(bytes.try_into().ok()?)))
-}
-
-fn le32(b: &[u8], at: usize) -> Option<usize> {
-    let bytes = b.get(at..at + 4)?;
-    usize::try_from(u32::from_le_bytes(bytes.try_into().ok()?)).ok()
-}
-
 /// The entry names of the central directory, `None` for an archive that
 /// is cut off or not consistent.
 fn names(b: &[u8]) -> Option<Vec<&[u8]>> {
     let from = b.len().saturating_sub(22 + 0xffff);
-    let tail = b.get(from..)?;
-    let end = from + tail.windows(4).rposition(|w| w == b"PK\x05\x06")?;
-    let count = le16(b, end + 10)?;
-    let mut at = le32(b, end + 16)?;
+    let end = from
+        + b.split_at(from)
+            .1
+            .windows(4)
+            .rposition(|w| w == b"PK\x05\x06")?;
+    // A field the file cuts off reads as 0, and fails where it is used.
+    let field = |at| le16(b, at).unwrap_or(0);
+    let count = field(end + 10);
+    let mut at = le32(b, end + 16).unwrap_or(0);
     let mut names = Vec::new();
     for _ in 0..count {
-        if b.get(at..at + 4)? != b"PK\x01\x02" {
+        if b.get(at..at + 4) != Some(b"PK\x01\x02") {
             return None;
         }
-        let (name, extra, comment) = (le16(b, at + 28)?, le16(b, at + 30)?, le16(b, at + 32)?);
+        let (name, extra, comment) = (field(at + 28), field(at + 30), field(at + 32));
         names.push(b.get(at + 46..at + 46 + name)?);
         at += 46 + name + extra + comment;
     }

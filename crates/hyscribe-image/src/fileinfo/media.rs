@@ -34,15 +34,18 @@ fn id3(b: &[u8]) -> bool {
 /// The brand of an ISO base media file: `ftyp`, or a `moov`, `wide` or
 /// `mdat` atom first, which libmagic takes for QuickTime.
 fn iso_media(b: &[u8]) -> Option<&'static str> {
-    let size = u32::from_be_bytes(b.get(..4)?.try_into().ok()?);
-    let atom: &[u8; 4] = b.get(4..8)?.try_into().ok()?;
+    let [s0, s1, s2, s3, a0, a1, a2, a3, ..] = *b else {
+        return None;
+    };
+    let size = u32::from_be_bytes([s0, s1, s2, s3]);
+    let atom = [a0, a1, a2, a3];
     if size < 8 {
         return None;
     }
-    if [b"moov", b"wide", b"mdat"].contains(&atom) {
+    if matches!(&atom, b"moov" | b"wide" | b"mdat") {
         return Some("video/quicktime");
     }
-    if atom != b"ftyp" {
+    if &atom != b"ftyp" {
         return None;
     }
     Some(match b.get(8..12)? {
@@ -74,7 +77,7 @@ fn ogg(b: &[u8]) -> Option<&'static str> {
 
 /// The `DocType` an EBML header names.
 fn ebml(b: &[u8]) -> Option<&'static str> {
-    let head = b.get(..b.len().min(64))?;
+    let head = b.split_at(b.len().min(64)).0;
     let has = |name: &[u8]| head.windows(name.len()).any(|w| w == name);
     if has(b"\x42\x82\x84webm") {
         Some("video/webm")

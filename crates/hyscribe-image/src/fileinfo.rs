@@ -14,6 +14,18 @@ mod media;
 mod text;
 mod zip;
 
+/// The little endian number of two bytes at `at`, if the file holds them.
+pub(crate) fn le16(b: &[u8], at: usize) -> Option<usize> {
+    let chunk = b.get(at..)?.first_chunk::<2>()?;
+    Some(usize::from(u16::from_le_bytes(*chunk)))
+}
+
+/// The little endian number of four bytes at `at`, if the file holds them.
+pub(crate) fn le32(b: &[u8], at: usize) -> Option<usize> {
+    let chunk = b.get(at..)?.first_chunk::<4>()?;
+    Some(u32::from_le_bytes(*chunk) as usize)
+}
+
 /// How much of a file libmagic reads (`FILE_BYTES_MAX`).
 pub(crate) const LIMIT: usize = 1 << 20;
 

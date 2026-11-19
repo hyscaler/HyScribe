@@ -387,6 +387,15 @@ fn reads_audio_and_video_as_getid3_does() {
     let unported =
         wp_generate_attachment_metadata(upload, "audio/mpeg", sizes(), &limits, &NoHooks, b"");
     assert_eq!(unported, Err(crate::meta::Unported));
+    let video = corpus("clip.mp4");
+    let upload = Upload {
+        bytes: &video,
+        file: "x.mp4",
+        attachment: 1,
+    };
+    let unported =
+        wp_generate_attachment_metadata(upload, "video/mp4", sizes(), &limits, &NoHooks, b"");
+    assert_eq!(unported, Err(crate::meta::Unported));
 }
 
 #[test]

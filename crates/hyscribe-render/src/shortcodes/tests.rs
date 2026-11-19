@@ -411,3 +411,10 @@ fn an_image_tag_without_its_end_is_no_image() {
     assert_eq!(split_image(b"<a href=x> <img src=x"), None);
     assert_eq!(split_image(b"<img src=x"), None);
 }
+
+#[test]
+fn an_image_tag_needs_a_character_before_its_end() {
+    assert_eq!(split_image(b"<img >x>"), None);
+    let found = split_image(b"<img x>cap");
+    assert_eq!(found, Some((b"<img x>".to_vec(), b"cap".to_vec())));
+}

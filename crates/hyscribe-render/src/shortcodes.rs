@@ -240,9 +240,8 @@ fn split_image(content: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
     // `[^>]+>` from `at`: a first character that is no `>`, then up to the
     // next `>`; the offset after it.
     let tag_end = |at: usize| {
-        let close = closers.get(closers.partition_point(|&p| p < at + 1));
-        let first = lower.get(at) != Some(&b'>');
-        close.filter(|_| first).map(|close| close + 1)
+        let close = closers.get(closers.partition_point(|&p| p < at)).copied();
+        close.filter(|&close| close > at).map(|close| close + 1)
     };
     let starts = |at: usize, opener: &[u8]| lower.get(at..).is_some_and(|r| r.starts_with(opener));
     let mut from = 0;

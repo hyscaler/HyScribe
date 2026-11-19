@@ -543,14 +543,9 @@ fn push(atts: &mut Vec<(Key, Value)>, value: Vec<u8>) {
 /// `1 === preg_match( '/^[^<]*+(?:<[^>]*+>[^<]*+)*+$/', $value )`: every
 /// `<` closed by a `>` before the next `<`.
 fn balanced_angle_brackets(text: &[u8]) -> bool {
-    let mut at = 0;
-    while let Some(open) = find(text, at, b"<") {
-        let Some(close) = find(text, open + 1, b">") else {
-            return false;
-        };
-        at = close + 1;
-    }
-    true
+    // Each `<` runs to the next `>`, so all are closed if the last is.
+    let last = text.iter().rposition(|&b| b == b'<');
+    last.is_none_or(|at| text.get(at..).is_some_and(|rest| rest.contains(&b'>')))
 }
 
 /// `stripcslashes( $text )`.
@@ -572,7 +567,6 @@ pub fn stripcslashes(text: &[u8]) -> Vec<u8> {
             b'v' => out.push(0x0b),
             b'b' => out.push(8),
             b'f' => out.push(0x0c),
-            b'\\' => out.push(b'\\'),
             b'x' if text.get(i).is_some_and(|b| b.is_ascii_hexdigit()) => {
                 let digits = text
                     .get(i..)
@@ -603,7 +597,7 @@ pub fn stripcslashes(text: &[u8]) -> Vec<u8> {
                         std::str::from_utf8(text.get(from..from + digits).unwrap_or_default());
                     // `(char) strtol()`: modulo 256.
                     out.push(
-                        (u32::from_str_radix(octal.unwrap_or("0"), 8).unwrap_or(0) % 256) as u8,
+                        (u32::from_str_radix(octal.unwrap_or("0"), 8).unwrap_or(0) & 0xff) as u8,
                     );
                     i = from + digits;
                 }

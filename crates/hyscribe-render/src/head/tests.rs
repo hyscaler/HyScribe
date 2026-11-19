@@ -693,3 +693,99 @@ fn mediaelement_styles_are_linked_as_wordpress_registers_them() {
     );
     assert_eq!(shortcode.version, None);
 }
+
+/// The embed code of the oEmbed golden of `?p=1`, at its size and secret.
+#[test]
+fn embed_code_matches_php() {
+    let golden = include_str!("../../../hyscribe-rest/tests/golden/oembed.tsv");
+    let body = unhex(golden.lines().next().unwrap().rsplit('\t').next().unwrap());
+    let data = json_decode(&body).unwrap();
+    let php = data.get_str("html").unwrap().to_php_string();
+    let site = oracle_site();
+    let post = site.post(1).unwrap();
+    let ours = post_embed_html(&site, &post, (600, 338), "0123456789").unwrap();
+    assert_eq!(
+        String::from_utf8(ours).unwrap(),
+        String::from_utf8(php).unwrap()
+    );
+}
+
+/// A site with pretty permalinks that keeps the post query it is asked and
+/// answers it with `found`.
+struct Named {
+    base: Options,
+    asked: std::cell::RefCell<Vec<hyscribe_model::PostQuery>>,
+    found: Vec<hyscribe_model::Post>,
+}
+
+impl Site for Named {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        self.base.option(name)
+    }
+    fn home_url(&self) -> Vec<u8> {
+        self.base.home_url()
+    }
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        self.base.post(id)
+    }
+    fn post_terms(&self, id: u64, taxonomy: &str) -> Vec<hyscribe_model::Term> {
+        self.base.post_terms(id, taxonomy)
+    }
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        self.base.post_meta(id, key)
+    }
+    fn query(&self, query: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        self.asked.borrow_mut().push(query.clone());
+        self.found.clone()
+    }
+}
+
+/// With pretty permalinks the frame's URL ends in `/embed/`, unless a
+/// post, page or attachment of any status is named `embed`, which
+/// `get_page_by_path()` would find at that URL.
+#[test]
+fn pretty_embed_urls_look_for_a_post_named_embed() {
+    let named = |found| Named {
+        base: Options {
+            options: vec![("permalink_structure", b"/%postname%/")],
+            ..oracle_site()
+        },
+        asked: std::cell::RefCell::default(),
+        found,
+    };
+    let site = named(Vec::new());
+    let post = site.post(1).unwrap();
+    let html = post_embed_html(&site, &post, (600, 338), "0123456789").unwrap();
+    let html = String::from_utf8(html).unwrap();
+    assert!(
+        html.contains(" src=\"http://127.0.0.1:8081/hello-world/embed/#?secret=0123456789\" "),
+        "{html}"
+    );
+    let asked = site.asked.take();
+    assert_eq!(
+        asked,
+        [hyscribe_model::PostQuery {
+            post_types: ["post", "page", "attachment"].map(String::from).to_vec(),
+            statuses: [
+                "publish",
+                "future",
+                "draft",
+                "pending",
+                "private",
+                "trash",
+                "auto-draft",
+                "inherit"
+            ]
+            .map(|status| hyscribe_model::StatusFilter {
+                status: status.into(),
+                author: None
+            })
+            .to_vec(),
+            names: vec!["embed".into()],
+            limit: 1,
+            ..hyscribe_model::PostQuery::default()
+        }]
+    );
+    let taken = named(vec![post.clone()]);
+    assert_eq!(post_embed_html(&taken, &post, (600, 338), "x"), None);
+}

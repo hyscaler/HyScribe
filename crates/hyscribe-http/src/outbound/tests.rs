@@ -50,6 +50,7 @@ async fn the_navigation_fallback_is_written_as_php_writes_it() {
         "navigation-fallback-escapes",
         "navigation-fallback-primary-location",
         "navigation-fallback-primary-slug",
+        "navigation-fallback-slug",
     ];
     for case in cases {
         let (title, name, content) = (

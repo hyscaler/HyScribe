@@ -98,6 +98,14 @@ return array(
 		},
 		'action' => $navigation_get,
 	),
+	'navigation-fallback-slug'             => array(
+		'setup'  => function () use ( $navigation_menu, $navigation_visitor, $plain ) {
+			$menu_id = $navigation_menu( 'Odd Name', array_slice( $plain, 0, 1 ) );
+			wp_update_term( $menu_id, 'nav_menu', array( 'slug' => 'a-slug-of-its-own' ) );
+			$navigation_visitor();
+		},
+		'action' => $navigation_get,
+	),
 	'navigation-fallback-primary-location' => array(
 		'setup'  => function () use ( $navigation_menu, $navigation_visitor, $plain ) {
 			$chosen = $navigation_menu( 'Chosen by location', array_slice( $plain, 0, 1 ) );

@@ -84,6 +84,8 @@ impl Site for Menus {
         if query.post_types != ["nav_menu_item"] {
             return Vec::new();
         }
+        // `nopaging`.
+        assert_eq!(query.limit, query_limit(-1));
         assert_eq!(query.order, [(OrderBy::MenuOrder, true)]);
         let menu = query.terms[0].terms[0];
         let mut found: Vec<Post> = self
@@ -377,6 +379,8 @@ fn a_link_to_the_current_page_makes_no_fallback() {
     assert!(current("//127.0.0.1:8081/about", "/about"));
     assert!(!current("http://127.0.0.1:8081/about", "/other"));
     assert!(!current("https://example.test/about", "/about"));
+    // A fragment at the start is kept, so it can be the page asked for.
+    assert!(current("#", "#"));
     // A fragment alone and an empty or zero link are no page.
     assert!(!current("#", "/about"));
     assert!(!current("", ""));
@@ -557,4 +561,31 @@ fn the_navigation_block_falls_back_to_the_classic_menu() {
     unported.entries[1].set("_menu_item_type", "taxonomy");
     assert!(!render(&unported).contains("Docs"));
     assert!(unported.inserted.borrow().is_empty());
+}
+
+/// `set_url_scheme()` puts the scheme of the home URL on a URL that has
+/// one of word characters, or has none but two slashes.
+#[test]
+fn urls_take_the_scheme_of_the_home() {
+    let cases: [(&[u8], &[u8]); 9] = [
+        (b"http://a/b", b"https://a/b"),
+        (b"  ftp://a  ", b"https://a"),
+        (b"a_b9://x", b"https://x"),
+        (b"//host/p", b"https://host/p"),
+        (b"://a", b"://a"),
+        (b"a b://x", b"a b://x"),
+        (b"a-b://x", b"a-b://x"),
+        (b"/relative", b"/relative"),
+        (b"", b""),
+    ];
+    for (url, expected) in cases {
+        assert_eq!(with_scheme(url, b"https"), expected, "{url:?}");
+    }
+}
+
+/// The hook's defaults pass what they are given on.
+#[test]
+fn the_hooks_pass_on_by_default() {
+    assert!(!().wp_navigation_should_create_fallback(false));
+    assert!(().wp_navigation_should_create_fallback(true));
 }

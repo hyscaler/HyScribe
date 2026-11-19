@@ -202,9 +202,149 @@ jobs:
           reference/default-install/db.sh down || true
           scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
 
+  switch-back:
+    # The switch-back suite (MVP 8.5, GOALS S7, an open question), over both fixtures.
+    needs: [coverage]
+    if: ${{ !cancelled() && needs.coverage.result == 'success' }}
+    runs-on: [self-hosted, hyscribe]
+    container:
+      image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
+      env:
+        CARGO_HOME: /cache/cargo
+        SCCACHE_DIR: /cache/sccache
+        DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
+        TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      volumes:
+        - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
+        - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
+        - hyscribe-cargo:/cache/cargo
+        - hyscribe-sccache:/cache/sccache
+        - ${{ vars.HYSCRIBE_CI_FIXTURES }}:${{ vars.HYSCRIBE_CI_FIXTURES }}:ro
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+    timeout-minutes: 90
+    env:
+      HYSCRIBE_DB_CONTAINER: ci-switchback-db-${{ github.run_id }}
+      HYSCRIBE_REF_NETWORK: ci-switchback-ref-${{ github.run_id }}
+      HYSCRIBE_PHP_CONTAINER: ci-switchback-php-${{ github.run_id }}
+      HYSCRIBE_DB_PORT: "28994"
+      HYSCRIBE_TEST_DB_PORT: "28994"
+      HYSCRIBE_PHP_PORT: "8094"
+      HYSCRIBE_CI_FIXTURES: ${{ vars.HYSCRIBE_CI_FIXTURES }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tools (system packages, cargo tools from the cache volume)
+        env:
+          RUSTC_WRAPPER: ""
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/ci-setup.sh sccache@0.19.0
+      - run: scripts/ci-as-user.sh prepare
+      - name: Theme Test Data fixture, the one the goldens were recorded on
+        run: |
+          mkdir -p target/fixtures
+          ln -sfn "$HYSCRIBE_CI_FIXTURES/theme-test-data" target/fixtures/theme-test-data
+          test -f target/fixtures/theme-test-data/7.1.3/database.sql
+      - name: Fixture network and port forwards
+        run: scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" "28994=db:3306" "8094=$HYSCRIBE_PHP_CONTAINER:80"
+      - name: Docker for the tests' SQL steps (they run as the ordinary user)
+        run: scripts/ci-docker-proxy.sh
+      - name: Switch back to PHP WordPress, default install
+        run: |
+          # The runner rewrites _work paths in a step's environment to /__w,
+          # which the host's Docker cannot mount: the scripts get the host
+          # path (also mounted in the job) from this literal.
+          ws=${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+          # World writable folders: HyScribe's test runs as the ordinary user.
+          (umask 000; CARGO="$ws/scripts/ci-cargo.sh" "$ws/reference/switch-back/run.sh" "$ws/target/switch-back/default")
+      - name: Switch back to PHP WordPress, Theme Test Data
+        run: |
+          ws=${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+          (umask 000; HYSCRIBE_SWITCH_BACK_FIXTURE=ttd CARGO="$ws/scripts/ci-cargo.sh" "$ws/reference/switch-back/run.sh" "$ws/target/switch-back/ttd")
+      - name: Logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: switch-back-logs
+          path: |
+            ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/switch-back/**/*.log
+            ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/switch-back/**/*.tsv
+            ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/switch-back/**/*.html
+      - name: Remove the fixture containers
+        if: always()
+        run: |
+          reference/default-install/php.sh down || true
+          reference/default-install/db.sh down || true
+          scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
+
+  screenshots:
+    # The screenshot comparison (GOALS S8, an open question): PHP and HyScribe, pixel by pixel.
+    needs: [coverage, switch-back]
+    if: ${{ !cancelled() && needs.coverage.result == 'success' }}
+    runs-on: [self-hosted, hyscribe]
+    container:
+      image: rust@sha256:223cc32ddca8f3ee90c436dbc94b6b5f052ea7f9653c5201e9612f08ad7d21b8 # rust:1-trixie, rustc 1.100
+      env:
+        CARGO_HOME: /cache/cargo
+        SCCACHE_DIR: /cache/sccache
+        DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
+        TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
+      volumes:
+        - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
+        - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
+        - hyscribe-cargo:/cache/cargo
+        - hyscribe-sccache:/cache/sccache
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+    timeout-minutes: 90
+    env:
+      HYSCRIBE_DB_CONTAINER: ci-shots-db-${{ github.run_id }}
+      HYSCRIBE_REF_NETWORK: ci-shots-ref-${{ github.run_id }}
+      HYSCRIBE_DB_PORT: "28995"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Tools (system packages, cargo tools from the cache volume)
+        env:
+          RUSTC_WRAPPER: ""
+        run: |
+          mkdir -p "$TMPDIR"
+          scripts/ci-setup.sh sccache@0.19.0
+      - run: rustup target add x86_64-unknown-linux-musl
+      - name: Release binary (musl, so it runs in the browser image)
+        run: |
+          CC_x86_64_unknown_linux_musl=clang cargo build --release --locked -p hyscribe --target x86_64-unknown-linux-musl
+      - name: Fixture network and the PHP container's port forward (php.sh waits for it)
+        run: scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" "28996=hs-shots-php-$HYSCRIBE_DB_PORT:80"
+      - name: Screenshots of every screen, PHP against HyScribe
+        env:
+          HYSCRIBE_BIN: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/x86_64-unknown-linux-musl/release/hyscribe
+        run: |
+          # The host path of the checkout, for the bind mounts (see the switch-back job).
+          ws=${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+          "$ws/reference/screenshots/golden.sh" "$ws/target/screenshots"
+      - name: Report of a failed run
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots-report
+          path: |
+            ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/screenshots/report.html
+            ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/screenshots/report.tsv
+            ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/screenshots/hyscribe.log
+            ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/screenshots/diff-*.png
+      - name: Remove the fixture containers
+        if: always()
+        run: |
+          docker rm -f "hs-shots-php-$HYSCRIBE_DB_PORT" "hs-shots-hyscribe-$HYSCRIBE_DB_PORT" || true
+          reference/default-install/db.sh down || true
+
   fuzz:
     # Last: one runner takes the jobs in turn, and the fuzz run is the longest.
-    needs: [checks, coverage, package]
+    needs: [checks, coverage, package, switch-back, screenshots]
     if: ${{ !cancelled() }}
     runs-on: [self-hosted, hyscribe]
     container:

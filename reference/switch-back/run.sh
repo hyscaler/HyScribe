@@ -61,8 +61,9 @@ mkdir -p "$OUT/uploads"
 if [ "$FIXTURE" = ttd ]; then
   cp -r "$ROOT/target/fixtures/theme-test-data/${HYSCRIBE_WP_VERSION:-7.1.3}/uploads/." "$OUT/uploads/"
 fi
-# PHP reads the uploads HyScribe wrote: its container mounts the folder.
-chmod -R a+rX "$OUT/uploads"
+# PHP reads the uploads HyScribe wrote: its container mounts the folder, and
+# HyScribe may run as another user than the one that copied the fixture's.
+chmod -R a+rwX "$OUT/uploads"
 export HYSCRIBE_PHP_UPLOADS="$OUT/uploads"
 
 "$ROOT/reference/default-install/db.sh" up

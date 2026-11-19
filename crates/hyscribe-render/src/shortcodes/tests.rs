@@ -141,6 +141,8 @@ fn shortcodes_match_php() {
             next.video_instances = renderer.video_instances;
             next.prefixed_ids = renderer.prefixed_ids.clone();
             next.assets = renderer.assets;
+            // The count of images in the content goes on too.
+            next.context.loading = renderer.context.loading.clone();
             renderer = next;
             feeding = true;
         }

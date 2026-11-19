@@ -1,0 +1,24 @@
+# The rows PHP WordPress writes for the action comment-post-paged-cookie-upper-email (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 19:43:52 to 2026-11-18 19:43:52 UTC.
+# %wp_comments:1% is 901.
+# %wp_comments:2% is 902.
+# %wp_comments:3% is 903.
+# %wp_comments:4% is 904.
+# %wp_comments:5% is 905.
+# %wp_comments:6% is 906.
+# %wp_comments:7% is 921.
+wp_comments	%wp_comments:7%	+	comment_ID	%wp_comments:7%
+wp_comments	%wp_comments:7%	+	comment_agent	HyScribe oracle
+wp_comments	%wp_comments:7%	+	comment_approved	0
+wp_comments	%wp_comments:7%	+	comment_author	Ann
+wp_comments	%wp_comments:7%	+	comment_author_IP	192.0.2.1
+wp_comments	%wp_comments:7%	+	comment_author_email	ann@example.test
+wp_comments	%wp_comments:7%	+	comment_author_url	
+wp_comments	%wp_comments:7%	+	comment_content	A paged comment.
+wp_comments	%wp_comments:7%	+	comment_date	%now%
+wp_comments	%wp_comments:7%	+	comment_date_gmt	%now%
+wp_comments	%wp_comments:7%	+	comment_karma	0
+wp_comments	%wp_comments:7%	+	comment_parent	0
+wp_comments	%wp_comments:7%	+	comment_post_ID	1
+wp_comments	%wp_comments:7%	+	comment_type	comment
+wp_comments	%wp_comments:7%	+	user_id	0

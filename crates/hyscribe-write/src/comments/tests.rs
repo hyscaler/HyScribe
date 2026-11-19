@@ -704,3 +704,38 @@ async fn every_failed_statement_fails_the_action() {
     })
     .await;
 }
+
+/// Each commenter cookie value comes out of `sanitize_comment_cookies()` as
+/// PHP leaves it (`reference/comments/cookies-golden.php`).
+#[test]
+fn commenter_cookies_are_sanitized_as_php() {
+    let golden = include_str!("../../tests/golden/comment-cookies.tsv");
+    let mut failures = Vec::new();
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [kind, value, php] = fields[..] else {
+            panic!("{line}");
+        };
+        let cookie = match kind {
+            "author" => CommentCookie::Author,
+            "email" => CommentCookie::Email,
+            _ => CommentCookie::Url,
+        };
+        let value = hyscribe_testkit::unhex(value);
+        let ours = sanitize_comment_cookie(cookie, &value);
+        let php = hyscribe_testkit::unhex(php);
+        if ours != php {
+            failures.push(format!(
+                "{kind} {:?}: {:?} not {:?}",
+                String::from_utf8_lossy(&value),
+                String::from_utf8_lossy(&ours),
+                String::from_utf8_lossy(&php)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(golden.lines().count(), COOKIE_CASES);
+}
+
+/// The lines of `reference/comments/cookies-golden.php`'s golden.
+const COOKIE_CASES: usize = 81;

@@ -283,7 +283,7 @@ fn mime_matches(wildcard: &str, real: &str) -> bool {
 
 /// `wp_post_mime_type_where()`'s types, each a `LIKE` pattern with a
 /// wildcard; none for a type that matches everything.
-fn mime_patterns(types: &str) -> Vec<String> {
+pub(super) fn mime_patterns(types: &str) -> Vec<String> {
     let keep = |text: &str, extra: &str| -> String {
         text.chars()
             .filter(|c| c.is_ascii_alphanumeric() || "-*.".contains(*c) || extra.contains(*c))

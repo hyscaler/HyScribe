@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `wp-comments-post.php`'s body parser never panics, under any content
-//! type, and what it reads is a form.
+//! type, URL-encoded or multipart, and what it reads is a form.
 
 #![no_main]
 
@@ -13,5 +13,7 @@ fuzz_target!(|data: &[u8]| {
     let (kind, body) = data.split_at(split);
     let _ = read_form(kind, body);
     let form = read_form(b"application/x-www-form-urlencoded", data);
+    assert!(form.is_none_or(|form| form.as_array().is_some()));
+    let form = read_form(b"multipart/form-data; boundary=x", data);
     assert!(form.is_none_or(|form| form.as_array().is_some()));
 });

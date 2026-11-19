@@ -67,7 +67,7 @@ record() {
   printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$page" >> "$OUT"
 }
 : > "$OUT"
-for screen in themes.php plugins.php import.php export.php site-health.php export-personal-data.php erase-personal-data.php; do
+for screen in themes.php plugins.php update-core.php import.php export.php site-health.php export-personal-data.php erase-personal-data.php; do
   for role in administrator editor author contributor subscriber; do
     record default "$screen" "$role"
   done
@@ -79,6 +79,21 @@ for screen in plugins.php export-personal-data.php; do
   record a5hidden "$screen" administrator
 done
 record g9broken themes.php administrator '?broken=1'
+record default update-core.php administrator '?action=upgrade-core'
+# Plugins the site names and HyScribe does not have: PHP deactivates them
+# as the screen opens, so the options table is put back after each view.
+record_active() {
+  printf "UPDATE wp_options SET option_value = '%s' WHERE option_name = 'active_plugins';\n" "$2" | sql
+  record "$1" plugins.php administrator
+  sql < "$OPTIONS"
+}
+record_active o36one 'a:1:{i:0;s:19:"missing/missing.php";}'
+record_active o36two 'a:2:{i:0;s:11:"one/one.php";i:1;s:7:"two.php";}'
+record_active o36path 'a:1:{i:0;s:11:"../evil.php";}'
+record_active o36inner 'a:1:{i:0;s:12:"dir/../x.php";}'
+record_active o36drive 'a:1:{i:0;s:8:"c:/x.php";}'
+record_active o36escape 'a:1:{i:0;s:12:"a b/<i>&.php";}'
+record_active o36dup 'a:2:{i:0;s:7:"x/x.php";i:1;s:7:"x/x.php";}'
 # An active theme the site does not have: stylesheet, template, then the
 # screens and roles.
 missing() {

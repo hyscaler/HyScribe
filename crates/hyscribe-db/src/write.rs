@@ -415,6 +415,32 @@ impl<'w> Write<'w> {
         self.change(Table::Posts, query).await
     }
 
+    /// `wp_media_attach_action()`'s `UPDATE`: `parent` becomes the parent of
+    /// the attachments `ids`; the rows it changed, as `mysqli` counts them.
+    pub async fn set_attachments_parent(
+        &mut self,
+        ids: &[u64],
+        parent: u64,
+    ) -> Result<u64, DbError> {
+        let mut changed = Sql::new(
+            "SELECT COUNT(*) FROM {prefix}posts WHERE post_type = 'attachment' \
+             AND post_parent != ? AND ID IN (",
+        );
+        changed.bind(Bind::Int(parent));
+        list(&mut changed, ids_or_none(ids));
+        let changed = changed.query(&self.writer.prefix);
+        let changed = self.count(changed).await?;
+        let mut sql = Sql::new(
+            "UPDATE {prefix}posts SET post_parent = ? \
+             WHERE post_type = 'attachment' AND ID IN (",
+        );
+        sql.bind(Bind::Int(parent));
+        list(&mut sql, ids_or_none(ids));
+        let query = sql.query(&self.writer.prefix);
+        self.change(Table::Posts, query).await?;
+        Ok(changed)
+    }
+
     /// `wp_delete_user()`: the posts of `author` pass to `new_author`.
     pub async fn reassign_posts(&mut self, author: u64, new_author: u64) -> Result<u64, DbError> {
         let query = self.sql("UPDATE {prefix}posts SET post_author = ? WHERE post_author = ?");
@@ -540,6 +566,42 @@ impl<'w> Write<'w> {
         sql.bind(Bind::Int(id));
         let row = self.optional(sql.query(&self.writer.prefix)).await?;
         Ok(row.map(|row| CommentFields::read(&row)))
+    }
+
+    /// `get_page_of_comment()`'s count: the top level comments of every
+    /// type on `post` from before `date_gmt` that are approved, or held and
+    /// `unapproved`'s: written by that user, or by the author with that
+    /// email.
+    pub async fn comments_before(
+        &mut self,
+        post: u64,
+        date_gmt: &str,
+        unapproved: Option<Unapproved<'_>>,
+    ) -> Result<u64, DbError> {
+        let query = match unapproved {
+            None => self.sql(
+                "SELECT COUNT(*) FROM {prefix}comments WHERE comment_post_ID = ? \
+                 AND comment_parent = 0 AND comment_date_gmt < ? AND comment_approved = '1'",
+            ),
+            Some(Unapproved::User(_)) => self.sql(
+                "SELECT COUNT(*) FROM {prefix}comments WHERE comment_post_ID = ? \
+                 AND comment_parent = 0 AND comment_date_gmt < ? \
+                 AND ( comment_approved = '1' OR ( user_id = ? AND comment_approved = '0' ) )",
+            ),
+            Some(Unapproved::Email(_)) => self.sql(
+                "SELECT COUNT(*) FROM {prefix}comments WHERE comment_post_ID = ? \
+                 AND comment_parent = 0 AND comment_date_gmt < ? \
+                 AND ( comment_approved = '1' \
+                 OR ( comment_author_email = ? AND comment_approved = '0' ) )",
+            ),
+        };
+        let query = query.bind(post).bind(date_gmt);
+        self.count(match unapproved {
+            None => query,
+            Some(Unapproved::User(user)) => query.bind(user),
+            Some(Unapproved::Email(email)) => query.bind(email),
+        })
+        .await
     }
 
     /// `wp_allow_comment()`'s duplicate: a comment not in the trash with
@@ -922,6 +984,15 @@ pub struct PostFields {
     pub mime_type: String,
     /// `guid`.
     pub guid: Vec<u8>,
+}
+
+/// Whose held comments a comment query adds to the approved ones.
+#[derive(Clone, Copy, Debug)]
+pub enum Unapproved<'a> {
+    /// The comments of this user.
+    User(u64),
+    /// The comments of the author with this email.
+    Email(&'a [u8]),
 }
 
 impl PostFields {

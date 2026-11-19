@@ -35,11 +35,29 @@ send() {
   local method=$1 user=$2 cookie=$3 data=${4//%nonce%/$nonce}
   local jar="hyscribe_user=$user"
   [ "$cookie" = - ] || jar="$jar; $cookie"
-  local args=(-g -s -o "$TMP/body" -D "$TMP/head" -w '%{http_code}' -X "$method" -A 'HyScribe oracle' -b "$jar")
-  if [ "$method" = POST ]; then
-    # %aN% stands for N letters a.
-    data=$(printf '%s' "$data" | perl -pe 's/%a(\d+)%/"a" x $1/ge')
-    args+=(-H 'Content-Type: application/x-www-form-urlencoded' --data-binary "$data")
+  local args=(-g -s -o "$TMP/body" -D "$TMP/head" -w '%{http_code}' -A 'HyScribe oracle' -b "$jar")
+  if [ "$method" = MULTIPART ]; then
+    # The pairs as multipart/form-data parts; a name starting with @ is a file.
+    args+=(-X POST)
+    while IFS= read -r -d '' arg; do args+=("$arg"); done < <(python3 -I -c '
+import sys, urllib.parse as u
+for n, pair in enumerate(sys.argv[1].split("&")):
+    name, _, value = pair.partition("=")
+    name, value = u.unquote_plus(name), u.unquote_plus(value)
+    if name.startswith("@"):
+        path = sys.argv[2] + "/file" + str(n)
+        open(path, "w").write(value)
+        sys.stdout.write("-F\0" + name[1:] + "=@" + path + ";filename=picture.txt;type=text/plain\0")
+    else:
+        sys.stdout.write("--form-string\0" + name + "=" + value + "\0")
+' "$data" "$TMP")
+  else
+    args+=(-X "$method")
+    if [ "$method" = POST ]; then
+      # %aN% stands for N letters a.
+      data=$(printf '%s' "$data" | perl -pe 's/%a(\d+)%/"a" x $1/ge')
+      args+=(-H 'Content-Type: application/x-www-form-urlencoded' --data-binary "$data")
+    fi
   fi
   curl "${args[@]}" "$BASE/wp-comments-post.php"
 }

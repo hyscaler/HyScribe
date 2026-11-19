@@ -24,6 +24,7 @@ pub use core_blocks::{
 };
 pub mod date;
 mod dimensions;
+pub mod duotone;
 mod elements;
 mod embed;
 mod excerpt;
@@ -55,6 +56,8 @@ pub mod registry;
 pub mod rest;
 mod rss;
 mod search;
+pub mod shortcode;
+mod shortcodes;
 pub mod site;
 pub mod site_templates;
 pub mod sitemap;

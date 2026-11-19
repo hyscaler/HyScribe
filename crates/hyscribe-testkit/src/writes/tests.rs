@@ -17,8 +17,17 @@ async fn the_default_install_loads_afresh() {
         ..saves.clone()
     };
     assert!(load_default_install(&read_only).await.is_err());
-    let closed = hyscribe_config::Database { port: 1, ..saves };
+    let closed = hyscribe_config::Database {
+        port: 1,
+        ..saves.clone()
+    };
     assert!(load_default_install(&closed).await.is_err());
+    // The Theme Test Data, with the terms of one name told apart: after the
+    // default install, as both load into the one scratch database.
+    let dump = std::fs::read_to_string(THEME_TEST_DATA).unwrap();
+    load_theme_test_data(&saves, &dump).await.unwrap();
+    assert!(load_theme_test_data(&read_only, &dump).await.is_err());
+    assert!(load_theme_test_data(&closed, &dump).await.is_err());
 }
 
 async fn run(conn: &mut MySqlConnection, sql: &'static str) -> Result<(), String> {

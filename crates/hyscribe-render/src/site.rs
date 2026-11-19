@@ -7,7 +7,7 @@ use hyscribe_model::{
 };
 use hyscribe_phpser::Value;
 
-pub use crate::outbound::{Get, Hooks, Response};
+pub use crate::outbound::{EmbedHosts, Get, Hooks, Response};
 
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
@@ -25,6 +25,11 @@ pub trait Site {
 
     /// `get_post_meta( $post_id, $key, true )`, `None` when unset.
     fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>>;
+
+    /// `get_post_meta( $post_id, $key )`: every value, in the order stored.
+    fn post_meta_all(&self, post_id: u64, key: &str) -> Vec<Vec<u8>> {
+        self.post_meta(post_id, key).into_iter().collect()
+    }
 
     /// The published posts a `WP_Query` with `query`'s arguments finds.
     fn query(&self, query: &PostQuery) -> Vec<Post>;
@@ -72,6 +77,21 @@ pub trait Site {
     /// Sites without comment data have none.
     fn held_comment(&self, _id: u64) -> Option<Comment> {
         None
+    }
+
+    /// `get_comment( $id )` in any state: approved, held, spam or trashed.
+    /// Sites without comment data have none; by default a comment this
+    /// site shows, approved or held.
+    fn any_comment(&self, id: u64) -> Option<Comment> {
+        self.comment(id).or_else(|| self.held_comment(id))
+    }
+
+    /// The comments of `post_id` held for moderation, notes left out, whose
+    /// author's email is `email`, oldest first then by ID; only comment
+    /// `only` when set: `include_unapproved` of a comment query. Sites
+    /// without comment data have none.
+    fn held_comments(&self, _post_id: u64, _email: &[u8], _only: Option<i64>) -> Vec<Comment> {
+        vec![]
     }
 
     /// `get_userdata( $id )`. Sites without user data have none.
@@ -157,6 +177,16 @@ pub trait Site {
         false
     }
 
+    /// Where embeds may fetch from: nowhere, as sites without a
+    /// client fetch nothing.
+    fn embed_hosts(&self) -> &EmbedHosts {
+        static NOWHERE: EmbedHosts = EmbedHosts {
+            providers: false,
+            hosts: Vec::new(),
+        };
+        &NOWHERE
+    }
+
     /// `update_post_meta( $post_id, $key, $value )`, which a page view
     /// writes in primary mode only: shadow mode and tests write nothing.
     fn update_post_meta(&self, _post_id: u64, _key: &str, _value: &[u8]) {}
@@ -207,6 +237,9 @@ pub struct Request {
     pub search_query: Vec<u8>,
     /// `is_singular()`: the main query's one post is the queried object.
     pub singular: bool,
+    /// `is_attachment()`: an attachment asked for as one, or one without a
+    /// parent; an attached one found by `name` is only a single post.
+    pub attachment: bool,
     /// `is_404()`
     pub not_found: bool,
     /// `is_preview()`
@@ -221,9 +254,24 @@ pub struct Request {
     pub uri: Vec<u8>,
     /// `$_GET`: the query as `parse_str()` reads it.
     pub get: Value,
+    /// `wp_get_current_commenter()`: the commenter's cookies.
+    pub commenter: Commenter,
     /// The query vars: `$_GET` with what the path gives under pretty
     /// permalinks.
     pub vars: Value,
+}
+
+/// `wp_get_current_commenter()`: the name, email and URL in the commenter
+/// cookies, as `sanitize_comment_cookies()` leaves them, empty for a
+/// cookie that is not sent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Commenter {
+    /// `comment_author`, escaped for attributes.
+    pub author: Vec<u8>,
+    /// `comment_author_email`, escaped for attributes.
+    pub email: Vec<u8>,
+    /// `comment_author_url`.
+    pub url: Vec<u8>,
 }
 
 impl Request {

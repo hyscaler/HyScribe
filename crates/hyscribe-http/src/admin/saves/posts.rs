@@ -113,7 +113,7 @@ const FORMATS: [&str; 9] = [
 type QueryArgs<'a> = [(&'a [u8], Option<&'a [u8]>)];
 
 /// `str_contains( $url, $file )`, for hs-admin's path of `file` too.
-fn mentions(url: &[u8], file: &str) -> bool {
+pub(super) fn mentions(url: &[u8], file: &str) -> bool {
     let has = |part: &[u8]| url.windows(part.len()).any(|window| window == part);
     let path = format!("/hs-admin/{}", file.trim_end_matches(".php"));
     let at = url
@@ -162,7 +162,11 @@ pub(super) async fn unfiltered_html(
 }
 
 /// The action's context for posts of `post_type`.
-fn context(asked: &Asked, site: &dyn Acting, (caps, post_type): (&Caps, &str)) -> Context {
+pub(super) fn context(
+    asked: &Asked,
+    site: &dyn Acting,
+    (caps, post_type): (&Caps, &str),
+) -> Context {
     Context {
         can_publish: caps.can_type("publish_posts", post_type),
         unfiltered_html: caps.can("unfiltered_html", &[]),
@@ -190,13 +194,12 @@ async fn post_php(
     let id = lookup(asked.get, "post").or_else(|| lookup(asked.post, "post_ID"));
     let id = id_of(id);
     let post = existing(write, id).await?;
-    if post.post_type == "attachment" {
-        return Err(Error::Unported("an attachment, which the media library handles").into());
-    }
+    let attachment = post.post_type == "attachment";
     let sendback = match referer(asked) {
         Some(referer) if !mentions(&referer, "post.php") && !mentions(&referer, "post-new.php") => {
             remove_query_arg(&[b"trashed", b"untrashed", b"deleted", b"ids"], &referer)
         }
+        _ if attachment => site.admin_url("upload.php").into_bytes(),
         _ => add_query_arg(
             &[(b"post_type", Some(post.post_type.as_bytes()))],
             site.admin_url("edit.php").as_bytes(),
@@ -216,6 +219,13 @@ async fn post_php(
             wp_untrash_post(write, &ctx, id, false).await?,
             "Error in restoring the item from Trash.",
             &[(b"untrashed", Some(b"1")), ids],
+        ),
+        // An attachment goes to the trash with `MEDIA_TRASH`.
+        _ if attachment => (
+            super::media::delete_attachment(write, (&ctx, site), id, !ctx.constants.media_trash)
+                .await?,
+            "Error in deleting the attachment.",
+            &[(b"deleted", Some(b"1"))],
         ),
         _ => (
             wp_delete_post(write, &ctx, id, true).await?,
@@ -470,11 +480,11 @@ pub(super) fn bulk<'a>(
 /// A request's fields as `edit_post()` and `bulk_edit_posts()` change them;
 /// a field set to null is not set.
 #[derive(Clone)]
-struct Data(Vec<(Key, Value)>);
+pub(super) struct Data(Vec<(Key, Value)>);
 
 impl Data {
     /// `$data[ $name ]` when `isset()`.
-    fn get(&self, name: &str) -> Option<&Value> {
+    pub(super) fn get(&self, name: &str) -> Option<&Value> {
         lookup(&self.0, name).filter(|value| **value != Value::Null)
     }
 
@@ -560,7 +570,8 @@ fn translate(
     }
     let me = i64::try_from(user).unwrap_or_default();
     data.set("user_ID", Value::Int(me));
-    let author = match data.get("post_author").filter(|author| !author.is_empty()) {
+    let given = |name| data.get(name).filter(|author| !author.is_empty());
+    let author = match given("post_author_override").or_else(|| given("post_author")) {
         Some(author) => author.to_int(),
         None => me,
     };
@@ -840,6 +851,9 @@ async fn edit_post(
     if !caps.can("edit_posts", &[]) {
         terms.clear();
     }
+    if post.post_type == "attachment" {
+        super::media::edit_fields(write, (id, post), &data).await?;
+    }
     // `_fix_attachment_links()` acts under pretty permalinks only, where
     // `wp_update_post()` is not ported yet.
     let me = i64::try_from(asked.user).unwrap_or_default();
@@ -849,6 +863,9 @@ async fn edit_post(
         // What `wp_update_post()` refuses is left undone, and the rest goes on.
         Err(Error::Refused(_)) => {}
         updated => updated?,
+    }
+    if post.post_type == "attachment" {
+        super::media::edit_done(write, id, &data).await?;
     }
     let lock = format!("{}:{}", ctx.now, asked.user);
     update_post_meta(write, id, "_edit_lock", Value::String(lock.into_bytes())).await?;
@@ -922,6 +939,136 @@ pub(super) fn inline_save<'a>(
             Some(message) => Err(Stop::Died(Ajax::Text(message.into()))),
             None => Ok(Ajax::PostRow(id)),
         }
+    })
+}
+
+/// The fields the attachment edit screen sends, which `edit_post()` reads or
+/// leaves: any other field is not ported.
+const ATTACHMENT_SENT: [&str; 30] = [
+    "_thumbnail_id",
+    "_wpnonce",
+    "_wp_http_referer",
+    "_wp_original_http_referer",
+    "user_ID",
+    "action",
+    "originalaction",
+    "original_post_status",
+    "referredby",
+    "post_ID",
+    "post_type",
+    "post_author",
+    "post_author_override",
+    "post_title",
+    "content",
+    "excerpt",
+    "comment_status",
+    "ping_status",
+    "post_name",
+    "_wp_attachment_image_alt",
+    "attachments",
+    "meta-box-order-nonce",
+    "closedpostboxesnonce",
+    "samplepermalinknonce",
+    "add_comment_nonce",
+    "_ajax_fetch_list_nonce",
+    "advanced_view",
+    "attachment_url",
+    "original_publish",
+    "save",
+];
+
+/// The attachment edit screen's fields read as text, where PHP fails on an array.
+const ATTACHMENT_TEXTS: [&str; 9] = [
+    "post_title",
+    "content",
+    "excerpt",
+    "comment_status",
+    "ping_status",
+    "post_name",
+    "post_author",
+    "post_author_override",
+    "_wp_attachment_image_alt",
+];
+
+/// `get_post_status( $attachment )`.
+async fn attachment_status(write: &mut Write<'_>, id: u64) -> Result<String, Error> {
+    let post = existing(write, id).await?;
+    // `wp_insert_post()` leaves an attachment `inherit`, `private`, `trash` or `auto-draft`.
+    if post.status != "inherit" {
+        return Ok(post.status);
+    }
+    let parent = match post.parent {
+        0 => None,
+        parent => write.post(parent).await?,
+    };
+    match parent {
+        None => Ok("publish".into()),
+        Some(parent) if parent.post_type == "attachment" => {
+            Err(Error::Unported("an attachment inside an attachment"))
+        }
+        Some(parent) if parent.status == "trash" => {
+            let kept = write
+                .meta_value(Meta::Post, post.parent, "_wp_trash_meta_status")
+                .await?;
+            let kept = kept.filter(|status| !Value::String(status.clone()).is_empty());
+            Ok(kept.map_or_else(|| "publish".into(), |status| text(&status)))
+        }
+        Some(parent) => Ok(parent.status),
+    }
+}
+
+/// `post.php?action=editpost` of an attachment, as its edit screen sends
+/// it: `edit_post()`, then `redirect_post()` back to the screen.
+pub(super) fn editpost<'a>(
+    write: &'a mut Write<'_>,
+    asked: &'a Asked<'a>,
+    site: &'a dyn Acting,
+) -> Saving<'a> {
+    Box::pin(async move {
+        let mut data = Data(asked.post.to_vec());
+        let sent = |name: &Key| {
+            let name = name.to_php_string();
+            name.starts_with(b"id3_") || ATTACHMENT_SENT.iter().any(|sent| sent.as_bytes() == name)
+        };
+        let array = |name: &&str| matches!(data.get(name), Some(Value::Array(_)));
+        if !data.0.iter().all(|(name, _)| sent(name)) || ATTACHMENT_TEXTS.iter().any(array) {
+            return Err(Error::Unported("a field the attachment edit screen does not send").into());
+        }
+        let id = id_of(data.get("post_ID"));
+        let post = existing(write, id).await?;
+        if post.post_type != "attachment" {
+            return Err(Error::Unported("editing a post other than an attachment").into());
+        }
+        let caps = Caps::load(write, asked.user, Some(id), site.constants()).await?;
+        if !caps.can("edit_post", &[Value::Int(id.cast_signed())]) {
+            let message = "Sorry, you are not allowed to edit this post.";
+            return Err(Stop::Died(Answer::Died(message)));
+        }
+        for name in ["comment_status", "ping_status"] {
+            if data.get(name).is_none() {
+                data.set(name, Value::String(b"closed".to_vec()));
+            }
+        }
+        if let Some(message) = edit_post(write, (asked, site), (&post, id), data).await? {
+            return Err(Stop::Died(Answer::Died(message)));
+        }
+        // `redirect_post()`: the Update button's message, by the status the attachment has.
+        let message = if asked.post("save").is_none() {
+            "4"
+        } else {
+            match attachment_status(write, id).await?.as_str() {
+                "pending" => "8",
+                "future" => "9",
+                "draft" => "10",
+                _ => "1",
+            }
+        };
+        let edit = site.admin_url(&format!("post.php?post={id}&action=edit"));
+        let args: &QueryArgs = &[(b"message", Some(message.as_bytes()))];
+        Ok(Answer::Redirect(text(&add_query_arg(
+            args,
+            edit.as_bytes(),
+        ))))
     })
 }
 

@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The notes and the comment meta of the comments' writes that
+# reference/rest/golden.sh records as comment-notes.tsv over the default
+# install as comment-notes.sql leaves it, each request sent with its body as
+# every identity, the database put back after each. comment-notes.php gives
+# every request the client address 127.0.0.1 and no user agent. Creating
+# notes (replies, resolving, reopening, on a page, a draft and a missing
+# post), the `_wp_note_status` meta of notes and comments, what PHP refuses
+# of it only after the write, and updating and deleting notes.
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"A new note","type":"note"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"parent":11,"content":"A reply","type":"note","status":"approved"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"parent":11,"content":"","type":"note","meta":{"_wp_note_status":"resolved"}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"parent":11,"content":"","type":"note","meta":{"_wp_note_status":"reopen"}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"","type":"note"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"","type":"note","meta":{"_wp_note_status":"bogus"}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Bogus","type":"note","meta":{"_wp_note_status":"bogus"}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Number","type":"note","meta":{"_wp_note_status":5}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Null","type":"note","meta":{"_wp_note_status":null}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Other","type":"note","meta":{"other":"x"}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Not meta","type":"note","meta":"nope"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":2,"content":"On the page","type":"note"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":3,"content":"On the draft","type":"note"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":999,"content":"Missing","type":"note"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"content":"No post","type":"note"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Held","type":"note","status":"hold"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Spam","type":"note","status":"spam"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Named <b>one</b>","type":"note","author_name":"Noter <i>x</i>","author_email":"noter@example.test","author_url":"https://noter.example.test/","author_ip":"10.0.0.9","date":"2026-01-02T03:04:05"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"<p onclick=\"x()\">Hi</p><script>bad()</script>","type":"note","author":704}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"A new note","type":"note","id":11}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"A note","type":"note"}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Plain with meta","meta":{"_wp_note_status":"resolved"}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Plain with null","meta":{"_wp_note_status":null}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Plain bogus","meta":{"_wp_note_status":"bogus"}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"","meta":{"_wp_note_status":"resolved"}}
+POST	/index.php?rest_route=/wp/v2/comments&_locale=user	json,restore	{"post":1,"content":"Plain other","meta":{"other":"x"}}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"content":"A note, edited"}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"type":"note","content":"A note, retyped"}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"meta":{"_wp_note_status":"resolved"}}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"meta":{"_wp_note_status":"reopen"},"content":"With content"}
+POST	/?rest_route=/wp/v2/comments/12	json,restore	{"meta":{"_wp_note_status":null}}
+POST	/?rest_route=/wp/v2/comments/12	json,restore	{"meta":{"_wp_note_status":"resolved"}}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"meta":{"_wp_note_status":null}}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"meta":{"_wp_note_status":"bogus"}}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"meta":"nope"}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"status":"hold"}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"status":"spam","content":"x"}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"post":2}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"post":3,"content":"Moved"}
+POST	/?rest_route=/wp/v2/comments/13	json,restore	{"post":1}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"author_ip":"10.0.0.2","author_name":"Renamed"}
+POST	/?rest_route=/wp/v2/comments/10	json,restore	{"meta":{"_wp_note_status":"resolved"}}
+POST	/?rest_route=/wp/v2/comments/10	json,restore	{"meta":{"_wp_note_status":null}}
+POST	/?rest_route=/wp/v2/comments/10	json,restore	{"type":"note"}
+POST	/?rest_route=/wp/v2/comments/11	json,restore	{"type":"comment"}
+POST	/?rest_route=/wp/v2/comments/14	json,restore	{"author_ip":"10.0.0.7","content":"Edited by whoever may"}
+POST	/?rest_route=/wp/v2/comments/14	json,restore	{"author_ip":"127.0.0.1","content":"Same address"}
+DELETE	/?rest_route=/wp/v2/comments/11	restore
+DELETE	/?rest_route=/wp/v2/comments/11&force=true	restore
+DELETE	/?rest_route=/wp/v2/comments/12&force=1	restore
+DELETE	/?rest_route=/wp/v2/comments/13	restore

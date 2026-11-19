@@ -130,7 +130,8 @@ fn the_automatic_update_message_is_php_s() {
     );
 }
 
-/// The plugin folder of the PHP oracle's image.
+/// The plugin folder of the PHP oracle's image is the one place the page
+/// differs: it names HyScribe's folder instead.
 #[test]
 fn plugins_are_php_s() {
     let mut failures = Vec::new();
@@ -138,9 +139,61 @@ fn plugins_are_php_s() {
     let canonical = format!("{SITE}/hs-admin/plugins");
     let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
     for (role, php) in &rows {
-        let ours = plugins(role, "/var/www/html/wp-content/plugins", &request);
+        let php = php.as_ref().map(|php| {
+            let path = "<code>/var/www/html/wp-content/plugins</code>";
+            assert!(php.contains(path));
+            php.replace(path, &format!("<code>{PLUGIN_DIR}</code>"))
+        });
+        let ours = plugins(role, &request).unwrap();
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows.len(), 6);
+    assert_eq!(rows.len(), 13);
+}
+
+/// Where PHP would write the option back, or find a file, the screen is not
+/// ported; an option never set names no plugin.
+#[test]
+fn unusual_active_plugins_are_not_ported() {
+    assert_eq!(missing_plugins(None), Some(String::new()));
+    assert_eq!(
+        missing_plugins(Some(b"a:0:{}".to_vec())),
+        Some(String::new())
+    );
+    for stored in [
+        &b""[..],
+        b"s:3:\"abc\";",
+        b"a:1:{i:0;i:5;}",
+        b"a:1:{i:0;s:0:\"\";}",
+    ] {
+        assert_eq!(missing_plugins(Some(stored.to_vec())), None);
+    }
+}
+
+/// Paths that climb or name a drive are invalid paths, others missing
+/// files, as `validate_file()` tells them.
+#[test]
+fn plugin_paths_are_validated_as_php_s() {
+    for file in [
+        "../",
+        "../a.php",
+        "a/../../b.php",
+        "a/../b.php",
+        "c:/a.php",
+        "a\\..\\b.php",
+    ] {
+        assert!(invalid_path(file), "{file}");
+    }
+    for file in ["a.php", "a/b.php", "a/b..php", "x../", "..", "a/.."] {
+        assert!(!invalid_path(file), "{file}");
+    }
+}
+
+/// An `active_plugins` PHP would write back leaves the screen unported.
+#[test]
+fn a_screen_with_plugins_to_repair_is_not_ported() {
+    let canonical = format!("{SITE}/hs-admin/plugins");
+    let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
+    let site = Role("o36bad:administrator");
+    assert_eq!(plugins(&site, &request), None);
 }

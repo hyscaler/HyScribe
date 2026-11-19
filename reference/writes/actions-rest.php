@@ -44,6 +44,16 @@ $rest_state = function ( $file ) {
 	};
 };
 
+// A comments write over reference/rest/comment-notes.sql.
+$note_write = function ( $method, $route, $body, $query = array() ) use ( $rest_send, $rest_state ) {
+	return array(
+		'setup'  => $rest_state( 'comment-notes.sql' ),
+		'action' => function () use ( $rest_send, $method, $route, $body, $query ) {
+			$rest_send( $method, $route, $body, $query );
+		},
+	);
+};
+
 $paragraph = fn( $text ) => "<!-- wp:paragraph -->\n<p>$text</p>\n<!-- /wp:paragraph -->";
 
 return array(
@@ -657,4 +667,18 @@ return array(
 			);
 		},
 	),
+	// The notes and comment meta of reference/rest/comment-notes.list, over comment-notes.sql.
+	'rest-notes-create'         => $note_write( 'POST', '/wp/v2/comments', array( 'post' => 1, 'content' => 'A new note', 'type' => 'note' ) ),
+	'rest-notes-reply'          => $note_write( 'POST', '/wp/v2/comments', array( 'post' => 1, 'parent' => 11, 'content' => 'A reply', 'type' => 'note', 'status' => 'approved' ) ),
+	'rest-notes-resolve'        => $note_write( 'POST', '/wp/v2/comments', array( 'post' => 1, 'parent' => 11, 'content' => '', 'type' => 'note', 'meta' => array( '_wp_note_status' => 'resolved' ) ) ),
+	'rest-notes-held'           => $note_write( 'POST', '/wp/v2/comments', array( 'post' => 1, 'content' => 'Held', 'type' => 'note', 'status' => 'hold' ) ),
+	'rest-notes-named'          => $note_write( 'POST', '/wp/v2/comments', array( 'post' => 1, 'content' => 'Named <b>one</b>', 'type' => 'note', 'author_name' => 'Noter <i>x</i>', 'author_email' => 'noter@example.test', 'author_url' => 'https://noter.example.test/', 'author_ip' => '10.0.0.9', 'date' => '2026-01-02T03:04:05' ) ),
+	'rest-notes-update'         => $note_write( 'POST', '/wp/v2/comments/11', array( 'content' => 'A note, edited' ) ),
+	'rest-notes-meta'           => $note_write( 'POST', '/wp/v2/comments/11', array( 'meta' => array( '_wp_note_status' => 'resolved' ) ) ),
+	'rest-notes-meta-reset'     => $note_write( 'POST', '/wp/v2/comments/12', array( 'meta' => array( '_wp_note_status' => null ) ) ),
+	'rest-notes-meta-same'      => $note_write( 'POST', '/wp/v2/comments/12', array( 'meta' => array( '_wp_note_status' => 'resolved' ) ) ),
+	'rest-notes-trash'          => $note_write( 'DELETE', '/wp/v2/comments/11', array() ),
+	'rest-notes-delete'         => $note_write( 'DELETE', '/wp/v2/comments/11', array(), array( 'force' => 'true' ) ),
+	'rest-comments-meta'        => $note_write( 'POST', '/wp/v2/comments', array( 'post' => 1, 'content' => 'Plain with meta', 'meta' => array( '_wp_note_status' => 'resolved' ) ) ),
+	'rest-comments-meta-update' => $note_write( 'POST', '/wp/v2/comments/10', array( 'meta' => array( '_wp_note_status' => 'resolved' ) ) ),
 );

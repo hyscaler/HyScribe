@@ -8,6 +8,7 @@
 
 pub(crate) mod args;
 mod menu_items;
+mod meta;
 pub(crate) mod prepare;
 pub(crate) mod write;
 

@@ -51,6 +51,10 @@ out( 'post_comments_feed_link post 1', get_post_comments_feed_link( 1 ) );
 out( 'post_comments_feed_link post 1 atom', get_post_comments_feed_link( 1, 'atom' ) );
 out( 'post_comments_feed_link page 2', get_post_comments_feed_link( 2 ) );
 out( 'post_comments_feed_link page 2 rss2', get_post_comments_feed_link( 2, 'rss2' ) );
+// An attachment without a parent has a comments feed address of its own.
+wp_cache_add( 13, new WP_Post( (object) array( 'ID' => 13, 'post_type' => 'attachment', 'post_status' => 'inherit', 'post_name' => 'loose', 'post_parent' => 0, 'post_date' => '2026-05-06 07:08:09', 'post_author' => 1, 'filter' => 'raw' ) ), 'posts' );
+out( 'post_comments_feed_link unattached 13', get_post_comments_feed_link( 13 ) );
+out( 'post_comments_feed_link unattached 13 atom', get_post_comments_feed_link( 13, 'atom' ) );
 $category = get_term( 1, 'category' );
 out( 'term_link category 1', get_term_link( $category ) );
 out( 'term_link tag', get_term_link( new WP_Term( (object) array( 'term_id' => 5, 'slug' => 'a-tag', 'taxonomy' => 'post_tag', 'parent' => 0 ) ) ) );

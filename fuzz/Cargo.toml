@@ -169,6 +169,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "shortcodes"
+path = "fuzz_targets/shortcodes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "wpautop"
 path = "fuzz_targets/wpautop.rs"
 test = false
@@ -257,6 +264,13 @@ bench = false
 [[bin]]
 name = "rest_serve"
 path = "fuzz_targets/rest_serve.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chromium_version"
+path = "fuzz_targets/chromium_version.rs"
 test = false
 doc = false
 bench = false
@@ -362,6 +376,20 @@ bench = false
 [[bin]]
 name = "xml_reader"
 path = "fuzz_targets/xml_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "duotone_color"
+path = "fuzz_targets/duotone_color.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "config_host_lists"
+path = "fuzz_targets/config_host_lists.rs"
 test = false
 doc = false
 bench = false

@@ -443,6 +443,22 @@ async fn writes_posts() {
         [first, second]
     );
 
+    // Attaching changes the attachments' parents only, and counts the rows changed.
+    let media = |parent| PostFields {
+        parent,
+        post_type: "attachment".into(),
+        ..hello()
+    };
+    let loose = write.insert_post(&media(0)).await.unwrap();
+    let kept = write.insert_post(&media(9)).await.unwrap();
+    let ids = [loose, kept, id];
+    assert_eq!(write.set_attachments_parent(&ids, 9).await.unwrap(), 1);
+    assert_eq!(write.set_attachments_parent(&ids, 9).await.unwrap(), 0);
+    assert_eq!(write.set_attachments_parent(&ids, 0).await.unwrap(), 2);
+    assert_eq!(write.set_attachments_parent(&[], 0).await.unwrap(), 0);
+    write.delete_post(loose).await.unwrap();
+    write.delete_post(kept).await.unwrap();
+
     let types = ["post", "page", "attachment", "revision"];
     let mine = sorted(write.author_post_ids_of_types(1, &types).await.unwrap());
     assert_eq!(mine, [1, 2, 3, first, second]);
@@ -661,6 +677,60 @@ async fn writes_comments() {
     assert_eq!(write.delete_comment(note).await.unwrap(), 1);
     assert_eq!(write.delete_comment(note).await.unwrap(), 0);
     assert_eq!(write.post_comment_ids(1).await.unwrap(), [1]);
+}
+
+/// `get_page_of_comment()`'s count: approved top level comments before a
+/// date, and the held ones of a user or an author's email.
+#[tokio::test]
+async fn comments_before_a_date_include_the_held_of_one_commenter() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let mut write = writer.begin().await.unwrap();
+    let comment = |approved: &str, parent, user_id, email: &str, date: &str| CommentFields {
+        approved: approved.into(),
+        parent,
+        user_id,
+        author_email: email.as_bytes().to_vec(),
+        date_gmt: date.into(),
+        ..commenter()
+    };
+    let rows = [
+        comment("1", 0, 0, "a@example.test", "2026-10-28 00:00:00"),
+        comment("0", 0, 7, "Held@Example.test", "2026-10-28 00:00:01"),
+        comment("0", 0, 0, "held@example.test", "2026-10-28 00:00:02"),
+        comment("0", 0, 0, "other@example.test", "2026-10-28 00:00:03"),
+        comment("0", 1, 7, "held@example.test", "2026-10-28 00:00:04"),
+        comment("spam", 0, 7, "held@example.test", "2026-10-28 00:00:05"),
+    ];
+    for row in &rows {
+        write.insert_comment(row).await.unwrap();
+    }
+    let end = "2026-10-29 00:00:00";
+    let count =
+        async |write: &mut Write<'_>, date, who| write.comments_before(1, date, who).await.unwrap();
+    // The fixture's comment and the first are approved.
+    assert_eq!(count(&mut write, end, None).await, 2);
+    assert_eq!(count(&mut write, end, Some(Unapproved::User(7))).await, 3);
+    assert_eq!(count(&mut write, end, Some(Unapproved::User(8))).await, 2);
+    let email = |email| Some(Unapproved::Email(email));
+    assert_eq!(count(&mut write, end, email(b"held@example.test")).await, 4);
+    assert_eq!(
+        count(&mut write, end, email(b"nobody@example.test")).await,
+        2
+    );
+    // Strictly before the date.
+    let date = "2026-10-28 00:00:02";
+    assert_eq!(
+        count(&mut write, date, email(b"held@example.test")).await,
+        3
+    );
+    assert_eq!(
+        write
+            .comments_before(2, end, email(b"held@example.test"))
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 #[tokio::test]
@@ -1376,6 +1446,7 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         alone!(w.set_post_guid(1, b"g").await.err()),
         alone!(w.set_comment_count(1, 1).await.err()),
         alone!(w.reparent_posts(1, "page", 0).await.err()),
+        alone!(w.set_attachments_parent(&[1], 0).await.err()),
         alone!(w.reassign_posts(1, 2).await.err()),
         alone!(w.delete_post(1).await.err()),
         alone!(w.insert_comment(&comment).await.err()),
@@ -1428,6 +1499,17 @@ pub(crate) async fn every_write() -> Vec<DbError> {
         ),
         alone!(w.duplicate_comment((1, 0), b"a", None, b"c").await.err()),
         alone!(w.user_has_approved_comment(1).await.err()),
+        alone!(w.comments_before(1, since, None).await.err()),
+        alone!(
+            w.comments_before(1, since, Some(Unapproved::User(1)))
+                .await
+                .err()
+        ),
+        alone!(
+            w.comments_before(1, since, Some(Unapproved::Email(b"e")))
+                .await
+                .err()
+        ),
         alone!(w.author_has_approved_comment(b"a", b"e").await.err()),
         alone!(w.last_comment_date(since, (0, b"ip"), b"e").await.err()),
         alone!(w.last_comment_date(since, (1, b""), b"e").await.err()),

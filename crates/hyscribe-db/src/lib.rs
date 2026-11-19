@@ -331,6 +331,17 @@ impl Db {
         self.select(sql).await.map(|posts| posts.into_iter().next())
     }
 
+    /// The attachment named `name`, of any status, the latest first as a
+    /// single post query takes it.
+    pub async fn attachment_by_name(&self, name: &str) -> Result<Option<Post>, DbError> {
+        let mut sql = select_posts(" FROM {prefix}posts WHERE ");
+        sql.push(
+            "post_name = ? AND post_type = 'attachment' ORDER BY post_date DESC, ID DESC LIMIT 1",
+        );
+        sql.bind(Bind::Text(name.to_string()));
+        self.select(sql).await.map(|posts| posts.into_iter().next())
+    }
+
     /// `get_page_by_path()`'s candidates: the pages and attachments of any
     /// status named one of `names`.
     pub async fn named_pages(&self, names: &[Vec<u8>]) -> Result<Vec<Post>, DbError> {
@@ -472,6 +483,25 @@ impl Db {
         .await
     }
 
+    /// `get_post_meta( $post_id, $key )`: every value, in the order stored.
+    pub async fn post_meta_all(&self, post_id: u64, key: &str) -> Result<Vec<Vec<u8>>, DbError> {
+        let rows = sqlx::query(self.prefix.sql(
+            "SELECT meta_value FROM {prefix}postmeta WHERE post_id = ? AND meta_key = ? ORDER BY meta_id",
+        ))
+        .bind(post_id)
+        .bind(key)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?;
+        rows.iter()
+            .map(|row| {
+                let mut c = Columns::new(row);
+                let value = c.bytes("meta_value");
+                c.finish(value)
+            })
+            .collect()
+    }
+
     /// `get_term( $id, $taxonomy )`.
     pub async fn term(&self, id: u64, taxonomy: &str) -> Result<Option<Term>, DbError> {
         let sql = self.prefix.sql(concat!(
@@ -551,6 +581,35 @@ impl Db {
              ORDER BY comment_date_gmt ASC, comment_ID ASC",
         );
         sql.bind(Bind::Int(post_id));
+        let rows = sql
+            .query(&self.prefix)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(db_error)?;
+        rows.iter().map(comment).collect()
+    }
+
+    /// The comments of `post_id` held for moderation whose author's email
+    /// is `email`, notes left out, oldest first then by ID: what a comment
+    /// query's `include_unapproved` adds. With `only`, just that comment.
+    pub async fn held_comments(
+        &self,
+        post_id: u64,
+        email: &[u8],
+        only: Option<i64>,
+    ) -> Result<Vec<Comment>, DbError> {
+        let mut sql = select_comments(
+            " FROM {prefix}comments \
+             WHERE comment_post_ID = ? AND comment_approved = '0' AND comment_type != 'note' \
+             AND comment_author_email = ?",
+        );
+        sql.bind(Bind::Int(post_id));
+        sql.bind(Bind::Bytes(email.to_vec()));
+        if let Some(only) = only {
+            sql.push(" AND comment_ID = ?");
+            sql.bind(Bind::Signed(only));
+        }
+        sql.push(" ORDER BY comment_date_gmt ASC, comment_ID ASC");
         let rows = sql
             .query(&self.prefix)
             .fetch_all(&self.pool)
@@ -1415,20 +1474,18 @@ impl Db {
     }
 
     /// `get_terms()` for a tag cloud: the terms of `taxonomy` with posts,
-    /// the most used first, `limit` of them, each with its post count.
+    /// the most used first, `limit` of them, each with its post count. As
+    /// `WP_Term_Query` asks, so that a tie in the count, which the plan
+    /// breaks, is broken as it breaks it.
     pub async fn cloud_terms(&self, taxonomy: &str, limit: u64) -> Result<Vec<Term>, DbError> {
-        let sql = self.prefix.sql(concat!(
-            "SELECT ",
-            terms_from!(),
-            "WHERE tt.taxonomy = ? AND tt.count > 0 ORDER BY tt.count DESC LIMIT ?"
-        ));
-        let rows = sqlx::query(sql)
-            .bind(taxonomy)
-            .bind(limit)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(db_error)?;
-        rows.iter().map(term).collect()
+        self.term_query(&TermQuery {
+            taxonomy: taxonomy.into(),
+            nonempty: true,
+            order: Some((TermOrder::Count, true)),
+            limit: Some(limit),
+            ..TermQuery::default()
+        })
+        .await
     }
 
     /// Every term of `taxonomy` with its post count, by name, as
@@ -2474,4 +2531,6 @@ mod dialect;
 mod people;
 mod write;
 
-pub use write::{CommentFields, DB_VERSIONS, Meta, PostFields, TermRow, UserFields, Write, Writer};
+pub use write::{
+    CommentFields, DB_VERSIONS, Meta, PostFields, TermRow, Unapproved, UserFields, Write, Writer,
+};

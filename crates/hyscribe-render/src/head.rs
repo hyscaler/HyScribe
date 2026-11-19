@@ -28,6 +28,8 @@ mod footer;
 use block_styles::BLOCK_STYLES;
 pub use embed::{Share, embed_page, embed_secret, post_embed_html};
 pub use footer::{emoji_detection_script, wp_footer};
+#[cfg(test)]
+pub(crate) use footer::{head_scripts, mediaelement_scripts};
 
 /// The WordPress version the bundled assets come from.
 const WP_VERSION: &str = include_str!("../../../wordpress/VERSION");
@@ -70,6 +72,10 @@ pub struct Assets {
     pub(crate) state: Vec<(Key, Value)>,
     /// The template was empty, so no skip link is enqueued.
     pub(crate) no_template: bool,
+    /// The duotone presets' custom properties, added to the global styles.
+    pub(crate) global_presets: String,
+    /// What `wp_footer()` prints first of the blocks': duotone filters.
+    pub(crate) footer: Vec<u8>,
 }
 
 impl Assets {
@@ -139,6 +145,7 @@ pub fn wp_head(
     for style in head.styles(assets) {
         out.extend(style.print(&siteurl));
     }
+    out.extend(footer::head_scripts(&siteurl, &assets.scripts));
     out.extend(head.rest_links());
     // wp_generator(), with HyScribe's name and version.
     out.extend(
@@ -331,7 +338,10 @@ impl Head<'_> {
             COMMON_CSS,
             None,
         );
-        let global = Style::inline("global-styles", &global);
+        let mut global = Style::inline("global-styles", &global);
+        if !assets.global_presets.is_empty() {
+            global.after.push(assets.global_presets.clone());
+        }
         let emoji = Style::inline("wp-emoji-styles", EMOJI_CSS);
         if assets.variations.is_empty() {
             queue.extend([emoji, library, global]);
@@ -376,7 +386,7 @@ impl Head<'_> {
         };
         let mut out = Vec::new();
         // wp_get_canonical_url()
-        if post.status == "publish" {
+        if crate::attachment::post_status(self.site, post) == "publish" {
             let mut url = self.context.permalink(post);
             if self.request.page >= 2 {
                 url = permalinks::paged(self.site, &url, self.request.page);
@@ -744,6 +754,19 @@ fn trim_quotes(text: &[u8]) -> &[u8] {
 /// A style a rendered block enqueued, by its handle: a core block's
 /// stylesheet, or nothing for a block without one.
 fn block_style(handle: &str, siteurl: &str) -> Style {
+    // MediaElement's two stylesheets, linked: `wp_audio_shortcode()` and
+    // `wp_video_shortcode()` enqueue them.
+    match handle {
+        "mediaelement" => {
+            let src = "/wp-includes/js/mediaelement/mediaelementplayer-legacy.min.css";
+            return Style::link(handle, src, Some("4.2.17"));
+        }
+        "wp-mediaelement" => {
+            let src = "/wp-includes/js/mediaelement/wp-mediaelement.min.css";
+            return Style::link(handle, src, None);
+        }
+        _ => {}
+    }
     let css = handle
         .strip_prefix("wp-block-")
         .and_then(|name| BLOCK_STYLES.iter().find(|(folder, _)| *folder == name));
@@ -779,6 +802,18 @@ impl Style {
             handle: handle.to_owned(),
             src: Some(src.to_owned()),
             css: Some(css),
+            version: version.map(str::to_owned),
+            after: Vec::new(),
+            inlined_src: None,
+        }
+    }
+
+    /// A stylesheet linked as it is, never inlined.
+    fn link(handle: &str, src: &str, version: Option<&str>) -> Style {
+        Style {
+            handle: handle.to_owned(),
+            src: Some(src.to_owned()),
+            css: None,
             version: version.map(str::to_owned),
             after: Vec::new(),
             inlined_src: None,

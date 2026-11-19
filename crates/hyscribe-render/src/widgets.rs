@@ -927,7 +927,7 @@ fn titled(args: &Args, title: &[u8]) -> Vec<u8> {
     [&args.before_title[..], title, &args.after_title].concat()
 }
 
-mod media;
+pub(crate) mod media;
 
 #[cfg(test)]
 mod tests;

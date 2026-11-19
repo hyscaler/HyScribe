@@ -3,8 +3,7 @@
 //! hs-admin's uploads: `async-upload.php`, which the media modal's
 //! uploader (`upload-attachment`) and Add New Media's Plupload (`short`)
 //! post to, and `media-new.php`'s browser uploader form, with their nonce
-//! and capability checks and answers as PHP gives them, and
-//! `wp_prepare_attachment_for_js()` of an image just uploaded. What else
+//! and capability checks and answers as PHP gives them. What else
 //! they take (a `fetch` of a media item, Plupload's long answer,
 //! `post_data`) answers 501.
 
@@ -14,16 +13,9 @@ use hyscribe_admin::actions::{ActionSite, Asked};
 use hyscribe_admin::assets::Urls;
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_admin::menu::MenuUser;
-use hyscribe_admin::page::PageSite;
 use hyscribe_admin::posts::PostsSite;
-use hyscribe_auth::caps::CapabilityData;
 use hyscribe_kses::esc_html;
-use hyscribe_phpser::{Key, Value, absint, json_encode, json_encode_localized, wp_basename};
-use hyscribe_render::attachment::{
-    attachment_link, attachment_url, image_constrain_size_for_editor, metadata,
-};
-use hyscribe_render::date::{Zone, format, stored_unix};
-use hyscribe_render::formatting::html_entity_decode;
+use hyscribe_phpser::{Key, Value, absint, json_encode, json_encode_localized};
 use hyscribe_write::posts::Context;
 
 use super::{Admin, died, not_ported, redirect, refused, screen_headers};
@@ -132,7 +124,10 @@ fn upload_attachment(admin: &Admin, asked: &Asked, files: &[(Vec<u8>, Sent)]) ->
     let post_id = post_id.map_or(0, i64::unsigned_abs);
     match media_handle_upload(admin, sent, post_id) {
         Ok(id) => {
-            let data = prepare_for_js(admin, id);
+            let post = admin.full_post(id).unwrap_or_default();
+            let Some(data) = super::media::prepare_for_js(admin, &post) else {
+                return not_ported();
+            };
             let json = object(vec![("success", Value::Bool(true)), ("data", data)]);
             plain(
                 StatusCode::OK,
@@ -280,183 +275,4 @@ fn media_handle_upload(admin: &Admin, sent: Sent, post_id: u64) -> Result<u64, R
     let prepared = uploads.media_handle_upload(admin.site, sent, post_id, (&time, who))?;
     let ctx = context(admin, who.unfiltered_html);
     uploads.completed(admin.site, writer, &ctx, &prepared)
-}
-
-/// `wp_prepare_attachment_for_js( $id )` of an image the current user has
-/// just uploaded: their own, which every role that uploads may edit and
-/// delete, attached to a post they may edit, if any. No audio or video, and
-/// no compat fields, which only plugins add.
-fn prepare_for_js(admin: &Admin, id: u64) -> Value {
-    let reads = &admin.reads.reads;
-    let post = admin.full_post(id).unwrap_or_default();
-    let meta = metadata(reads, id).filter(|meta| matches!(meta, Value::Array(_)));
-    let (kind, subtype) = post
-        .mime_type
-        .split_once('/')
-        .unwrap_or((&post.mime_type, ""));
-    let url = attachment_url(reads, id).unwrap_or_default();
-    let base_url = hyscribe_render::template::replace(&url, &wp_basename(&url), b"");
-    let file = PostsSite::meta(admin, &post, "_wp_attached_file").unwrap_or_default();
-    let can_read = |id| admin.can_for("read_post", id);
-    let link = attachment_link(reads, &post, false, &can_read);
-    let edit_link = |id| text(admin.admin_url(&format!("post.php?post={id}&action=edit")));
-    let alt = PostsSite::meta(admin, &post, "_wp_attachment_image_alt");
-    let unix = |date: &str| Value::Int(stored_unix(date, Zone::Utc) * 1000);
-    let nonce = |action: String| text(PageSite::nonce(admin, &action));
-    let mut data = vec![
-        ("id", Value::Int(id.cast_signed())),
-        ("title", text(post.title.clone())),
-        ("filename", text(wp_basename(&file))),
-        ("url", text(hyscribe_kses::esc_url_raw(&url))),
-        ("link", text(link)),
-        ("alt", text(alt.unwrap_or_default())),
-        ("author", text(post.author.to_string())),
-        ("description", text(post.content.clone())),
-        ("caption", text(post.excerpt.clone())),
-        ("name", text(post.name.clone())),
-        ("status", text(post.status.clone())),
-        ("uploadedTo", Value::Int(post.parent.cast_signed())),
-        ("date", unix(&post.date_gmt)),
-        ("modified", unix(&post.modified_gmt)),
-        ("menuOrder", Value::Int(post.menu_order)),
-        ("mime", text(post.mime_type.clone())),
-        ("type", text(kind)),
-        ("subtype", text(subtype)),
-        ("icon", {
-            let icon = hyscribe_admin::media::icon_name(&file, &post.mime_type);
-            text(format!(
-                "{}/wp-includes/images/media/{icon}.svg",
-                admin.site_url()
-            ))
-        }),
-        (
-            "dateFormatted",
-            text(format("F j, Y", &post.date, admin.site.zone())),
-        ),
-        (
-            "nonces",
-            object(vec![
-                ("update", nonce(format!("update-post_{id}"))),
-                ("delete", nonce(format!("delete-post_{id}"))),
-                ("edit", nonce(format!("image_editor-{id}"))),
-            ]),
-        ),
-        ("editLink", edit_link(id)),
-        ("meta", Value::Bool(false)),
-    ];
-    // `get_edit_user_link()` of the user's own is their profile.
-    let name = match admin.user.display_name.is_empty() {
-        true => CapabilityData::user_meta(admin, admin.user.id, "nickname").unwrap_or_default(),
-        false => admin.user.display_name.clone(),
-    };
-    data.push(("authorName", text(html_entity_decode(&name))));
-    data.push(("authorLink", text(admin.admin_url("profile.php"))));
-    let parent = (post.parent != 0)
-        .then(|| admin.full_post(post.parent))
-        .flatten();
-    if let Some(parent) = parent {
-        let title = match parent.title.is_empty() {
-            true => b"(no title)".to_vec(),
-            false => parent.title.clone(),
-        };
-        data.push(("uploadedToTitle", text(title)));
-        data.push(("uploadedToLink", edit_link(parent.id)));
-    }
-    // An upload's metadata always has its size, never 0: an empty file is refused.
-    let bytes = meta
-        .as_ref()
-        .and_then(|meta| meta.get_str("filesize"))
-        .map(Value::to_int);
-    data.extend(bytes.into_iter().flat_map(|bytes| {
-        let readable = text(hyscribe_admin::media::size_format(bytes));
-        [
-            ("filesizeInBytes", Value::Int(bytes)),
-            ("filesizeHumanReadable", readable),
-        ]
-    }));
-    let context = PostsSite::meta(admin, &post, "_wp_attachment_context");
-    data.push(("context", text(context.unwrap_or_default())));
-    let mut data: Vec<(Key, Value)> = data
-        .into_iter()
-        .map(|(key, value)| (Key::String(key.into()), value))
-        .collect();
-    let image = meta.filter(|_| kind == "image");
-    image
-        .iter()
-        .for_each(|meta| image_fields(admin, &mut data, (meta, &url, &base_url)));
-    data.push((
-        Key::String(b"compat".to_vec()),
-        object(vec![("item", text("")), ("meta", text(""))]),
-    ));
-    Value::Array(data)
-}
-
-/// `landscape` or `portrait`.
-fn orientation(width: i64, height: i64) -> Value {
-    text(if height > width {
-        "portrait"
-    } else {
-        "landscape"
-    })
-}
-
-/// An image's own fields of `wp_prepare_attachment_for_js()`: the
-/// original's URL and name, its full size and its sizes.
-fn image_fields(
-    admin: &Admin,
-    data: &mut Vec<(Key, Value)>,
-    (meta, url, base): (&Value, &[u8], &[u8]),
-) {
-    let mut push = |key: &str, value: Value| data.push((Key::String(key.into()), value));
-    let mut sizes = Vec::new();
-    for name in ["thumbnail", "medium", "large"] {
-        let Some(size) = meta.get_path(&["sizes", name]) else {
-            continue;
-        };
-        let side = |key| size.get_str(key).map_or(0, Value::to_int);
-        let reads = &admin.reads.reads;
-        let (width, height) =
-            image_constrain_size_for_editor(reads, (side("width"), side("height")), name);
-        let file = size
-            .get_str("file")
-            .map(Value::to_php_string)
-            .unwrap_or_default();
-        let entry = object(vec![
-            ("height", Value::Int(height)),
-            ("width", Value::Int(width)),
-            (
-                "url",
-                text(hyscribe_kses::esc_url_raw(&[base, &file[..]].concat())),
-            ),
-            ("orientation", orientation(width, height)),
-        ]);
-        sizes.push((Key::String(name.into()), entry));
-    }
-    let original = meta
-        .get_str("original_image")
-        .filter(|name| !name.is_empty());
-    if let Some(original) = original.map(Value::to_php_string) {
-        let original_url = [base, &original[..]].concat();
-        push(
-            "originalImageURL",
-            text(hyscribe_kses::esc_url_raw(&original_url)),
-        );
-        push("originalImageName", text(wp_basename(&original)));
-    }
-    let side = |key| meta.get_str(key).map(Value::to_int);
-    let mut full = vec![("url", text(hyscribe_kses::esc_url_raw(url)))];
-    let dimensions = side("width").zip(side("height"));
-    full.extend(dimensions.into_iter().flat_map(|(width, height)| {
-        [
-            ("height", Value::Int(height)),
-            ("width", Value::Int(width)),
-            ("orientation", orientation(width, height)),
-        ]
-    }));
-    // array_merge(): `url` is there already, the rest comes after.
-    for (key, value) in full.iter().skip(1) {
-        push(key, value.clone());
-    }
-    sizes.push((Key::String(b"full".to_vec()), object(full)));
-    push("sizes", Value::Array(sizes));
 }

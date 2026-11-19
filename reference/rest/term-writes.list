@@ -37,3 +37,15 @@ POST	/?rest_route=/wp/v2/tags/2	json,restore	{"parent":1}
 POST	/?rest_route=/wp/v2/tags/1	json,restore	{"name":"Not a tag"}
 DELETE	/?rest_route=/wp/v2/tags/2&force=1	restore
 POST	/?rest_route=/wp/v2/tags/2&_method=DELETE&force=true	restore
+# The editor's category and tag panels creating a term inline (apiFetch POST with _locale=user).
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Inline","parent":0}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Inline child","parent":1}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Sub","parent":0}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Sub","parent":1}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"  Spaced  <b>out</b> & more ","parent":0}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Café society","parent":0}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"inline tag"}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"Tagged"}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"tagged"}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"Two, words"}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"Sub"}

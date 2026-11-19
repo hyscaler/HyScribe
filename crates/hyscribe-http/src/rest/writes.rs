@@ -20,16 +20,17 @@ use hyscribe_rest::{
 use hyscribe_write::Error;
 use hyscribe_write::comments::{
     CommentEdit, Commenter, NewComment, Refused, allow_and_insert_comment, delete_comment,
-    restore_comment, set_comment_status, spam_comment, trash_comment, update_comment,
+    insert_note, restore_comment, set_comment_status, spam_comment, trash_comment, update_comment,
 };
 use hyscribe_write::options::{
     add_option, delete_metadata, delete_option, get_option, sanitize_option, update_metadata,
     update_option,
 };
 use hyscribe_write::posts::{
-    Context, PostArgs, Revisioned, get_user_global_styles_post_id, stick_post, unstick_post,
-    wp_create_post_autosave, wp_delete_attachment, wp_delete_post, wp_insert_post, wp_trash_post,
-    wp_unique_post_slug, wp_update_post,
+    AttachmentDeleted, Context, PostArgs, Revisioned, get_user_global_styles_post_id, stick_post,
+    unstick_post, wp_after_insert_post, wp_create_post_autosave, wp_delete_attachment,
+    wp_delete_post, wp_insert_post, wp_trash_post, wp_unique_post_slug, wp_update_post,
+    wp_update_post_quietly,
 };
 use hyscribe_write::terms::{
     Deletion, Taxonomy, TermArgs, TermError, TermList, TermRef, wp_delete_term, wp_insert_term,
@@ -93,7 +94,7 @@ fn made(
     // Only once the rows are committed: a file never goes with a row that stays.
     match (done, uploads) {
         (Outcome::Deleted(id, files), Some(uploads)) => {
-            uploads.remove(&files);
+            uploads.delete(&files);
             Ok(Outcome::Written(id))
         }
         (done, _) => Ok(done),
@@ -225,13 +226,11 @@ async fn written(
             Ok(done(wp_delete_post(write, ctx, *id, true).await?, *id))
         }
         hyscribe_rest::Write::DeleteAttachment(id) => {
-            let files = wp_delete_attachment(write, ctx, *id).await?;
-            Ok(
-                files.map_or(Outcome::Refused("rest_cannot_delete"), |files| {
-                    let files = files.into_iter().map(|file| (file.path, file.within));
-                    Outcome::Deleted(*id, files.collect())
-                }),
-            )
+            let deleted = wp_delete_attachment(write, ctx, *id, true).await?;
+            Ok(match deleted {
+                Some(AttachmentDeleted::Deleted(files)) => Outcome::Deleted(*id, files),
+                _ => Outcome::Refused("rest_cannot_delete"),
+            })
         }
         // Its file is written first, by `rest::uploads`.
         hyscribe_rest::Write::Upload(_) => Err(Error::Unported("an upload's file")),
@@ -354,10 +353,14 @@ async fn comment_saved(
             manage_options: save.skip_flood,
             unfiltered_html: plan.unfiltered_html,
         };
-        match allow_and_insert_comment(write, context, comment, commenter).await? {
-            Ok(id) => id,
-            Err(Refused::Duplicate) => return Ok(Outcome::Refused("comment_duplicate")),
-            Err(Refused::Flood) => return Ok(Outcome::Refused("comment_flood")),
+        if save.note {
+            insert_note(write, context, comment, plan.unfiltered_html).await?
+        } else {
+            match allow_and_insert_comment(write, context, comment, commenter).await? {
+                Ok(id) => id,
+                Err(Refused::Duplicate) => return Ok(Outcome::Refused("comment_duplicate")),
+                Err(Refused::Flood) => return Ok(Outcome::Refused("comment_flood")),
+            }
         }
     } else {
         let edit = CommentEdit {
@@ -384,6 +387,18 @@ async fn comment_saved(
     };
     if let Some(status) = &save.status {
         status_changed(write, context, id, status).await?;
+    }
+    for (key, value) in &save.meta {
+        let any = Value::String(Vec::new());
+        match value {
+            Value::Null => {
+                delete_metadata(write, Meta::Comment, id, key, &any, false).await?;
+            }
+            value => {
+                let value = Value::String(addslashes(&value.to_php_string()));
+                update_metadata(write, Meta::Comment, id, key, &value, &any).await?;
+            }
+        }
     }
     Ok(Outcome::Written(id))
 }
@@ -588,6 +603,9 @@ async fn saved(
     slug: Option<Vec<u8>>,
     ctx: &Context,
 ) -> Result<Outcome, Error> {
+    // The controller fires the after hooks, which save the revision, once the
+    // meta is written.
+    let deferred = save.id != 0 && !save.meta.is_empty();
     let saved = if save.id == 0 {
         let mut args = PostArgs {
             post_type: save.post_type.clone(),
@@ -597,7 +615,11 @@ async fn saved(
         wp_insert_post(write, ctx, args).await
     } else {
         let change = |args: &mut PostArgs| fields(save, slug.as_ref(), args);
-        wp_update_post(write, ctx, save.id, &change).await
+        if deferred {
+            wp_update_post_quietly(write, ctx, save.id, &change).await
+        } else {
+            wp_update_post(write, ctx, save.id, &change).await
+        }
     };
     let id = match saved {
         Ok(id) => id,
@@ -640,7 +662,19 @@ async fn saved(
         }
     }
     for (key, value) in &save.meta {
-        update_metadata(write, Meta::Post, id, key, value, &Value::Null).await?;
+        match value {
+            Value::Null => {
+                delete_metadata(write, Meta::Post, id, key, &any, false).await?;
+            }
+            value => {
+                // `update_value()` slashes what `update_metadata()` unslashes.
+                let value = Value::String(addslashes(&value.to_php_string()));
+                update_metadata(write, Meta::Post, id, key, &value, &Value::Null).await?;
+            }
+        }
+    }
+    if deferred {
+        wp_after_insert_post(write, ctx, id).await?;
     }
     if let Some(alt) = &save.alt_text {
         let alt = Value::String(alt.clone());

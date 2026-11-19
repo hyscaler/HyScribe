@@ -16,11 +16,13 @@ use crate::posts::PostsSite;
 pub(crate) mod attachment;
 pub(crate) mod image;
 mod library;
+mod query;
 mod upload_new;
 
-pub use attachment::{AttachmentArgs, AttachmentSite, attachment_edit};
+pub use attachment::{AttachmentArgs, AttachmentSite, attachment_edit, human_readable_duration};
 pub use image::{icon_name, site_icon_url};
 pub use library::{LibraryArgs, upload};
+pub use query::attachments_query;
 pub use upload_new::{NewArgs, media_new};
 
 /// What the Media screens ask of the site beyond the posts list's.

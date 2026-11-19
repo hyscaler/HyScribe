@@ -2,9 +2,6 @@
 
 //! `get_the_excerpt()`: a post's hand-written excerpt, or the one
 //! `wp_trim_excerpt()` makes from its content.
-//!
-//! Not ported yet, as with the content: shortcodes (`strip_shortcodes()`,
-//! `shortcode_unautop()`, `do_shortcode()`).
 
 use hyscribe_kses::wp_strip_all_tags;
 use hyscribe_model::Post;
@@ -13,7 +10,8 @@ use hyscribe_phpser::{Value, php_trim};
 use crate::blocks::{Block, parse_blocks};
 use crate::content::get_the_content;
 use crate::core_blocks::{prepared, render};
-use crate::formatting::contains;
+use crate::formatting::{CORE_SHORTCODE_TAGS, contains};
+use crate::shortcode::strip_shortcodes;
 use crate::site::{Request, Site};
 use crate::template::{Renderer, replace};
 use crate::theme::Theme;
@@ -83,6 +81,7 @@ impl Renderer<'_> {
             return post.excerpt.clone();
         }
         let content = get_the_content(self, post, false);
+        let content = strip_shortcodes(&content, &CORE_SHORTCODE_TAGS);
         let content = self.excerpt_remove_blocks(&content);
         let content = excerpt_remove_footnotes(&content);
         let content = replace(

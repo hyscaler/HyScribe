@@ -545,6 +545,7 @@ async fn every_query() -> Vec<DbError> {
         db.count_terms_with_posts("category").await.unwrap_err(),
         db.option("blogname").await.unwrap_err(),
         db.post_meta(1, "x").await.unwrap_err(),
+        db.post_meta_all(1, "x").await.unwrap_err(),
         db.post_terms(1, "category").await.unwrap_err(),
         db.term(1, "category").await.unwrap_err(),
         db.term_taxonomy(1).await.unwrap_err(),
@@ -574,6 +575,7 @@ async fn every_query() -> Vec<DbError> {
         db.user_post_counts(&[1], true, 1).await.unwrap_err(),
         db.comments(1).await.unwrap_err(),
         db.older_comments(1, "").await.unwrap_err(),
+        db.held_comments(1, b"e", None).await.unwrap_err(),
         db.comment(1).await.unwrap_err(),
         db.adjacent_post(&Post::default(), true, None)
             .await
@@ -984,11 +986,34 @@ async fn options_meta_and_terms() {
         db.older_comments(2, "2027-01-01 00:00:00").await.unwrap(),
         0
     );
+    // Nothing is held in the default install.
+    assert!(
+        db.held_comments(1, b"wapuu@wordpress.example", None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        db.held_comments(1, b"x", Some(-1))
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         db.post_meta(2, "_wp_page_template").await.unwrap(),
         Some(b"default".to_vec())
     );
     assert_eq!(db.post_meta(1, "_thumbnail_id").await.unwrap(), None);
+    assert_eq!(
+        db.post_meta_all(2, "_wp_page_template").await.unwrap(),
+        [b"default".to_vec()]
+    );
+    assert!(
+        db.post_meta_all(1, "_thumbnail_id")
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let terms = db.post_terms(1, "category").await.unwrap();
     assert_eq!(
         terms,
@@ -1349,6 +1374,22 @@ async fn sticky_posts_come_first_and_formats_filter() {
         ..PostQuery::default()
     });
     assert_eq!(db.count_posts(&one).await.unwrap(), 2);
+}
+
+/// An attachment by its name, whatever its status; a post of that name is
+/// none.
+#[tokio::test]
+async fn attachments_by_name() {
+    let db = named("wordpress_ttd").await;
+    let found = db.attachment_by_name("canola2").await.unwrap().unwrap();
+    assert_eq!((found.id, found.post_type.as_str()), (611, "attachment"));
+    assert!(
+        db.attachment_by_name("hello-world")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(db.attachment_by_name("no-such").await.unwrap().is_none());
 }
 
 #[tokio::test]

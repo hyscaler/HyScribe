@@ -72,6 +72,7 @@ fn post(row: &Value) -> Post {
         comment_status: text(row, "comment_status"),
         title: row.get_str("post_title").unwrap().to_php_string(),
         status: text(row, "post_status"),
+        parent: row.get_str("post_parent").map_or(0, |v| v.to_int() as u64),
         password: row.get_str("post_password").unwrap().to_php_string(),
         post_type: text(row, "post_type"),
         date: text(row, "post_date"),
@@ -188,6 +189,7 @@ fn matches_php() {
             query: None,
             comment: None,
             comment_depth: 0,
+            comment_held: false,
             terms: Default::default(),
             loading: Default::default(),
         };
@@ -240,6 +242,7 @@ fn relative_dates() {
         query: None,
         comment: None,
         comment_depth: 0,
+        comment_held: false,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -266,6 +269,7 @@ fn blocks_without_a_callback_render_their_saved_markup() {
         query: None,
         comment: None,
         comment_depth: 0,
+        comment_held: false,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -320,6 +324,7 @@ fn bindings_and_the_front_page() {
         query: None,
         comment: None,
         comment_depth: 0,
+        comment_held: false,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -400,6 +405,7 @@ fn post_terms_match_php() {
             query: None,
             comment: None,
             comment_depth: 0,
+            comment_held: false,
             terms: Default::default(),
             loading: Default::default(),
         };
@@ -497,6 +503,7 @@ fn post_navigation_links_match_php() {
         };
         let request = Request {
             singular: state.get_str("singular") == Some(&Value::Bool(true)),
+            attachment: state.get_str("attachment") == Some(&Value::Bool(true)),
             ..Request::default()
         };
         let context = Context {
@@ -507,6 +514,7 @@ fn post_navigation_links_match_php() {
             query: None,
             comment: None,
             comment_depth: 0,
+            comment_held: false,
             terms: Default::default(),
             loading: Default::default(),
         };
@@ -545,6 +553,7 @@ fn comments_match_php() {
             query: None,
             comment: None,
             comment_depth: 0,
+            comment_held: false,
             terms: Default::default(),
             loading: Default::default(),
         };
@@ -582,6 +591,7 @@ fn legacy_comments_are_not_ported() {
         query: None,
         comment: None,
         comment_depth: 0,
+        comment_held: false,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -611,6 +621,7 @@ fn avatar_defaults_without_options() {
         query: None,
         comment: None,
         comment_depth: 0,
+        comment_held: false,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -655,6 +666,7 @@ fn comment_form_without_comment_data() {
         query: None,
         comment: None,
         comment_depth: 0,
+        comment_held: false,
         terms: Default::default(),
         loading: Default::default(),
     };
@@ -730,6 +742,7 @@ fn footnotes_match_php() {
             query: None,
             comment: None,
             comment_depth: 0,
+            comment_held: false,
             terms: Default::default(),
             loading: Default::default(),
         };

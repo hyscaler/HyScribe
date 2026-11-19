@@ -11,7 +11,7 @@ use hyscribe_testkit::writes::check_writes;
 use super::super::Stop;
 use super::super::screen::tests::{ajax, answered, cut, run};
 use super::super::tests::unread::Unread;
-use super::super::tests::{SITE, asked, fields, writer};
+use super::super::tests::{SITE, asked, fields, turn, writer};
 use super::*;
 
 /// `$views_draft()`: the Quick Draft form's auto-draft, user 1's.
@@ -26,6 +26,7 @@ fn shown(err: Error) -> String {
 /// The save, from the auto-draft the form named, then the form's next one.
 #[tokio::test]
 async fn the_quick_draft_save_is_php_s() {
+    let _turn = turn().await;
     let writer = writer().await;
     let setup = async |conn: &mut Connection| cut(&writer, conn, drafted).await.map_err(shown);
     let action = async |conn: &mut Connection, id: u64| {

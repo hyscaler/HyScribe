@@ -9,12 +9,13 @@ use std::sync::OnceLock;
 mod notices;
 
 use hyscribe_auth::caps::{CapPost, CapabilityData, User as Capabilities};
+use hyscribe_phpser::{Key, Value};
 use hyscribe_testkit::SqlValue;
 
 use crate::admin_bar::Browser;
 use crate::assets::{Urls, admin_links};
 use crate::login::authenticate::Account;
-use crate::login::{Notice, Site, User};
+use crate::login::{Notice, Site, User, UserRequest};
 use crate::menu::{MenuUser, link};
 use crate::page::{PageSite, Request};
 
@@ -99,6 +100,9 @@ fn admin(oracle: &Oracle) -> User {
     }
 }
 
+/// When the oracle's personal data request was last changed.
+pub const REQUESTED: i64 = 1_794_000_000;
+
 impl Site for Oracle {
     fn blogname(&self) -> String {
         "HyScribe Default Install".into()
@@ -141,8 +145,15 @@ impl Site for Oracle {
     fn can_register(&self) -> bool {
         self.register
     }
-    fn post_type(&self, id: u64) -> Option<String> {
-        (Some(id) == self.user_request).then(|| "user_request".into())
+    fn user_request(&self, id: u64) -> Option<UserRequest> {
+        (Some(id) == self.user_request).then(|| UserRequest {
+            id,
+            email: b"reader@example.test".to_vec(),
+            action_name: b"export_personal_data".to_vec(),
+            status: "request-pending".into(),
+            confirm_key: hyscribe_auth::wp_fast_hash(b"a-key").into_bytes(),
+            modified: REQUESTED,
+        })
     }
     fn site_icon(&self, size: i64) -> Option<Vec<u8>> {
         crate::media::site_icon_url(&Role(self.icon?), size)
@@ -175,9 +186,19 @@ pub const BROWSER: Browser = Browser {
 
 /// The request for `uri` at `canonical` from `browser`.
 pub fn request<'a>(canonical: &'a str, uri: &'a str, browser: &'a Browser<'a>) -> Request<'a> {
+    request_at(SITE, canonical, uri, browser)
+}
+
+/// [`request`] to the site at `origin`.
+pub fn request_at<'a>(
+    origin: &'a str,
+    canonical: &'a str,
+    uri: &'a str,
+    browser: &'a Browser<'a>,
+) -> Request<'a> {
     Request {
         canonical,
-        origin: SITE,
+        origin,
         uri,
         browser,
     }
@@ -260,7 +281,22 @@ impl Role {
         if self.variant() == "h9home" {
             return SITE.replace("http:", "https:");
         }
+        self.site()
+    }
+
+    /// The site's address: HTTPS in the `ssl` variants of the profile
+    /// goldens, which PHP served as behind a TLS proxy.
+    pub fn site(&self) -> String {
+        if self.tls() {
+            return SITE.replace("http:", "https:");
+        }
         SITE.into()
+    }
+
+    /// A variant of `reference/profile/golden.sh` or
+    /// `reference/user-edit/golden.sh` over HTTPS.
+    pub fn tls(&self) -> bool {
+        self.variant().starts_with("pssl") || self.variant().starts_with("u3ssl")
     }
 
     /// A variant of `reference/media/golden.sh` or
@@ -374,7 +410,7 @@ impl Role {
     fn variant_option(&self, name: &str) -> Option<&'static [u8]> {
         let value: &[u8] = match (self.variant(), name) {
             // `WP_SITEURL` and `WP_HOME`.
-            (_, "siteurl" | "home") => SITE.as_bytes(),
+            (_, "siteurl" | "home") => &*Box::leak(self.site().into_bytes().into_boxed_slice()),
             (variant, "_transient_settings_errors") if variant.starts_with("o5") => {
                 let kept = crate::settings::tests::kept_errors(variant);
                 return kept.map(|kept| &*Box::leak(kept.into_boxed_slice()));
@@ -393,6 +429,14 @@ impl Role {
             ("h9iconpdf", "site_icon") => b"953",
             ("h9iconnone", "site_icon") => b"954",
             ("h9iconbig", "site_icon") => b"955",
+            ("o36bad", "active_plugins") => b"s:3:\"abc\";",
+            ("o36one", "active_plugins") => b"a:1:{i:0;s:19:\"missing/missing.php\";}",
+            ("o36two", "active_plugins") => b"a:2:{i:0;s:11:\"one/one.php\";i:1;s:7:\"two.php\";}",
+            ("o36path", "active_plugins") => b"a:1:{i:0;s:11:\"../evil.php\";}",
+            ("o36inner", "active_plugins") => b"a:1:{i:0;s:12:\"dir/../x.php\";}",
+            ("o36drive", "active_plugins") => b"a:1:{i:0;s:8:\"c:/x.php\";}",
+            ("o36escape", "active_plugins") => b"a:1:{i:0;s:12:\"a b/<i>&.php\";}",
+            ("o36dup", "active_plugins") => b"a:2:{i:0;s:7:\"x/x.php\";i:1;s:7:\"x/x.php\";}",
             ("a5auto", "auto_update_themes") => b"a:1:{i:0;s:16:\"twentytwentyfive\";}",
             ("j9parent", "template") => b"gone",
             ("g9gone" | "g9noswitch" | "g9nooptions", "stylesheet" | "template")
@@ -789,8 +833,12 @@ impl crate::terms::TermsSite for Role {
     }
     fn term_link(&self, term: &hyscribe_model::Term, taxonomy: &str) -> String {
         match taxonomy {
-            "category" => format!("{SITE}/?cat={}", term.id),
-            _ => format!("{SITE}/?tag={}", String::from_utf8_lossy(&term.slug)),
+            "category" => format!("{}/?cat={}", self.site(), term.id),
+            _ => format!(
+                "{}/?tag={}",
+                self.site(),
+                String::from_utf8_lossy(&term.slug)
+            ),
         }
     }
 }
@@ -837,19 +885,19 @@ impl Urls for Role {
         if self.variant() == "h9ssl" || self.variant().starts_with("o35") {
             return SITE.replace("http:", "https:");
         }
-        SITE.into()
+        self.site()
     }
     fn admin_url(&self, path: &str) -> String {
-        format!("{SITE}/hs-admin/{}", link(path))
+        format!("{}/hs-admin/{}", self.site(), link(path))
     }
     fn fill(&self, text: &str) -> String {
-        let text = admin_links(text, "%admin_url%", &format!("{SITE}/hs-admin/"));
+        let text = admin_links(text, "%admin_url%", &format!("{}/hs-admin/", self.site()));
         admin_links(&text, "\"%admin_path%", "\"/hs-admin/")
             .replace(
                 "%rest_url%",
                 &format!("{}/{}", self.home(), self.rest_path()),
             )
-            .replace("%site_url%", SITE)
+            .replace("%site_url%", &self.site())
             .replace("%user_id%", "0")
             .replace(
                 "%nonce:reset-password-for-user%",
@@ -886,6 +934,18 @@ impl PageSite for Role {
             ("o35zone", "locale") => return Some(b"fr_FR".to_vec()),
             ("m4list" | "m4ttdlist", "media_library_mode") => return Some(b"list".to_vec()),
             ("m4ttdpaged", "upload_per_page") => return Some(b"5".to_vec()),
+            ("psslhidden", "manageapplication-passwords-usercolumnshidden") => {
+                return Some(b"a:2:{i:0;s:7:\"last_ip\";i:1;s:7:\"created\";}".to_vec());
+            }
+            ("psslhiddenempty", "manageapplication-passwords-usercolumnshidden") => {
+                return Some(b"a:1:{i:0;s:7:\"last_ip\";}".to_vec());
+            }
+            ("psslhiddenall", "manageapplication-passwords-usercolumnshidden") => {
+                return Some(
+                    b"a:5:{i:0;s:4:\"name\";i:1;s:7:\"created\";i:2;s:9:\"last_used\";i:3;s:7:\"last_ip\";i:4;s:6:\"revoke\";}"
+                        .to_vec(),
+                );
+            }
             ("m4ttdhidden", "manageuploadcolumnshidden") => {
                 return Some(b"a:1:{i:0;s:6:\"author\";}".to_vec());
             }
@@ -993,7 +1053,7 @@ impl PageSite for Role {
         false
     }
     fn login_url(&self) -> String {
-        format!("{SITE}/hs-login")
+        format!("{}/hs-login", self.site())
     }
     fn template(&self) -> String {
         let template = CapabilityData::option(self, "template").unwrap_or_default();
@@ -1004,12 +1064,20 @@ impl PageSite for Role {
         String::from_utf8(stylesheet).unwrap()
     }
     fn font_faces(&self, with_theme: bool) -> Vec<u8> {
-        static FACES: OnceLock<[Vec<u8>; 2]> = OnceLock::new();
+        // By scheme, then with the theme's fonts or not.
+        static FACES: OnceLock<[[Vec<u8>; 2]; 2]> = OnceLock::new();
         let faces = FACES.get_or_init(|| {
             let theme = hyscribe_render::theme::twentytwentyfive();
-            [false, true].map(|with_theme| theme.admin_font_faces(SITE, with_theme))
+            [false, true].map(|tls| {
+                let site = if tls {
+                    SITE.replace("http:", "https:")
+                } else {
+                    SITE.into()
+                };
+                [false, true].map(|with_theme| theme.admin_font_faces(&site, with_theme))
+            })
         });
-        faces[usize::from(with_theme)].clone()
+        faces[usize::from(self.tls())][usize::from(with_theme)].clone()
     }
 }
 
@@ -1132,7 +1200,7 @@ impl crate::users::UsersSite for Role {
             .collect()
     }
     fn author_url(&self, id: u64) -> String {
-        format!("{SITE}/?author={id}")
+        format!("{}/?author={id}", self.site())
     }
     /// Those with posts.
     fn owns_content(&self, id: u64) -> bool {
@@ -1248,7 +1316,7 @@ impl crate::profile::ProfileSite for Role {
     fn sessions(&self, id: u64) -> usize {
         match (self.variant(), id) {
             ("psessions1", 1) | ("u3sessions", 601) => 1,
-            ("psessions2", 1) => 2,
+            ("psessions2" | "psslsessions2", 1) => 2,
             _ => 0,
         }
     }
@@ -1256,9 +1324,90 @@ impl crate::profile::ProfileSite for Role {
     fn generated_password(&self) -> String {
         "%password%".into()
     }
+    /// The passwords of `reference/profile/variants.php` and
+    /// `reference/user-edit/variants.php`.
+    fn application_passwords(&self, id: u64) -> Option<Vec<u8>> {
+        let item =
+            |uuid: &str, name: &str, created: i64, last_used: Option<i64>, ip: Option<&str>| {
+                let text = |value: &str| Value::String(value.as_bytes().to_vec());
+                let key = |name: &str| Key::String(name.as_bytes().to_vec());
+                Value::Array(vec![
+                    (key("uuid"), text(uuid)),
+                    (key("app_id"), text("")),
+                    (key("name"), text(name)),
+                    (key("password"), text("x")),
+                    (key("created"), Value::Int(created)),
+                    (key("last_used"), last_used.map_or(Value::Null, Value::Int)),
+                    (key("last_ip"), ip.map_or(Value::Null, text)),
+                ])
+            };
+        let phone = || {
+            item(
+                "11111111-1111-4111-8111-111111111111",
+                "Phone",
+                1_700_000_000,
+                None,
+                None,
+            )
+        };
+        let list = match (self.variant(), id) {
+            // An item without a `uuid`, which PHP repairs.
+            ("psslnouuid", 1) => {
+                return Some(b"a:1:{i:0;a:1:{s:4:\"name\";s:1:\"n\";}}".to_vec());
+            }
+            ("psslapps1" | "psslhidden" | "psslhiddenall", 1) => vec![phone()],
+            ("psslapps3", 1) => vec![
+                phone(),
+                item(
+                    "22222222-2222-4222-8222-222222222222",
+                    "Laptop <b>\"quoted\"</b> & more",
+                    1_731_974_400,
+                    Some(1_732_000_000),
+                    Some("203.0.113.7"),
+                ),
+                item(
+                    "44444444-4444-4444-8444-444444444444",
+                    "Empty",
+                    0,
+                    Some(0),
+                    Some(""),
+                ),
+            ],
+            ("u3sslapps", 601) => vec![
+                item(
+                    "55555555-5555-4555-8555-555555555555",
+                    "Tablet",
+                    1_700_000_000,
+                    Some(1_732_000_000),
+                    Some("2001:db8::1"),
+                ),
+                item(
+                    "66666666-6666-4666-8666-666666666666",
+                    "Script",
+                    1_731_974_400,
+                    None,
+                    None,
+                ),
+            ],
+            ("u3sslapps", 1) => vec![item(
+                "77777777-7777-4777-8777-777777777777",
+                "Admin app",
+                1_700_000_000,
+                None,
+                None,
+            )],
+            _ => return None,
+        };
+        let key = |at: usize| Key::Int(i64::try_from(at).unwrap());
+        let list = list
+            .into_iter()
+            .enumerate()
+            .map(|(at, item)| (key(at), item));
+        Some(hyscribe_phpser::encode(&Value::Array(list.collect())))
+    }
     /// A path on the site, or else the fallback.
     fn validate_redirect(&self, location: &[u8], fallback: &str) -> Vec<u8> {
-        if location.starts_with(b"/") || location.starts_with(SITE.as_bytes()) {
+        if location.starts_with(b"/") || location.starts_with(self.site().as_bytes()) {
             location.to_vec()
         } else {
             fallback.as_bytes().to_vec()
@@ -1950,6 +2099,24 @@ impl crate::site_health::HealthSite for Role {
             "11.8.9-MariaDB-ubu2404".into(),
             "utf8mb4_unicode_520_ci".into(),
         )
+    }
+    /// A healthy machine, or in `t34bad` one with every check failing.
+    fn environment(&self) -> crate::site_health::Environment {
+        use crate::site_health::{EnvFile, Environment};
+        if self.variant() == "t34bad" {
+            return Environment {
+                env_file: EnvFile::Mode(0o644),
+                disk_free: Some(1 << 20),
+                service_pid: None,
+                pid: 4242,
+            };
+        }
+        Environment {
+            env_file: EnvFile::Mode(0o600),
+            disk_free: Some(5 << 30),
+            service_pid: Some(4242),
+            pid: 4242,
+        }
     }
 }
 

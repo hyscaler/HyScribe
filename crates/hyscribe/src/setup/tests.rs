@@ -112,10 +112,9 @@ pub(crate) fn wp_config(extra: &str) -> String {
 }
 
 const CONSTANTS_SET: &str = "define( 'DISALLOW_UNFILTERED_HTML', false );\n\
-    define( 'ALLOW_UNFILTERED_UPLOADS', true );\ndefine( 'MEDIA_TRASH', true );\n\
-    define( 'MULTISITE', false );\n\
+    define( 'ALLOW_UNFILTERED_UPLOADS', true );\ndefine( 'MULTISITE', false );\n\
     define( 'WP_HOME', 'https://example.com' );\ndefine( 'WP_SITEURL', 'https://example.com/wp' );\n\
-    define( 'EMPTY_TRASH_DAYS', 7 );";
+    define( 'EMPTY_TRASH_DAYS', 7 );\ndefine( 'MEDIA_TRASH', true );";
 
 /// Every answer the default, with a `wp-config.php` and no `.env`.
 pub(crate) const DEFAULTS: &str = "\n\n\n\n\n\n\n";

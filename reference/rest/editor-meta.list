@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The block editor's saves with `meta` and of password protected and sticky
+# posts, which reference/rest/golden.sh records as editor-meta.tsv over the
+# default install as editor-meta.sql leaves it: the footnotes block's meta
+# in saves of posts, pages and patterns (with the revisions it makes), what
+# PHP refuses of a footnotes value, meta that is not registered, and a
+# password protected post made sticky. Each as every identity, the database
+# put back after each; the editor's PUT as a POST with X-HTTP-Method-Override.
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"meta":{"footnotes":"[{\"content\":\"A <b>note</b>\",\"id\":\"n1\"}]"},"content":"<!-- wp:paragraph -->\n<p>No notes yet.<sup data-fn=\"n1\" class=\"fn\"><a href=\"#n1\" id=\"n1-link\">1</a></sup></p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"meta":{"footnotes":"[{\"content\":\"Bad <script>x()</script><em>ok</em> café / <a href=\\\"https://x.test/\\\" onclick=\\\"y()\\\">l</a>\",\"id\":\"AB 12!\"},{\"content\":\"\",\"id\":\"e\"},{\"content\":\"no id\"},{\"id\":\"no-content\"},{\"content\":\"0\",\"id\":\"zero\"},{\"content\":\"kept\",\"id\":7}]"}}
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"meta":{"footnotes":"not json"}}
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"meta":{"footnotes":"{\"a\":{\"content\":\"Keyed\",\"id\":\"k\"},\"b\":\"text\",\"c\":[]}"}}
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"meta":{"footnotes":""}}
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"meta":{"footnotes":null}}
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"meta":{"other":"x"}}
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"meta":[]}
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"meta":"nope"}
+POST	/index.php?rest_route=/wp/v2/posts/9701&_locale=user	json,restore,put	{"id":9701,"title":"Retitled","meta":{"footnotes":"[{\"content\":\"With title\",\"id\":\"t1\"}]"}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"meta":{"footnotes":"[{\"id\":\"a1\",\"content\":\"Old\"}]"}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"meta":{"footnotes":"[{\"content\":\"New\",\"id\":\"a1\"}]"}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"content":"<!-- wp:paragraph -->\n<p>Noted again.</p>\n<!-- /wp:paragraph -->","meta":{"footnotes":"[{\"content\":\"Newer\",\"id\":\"a1\"}]"}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"meta":{"footnotes":null}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"meta":{"footnotes":""}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"meta":{"footnotes":5}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"meta":{"footnotes":["x"]}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"meta":{"footnotes":true}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"meta":{"footnotes":"[{\"content\":[\"x\"],\"id\":\"a\"}]"}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"status":"draft","meta":{"footnotes":"[{\"content\":\"Drafted\",\"id\":\"d1\"}]"}}
+POST	/index.php?rest_route=/wp/v2/posts/9702&_locale=user	json,restore,put	{"id":9702,"status":"private","meta":{"footnotes":"[{\"content\":\"Private\",\"id\":\"v1\"}]"}}
+POST	/index.php?rest_route=/wp/v2/pages/9704&_locale=user	json,restore,put	{"id":9704,"meta":{"footnotes":"[{\"content\":\"On a page\",\"id\":\"g1\"}]"}}
+POST	/index.php?rest_route=/wp/v2/posts/9999&_locale=user	json,restore,put	{"id":9999,"meta":{"footnotes":"[]"}}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Created","status":"draft","meta":{"footnotes":"[{\"content\":\"Born\",\"id\":\"b1\"}]"}}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Created","status":"publish","meta":{"footnotes":"[{\"content\":\"Born\",\"id\":\"b1\"}]"}}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Created","status":"draft","meta":{"footnotes":null}}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Created","status":"draft","meta":{"footnotes":""}}
+POST	/?rest_route=/wp/v2/pages	json,restore	{"title":"A page","status":"draft","meta":{"footnotes":"[{\"content\":\"Page born\",\"id\":\"c1\"}]"}}
+POST	/?rest_route=/wp/v2/blocks/9707	json,restore	{"meta":{"footnotes":"[{\"content\":\"Pattern new\",\"id\":\"p1\"}]"}}
+POST	/?rest_route=/wp/v2/blocks/9707	json,restore	{"meta":{"footnotes":null,"wp_pattern_sync_status":"unsynced"}}
+POST	/?rest_route=/wp/v2/blocks	json,restore	{"title":"Fresh pattern","status":"publish","meta":{"footnotes":"[{\"content\":\"Fresh\",\"id\":\"f1\"}]","wp_pattern_sync_status":"unsynced"}}
+POST	/index.php?rest_route=/wp/v2/posts/9705&_locale=user	json,restore,put	{"id":9705,"sticky":true}
+POST	/index.php?rest_route=/wp/v2/posts/9705&_locale=user	json,restore,put	{"id":9705,"sticky":true,"content":"<!-- wp:paragraph -->\n<p>Guarded.</p>\n<!-- /wp:paragraph -->"}
+POST	/index.php?rest_route=/wp/v2/posts/9705&_locale=user	json,restore,put	{"id":9705,"sticky":true,"password":"other"}
+POST	/index.php?rest_route=/wp/v2/posts/9705&_locale=user	json,restore,put	{"id":9705,"sticky":true,"password":""}
+POST	/index.php?rest_route=/wp/v2/posts/9705&_locale=user	json,restore,put	{"id":9705,"sticky":false}
+POST	/index.php?rest_route=/wp/v2/posts/9705&_locale=user	json,restore,put	{"id":9705,"sticky":"1"}
+POST	/index.php?rest_route=/wp/v2/posts/9706&_locale=user	json,restore,put	{"id":9706,"password":"pw"}
+POST	/index.php?rest_route=/wp/v2/posts/9706&_locale=user	json,restore,put	{"id":9706,"sticky":true,"password":"pw"}
+POST	/index.php?rest_route=/wp/v2/posts/9706&_locale=user	json,restore,put	{"id":9706,"sticky":false}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Guarded new","password":"pw","sticky":true}
+POST	/?rest_route=/wp/v2/posts	json,restore	{"title":"Guarded new","password":"","sticky":true}

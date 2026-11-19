@@ -11,7 +11,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::actions::{ActionSite, Asked, Body, Refusal, admin_ajax};
 use hyscribe_admin::admin_bar::{BarSite, Browser};
-use hyscribe_admin::appearance::themes;
+use hyscribe_admin::appearance::{plugins, themes};
 use hyscribe_admin::assets::Urls;
 use hyscribe_admin::comments::{
     CommentArgs, CommentEditSite, CommentQuery, CommentsSite, MODERATED, comment_edit,
@@ -32,7 +32,7 @@ use hyscribe_admin::posts::{
 use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
-use hyscribe_admin::site_health::{HealthSite, Install, info};
+use hyscribe_admin::site_health::{EnvFile, Environment, HealthSite, Install, info, status};
 use hyscribe_admin::terms::{
     Taxonomy as Terms, TermArgs, TermEditArgs, TermsSite, edit_tags, term_edit,
 };
@@ -58,7 +58,8 @@ use crate::login::{
 use crate::redirect::wp_sanitize_redirect;
 use crate::{Site, now};
 
-mod saves;
+mod media;
+pub(crate) mod saves;
 mod uploads;
 mod views;
 
@@ -206,6 +207,8 @@ struct Admin<'a> {
     /// `$GLOBALS['login_grace_period']`: the auth cookie expired within
     /// its grace.
     grace: bool,
+    /// The files an action deletes once it is committed.
+    files: RefCell<Vec<(Vec<u8>, Vec<u8>)>>,
 }
 
 impl<'a> Admin<'a> {
@@ -227,6 +230,7 @@ impl<'a> Admin<'a> {
             welcome: None,
             grace: false,
             outbox: crate::mail::Outbox::new(Arc::clone(&site.mailer)),
+            files: RefCell::default(),
         }
     }
 
@@ -387,6 +391,9 @@ impl ActionSite for Admin<'_> {
         let post = PostsSite::post(self, post).unwrap_or_default();
         let holder = hyscribe_admin::posts::lock_holder(self, &post)?;
         Some(String::from_utf8_lossy(&holder.display_name).into_owned())
+    }
+    fn user_option(&self, name: &str) -> Option<Vec<u8>> {
+        PageSite::user_option(self, name)
     }
 }
 
@@ -839,6 +846,9 @@ impl ProfileSite for Admin<'_> {
         let host = hyscribe_kses::url_host(self.site.home.as_bytes()).unwrap_or_default();
         crate::redirect::wp_validate_redirect(location, &host, fallback.as_bytes())
     }
+    fn application_passwords(&self, id: u64) -> Option<Vec<u8>> {
+        self.reads.user_meta(id, "_application_passwords")
+    }
 }
 
 impl ToolsSite for Admin<'_> {
@@ -879,6 +889,36 @@ impl HealthSite for Admin<'_> {
     }
     fn database_server(&self) -> (String, String) {
         self.reads.reads.wait(self.site.db.server())
+    }
+    fn environment(&self) -> Environment {
+        environment(&self.site.install.binary)
+    }
+}
+
+/// The `.env` file, the disk and the service of the `hyscribe/` folder the
+/// binary at `binary` is in.
+fn environment(binary: &str) -> Environment {
+    use std::os::unix::fs::PermissionsExt;
+    let home = std::path::Path::new(binary)
+        .parent()
+        .filter(|home| !home.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let env_file = match std::fs::metadata(home.join(".env")) {
+        Ok(file) => EnvFile::Mode(file.permissions().mode() & 0o777),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => EnvFile::Missing,
+        Err(_) => EnvFile::Unreadable,
+    };
+    let service_pid = match hyscribe_service::status(&hyscribe_service::Paths::new(home)) {
+        Ok(
+            hyscribe_service::Status::Running(pid) | hyscribe_service::Status::Starting(Some(pid)),
+        ) => Some(pid),
+        _ => None,
+    };
+    Environment {
+        env_file,
+        disk_free: hyscribe_service::disk_free(home),
+        service_pid,
+        pid: std::process::id(),
     }
 }
 
@@ -1315,6 +1355,13 @@ fn screen(
     origin: &str,
     browser: &Browser,
 ) -> Option<Response> {
+    // The screens with the media library's templates or its list, which
+    // `MEDIA_TRASH` changes, are not ported with it.
+    let media = ["upload", "post", "post-new", "options-general"];
+    let screen = path.strip_prefix("/hs-admin/").unwrap_or_default();
+    if admin.site.constants.media_trash && media.contains(&screen) {
+        return None;
+    }
     let canonical =
         String::from_utf8_lossy(&remove_query_arg(&REMOVABLE, url.as_bytes())).into_owned();
     let request = Request {
@@ -1391,33 +1438,34 @@ fn screen(
         "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)
             .or_else(|| block_editor(admin, &request))?,
         "/hs-admin/revision" => hyscribe_admin::revisions::revision(admin, query, &request)?,
-        // Its page prints the PHP and web server details HyScribe has no
-        // equivalent for: refused as PHP refuses, else not ported.
+        // Nobody may update here (the updates are HyScribe's releases, an open question;
+        // `update_core` is never granted): refused as PHP refuses the menu.
+        "/hs-admin/update-core" => Answer::from_page(None),
+        // Refused as PHP refuses; its arguments and actions are not ported.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
+        "/hs-admin/plugins" if request_uri.contains('?') => return None,
+        "/hs-admin/plugins" => plugins(admin, &request)?,
         "/hs-admin/site-health" if !admin.can("view_site_health_checks") => Answer::from_page(None),
-        // The Info tab of the bundled theme; the Status tab's checks
-        // are not decided.
+        // The Info tab of the bundled theme, and the Status tab with
+        // HyScribe's own checks.
         "/hs-admin/site-health" => {
-            only_argument(query, "tab").filter(|tab| tab.as_deref() == Some("debug"))?;
+            let tab = only_argument(query, "tab")?;
             let bundled =
                 |name| PostsSite::option(admin, name).as_deref() == Some(&b"twentytwentyfive"[..]);
             if !bundled("stylesheet") || !bundled("template") {
                 return None;
             }
-            Answer::from_page(info(admin, &request))
+            match tab.as_deref() {
+                None => Answer::from_page(status(admin, &request)),
+                Some("debug") => Answer::from_page(info(admin, &request)),
+                Some(_) => return None,
+            }
         }
         "/hs-admin/site-editor" if !admin.can("edit_theme_options") => Answer::from_page(None),
         "/hs-admin/site-editor" => hyscribe_admin::site_editor::site_editor(query, request_uri)
             .or_else(|| site_editor_page(admin, query, &request))?,
-        // HTTPS offers application passwords, whose list is not ported.
-        "/hs-admin/profile" => {
-            let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;
-            profile(admin, &args, &request)
-        }
-        "/hs-admin/user-edit" => {
-            let args = edit_args(query).filter(|_| !origin.starts_with("https://"))?;
-            user_edit(admin, &args, &request)
-        }
+        "/hs-admin/profile" => profile(admin, &edit_args(query)?, &request)?,
+        "/hs-admin/user-edit" => user_edit(admin, &edit_args(query)?, &request)?,
         "/hs-admin/user-new" => {
             let (mut update, mut user_id) = (None, None);
             for (key, value) in query_strings(query)? {
@@ -1684,7 +1732,10 @@ fn ajax_answer(
                         saves::destroy_sessions(sessions, &asked, reads.session_token(), name);
                     return ajax_text(StatusCode::OK, JSON, json);
                 }
-                Ok(()) => return ajax_save(&admin, &asked),
+                Ok(()) => {
+                    return media::read(&admin, &asked)
+                        .unwrap_or_else(|| ajax_save(&admin, &asked));
+                }
                 refused => refused,
             }
         }

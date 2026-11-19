@@ -20,6 +20,7 @@ use crate::steps::{Steps, step};
 use crate::{MYSQL, wp_timezone};
 
 pub use allow::Refused;
+pub use filter::{CommentCookie, sanitize_comment_cookie};
 
 /// What the comment functions take from outside the database.
 #[derive(Clone, Copy, Debug)]
@@ -251,17 +252,42 @@ pub async fn allow_and_insert_comment(
         Ok(approved) => approved,
         Err(refused) => return steps.finish(Ok(Err(refused))),
     };
-    let balance = balance_tags(&mut steps).await;
+    comment.approved = Some(approved);
+    let id = filtered_insert(&mut steps, context, comment, commenter.unfiltered_html).await;
+    steps.finish(Ok(Ok(id)))
+}
+
+/// The REST API's create of a note: approved with no `wp_allow_comment()`,
+/// then `wp_insert_comment( wp_filter_comment() )`.
+pub async fn insert_note(
+    write: &mut Write<'_>,
+    context: Context<'_>,
+    mut comment: NewComment,
+    unfiltered_html: bool,
+) -> Result<u64, DbError> {
+    let mut steps = Steps::new(write);
+    comment.comment_type = "note".into();
+    comment.approved = Some("1".into());
+    let id = filtered_insert(&mut steps, context, comment, unfiltered_html).await;
+    steps.finish(Ok(id))
+}
+
+/// `wp_insert_comment( wp_filter_comment( $comment ) )`.
+async fn filtered_insert(
+    steps: &mut Steps<'_, '_, DbError>,
+    context: Context<'_>,
+    mut comment: NewComment,
+    unfiltered_html: bool,
+) -> u64 {
+    let balance = balance_tags(steps).await;
     filter::Fields {
         author: &mut comment.author,
         email: &mut comment.author_email,
         url: &mut comment.author_url,
         content: &mut comment.content,
     }
-    .filter(!commenter.unfiltered_html, context.home, balance);
-    comment.approved = Some(approved);
-    let id = insert(&mut steps, context, &comment).await;
-    steps.finish(Ok(Ok(id)))
+    .filter(!unfiltered_html, context.home, balance);
+    insert(steps, context, &comment).await
 }
 
 /// `wp_update_comment()`: `None` when there is no such comment or no such

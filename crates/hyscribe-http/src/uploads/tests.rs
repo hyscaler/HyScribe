@@ -331,35 +331,37 @@ async fn bodies_are_refused_past_their_limits() {
     assert_ne!(status("/", 2 << 20).await, large);
 }
 
+/// An attachment's files are read and deleted only inside the uploads
+/// folder, each below its own folder, as `wp_delete_file_from_directory()`
+/// resolves them; a link is deleted, not what it points to.
 #[test]
-fn files_are_removed_only_from_within_their_folder() {
-    let (dir, outside) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let folder = dir.path().join("2026/11");
-    std::fs::create_dir_all(&folder).unwrap();
-    let write = |path: &Path| std::fs::write(path, "x").unwrap();
-    let (kept, gone) = (folder.join("kept.jpg"), folder.join("gone.jpg"));
-    let (root, linked) = (dir.path().join("root.jpg"), folder.join("linked.jpg"));
-    for path in [&kept, &gone, &root] {
-        write(path);
+fn files_stay_inside_the_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let uploads = uploads(dir.path());
+    std::fs::create_dir_all(dir.path().join("2026/05")).unwrap();
+    for name in ["2026/05/a.png", "2026/05/b.png", "c.png"] {
+        std::fs::write(dir.path().join(name), b"abc").unwrap();
     }
-    write(&outside.path().join("outside.jpg"));
-    std::os::unix::fs::symlink(outside.path().join("outside.jpg"), &linked).unwrap();
-    let pair = |file: &str, within: &str| (file.as_bytes().to_vec(), within.as_bytes().to_vec());
-    uploads(dir.path()).remove(&[
-        // Not within its folder: another folder's file, the folder itself,
-        // a link out of it, and what is missing or no text.
-        pair("2026/11/kept.jpg", "2026/12"),
-        pair("2026/11", "2026/11"),
-        pair("2026/11/linked.jpg", "2026/11"),
-        pair("2026/11/missing.jpg", "2026/11"),
-        pair("2026/11/kept.jpg", "2026/missing"),
-        (b"2026/11/\xff.jpg".to_vec(), b"2026/11".to_vec()),
-        (b"2026/11/kept.jpg".to_vec(), b"\xff".to_vec()),
-        // Within it, and the uploads folder's own file.
-        pair("2026/11/gone.jpg", "2026/11"),
-        pair("root.jpg", ""),
+    std::fs::write(outside.path().join("d.png"), b"d").unwrap();
+    let link = dir.path().join("2026/05/d.png");
+    std::os::unix::fs::symlink(outside.path().join("d.png"), &link).unwrap();
+    assert_eq!(uploads.file_size(b"2026/05/a.png"), Some(Some(3)));
+    assert_eq!(uploads.file_size(b"2026/05/none.png"), Some(None));
+    assert_eq!(uploads.file_size(b"/etc/passwd"), None);
+    assert_eq!(uploads.file_size(b"2026/../../x"), None);
+    let pair = |file: &str, folder: &str| (file.as_bytes().to_vec(), folder.as_bytes().to_vec());
+    uploads.delete(&[
+        pair("2026/05/a.png", "2026/05"),
+        pair("c.png", "2026/05"),
+        pair("2026/05", "2026/05"),
+        pair("2026/05/d.png", "2026/05"),
+        pair("2026/05/none.png", "2026/05"),
+        pair("../b.png", ""),
+        pair("2026/05/b.png", "/"),
     ]);
-    assert!(kept.exists() && linked.is_symlink() && folder.exists());
-    assert!(!gone.exists() && !root.exists());
-    assert!(outside.path().join("outside.jpg").exists());
+    let exists = |name: &str| dir.path().join(name).exists();
+    assert!(!exists("2026/05/a.png") && exists("2026/05/b.png") && exists("c.png"));
+    assert!(exists("2026/05") && link.symlink_metadata().is_ok());
+    assert!(outside.path().join("d.png").exists());
 }

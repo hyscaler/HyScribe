@@ -170,14 +170,14 @@ async fn publishing_what_is_missing_published_or_unported_writes_nothing() {
         w.remove_relationships(id, &[1]).await.unwrap();
         wp_publish_post(w, &ctx, id).await.unwrap();
         assert!(w.object_terms(id, "category").await.unwrap().is_empty());
-        // A menu item is not a ported type.
+        // An attachment is not a ported type.
         let post = w.post(1).await.unwrap().unwrap();
-        let item = hyscribe_db::PostFields {
-            post_type: "nav_menu_item".into(),
-            status: "draft".into(),
+        let attachment = hyscribe_db::PostFields {
+            post_type: "attachment".into(),
+            status: "inherit".into(),
             ..post
         };
-        let id = w.insert_post(&item).await.unwrap();
+        let id = w.insert_post(&attachment).await.unwrap();
         let refused = wp_publish_post(w, &ctx, id).await;
         assert!(matches!(refused, Err(crate::Error::Unported(_))));
     })

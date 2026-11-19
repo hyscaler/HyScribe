@@ -128,6 +128,7 @@ fn ours(file: &str, query: &str, role: &'static str, request: &Request) -> Optio
             } else {
                 user_edit(&site, &args, request)
             }
+            .unwrap()
         }
         "user-new.php" => {
             let update = arguments(query)

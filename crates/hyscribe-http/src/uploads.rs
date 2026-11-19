@@ -113,25 +113,39 @@ impl Uploads {
         self.max_size
     }
 
-    /// `wp_delete_file_from_directory()` of each `(file, folder)`, both as
-    /// paths under the uploads folder: a file is deleted only when it
-    /// really is within the folder, links followed, and then it is the
-    /// path that goes, a link included. What is missing is left.
-    pub(crate) fn remove(&self, files: &[(Vec<u8>, Vec<u8>)]) {
-        let under = |path: &[u8]| {
-            let path = std::str::from_utf8(path).ok()?;
-            Some(self.dir.join(path))
-        };
+    /// The uploads folder's path of `file`, an attachment's
+    /// `_wp_attached_file`: `None` for one that leaves the folder, as an
+    /// absolute path or `..` would.
+    pub(crate) fn path(&self, file: &[u8]) -> Option<PathBuf> {
+        use std::os::unix::ffi::OsStrExt as _;
+        let relative = Path::new(std::ffi::OsStr::from_bytes(file));
+        let inside = relative
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)));
+        inside.then(|| self.dir.join(relative))
+    }
+
+    /// `wp_filesize()` of `file` when `is_readable()`, else none; `None`
+    /// for a file outside the folder.
+    pub(crate) fn file_size(&self, file: &[u8]) -> Option<Option<u64>> {
+        let path = self.path(file)?;
+        Some(std::fs::metadata(path).ok().map(|meta| meta.len()))
+    }
+
+    /// `wp_delete_file_from_directory()` of each file within its folder:
+    /// deleted when both resolve inside the uploads folder, the file
+    /// below the folder.
+    pub(crate) fn delete(&self, files: &[(Vec<u8>, Vec<u8>)]) {
         for (file, folder) in files {
-            let (Some(file), Some(folder)) = (under(file), under(folder)) else {
+            let (Some(path), Some(folder)) = (self.path(file), self.path(folder)) else {
                 continue;
             };
-            let (Ok(real), Ok(within)) = (file.canonicalize(), folder.canonicalize()) else {
+            let real = |path: &Path| std::fs::canonicalize(path).ok();
+            let (Some(real_file), Some(real_folder)) = (real(&path), real(&folder)) else {
                 continue;
             };
-            if real != within && real.starts_with(&within) {
-                // `wp_delete_file()` is `@unlink()`: a failure is not an error.
-                let _ = std::fs::remove_file(&file);
+            if real_file != real_folder && real_file.starts_with(&real_folder) {
+                let _ = std::fs::remove_file(path);
             }
         }
     }

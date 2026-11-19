@@ -570,16 +570,16 @@ fn paragraphs(text: &[u8]) -> Vec<&[u8]> {
     parts.into_iter().filter(|part| !part.is_empty()).collect()
 }
 
-/// `wp_replace_in_html_tags( $text, array( $needle => $with ) )`: the
-/// replacement inside the elements `wp_html_split()` finds.
-pub(crate) fn replace_in_html_tags(text: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(text.len());
+/// `wp_html_split( $text )`: the end of each element, the text between
+/// them left out, as `(start, end)` pairs of every element, which runs from
+/// its `<` to the `>` that closes it, or the end of the text.
+pub(crate) fn html_elements(text: &[u8]) -> Vec<(usize, usize)> {
+    let mut elements = Vec::new();
     let mut comments = Next::new(text, b"-->");
     let mut cdata = Next::new(text, b"]]>");
     let mut gt = Next::new(text, b">");
     let mut at = 0;
     while let Some(start) = find(text, at, b"<") {
-        out.extend_from_slice(text.get(at..start).unwrap_or_default());
         let rest = text.get(start..).unwrap_or_default();
         // The last byte of the element.
         let last = if rest.starts_with(b"<!--") {
@@ -590,12 +590,25 @@ pub(crate) fn replace_in_html_tags(text: &[u8], needle: &[u8], with: &[u8]) -> V
             gt.from(start)
         };
         let last = last.unwrap_or(text.len() - 1);
+        elements.push((start, last + 1));
+        at = last + 1;
+    }
+    elements
+}
+
+/// `wp_replace_in_html_tags( $text, array( $needle => $with ) )`: the
+/// replacement inside the elements `wp_html_split()` finds.
+pub(crate) fn replace_in_html_tags(text: &[u8], needle: &[u8], with: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut at = 0;
+    for (start, end) in html_elements(text) {
+        out.extend_from_slice(text.get(at..start).unwrap_or_default());
         out.extend(replace(
-            text.get(start..=last).unwrap_or_default(),
+            text.get(start..end).unwrap_or_default(),
             needle,
             with,
         ));
-        at = last + 1;
+        at = end;
     }
     out.extend_from_slice(text.get(at..).unwrap_or_default());
     out

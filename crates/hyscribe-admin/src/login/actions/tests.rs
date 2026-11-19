@@ -5,7 +5,7 @@ use hyscribe_testkit::unhex;
 
 use super::*;
 use crate::login::Session;
-use crate::tests::{Oracle, first_difference};
+use crate::tests::{Oracle, REQUESTED, first_difference};
 
 /// What PHP's Set-Cookie headers did to the reset password cookie.
 fn reset(cookies: &str) -> Reset {
@@ -270,11 +270,7 @@ fn what_php_refuses_is_php_s_or_not_ported() {
         user_request: Some(7),
         ..Oracle::default()
     };
-    for (query, name) in [
-        ("key%5B%5D=x&login=admin", "rp"),
-        ("request_id=-7&confirm_key=x", "confirmaction"),
-        ("", "postpass"),
-    ] {
+    for (query, name) in [("key%5B%5D=x&login=admin", "rp"), ("", "postpass")] {
         let query = parse_str(query.as_bytes());
         assert_eq!(
             action(&oracle, &request(&query, None), name, (b"/", NOW)),
@@ -295,4 +291,49 @@ fn a_zero_redirect_is_none() {
         page("action=lostpassword&redirect_to=0"),
         page("action=lostpassword")
     );
+}
+
+/// The confirmed page words each action as PHP does, and an action it has
+/// no words for gets the general ones.
+#[test]
+fn the_confirmed_page_names_the_action() {
+    let oracle = Oracle::default();
+    let query = parse_str(b"");
+    for (name, text) in [
+        (
+            &b"export_personal_data"[..],
+            "Thanks for confirming your export request.",
+        ),
+        (
+            b"remove_personal_data",
+            "Thanks for confirming your erasure request.",
+        ),
+        (b"other", "Action has been confirmed."),
+    ] {
+        let page = request_confirmed(&oracle, &request(&query, None), name);
+        let page = String::from_utf8(page).unwrap();
+        let paragraph = format!("<p class=\"success\">{text}</p>");
+        assert!(page.contains(&paragraph), "{text}");
+    }
+}
+
+/// A confirmation key is good for a day to the second.
+#[test]
+fn a_confirmation_key_lasts_a_day() {
+    let oracle = Oracle {
+        user_request: Some(7),
+        ..Oracle::default()
+    };
+    let query = parse_str(b"request_id=7&confirm_key=a-key");
+    let at = |now| {
+        action(
+            &oracle,
+            &request(&query, None),
+            "confirmaction",
+            (b"/", now),
+        )
+    };
+    let last = REQUESTED + 86_400;
+    assert!(matches!(at(last), Action::ConfirmRequest(found, 7) if found.id == 7));
+    assert!(matches!(at(last + 1), Action::Died(_)));
 }

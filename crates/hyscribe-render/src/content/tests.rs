@@ -242,6 +242,30 @@ fn password_forms_enqueue_the_button_style() {
     }
 }
 
+/// The content of an attachment, the global post, has its link first, as
+/// `prepend_attachment()` puts it; another post's has not, and the global
+/// post is as it was after.
+#[test]
+fn attachment_content_has_its_link_first() {
+    let theme = twentytwentyfive();
+    let (mut site, request) = case(
+        br#"{"singular":true,"home":"","siteurl":""}"#,
+        br#"{"ID":5,"post_title":"T","post_content":"Words","post_password":""}"#,
+    );
+    let mut renderer = Renderer::new(&theme, &site, &request);
+    let plain = String::from_utf8(renderer.the_content(&site.post)).unwrap();
+    assert_eq!(plain, "<p>Words</p>\n");
+    site.post.post_type = "attachment".into();
+    site.post.mime_type = "image/png".into();
+    site.post.guid = b"http://s.test/wp-content/uploads/a.png".to_vec();
+    let mut renderer = Renderer::new(&theme, &site, &request);
+    let content = String::from_utf8(renderer.the_content(&site.post)).unwrap();
+    let link = "<p class=\"attachment\"><a href='http://s.test/wp-content/uploads/a.png'>";
+    assert!(content.starts_with(link), "{content}");
+    assert!(content.ends_with("</p>\n<p>Words</p>\n"), "{content}");
+    assert!(renderer.attachment.is_none());
+}
+
 #[test]
 fn empty_paragraphs_stay_empty() {
     let theme = twentytwentyfive();

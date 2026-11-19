@@ -109,6 +109,10 @@ impl RenderSite for Reads<'_> {
         self.site.feed_hosts.iter().any(|allowed| allowed == host)
     }
 
+    fn embed_hosts(&self) -> &hyscribe_render::site::EmbedHosts {
+        &self.site.embed_hosts
+    }
+
     fn update_post_meta(&self, post_id: u64, key: &str, value: &[u8]) {
         write(self.site, self, Write::Meta(post_id, key, value));
         if self.site.writer.is_some() {
@@ -161,6 +165,10 @@ impl RenderSite for Reads<'_> {
         self.memo(&self.meta, (post_id, key.to_string()), || {
             self.wait(self.site.db.post_meta(post_id, key))
         })
+    }
+
+    fn post_meta_all(&self, post_id: u64, key: &str) -> Vec<Vec<u8>> {
+        self.wait(self.site.db.post_meta_all(post_id, key))
     }
 
     fn query(&self, query: &PostQuery) -> Vec<Post> {
@@ -224,6 +232,14 @@ impl RenderSite for Reads<'_> {
 
     fn held_comment(&self, id: u64) -> Option<Comment> {
         self.wait(self.site.db.held_comment(id))
+    }
+
+    fn any_comment(&self, id: u64) -> Option<Comment> {
+        self.wait(self.site.db.any_comment(id))
+    }
+
+    fn held_comments(&self, post_id: u64, email: &[u8], only: Option<i64>) -> Vec<Comment> {
+        self.wait(self.site.db.held_comments(post_id, email, only))
     }
 
     fn user(&self, id: u64) -> Option<User> {

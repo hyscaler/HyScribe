@@ -368,13 +368,31 @@ async fn logged_in_users_are_let_in() {
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
     for path in [
-        "/hs-admin/plugins",
-        "/hs-admin/site-health",
+        "/hs-admin/plugins?plugin_status=active",
+        "/hs-admin/nav-menus",
+        "/hs-admin/site-health?tab=status",
         "/hs-admin/site-editor",
         "/hs-admin/site-editor?p=%2Fpage",
     ] {
         let response = get(&site, path, "127.0.0.1:8081", &auth).await;
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+    }
+    // Updates is refused as PHP refuses it where no one may update, with or
+    // without an action.
+    for path in [
+        "/hs-admin/update-core",
+        "/hs-admin/update-core?action=upgrade-core",
+    ] {
+        let response = get(&site, path, "127.0.0.1:8081", &cookies).await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+        let page = page_of(response).await;
+        let row = list
+            .lines()
+            .find(|l| l.starts_with("default\tupdate-core.php\tadministrator\t"))
+            .unwrap();
+        let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+        let php = String::from_utf8(php).unwrap();
+        assert_eq!(page, php.strip_prefix("403\t").unwrap(), "{path}");
     }
     // Add User, as PHP showed it.
     let page = page_of(get(&site, "/hs-admin/user-new", "127.0.0.1:8081", &cookies).await).await;
@@ -435,6 +453,7 @@ async fn logged_in_users_are_let_in() {
         "/hs-admin/user-edit?user_id=1&x=1",
         "/hs-admin/user-edit?user_id[]=1",
         "/hs-admin/user-edit?user_id=%FF",
+        "/hs-admin/profile?x=1",
         "/hs-admin/user-new?update=add&x=1",
         "/hs-admin/user-new?update[]=add",
         "/hs-admin/user-new?update=%FF",
@@ -928,6 +947,26 @@ async fn the_site_editor_s_redirects_and_refusals() {
 }
 
 /// A user without the screen's capability gets `wp_die()`'s refusal.
+/// Who may not view Site Health is refused as PHP refuses, whatever the
+/// theme: the refusal comes before the theme the screens need.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_health_refuses_before_it_checks_the_theme() {
+    let mut site = Arc::try_unwrap(oracle_site().await).ok().unwrap();
+    site.options.insert("template".into(), b"gone".to_vec());
+    let site = Arc::new(site);
+    let handle = Handle::current();
+    let response = tokio::task::spawn_blocking(move || {
+        let reads = LoginReads::new(&site, handle, now());
+        let admin = Admin::new(&reads, &site, hyscribe_model::User::default());
+        let path = "/hs-admin/site-health";
+        let url = format!("http://h{path}");
+        screen(&admin, path, path, &url, "http://h", &Browser::default())
+    })
+    .await
+    .unwrap();
+    assert_eq!(response.map(|r| r.status()), Some(StatusCode::FORBIDDEN));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refusals() {
     let site = oracle_site().await;
@@ -1017,7 +1056,7 @@ async fn refusals() {
     .unwrap()
     .unwrap();
     assert_eq!(users.status(), StatusCode::FORBIDDEN);
-    // Over HTTPS the profile offers application passwords, not ported.
+    // Over HTTPS the profile is served as over HTTP.
     let profile = tokio::task::spawn_blocking({
         let (site, handle) = (Arc::clone(&site), handle.clone());
         move || {
@@ -1035,8 +1074,9 @@ async fn refusals() {
         }
     })
     .await
+    .unwrap()
     .unwrap();
-    assert!(profile.is_none());
+    assert_eq!(profile.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let profile = tokio::task::spawn_blocking({
         let (site, handle) = (Arc::clone(&site), handle.clone());
         move || {
@@ -1090,15 +1130,25 @@ async fn refusals() {
     .await
     .unwrap();
     assert_eq!(conflict, StatusCode::CONFLICT);
-    // Editing a user needs `edit_users`, adding one `create_users`; over
-    // HTTPS the form offers application passwords.
+    // Editing a user needs `edit_users`, adding one `create_users`; the
+    // Updates screen is for those who may update, which no user may.
     for (path, https, status) in [
         (
             "/hs-admin/user-edit?user_id=1",
             false,
             Some(StatusCode::INTERNAL_SERVER_ERROR),
         ),
-        ("/hs-admin/user-edit?user_id=1", true, None),
+        (
+            "/hs-admin/user-edit?user_id=1",
+            true,
+            Some(StatusCode::INTERNAL_SERVER_ERROR),
+        ),
+        ("/hs-admin/update-core", false, Some(StatusCode::FORBIDDEN)),
+        (
+            "/hs-admin/update-core?action=upgrade-core",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
         ("/hs-admin/user-new", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/user-new?update[]=add", false, None),
         ("/hs-admin/themes?broken[]=1", false, None),
@@ -1220,6 +1270,110 @@ async fn a_missing_theme_is_php_s() {
     let kid = Arc::new(kid);
     let page = page_of(get(&kid, "/hs-admin/themes", host, &cookies).await).await;
     assert_eq!(with_values(&php("j9child"), &page), page);
+}
+
+/// The Plugins screen as PHP shows the default install, but for the
+/// plugins folder, which it names relative to HyScribe's.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_plugins_screen_is_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/appearance.tsv");
+    let row = golden
+        .lines()
+        .find(|l| l.starts_with("default\tplugins.php\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap())
+        .replace("/var/www/html/wp-content/plugins", "hyscribe/plugins/");
+    let page = page_of(get(&site, "/hs-admin/plugins", "127.0.0.1:8081", &cookies).await).await;
+    assert_eq!(with_values(&php, &page), page);
+    assert!(page.contains("<code>hyscribe/plugins/</code> directory"));
+    // An option PHP would repair by writing is not ported.
+    let mut odd = Arc::try_unwrap(site).ok().unwrap();
+    odd.options.insert("active_plugins".into(), b"abc".to_vec());
+    let response = get(
+        &Arc::new(odd),
+        "/hs-admin/plugins",
+        "127.0.0.1:8081",
+        &cookies,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// Site Health's Status tab: PHP's page around HyScribe's checks,
+/// of the bundled theme only.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_health_status_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let host = "127.0.0.1:8081";
+    let path = "/hs-admin/site-health";
+    let page = page_of(get(&site, path, host, &cookies).await).await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/site-health.tsv");
+    let row = golden
+        .lines()
+        .find(|l| l.starts_with("site-health.php\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    let frame = |page: &str| {
+        let (head, rest) = page.split_once("\"direct\":").unwrap();
+        let (_, tail) = rest.split_once(",\"issues\":").unwrap();
+        format!("{head}{tail}")
+    };
+    let (php, framed) = (frame(&php), frame(&page));
+    assert_eq!(with_values(&php, &framed), framed);
+    for test in [
+        "hyscribe_version",
+        "sql_server",
+        "https_status",
+        "hyscribe_env_permissions",
+        "available_updates_disk_space",
+        "hyscribe_service",
+    ] {
+        assert!(page.contains(&format!("\"test\":\"{test}\"")), "{test}");
+    }
+    // The fixture's MariaDB is current, and the Info tab sends no results.
+    assert!(!page.contains("Outdated SQL server"));
+    let info = page_of(get(&site, "/hs-admin/site-health?tab=debug", host, &cookies).await).await;
+    assert!(info.contains("\"direct\":[]"));
+    let mut gone = Arc::try_unwrap(site).ok().unwrap();
+    gone.options.insert("template".into(), b"gone".to_vec());
+    let response = get(&Arc::new(gone), path, host, &cookies).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// The machine's facts: the `.env` beside the binary, the disk, and the
+/// holder of the pid file.
+#[test]
+fn the_environment_is_read_from_the_folder() {
+    use hyscribe_admin::site_health::EnvFile;
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let binary = dir.path().join("hyscribe").display().to_string();
+    let env = || super::environment(&binary);
+    assert_eq!(env().env_file, EnvFile::Missing);
+    assert_eq!(env().pid, std::process::id());
+    assert!(env().disk_free.is_some());
+    assert_eq!(env().service_pid, None);
+    let file = dir.path().join(".env");
+    std::fs::write(&file, "").unwrap();
+    for mode in [0o600, 0o644] {
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
+        assert_eq!(env().env_file, EnvFile::Mode(mode));
+    }
+    let lock = hyscribe_service::hold(&hyscribe_service::Paths::new(dir.path())).unwrap();
+    // Starting, then listening.
+    assert_eq!(env().service_pid, Some(std::process::id()));
+    lock.listening();
+    assert_eq!(env().service_pid, Some(std::process::id()));
+    // A binary named alone is in the working folder, and a path through a
+    // file cannot be read.
+    assert!(super::environment("hyscribe").disk_free.is_some());
+    let through = file.join("hyscribe").display().to_string();
+    assert_eq!(super::environment(&through).env_file, EnvFile::Unreadable);
 }
 
 /// Paged comments link to their page, on the comments list and the
@@ -2636,10 +2790,9 @@ async fn page_views_and_screen_state_write_as_php() {
 /// One test at a time over `wordpress_saves`, which each reloads.
 pub(crate) static SAVES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// The tests that insert comments into the fixture in transactions that
-/// stay open for a while take turns, as their inserts into the comments'
-/// indexes can deadlock.
-pub(crate) static COMMENTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// One test at a time writing comments on the fixture database, whose rows
+/// two transactions inserting at once can deadlock on.
+pub(crate) static COMMENT_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// In primary mode a Settings save's notice shows on the screen it sends
 /// back, which deletes it, so a reload shows none; shadow mode only reads.
@@ -2777,7 +2930,6 @@ async fn the_site_health_info_tab() {
         assert!(page.contains(&row), "{row}");
     }
     for path in [
-        "/hs-admin/site-health",
         "/hs-admin/site-health?tab=",
         "/hs-admin/site-health?tab=status",
         "/hs-admin/site-health?tab=debug&x=1",
@@ -2807,4 +2959,5 @@ async fn the_site_health_info_tab() {
 
 mod clean_urls;
 mod comment_saves;
+mod passwords;
 mod revisions;

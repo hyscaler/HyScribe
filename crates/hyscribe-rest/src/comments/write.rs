@@ -5,7 +5,7 @@
 //! pass gives the [`Plan`] `hyscribe-http` writes with
 //! `wp_allow_comment()` and `wp_insert_comment()`, `wp_update_comment()`,
 //! the status functions, `wp_trash_comment()` or `wp_delete_comment()`.
-//! Notes, `author_ip` and `meta` are not ported; a visitor's create is
+//! A note is approved without `wp_allow_comment()`. A visitor's create is
 //! refused, as `rest_allow_anonymous_comments` refuses it by default.
 
 use hyscribe_phpser::{Value, lookup, php_trim};
@@ -54,6 +54,11 @@ pub struct CommentSave {
     pub skip_flood: bool,
     /// Whether `wp_update_comment()` filters the content through kses.
     pub kses: bool,
+    /// A note, which is approved without `wp_allow_comment()`.
+    pub note: bool,
+    /// What the comment's `meta` writes after its status, `null` to delete
+    /// it: `_wp_note_status`.
+    pub meta: Vec<(&'static str, Value)>,
 }
 
 /// `wp_get_comment_fields_max_lengths()` of the core tables.
@@ -67,20 +72,20 @@ const MAX_LENGTHS: [(&str, usize); 4] = [
 /// The ported write of the route `regex`'s endpoint `index`, if any.
 pub(crate) fn writing(regex: &str, index: usize) -> Option<Writing> {
     let item = "/wp/v2/comments/(?P<id>[\\d]+)";
-    let (unported, plan): (fn(&Params) -> bool, _) = match (regex, index) {
-        (ROUTE, 1) => (|params| params.text("type") == b"note", plan_create as _),
-        (_, 1) if regex == item => (|_| false, plan_update as _),
-        (_, 2) if regex == item => (|_| false, plan_delete as _),
+    let plan: fn(&Context, &Params) -> Result<Plan, RestError> = match (regex, index) {
+        (ROUTE, 1) => plan_create,
+        (_, 1) if regex == item => plan_update,
+        (_, 2) if regex == item => plan_delete,
         _ => return None,
     };
-    Some(Writing {
-        unported,
-        ..Writing::plain(plan, finish)
-    })
+    Some(Writing::plain(plan, finish))
 }
 
+/// The schema of a comment's `meta`: the registered note status.
+const NOTE_META: &str = r#"{"type":"object","properties":{"_wp_note_status":{"type":"string","enum":["resolved","reopen"]}}}"#;
+
 /// `get_endpoint_args_for_item_schema()` of a create (with defaults) or an
-/// update; `author_ip`, whose format is not ported, and `meta` are not.
+/// update.
 pub(super) fn save_args(create: bool) -> Vec<Arg> {
     let string = r#"{"type":"string"}"#;
     let date = r#"{"type":"string","format":"date-time"}"#;
@@ -93,7 +98,7 @@ pub(super) fn save_args(create: bool) -> Vec<Arg> {
     vec![
         value("author", r#"{"type":"integer"}"#),
         arg("author_email", string, false, Sanitize::Site(author_email)),
-        arg("author_ip", string, false, Sanitize::NotPorted),
+        value("author_ip", r#"{"type":"string","format":"ip"}"#),
         arg("author_name", string, true, Sanitize::TextField),
         value("author_url", r#"{"type":"string","format":"uri"}"#),
         arg("author_user_agent", string, true, Sanitize::TextField),
@@ -103,7 +108,7 @@ pub(super) fn save_args(create: bool) -> Vec<Arg> {
         value("parent", id),
         value("post", id),
         arg("status", string, true, Sanitize::Key),
-        arg("meta", r#"{"type":"object"}"#, false, Sanitize::NotPorted),
+        arg("meta", NOTE_META, true, Sanitize::IsArray),
     ]
 }
 
@@ -165,9 +170,10 @@ fn prepared(context: &Context, params: &Params) -> Result<CommentSave, RestError
         author: given("author_name").or_else(|| user.as_ref().map(|u| u.display_name.clone())),
         author_email: given("author_email").or_else(|| user.as_ref().map(|u| u.email.clone())),
         author_url: given("author_url").or_else(|| user.as_ref().map(|u| u.url.clone())),
-        author_ip: match valid {
-            true => context.remote_addr.to_vec(),
-            false => b"127.0.0.1".to_vec(),
+        author_ip: match (given("author_ip"), valid) {
+            (Some(ip), _) if context.can("moderate_comments") => ip,
+            (_, true) => context.remote_addr.to_vec(),
+            (_, false) => b"127.0.0.1".to_vec(),
         },
         agent: filled("author_user_agent").or(header),
         date: match (filled("date"), filled("date_gmt")) {
@@ -180,11 +186,49 @@ fn prepared(context: &Context, params: &Params) -> Result<CommentSave, RestError
     })
 }
 
+/// The kinds of a note's `_wp_note_status`.
+const NOTE_STATUSES: [&[u8]; 2] = [b"resolved", b"reopen"];
+
+/// The `_wp_note_status` of the request's `meta`, as given.
+fn note_status(params: &Params) -> Option<&Value> {
+    let meta = params.get("meta").and_then(Value::as_array);
+    meta.and_then(|meta| lookup(meta, "_wp_note_status"))
+}
+
+/// A `_wp_note_status` that resolves or reopens a note.
+fn resolves(params: &Params) -> bool {
+    let status = note_status(params);
+    matches!(status, Some(Value::String(kind)) if NOTE_STATUSES.contains(&kind.as_slice()))
+}
+
+/// `update_value()` of a comment's `meta`: the `_wp_note_status` it allows,
+/// or `null` to delete one `stored` that its schema takes, for a user who
+/// may edit the comment on `post`. PHP checks it once the comment is
+/// written, so what it refuses is not ported.
+fn meta_updates(
+    context: &Context,
+    params: &Params,
+    (post, stored): (u64, &[u8]),
+) -> Result<Vec<(&'static str, Value)>, RestError> {
+    let status = match note_status(params) {
+        None => return Ok(Vec::new()),
+        Some(Value::Null) if NOTE_STATUSES.contains(&stored) => Value::Null,
+        Some(status) if resolves(params) => status.clone(),
+        Some(_) => return Err(RestError::not_ported()),
+    };
+    // The field's `auth_callback` is `edit_comment`, which `edit_post` of the
+    // comment's post gives.
+    if !context.can_for("edit_post", post) {
+        return Err(RestError::not_ported());
+    }
+    Ok(vec![("_wp_note_status", status)])
+}
+
 /// `check_is_comment_content_allowed()`: content, where given, is not
-/// empty once trimmed.
-fn content_allowed(save: &CommentSave) -> Result<(), RestError> {
+/// empty once trimmed, unless `resolves`: a note that resolves or reopens.
+fn content_allowed(save: &CommentSave, resolves: bool) -> Result<(), RestError> {
     match save.content.as_deref() {
-        Some(b"") => Err(invalid(
+        Some(b"") if !resolves => Err(invalid(
             "rest_comment_content_invalid",
             "Invalid comment content.",
         )),
@@ -220,14 +264,15 @@ fn plan_create(context: &Context, params: &Params) -> Result<Plan, RestError> {
         ));
     }
     let kind = params.text("type");
-    if !Value::String(kind.clone()).is_empty() && kind != b"comment" {
+    if !Value::String(kind.clone()).is_empty() && kind != b"comment" && kind != b"note" {
         let message = "Cannot create a comment with that type.";
         return Err(invalid("rest_invalid_comment_type", message));
     }
     // Its type, none or `comment`, is stored as `comment`.
     let mut save = prepared(context, params)?;
+    save.note = kind == b"note";
     save.content = Some(save.content.unwrap_or_default());
-    content_allowed(&save)?;
+    content_allowed(&save, save.note && resolves(params))?;
     let empty = |field: &Option<Vec<u8>>| {
         field
             .as_ref()
@@ -253,6 +298,8 @@ fn plan_create(context: &Context, params: &Params) -> Result<Plan, RestError> {
     let user = save.user_id.unwrap_or_default();
     save.moderate_comments = user != 0 && context.site.can(user, "moderate_comments", &[]);
     save.skip_flood = context.can("manage_options") || context.can("moderate_comments");
+    let post = save.post_id.unwrap_or_default();
+    save.meta = meta_updates(context, params, (post, b""))?;
     Ok(Plan::new(
         context,
         Write::Comment(Box::new(save)),
@@ -278,7 +325,7 @@ fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
     }
     let mut save = prepared(context, params)?;
     save.id = comment.id;
-    content_allowed(&save)?;
+    content_allowed(&save, false)?;
     max_lengths(&save)?;
     // `wp_update_comment()` filters the content unless the user and the
     // comment's author may post unfiltered HTML.
@@ -288,6 +335,7 @@ fn plan_update(context: &Context, params: &Params) -> Result<Plan, RestError> {
         context.site.can(author, "unfiltered_html", &[]),
     ];
     save.kses = unfiltered.contains(&false);
+    save.meta = meta_updates(context, params, (comment.post_id, &row.note_status))?;
     Ok(Plan::new(
         context,
         Write::Comment(Box::new(save)),

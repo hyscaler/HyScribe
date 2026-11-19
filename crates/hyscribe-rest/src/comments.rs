@@ -447,9 +447,13 @@ fn create_permission(context: &Context, params: &Params) -> Result<(), RestError
         let message = "Sorry, you are not allowed to edit 'author' for comments.";
         return Err(context.forbidden("rest_comment_invalid_author", message));
     }
-    // `$_SERVER['REMOTE_ADDR']` is not read.
-    if params.get("author_ip").is_some() && !context.can("moderate_comments") {
-        return Err(RestError::not_ported());
+    // Given, an address that is not the request's own.
+    let foreign = params
+        .get("author_ip")
+        .is_some_and(|ip| ip.to_php_string() != context.remote_addr);
+    if foreign && !context.can("moderate_comments") {
+        let message = "Sorry, you are not allowed to edit 'author_ip' for comments.";
+        return Err(context.forbidden("rest_comment_invalid_author_ip", message));
     }
     let post = params.get("post").map_or(0, Value::to_int);
     let has_post = params.get("post").is_some_and(|post| !post.is_empty());

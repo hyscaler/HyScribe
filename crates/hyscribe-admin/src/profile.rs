@@ -11,6 +11,7 @@ use hyscribe_phpser::{
 use hyscribe_render::user_avatar;
 
 use crate::admin_bar::BarSite;
+use crate::assets::Urls;
 use crate::list_table::{checked, fill, selected, wp_nonce_field};
 use crate::menu::Screen;
 use crate::page::{HelpTab, Page, Request, SCHEMES, admin_page, wp_admin_notice};
@@ -46,7 +47,11 @@ pub trait ProfileSite: UsersSite {
     /// `wp_validate_redirect( $location, $fallback )` of an absolute
     /// `location`.
     fn validate_redirect(&self, location: &[u8], fallback: &str) -> Vec<u8>;
+    /// A user's `_application_passwords` meta, as stored.
+    fn application_passwords(&self, id: u64) -> Option<Vec<u8>>;
 }
+
+mod apps;
 
 const PAGE: &str = include_str!("profile/page.html");
 
@@ -313,13 +318,13 @@ fn notices(site: &dyn ProfileSite, args: &EditArgs, edit: &Edit, uri: &str) -> S
 }
 
 /// `profile.php`: the current user's profile, or the user `args` name's.
-pub fn profile(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> Answer {
+pub fn profile(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> Option<Answer> {
     user_form(site, args, request, true)
 }
 
 /// `user-edit.php`: a user's profile, the current user's as on
 /// `profile.php`.
-pub fn user_edit(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> Answer {
+pub fn user_edit(site: &dyn ProfileSite, args: &EditArgs, request: &Request) -> Option<Answer> {
     user_form(site, args, request, false)
 }
 
@@ -330,7 +335,7 @@ fn user_form(
     args: &EditArgs,
     request: &Request,
     profile_page: bool,
-) -> Answer {
+) -> Option<Answer> {
     let given = |arg: &Option<String>| {
         arg.as_deref()
             .map(|text| Value::String(text.as_bytes().to_vec()))
@@ -344,11 +349,13 @@ fn user_form(
     let id = if own { me } else { asked };
     let user = site.profile_user(id);
     if user.is_none() && !own {
-        return Answer::Died("Invalid user ID.");
+        return Some(Answer::Died("Invalid user ID."));
     }
     let user = user.unwrap_or_default();
     if !site.can_for("edit_user", id) {
-        return Answer::Died("Sorry, you are not allowed to edit this user.");
+        return Some(Answer::Died(
+            "Sorry, you are not allowed to edit this user.",
+        ));
     }
     // `sanitize_url()`, then without the arguments of an update.
     let referer = given(&args.referer).map_or_else(Vec::new, |referer| {
@@ -536,7 +543,7 @@ fn form(
     shown: &Edit,
     request: &Request,
     notices: String,
-) -> Answer {
+) -> Option<Answer> {
     let me = site.user_id();
     let id = user.id;
     let profile = shown.profile;
@@ -580,6 +587,10 @@ fn form(
         )
     };
     let title = esc_html(title.as_bytes());
+    // HTTPS offers application passwords; stored ones PHP would repair
+    // are not ported.
+    let https = Urls::site_url(site).starts_with("https://");
+    let (apps, templates) = apps::section(site, id, https)?;
     let content = fill(
         PAGE,
         &[
@@ -643,6 +654,8 @@ fn form(
             ("reset", reset),
             ("sessions", sessions),
             ("caps", additional_caps(&capabilities, &keys)),
+            ("apps", apps),
+            ("templates", templates),
             ("user_id", id.to_string()),
             ("submit", either("Update Profile", "Update User")),
         ],
@@ -654,7 +667,19 @@ fn form(
     }];
     let edit_users = site.can("edit_users");
     let users = |on: bool| if on { "users.php" } else { "profile.php" };
-    let script_data = shown.script_id.map(|id| profile_script(site, id));
+    let mut script_data: Vec<(&str, String)> = shown
+        .script_id
+        .map(|id| profile_script(site, id))
+        .into_iter()
+        .collect();
+    if https {
+        script_data.push(("wp-api-request", apps::api_settings(site)));
+    }
+    let scripts: &[&str] = if https {
+        &["user-profile", "application-passwords"]
+    } else {
+        &["user-profile"]
+    };
     let author = site.author_url(id);
     let page = Page {
         screen: Screen {
@@ -678,7 +703,7 @@ fn form(
         sidebar: HELP_SIDEBAR,
         screen_options: "",
         styles: &[],
-        scripts: &["user-profile"],
+        scripts,
         late_scripts: &[],
         script_data: script_data.as_slice(),
         script_after: &[],
@@ -691,7 +716,7 @@ fn form(
         origin: request.origin,
         view: (!shown.profile_page).then_some(("View User", author.as_str())),
     };
-    Answer::from_page(admin_page(site, &page, request.browser))
+    Some(Answer::from_page(admin_page(site, &page, request.browser)))
 }
 
 #[cfg(test)]

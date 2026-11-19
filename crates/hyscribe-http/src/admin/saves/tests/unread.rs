@@ -14,7 +14,7 @@ use super::SITE;
 /// A site any other read of fails the test: the write oracle's
 /// `admin_url()`, and its constants, by default HyScribe's.
 #[derive(Default)]
-pub(in crate::admin::saves) struct Unread(pub Constants);
+pub(in crate::admin::saves) struct Unread(pub Constants, pub bool);
 
 impl CapabilityData for Unread {
     fn option(&self, _: &str) -> Option<Vec<u8>> {
@@ -62,6 +62,9 @@ impl ActionSite for Unread {
     fn lock_holder(&self, _: u64) -> Option<String> {
         unreachable!()
     }
+    fn user_option(&self, _: &str) -> Option<Vec<u8>> {
+        unreachable!()
+    }
 }
 
 impl Acting for Unread {
@@ -85,6 +88,9 @@ impl Acting for Unread {
     }
     fn logged_in(&self) -> bool {
         unreachable!()
+    }
+    fn delete_files(&self, _: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
+        !self.1
     }
     fn outbox(&self) -> &crate::mail::Outbox {
         crate::mail::tests::outbox()

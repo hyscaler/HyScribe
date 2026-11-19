@@ -46,14 +46,17 @@ async fn request(site: &Arc<Site>, method: &str, uri: &str) -> Reply {
 }
 
 async fn answer(app: Router, method: &str, uri: &str) -> Reply {
+    answer_with(app, method, uri, "").await
+}
+
+/// [`answer`] with a `Cookie` header, none when `cookie` is empty.
+async fn answer_with(app: Router, method: &str, uri: &str, cookie: &str) -> Reply {
+    let mut asked = Request::builder().method(method).uri(uri);
+    if !cookie.is_empty() {
+        asked = asked.header(header::COOKIE, cookie);
+    }
     let response = app
-        .oneshot(
-            Request::builder()
-                .method(method)
-                .uri(uri)
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(asked.body(Body::empty()).unwrap())
         .await
         .unwrap();
     let status = response.status();
@@ -262,6 +265,7 @@ async fn database_errors_show_no_details() {
         install: unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
+        embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     // The 404 page fails while rendering, reading an option it has not loaded.
@@ -277,6 +281,9 @@ async fn database_errors_show_no_details() {
         "/?error=404&p=1&feed=rss2",
         "/?name=x",
         "/?pagename=x",
+        "/?attachment=x",
+        "/?subpost=x",
+        "/?name=x&post_type=attachment",
         "/?attachment_id=1",
         // Past a route that reads nothing, sitemaps fail.
         "/?author=1&sitemap=index",
@@ -1005,6 +1012,7 @@ async fn the_front_page_links_to_home() {
         install: unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
+        embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     // Search results list the front page with a link to it.
@@ -1148,6 +1156,7 @@ async fn failed_reads_answer_defaults() {
         install: unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
+        embed_hosts: Arc::default(),
         mailer: Arc::new(crate::mail_off()),
     });
     // The site's global styles, read on each reload.
@@ -2964,21 +2973,37 @@ const TTD_PAGES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/pages
 /// Each request of a `reference/pages/golden.sh` list over `database`,
 /// served with the options it names, against PHP's status, location and
 /// page, or with `hashed` the page's hash, the page itself in `TTD_PAGES`.
-/// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ.
+/// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ;
+/// those whose `why` says `rand` show a gallery in random order, which may
+/// match by chance and which no golden can pin.
 /// Author archives are off (docs/SECURITY_MODEL.md): their count is returned.
 async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: &str) -> usize {
-    let known: Vec<(&str, &str)> = known
+    let known: Vec<(&str, &str, &str)> = known
         .lines()
         .map(|line| {
             let mut fields = line.split('\t');
-            (fields.next().unwrap(), fields.next().unwrap())
+            let (options, path) = (fields.next().unwrap(), fields.next().unwrap());
+            (options, path, fields.next().unwrap_or_default())
         })
         .collect();
-    let mut sites: HashMap<&str, Arc<Site>> = HashMap::new();
+    let mut sites: HashMap<String, Arc<Site>> = HashMap::new();
     let (mut failures, mut authors, mut kept) = (Vec::new(), 0, None);
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
-        if !sites.contains_key(fields[0]) {
+        // An option named `_cookie` is the cookies the request sends.
+        let mut cookie = String::new();
+        let mut named = Vec::new();
+        for pair in fields[0].split('&').filter(|pair| !pair.is_empty()) {
+            match pair.strip_prefix("_cookie=") {
+                Some(value) => {
+                    cookie =
+                        String::from_utf8(hyscribe_phpser::urldecode(value.as_bytes())).unwrap();
+                }
+                None => named.push(pair),
+            }
+        }
+        let named = named.join("&");
+        if !sites.contains_key(&named) {
             let config = Database {
                 name: database.into(),
                 ..fixture_config()
@@ -2987,16 +3012,17 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
             let oracle = Some("http://127.0.0.1:8081".to_string());
             let mut site = Site::load(db, oracle.clone(), oracle).await.unwrap();
             // Names from `_` are the golden script's, not options.
-            let options = fields[0].split('&').filter_map(|o| o.split_once('='));
+            let options = named.split('&').filter_map(|o| o.split_once('='));
             for (name, value) in options.filter(|(name, _)| !name.starts_with('_')) {
                 let value = hyscribe_phpser::urldecode(value.as_bytes());
                 site.options.insert(name.into(), value);
             }
             site.build_rewriter();
-            sites.insert(fields[0], Arc::new(site));
+            sites.insert(named.clone(), Arc::new(site));
         }
         let path = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
-        let reply = request(&sites[fields[0]], "GET", &path).await;
+        let app = router(sites[&named].clone());
+        let reply = answer_with(app, "GET", &path, &cookie).await;
         if path.contains("author=") {
             assert_eq!(reply.status, StatusCode::NOT_FOUND, "{path}");
             authors += 1;
@@ -3013,8 +3039,11 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
             php(fields[4]) == reply.body
         };
         let same = same && reply.status.as_str() == fields[2] && location == fields[3];
-        if known.contains(&(fields[0], path.as_str())) {
-            if same {
+        let listed = known
+            .iter()
+            .find(|(options, listed, _)| *options == fields[0] && *listed == path);
+        if let Some((.., why)) = listed {
+            if same && !why.contains("rand") {
                 failures.push(format!("{} {path} matches: no longer known", fields[0]));
             }
         } else if !same {
@@ -3067,17 +3096,27 @@ async fn listed_pages_match_php() {
 /// which `reference/pages/ttd-list.sh` builds from its database: every
 /// post, page, attachment and archive, searches, feeds, comment pages and
 /// both kinds of front page, by hash, as the fixture's content is not ours
-/// to commit. The known differences name what is not ported: attachment
-/// pages and their redirect to the file, core's shortcodes, duotone, oEmbed,
-/// the RSS block, a post's later enclosures, image loading priorities, the
-/// navigation fallback from a classic menu; and terms of the same name,
-/// whose order MariaDB leaves open (`term-ties`).
+/// to commit, loaded into `wordpress_saves` with the terms of one name told
+/// apart (`reference/pages/ttd-ties.sql`), as MariaDB orders them
+/// differently from run to run. The known differences name what is not
+/// ported: oEmbed, the RSS block, image loading priorities, the player of
+/// an attachment page for audio, the navigation fallback from a classic
+/// menu; and galleries `orderby="rand"`, which no two runs repeat.
 #[tokio::test(flavor = "multi_thread")]
 async fn theme_test_data_pages_match_php() {
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    let dump = std::fs::read_to_string(hyscribe_testkit::writes::THEME_TEST_DATA).unwrap();
+    hyscribe_testkit::writes::load_theme_test_data(&db, &dump)
+        .await
+        .unwrap();
     let golden = include_str!("../tests/golden/pages-ttd.tsv");
     let known = include_str!("../tests/golden/pages-ttd-known.tsv");
     assert_eq!(
-        assert_listed_pages("wordpress_ttd", golden, true, known).await,
+        assert_listed_pages("wordpress_saves", golden, true, known).await,
         10
     );
     assert_eq!(golden.lines().count(), 747);
@@ -3127,6 +3166,41 @@ async fn edited_site_pages_match_php() {
     let drop = "DROP TABLE broken_options";
     sqlx::raw_sql(drop).execute(&mut conn).await.unwrap();
     assert!(site.is_err());
+}
+
+/// The pages of `reference/pages/comments.list` over the comments of
+/// `reference/pages/comments.sql`: paged comments, comment pages and their
+/// redirects, and the held comments, comment form and links the commenter
+/// cookies change, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn commenter_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let comments = include_str!("../../../reference/pages/comments.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(comments))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-comments.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 95);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test
@@ -3296,4 +3370,122 @@ fn the_rules_compile_once_per_options() {
     assert!(Arc::ptr_eq(&postname, &again));
     let dated = compiled.rewriter(&settings("/%year%/%postname%/"));
     assert!(!Arc::ptr_eq(&postname, &dated));
+}
+
+/// The pages of `reference/attachment-page/golden.sh`: attachments by ID
+/// and by name, with attachment pages off and on, over the default install
+/// with the attachments of `reference/attachment-edit/content.sql` and
+/// `reference/attachment-page/extra.sql`, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn attachment_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    for rows in [
+        include_str!("../../../reference/attachment-edit/content.sql"),
+        include_str!("../../../reference/attachment-page/extra.sql"),
+    ] {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(rows))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    let golden = include_str!("../tests/golden/attachment-pages.tsv");
+    // The players of audio and video files need MediaElement.js.
+    let known = ["817", "818", "821", "825"]
+        .map(|id| format!("wp_attachment_pages_enabled=1\t/?attachment_id={id}\tmediaelement\n"))
+        .concat();
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, &known).await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 110);
+    // Without the table of its meta the file of an attachment is unread.
+    let tables = [
+        "options",
+        "posts",
+        "terms",
+        "term_taxonomy",
+        "term_relationships",
+        "users",
+        "usermeta",
+        "comments",
+        "commentmeta",
+        "termmeta",
+    ];
+    for table in tables {
+        let copy = format!("CREATE TABLE broken_{table} AS SELECT * FROM wp_{table}");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(copy))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    let config = Database {
+        prefix: hyscribe_config::Prefix::new("broken_").unwrap(),
+        ..db
+    };
+    let site = Site::load(Db::connect(&config).await.unwrap(), None, None).await;
+    let reply = match site {
+        Ok(site) => Some(request(&Arc::new(site), "GET", "/?attachment_id=801").await),
+        Err(_) => None,
+    };
+    for table in tables {
+        let drop = format!("DROP TABLE broken_{table}");
+        sqlx::raw_sql(sqlx::AssertSqlSafe(drop))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        reply.expect("the site loads").status,
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+}
+
+/// The pages of `reference/duotone/page-golden.sh`: covers and an image with
+/// every kind of duotone filter, the footer's filters and the global
+/// styles' custom properties of presets, over the default install with the
+/// posts of `reference/duotone/page.sql`, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn duotone_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let rows = include_str!("../../../reference/duotone/page.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(rows))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/duotone-pages.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 2);
 }

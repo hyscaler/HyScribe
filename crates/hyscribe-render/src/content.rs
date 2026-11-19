@@ -3,7 +3,7 @@
 //! `core/post-content`: the post's content through `get_the_content()` and
 //! the `the_content` filters.
 //!
-//! Not ported yet: shortcodes, `wp_link_pages()`, `force_balance_tags()` on
+//! Not ported yet: `wp_link_pages()`, `force_balance_tags()` on
 //! a teaser, attachments and `wp_filter_content_tags()`.
 
 use hyscribe_kses::{esc_attr, esc_url, url_host, url_scheme};
@@ -17,6 +17,7 @@ use crate::content_tags::wp_filter_content_tags;
 use crate::core_blocks::prepared;
 use crate::formatting::{CORE_SHORTCODE_TAGS, capital_p_dangit, contains, wptexturize};
 use crate::post::the_title;
+use crate::shortcode::shortcode_unautop;
 use crate::site::{Request, Site};
 use crate::supports::get_block_wrapper_attributes;
 use crate::template::{Renderer, replace, site_smilies};
@@ -43,7 +44,7 @@ impl Renderer<'_> {
         if contains(&post.content, b"<!-- wp:nextpage ") {
             content.extend(wp_link_pages(self, &post));
         }
-        let content = self.content_filtered(&content);
+        let content = self.content_filtered(&post, &content);
         self.open_posts.pop();
         if is_empty_string(&content) {
             return Vec::new();
@@ -81,11 +82,21 @@ impl Renderer<'_> {
     /// escape between them.
     pub(crate) fn the_content(&mut self, post: &Post) -> Vec<u8> {
         let content = get_the_content(self, post, true);
-        self.content_filtered(&content)
+        self.content_filtered(post, &content)
+    }
+
+    /// The `the_content` filters on the content of `post`, the global post,
+    /// `]]>` escaped first.
+    fn content_filtered(&mut self, post: &Post, content: &[u8]) -> Vec<u8> {
+        let global = (post.post_type == "attachment").then(|| post.clone());
+        let outer = std::mem::replace(&mut self.attachment, global);
+        let filtered = self.the_content_filters(content);
+        self.attachment = outer;
+        filtered
     }
 
     /// The `the_content` filters on `content`, `]]>` escaped first.
-    fn content_filtered(&mut self, content: &[u8]) -> Vec<u8> {
+    pub(crate) fn the_content_filters(&mut self, content: &[u8]) -> Vec<u8> {
         let content = replace(content, b"]]>", b"]]&gt;");
         // `WP_Embed::autoembed()` runs before `do_blocks()`.
         let content = self.autoembed(&content);
@@ -93,24 +104,30 @@ impl Renderer<'_> {
         self.context.loading.in_the_content = true;
         let rendered = self.render_top_level(&content);
         self.context.loading.in_the_content = outer;
-        // do_blocks() takes wpautop() off for content with blocks.
-        self.content_filters(&rendered, !contains(&content, b"<!-- wp:"), true)
+        // do_blocks() takes wpautop() off for content with blocks, and
+        // `_restore_wpautop_hook()` puts it back last, for the content after.
+        let blocks = contains(&content, b"<!-- wp:");
+        let filtered = self.content_filters(&rendered, !blocks, true);
+        self.autop_restored |= blocks;
+        filtered
     }
 
     /// The `the_content` filters after `do_blocks()`; `wpautop()` only with
     /// `autop`, `wp_filter_content_tags()` only with `tags` (excerpts unhook
     /// it).
-    pub(crate) fn content_filters(&self, content: &[u8], autop: bool, tags: bool) -> Vec<u8> {
+    pub(crate) fn content_filters(&mut self, content: &[u8], autop: bool, tags: bool) -> Vec<u8> {
         let site = self.context.site;
         let content = wptexturize(content, &CORE_SHORTCODE_TAGS);
+        let autop_restored = self.autop_restored;
         let autop_at = |restored: bool, content: Vec<u8>| {
-            if autop && restored == self.autop_restored {
+            if autop && restored == autop_restored {
                 wpautop(&content, true)
             } else {
                 content
             }
         };
         let content = autop_at(false, content);
+        let content = shortcode_unautop(&content, &CORE_SHORTCODE_TAGS);
         let content = match &self.attachment {
             Some(post) => [
                 prepend_attachment(site, &self.context.loading, post, &self.audio_instances),
@@ -121,6 +138,10 @@ impl Renderer<'_> {
         };
         let content = replace_insecure_home_url(site, &content);
         let content = capital_p_dangit(&autop_at(true, content));
+        // `doing_filter( 'the_content' )` for the images shortcodes make.
+        let outer = std::mem::replace(&mut self.context.loading.in_the_content, true);
+        let content = self.do_shortcode(&content);
+        self.context.loading.in_the_content = outer;
         let content = if tags {
             wp_filter_content_tags(site, &self.context.loading, &content)
         } else {

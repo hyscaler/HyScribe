@@ -64,6 +64,48 @@ pub struct GlobalStyles {
     blocks: blocks::Blocks,
 }
 
+/// `WP_Duotone::get_slug_from_attribute( $duotone_attr )`: the slug of
+/// `var:preset|duotone|<slug>` or `var(--wp--preset--duotone--<slug>)`,
+/// whichever starts first, or none.
+pub fn duotone_slug(attribute: &[u8]) -> String {
+    let token = |from: usize| {
+        attribute
+            .get(from..)
+            .unwrap_or_default()
+            .iter()
+            .take_while(|b| !matches!(b, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r'))
+            .count()
+    };
+    let find = |needle: &[u8]| {
+        attribute
+            .windows(needle.len())
+            .position(|window| window == needle)
+            .map(|at| (at, at + needle.len()))
+    };
+    let colon = find(b"var:preset|duotone|").and_then(|(start, from)| {
+        let length = token(from);
+        (length > 0).then_some((start, from, from + length))
+    });
+    // `(\S+)\)`: the token up to its last parenthesis.
+    let function = find(b"var(--wp--preset--duotone--").and_then(|(start, from)| {
+        let run = attribute.get(from..from + token(from)).unwrap_or_default();
+        let close = run.iter().rposition(|b| *b == b')').filter(|&i| i > 0)?;
+        Some((start, from, from + close))
+    });
+    let found = match (colon, function) {
+        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+        (a, b) => a.or(b),
+    };
+    let slug = found.map_or(&[][..], |(_, from, to)| {
+        attribute.get(from..to).unwrap_or_default()
+    });
+    // `! empty( $matches[1] )`: "0" is empty.
+    if slug == b"0" {
+        return String::new();
+    }
+    String::from_utf8_lossy(slug).into_owned()
+}
+
 /// The origins whose presets and styles the stylesheet prints.
 const STYLESHEET_ORIGINS: [&str; 3] = ["default", "theme", "custom"];
 
@@ -145,6 +187,28 @@ impl GlobalStyles {
     /// A style of one block (`styles.blocks.<block>`).
     pub fn block_style(&self, block: &str, path: &[&str]) -> Option<&Value> {
         php::get(self.styles(), &["blocks", block]).and_then(|s| php::get(s, path))
+    }
+
+    /// `wp_get_block_css_selector( $block_type, array( 'filter', 'duotone' ),
+    /// true )`: where a block's duotone filter applies; none for a block
+    /// without one.
+    pub fn duotone_selector(&self, block: &str) -> Option<&str> {
+        self.blocks.get(block)?.duotone.as_deref()
+    }
+
+    /// `WP_Duotone::get_all_global_style_block_names()`: each block whose
+    /// global styles set a duotone preset, with the preset's slug.
+    pub fn duotone_blocks(&self) -> Vec<(String, String)> {
+        self.blocks
+            .iter()
+            .filter(|meta| meta.duotone.as_deref().is_some_and(|s| !s.is_empty()))
+            .filter_map(|meta| {
+                let attribute = php::as_str(self.block_style(&meta.name, &["filter", "duotone"])?)?;
+                let slug = duotone_slug(attribute.as_bytes());
+                // `$slug && $slug !== $duotone_attr`: a slug is never the whole value.
+                (!slug.is_empty()).then(|| (meta.name.clone(), slug))
+            })
+            .collect()
     }
 
     /// `settings.useRootPaddingAwareAlignments`, as block supports test it.
@@ -286,5 +350,7 @@ fn block_name_from_path(path: &[String]) -> String {
     }
 }
 
+#[cfg(test)]
+mod duotone_tests;
 #[cfg(test)]
 mod tests;

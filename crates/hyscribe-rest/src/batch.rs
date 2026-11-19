@@ -193,6 +193,7 @@ fn context_of<'a>(context: &Context<'a>, parameters: bool) -> Context<'a> {
         uri: context.uri,
         parameters,
         remote_addr: context.remote_addr,
+        postpass: context.postpass,
         user_agent: context.user_agent,
         host: context.host,
         now: context.now,

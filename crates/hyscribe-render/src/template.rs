@@ -67,6 +67,10 @@ pub fn render_template(
     // `get_the_block_template_html()` autoembeds before `do_blocks()`.
     let embedded = renderer.autoembed(template);
     let rendered = renderer.render(&embedded);
+    // `wp_enqueue_scripts` and `wp_footer` after the template rendered.
+    renderer.assets.rules.extend(renderer.duotone.rules());
+    renderer.assets.global_presets = renderer.duotone.global_styles();
+    renderer.assets.footer = renderer.duotone.footer();
     let content = site_smilies(site, &wptexturize(&rendered, &CORE_SHORTCODE_TAGS));
     let html = [
         b"<div class=\"wp-site-blocks\">".as_slice(),
@@ -203,6 +207,8 @@ pub(crate) struct Renderer<'a> {
     pub(crate) parent_layout: Option<Value>,
     /// The last number `wp_unique_id()` gave out.
     pub(crate) unique_id: u64,
+    /// What the duotone support collected.
+    pub(crate) duotone: crate::duotone::Duotone,
     /// `wp_unique_prefixed_id( 'wp-elements-' )`'s counter.
     pub(crate) elements_id: u64,
     /// How often each navigation name has been seen, for unique labels.
@@ -244,6 +250,12 @@ pub(crate) struct Renderer<'a> {
     pub(crate) attachment: Option<hyscribe_model::Post>,
     /// `wp_audio_shortcode()`'s `static $instance`.
     pub(crate) audio_instances: std::cell::Cell<u64>,
+    /// `wp_video_shortcode()`'s `static $instance`.
+    pub(crate) video_instances: u64,
+    /// `wp_unique_prefixed_id()`'s counters, by prefix.
+    pub(crate) prefixed_ids: HashMap<Vec<u8>, u64>,
+    /// The shortcodes being run inside one another.
+    pub(crate) shortcode_depth: usize,
     /// `_restore_wpautop_hook()` has added `wpautop()` back after content
     /// with blocks, last of its priority, after `prepend_attachment()`.
     pub(crate) autop_restored: bool,
@@ -266,8 +278,9 @@ impl<'a> Renderer<'a> {
                 query: None,
                 comment: None,
                 comment_depth: 0,
+                comment_held: false,
                 terms: Default::default(),
-                loading: Loading::in_the_loop(request.singular),
+                loading: Loading::in_the_loop(request.singular || request.feed),
             },
             assets: Assets::default(),
             open_parts: Vec::new(),
@@ -281,6 +294,7 @@ impl<'a> Renderer<'a> {
             gallery_instances: 0,
             parent_layout: None,
             unique_id: 0,
+            duotone: Default::default(),
             elements_id: 0,
             navigation_names: HashMap::new(),
             navigation: None,
@@ -300,6 +314,9 @@ impl<'a> Renderer<'a> {
             depth: 0,
             attachment: None,
             audio_instances: std::cell::Cell::new(0),
+            video_instances: 0,
+            prefixed_ids: HashMap::new(),
+            shortcode_depth: 0,
             autop_restored: false,
         }
     }
@@ -480,6 +497,7 @@ impl Renderer<'_> {
         let html = elements_class(html, block);
         let html = self.layout(block, html);
         let html = crate::dimensions::dimensions(html, block);
+        let html = self.duotone(block, html);
         // The block visibility support hides a block set not to show.
         let hidden = types.is_some() && !visible(block);
         let html = if hidden { Vec::new() } else { html };

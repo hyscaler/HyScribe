@@ -283,6 +283,52 @@ fn body_classes_match_php() {
     assert!(count >= 14);
 }
 
+/// An attachment asked for as one is `attachment`; one found by name is a
+/// single post that is not, as the page of `/?attachment_id=611` and of
+/// `/?name=...&post_type=attachment` have it in PHP.
+#[test]
+fn attachment_body_classes() {
+    let site = crate::fixture::DefaultInstall { home: Vec::new() };
+    let class = |mime: &str, attachment: bool| {
+        let request = Request {
+            posts: vec![Post {
+                id: 611,
+                post_type: "attachment".into(),
+                mime_type: mime.into(),
+                ..Post::default()
+            }],
+            singular: true,
+            attachment,
+            ..Request::default()
+        };
+        String::from_utf8(body_class(&site, &request, "t")).unwrap()
+    };
+    assert_eq!(
+        class("image/jpeg", true),
+        "attachment wp-singular attachment-template-default single single-attachment \
+         postid-611 attachmentid-611 attachment-jpeg wp-embed-responsive wp-theme-t"
+    );
+    assert_eq!(
+        class("image/jpeg", false),
+        "wp-singular attachment-template-default single single-attachment postid-611 \
+         wp-embed-responsive wp-theme-t"
+    );
+    for (mime, suffix) in [
+        ("audio/mpeg", "mpeg"),
+        ("application/pdf", "pdf"),
+        ("video/quicktime", "quicktime"),
+        ("text/plain", "plain"),
+        ("music/x", "x"),
+        ("other/type", "other/type"),
+        ("", ""),
+    ] {
+        assert!(
+            class(mime, true).contains(&format!(" attachment-{suffix} wp-embed")),
+            "{mime}"
+        );
+    }
+}
+
 /// The admin prefixes neither a protected nor a private post's title.
 #[test]
 fn admin_titles_have_no_prefix() {

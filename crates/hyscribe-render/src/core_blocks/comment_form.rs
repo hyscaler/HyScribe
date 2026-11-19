@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The post comments form block with `comment_form()`, for a visitor who
-//! is not logged in. Comment cookies are not read yet, so the fields start
-//! empty.
+//! is not logged in, its fields filled from the commenter cookies.
 
-use hyscribe_kses::esc_url;
+use hyscribe_kses::{esc_attr, esc_url};
 use hyscribe_model::{Comment, Post};
 use hyscribe_phpser::{is_empty_string, remove_query_arg};
 
@@ -107,6 +106,14 @@ fn fields(
     } else {
         ("", "")
     };
+    let commenter = &context.request.commenter;
+    let (author, email) = (esc_attr(&commenter.author), esc_attr(&commenter.email));
+    let url = esc_attr(&commenter.url);
+    let checked = if is_empty_string(&commenter.email) {
+        ""
+    } else {
+        " checked"
+    };
     let action = esc_url(&context.site_url(b"/wp-comments-post.php"));
     let mut form = format!(
         "<form action=\"{}\" method=\"post\" id=\"commentform\" class=\"comment-form\">",
@@ -117,14 +124,14 @@ fn fields(
         "<p class=\"comment-form-comment\"><label for=\"comment\">Comment{REQUIRED}</label> <textarea id=\"comment\" name=\"comment\" cols=\"45\" rows=\"8\" maxlength=\"65525\" required></textarea></p>"
     ));
     form.push_str(&format!(
-        "<p class=\"comment-form-author\"><label for=\"author\">Name{indicator}</label> <input id=\"author\" name=\"author\" type=\"text\" value=\"\" size=\"30\" maxlength=\"245\" autocomplete=\"name\"{attribute} /></p>\n"
+        "<p class=\"comment-form-author\"><label for=\"author\">Name{indicator}</label> <input id=\"author\" name=\"author\" type=\"text\" value=\"{author}\" size=\"30\" maxlength=\"245\" autocomplete=\"name\"{attribute} /></p>\n"
     ));
     form.push_str(&format!(
-        "<p class=\"comment-form-email\"><label for=\"email\">Email{indicator}</label> <input id=\"email\" name=\"email\" type=\"email\" value=\"\" size=\"30\" maxlength=\"100\" aria-describedby=\"email-notes\" autocomplete=\"email\"{attribute} /></p>\n"
+        "<p class=\"comment-form-email\"><label for=\"email\">Email{indicator}</label> <input id=\"email\" name=\"email\" type=\"email\" value=\"{email}\" size=\"30\" maxlength=\"100\" aria-describedby=\"email-notes\" autocomplete=\"email\"{attribute} /></p>\n"
     ));
-    form.push_str("<p class=\"comment-form-url\"><label for=\"url\">Website</label> <input id=\"url\" name=\"url\" type=\"url\" value=\"\" size=\"30\" maxlength=\"200\" autocomplete=\"url\" /></p>\n");
+    form.push_str(&format!("<p class=\"comment-form-url\"><label for=\"url\">Website</label> <input id=\"url\" name=\"url\" type=\"url\" value=\"{url}\" size=\"30\" maxlength=\"200\" autocomplete=\"url\" /></p>\n"));
     if cookies {
-        form.push_str("<p class=\"comment-form-cookies-consent\"><input id=\"wp-comment-cookies-consent\" name=\"wp-comment-cookies-consent\" type=\"checkbox\" value=\"yes\" /> <label for=\"wp-comment-cookies-consent\">Save my name, email, and website in this browser for the next time I comment.</label></p>\n");
+        form.push_str(&format!("<p class=\"comment-form-cookies-consent\"><input id=\"wp-comment-cookies-consent\" name=\"wp-comment-cookies-consent\" type=\"checkbox\" value=\"yes\"{checked} /> <label for=\"wp-comment-cookies-consent\">Save my name, email, and website in this browser for the next time I comment.</label></p>\n"));
     }
     // The submit field, with get_comment_id_fields().
     form.push_str(&format!(

@@ -111,6 +111,13 @@ fn links_match_php() {
             let feed = |at: usize| words.get(at).copied().unwrap_or("rss2");
             let value = match words[0] {
                 "permalink" => permalink(rest),
+                "post_comments_feed_link" if words[1] == "unattached" => {
+                    let structure: &'static str = Box::leak(fields[0].to_string().into_boxed_str());
+                    let site = crate::fixture::site(vec![("permalink_structure", structure)]);
+                    let loose = post(13, "attachment", "inherit", "loose", "");
+                    let link = post_comments_feed_link(&site, &loose, feed(3));
+                    format!("{HOME}{}", String::from_utf8(link).unwrap())
+                }
                 "post_comments_feed_link" => {
                     let name = format!("{} {}", words[1], words[2]);
                     links.feed_under(&page_link(&name), feed(3))
@@ -174,7 +181,36 @@ fn links_match_php() {
         }
         assert_eq!(ours, expected, "{head}");
     }
-    assert_eq!(lines, 1024);
+    assert_eq!(lines, 1056);
+}
+
+/// Without pretty permalinks the comments feed of an attachment with no
+/// parent is asked for by `attachment_id`, as the feed link of an unattached
+/// image is in the Theme Test Data's pages.
+#[test]
+fn plain_comments_feed_link_of_an_attachment() {
+    let site = crate::fixture::site(Vec::new());
+    let mut attachment = post(13, "attachment", "inherit", "loose", "");
+    let link = |post: &Post, feed| String::from_utf8(post_comments_feed_link(&site, post, feed));
+    assert_eq!(
+        link(&attachment, "rss2").unwrap(),
+        "/?feed=rss2&attachment_id=13"
+    );
+    attachment.parent = 1;
+    assert_eq!(link(&attachment, "rss2").unwrap(), "/?feed=rss2&p=13");
+    let page = post(2, "page", "publish", "sample-page", "");
+    assert_eq!(link(&page, "atom").unwrap(), "/?feed=atom&page_id=2");
+    // Under pretty permalinks, the unattached attachment's feed address is
+    // its own and another post's is its link's.
+    let site = crate::fixture::site(vec![("permalink_structure", "/%postname%/")]);
+    let link = |post: &Post, feed| String::from_utf8(post_comments_feed_link(&site, post, feed));
+    attachment.parent = 0;
+    assert_eq!(
+        link(&attachment, "atom").unwrap(),
+        "/feed/atom/?attachment_id=13"
+    );
+    let hello = post(1, "post", "publish", "hello-world", "2026-10-27 08:08:15");
+    assert_eq!(link(&hello, "rss2").unwrap(), "/hello-world/feed/");
 }
 
 #[test]
@@ -403,6 +439,7 @@ fn comment_pages_under_pretty_permalinks() {
         query: None,
         comment: None,
         comment_depth: 0,
+        comment_held: false,
         terms: Default::default(),
         loading: Default::default(),
     };

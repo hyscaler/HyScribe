@@ -29,8 +29,8 @@ mod trash;
 pub use autosave::{Revisioned, wp_create_post_autosave};
 pub use date::checkdate as wp_checkdate;
 pub use trash::{
-    AttachmentFile, stick_post, unstick_post, wp_delete_attachment, wp_delete_post, wp_trash_post,
-    wp_untrash_post,
+    AttachmentDeleted, stick_post, unstick_post, wp_delete_attachment, wp_delete_post,
+    wp_trash_post, wp_untrash_post,
 };
 
 /// Who writes and where: what the PHP functions read from the request and
@@ -209,11 +209,21 @@ async fn existing(write: &mut Write<'_>, id: u64) -> Result<PostFields> {
 pub async fn wp_insert_post(write: &mut Write<'_>, ctx: &Context, args: PostArgs) -> Result<u64> {
     let (id, kind, update) = insert(write, ctx, args, None).await?;
     // wp_after_insert_post: wp_save_post_revision_on_insert(), which an
-    // attachment, with no revisions, never reaches.
+    // attachment's insert returns before.
     if update && kind != Kind::Attachment {
         hooks::save_revision(write, ctx, kind, id).await?;
     }
     Ok(id)
+}
+
+/// `wp_after_insert_post( $post, true, ... )` of a post already updated: the
+/// revision `wp_save_post_revision_on_insert()` makes where the post differs
+/// from its last, footnotes included.
+pub async fn wp_after_insert_post(write: &mut Write<'_>, ctx: &Context, id: u64) -> Result<()> {
+    let post = existing(write, id).await?;
+    // The post was just written, so `insert()` took its type.
+    let kind = Kind::of(&post.post_type).unwrap_or(Kind::Post);
+    hooks::save_revision(write, ctx, kind, id).await
 }
 
 /// `wp_update_post( $postarr )`: `change` sets the fields to change on the
@@ -226,6 +236,19 @@ pub async fn wp_update_post(
 ) -> Result<u64> {
     let args = update_args(write, ctx, id, change).await?;
     wp_insert_post(write, ctx, args).await
+}
+
+/// `wp_update_post( $postarr, true, false )`: the post updated without its
+/// after hooks, which the caller fires with [`wp_after_insert_post`].
+pub async fn wp_update_post_quietly(
+    write: &mut Write<'_>,
+    ctx: &Context,
+    id: u64,
+    change: &dyn Fn(&mut PostArgs),
+) -> Result<u64> {
+    let args = update_args(write, ctx, id, change).await?;
+    let (id, ..) = insert(write, ctx, args, None).await?;
+    Ok(id)
 }
 
 /// `wp_update_post()`'s arguments for `wp_insert_post()`: the post's own,
@@ -817,6 +840,11 @@ async fn insert(
         update_metadata(write, Meta::Post, id, "_wp_attached_file", &file, &any).await?;
         return Ok((id, kind, false));
     }
+    // An attachment's update fires `attachment_updated` alone.
+    if let (Kind::Attachment, Some(before)) = (kind, &before) {
+        hooks::post_updated(write, kind, id, before).await?;
+        return Ok((id, kind, true));
+    }
     if truthy(&args.page_template) {
         if args.page_template != b"default" {
             return Err(Error::Unported("a page template of the theme"));
@@ -824,11 +852,6 @@ async fn insert(
         let template = Value::String(args.page_template);
         let any = Value::String(Vec::new());
         update_metadata(write, Meta::Post, id, "_wp_page_template", &template, &any).await?;
-    }
-    // An attachment's update fires `attachment_updated` alone.
-    if let (Kind::Attachment, Some(before)) = (kind, &before) {
-        hooks::post_updated(write, kind, id, before).await?;
-        return Ok((id, kind, true));
     }
     hooks::transition(write, ctx, kind, (&fields.status, &previous), id).await?;
     if let Some(before) = before {
@@ -839,9 +862,6 @@ async fn insert(
 
 #[cfg(test)]
 pub(crate) mod tests;
-
-#[cfg(test)]
-mod attachment_tests;
 
 #[cfg(test)]
 mod editor_tests;

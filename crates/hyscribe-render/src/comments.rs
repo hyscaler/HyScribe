@@ -2,11 +2,10 @@
 
 //! The comment template block: the post's approved comments, threaded, each
 //! rendering the template's inner blocks with the comment as context, and
-//! the held comment its author previews from the link they are sent to.
-//!
-//! The held comments the commenter cookies would show are not ported yet.
+//! the held comments their author sees: those the commenter cookies name,
+//! or the one the link they are sent to previews.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use hyscribe_model::Comment;
 use hyscribe_phpser::{Value, hash_equals, is_empty_string};
@@ -36,7 +35,7 @@ impl Renderer<'_> {
         }
         let option = |name| site.option(name).unwrap_or_default();
         let threaded = !is_empty_string(&option("thread_comments"));
-        let all = post_comments(site, self.context.request, post_id);
+        let (all, held) = post_comments(site, self.context.request, post_id);
         let mut listed = listed(site, &all);
         if let Some(paging) = paging(site, self.context.request, listed.len()) {
             // Pages below the first list the first.
@@ -66,6 +65,7 @@ impl Renderer<'_> {
             children.entry(comment.parent).or_default().push(comment);
         }
         let threads = Threads {
+            held,
             children,
             threaded,
             depth_limit,
@@ -103,11 +103,16 @@ impl Renderer<'_> {
             };
             let outer = self.context.comment.replace((*comment).clone());
             let outer_depth = std::mem::replace(&mut self.context.comment_depth, levels.len());
+            let outer_held = std::mem::replace(
+                &mut self.context.comment_held,
+                threads.held.contains(&comment.id),
+            );
             // Each comment renders as the template block again, whose
             // `render_block` filters see its class.
             let html = elements_class(self.saved_markup(block), block);
             self.context.comment = outer;
             self.context.comment_depth = outer_depth;
+            self.context.comment_held = outer_held;
             let classes = self.comment_class(comment);
             content.extend(
                 format!("<li id=\"comment-{}\" class=\"{}\">", comment.id, classes).into_bytes(),
@@ -182,34 +187,69 @@ impl Renderer<'_> {
     }
 }
 
-/// The comments a comment query lists on `post_id`: the approved ones and
-/// the held one [`held_preview`] shows, oldest first, then by ID.
-pub(crate) fn post_comments(site: &dyn Site, request: &Request, post_id: u64) -> Vec<Comment> {
+/// The comments a comment query lists on `post_id`, oldest first, then by
+/// ID: the approved ones and the held ones [`unapproved`] names, whose IDs
+/// come second.
+pub(crate) fn post_comments(
+    site: &dyn Site,
+    request: &Request,
+    post_id: u64,
+) -> (Vec<Comment>, HashSet<u64>) {
     let mut all = site.comments(post_id);
-    let held = held_preview(site, request);
-    if let Some(held) = held.filter(|c| c.post_id == post_id && c.comment_type != b"note") {
-        all.push(held);
-        all.sort_by(|a, b| (&a.date_gmt, a.id).cmp(&(&b.date_gmt, b.id)));
-    }
-    all
+    let held = unapproved(site, request)
+        .map(|who| site.held_comments(post_id, &who.email, who.only))
+        .unwrap_or_default();
+    let ids = held.iter().map(|comment| comment.id).collect();
+    all.extend(held);
+    all.sort_by(|a, b| (&a.date_gmt, a.id).cmp(&(&b.date_gmt, b.id)));
+    (all, ids)
 }
 
-/// `wp_get_unapproved_comment_author_email()`'s comment: the request's held
-/// `unapproved` one whose date `moderation-hash` signs, for ten minutes.
-pub(crate) fn held_preview(site: &dyn Site, request: &Request) -> Option<Comment> {
+/// Whose held comments a comment query includes: `include_unapproved`.
+pub(crate) struct Unapproved {
+    /// `wp_get_unapproved_comment_author_email()`.
+    pub(crate) email: Vec<u8>,
+    /// The one comment the request's `unapproved` names, when it and
+    /// `moderation-hash` are both set: the others are left out.
+    pub(crate) only: Option<i64>,
+}
+
+/// `wp_get_unapproved_comment_author_email()`: the email of the held
+/// comment the request's `unapproved` names, when `moderation-hash` signs
+/// its date and ten minutes have not passed, else the commenter cookie's.
+/// `None` where there is none.
+pub(crate) fn unapproved(site: &dyn Site, request: &Request) -> Option<Unapproved> {
     let arg = |name| request.get.get_str(name).filter(|value| !value.is_empty());
-    let id = u64::try_from(arg("unapproved")?.to_int()).ok()?;
-    // An array is a fatal error in PHP's `hash_equals()`.
-    let hash = arg("moderation-hash")?.as_bytes()?;
-    let comment = site.held_comment(id)?;
-    let signed = site.wp_hash(comment.date_gmt.as_bytes())?;
-    let fresh = request.now < stored_unix(&comment.date_gmt, Zone::Utc) + 600;
-    let shown = fresh && hash_equals(signed.as_bytes(), hash);
-    (shown && !is_empty_string(&comment.author_email)).then_some(comment)
+    let asked = arg("unapproved").zip(arg("moderation-hash"));
+    let mut email = Vec::new();
+    if let Some((id, hash)) = asked {
+        // An array is a fatal error in PHP's `hash_equals()`.
+        let hash = hash.as_bytes()?;
+        let found = u64::try_from(id.to_int())
+            .ok()
+            .and_then(|id| site.any_comment(id));
+        if let Some(comment) = found {
+            // Without the salts to sign it, no hash matches.
+            let signed = site.wp_hash(comment.date_gmt.as_bytes());
+            let fresh = request.now < stored_unix(&comment.date_gmt, Zone::Utc) + 600;
+            if fresh && signed.is_some_and(|signed| hash_equals(signed.as_bytes(), hash)) {
+                email = comment.author_email;
+            }
+        }
+    }
+    if is_empty_string(&email) {
+        email = request.commenter.email.clone();
+    }
+    (!is_empty_string(&email)).then(|| Unapproved {
+        email,
+        only: asked.map(|(id, _)| id.to_int()),
+    })
 }
 
 /// The replies to each comment, in the order of all the post's comments.
 struct Threads<'a> {
+    /// The listed comments that are held.
+    held: HashSet<u64>,
     children: HashMap<u64, Vec<&'a Comment>>,
     threaded: bool,
     depth_limit: i64,

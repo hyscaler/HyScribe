@@ -133,6 +133,25 @@ fn config_check_describes_without_secrets() {
 }
 
 #[test]
+fn the_proxies_are_trusted_only_behind_a_proxy() {
+    let values = |extra: &[(&str, &str)]| {
+        let mut map: std::collections::HashMap<String, String> =
+            [("DB_NAME", "b"), ("DB_USER", "w")]
+                .into_iter()
+                .chain(extra.iter().copied())
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+        map.entry("PORT".into()).or_insert("8080".into());
+        hyscribe_config::from_map(&map).unwrap()
+    };
+    assert_eq!(super::trusted_proxies(&values(&[])), None);
+    let behind = values(&[("BEHIND_PROXY", "true"), ("TRUSTED_PROXIES", "10.0.0.0/8")]);
+    let list = super::trusted_proxies(&behind).unwrap();
+    assert_eq!(list, behind.trusted_proxies);
+    assert_eq!(list.len(), 1);
+}
+
+#[test]
 fn config_check_reads_dir_option() {
     let home = tempfile::tempdir().unwrap();
     let site = tempfile::tempdir().unwrap();

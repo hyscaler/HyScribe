@@ -265,6 +265,16 @@ fn server_config(
 }
 
 /// The installation the admin describes: `binary`, and what `.env` sets.
+/// The peers `X-Forwarded-For` is believed from, none when not behind a
+/// proxy.
+fn trusted_proxies(config: &Config) -> Option<Vec<hyscribe_config::proxies::Cidr>> {
+    if config.server.behind_proxy {
+        Some(config.trusted_proxies.clone())
+    } else {
+        None
+    }
+}
+
 fn install(config: &Config, binary: &Path) -> hyscribe_http::Install {
     hyscribe_http::Install {
         binary: binary.display().to_string(),
@@ -339,12 +349,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                     .with_salts(config.salts.clone())
                     .with_public_users(config.rest_public_users)
                     .with_constants(config.constants)
-                    .with_proxy(
-                        config
-                            .server
-                            .behind_proxy
-                            .then(|| config.trusted_proxies.clone()),
-                    )
+                    .with_proxy(trusted_proxies(&config))
                     .with_time_limit(std::time::Duration::from_secs(u64::from(
                         config.request_time_limit,
                     )))

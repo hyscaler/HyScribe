@@ -329,6 +329,66 @@ fn with(name: &str, mime: &str, limits: &Limits, hooks: &dyn Hooks) -> Generated
     wp_generate_attachment_metadata(upload, mime, sizes(), limits, hooks, b"").unwrap()
 }
 
+/// The file formats the audio and video hooks are given, and what they
+/// answer with: a filter that gives no array leaves no metadata.
+struct Formats(std::sync::Mutex<Vec<(String, Option<String>)>>, Value);
+
+impl Hooks for Formats {
+    fn wp_read_audio_metadata(&self, _meta: Value, format: Option<&str>) -> Value {
+        let mut seen = self.0.lock().unwrap();
+        seen.push(("audio".into(), format.map(String::from)));
+        self.1.clone()
+    }
+
+    fn wp_read_video_metadata(&self, meta: Value, format: Option<&str>) -> Value {
+        let mut seen = self.0.lock().unwrap();
+        seen.push(("video".into(), format.map(String::from)));
+        meta
+    }
+}
+
+#[test]
+fn reads_audio_and_video_as_getid3_does() {
+    let filesize = |name: &str| Value::Int(corpus(name).len() as i64);
+    let size_only = |name: &str| (Key::String(b"filesize".to_vec()), filesize(name));
+    let limits = Limits::default();
+    let wav = with("tone.wav", "audio/wav", &limits, &NoHooks);
+    let read = crate::getid3::wp_read_audio_metadata(&corpus("tone.wav")).unwrap();
+    assert_eq!((wav.meta, wav.files.len()), (Value::Array(read), 0));
+    // A format with no module: its size and type.
+    let mpeg = with("clip.mpg", "video/mpeg", &limits, &NoHooks);
+    let kind = (
+        Key::String(b"mime_type".to_vec()),
+        Value::String(b"video/mpeg".to_vec()),
+    );
+    assert_eq!(mpeg.meta, Value::Array(vec![size_only("clip.mpg"), kind]));
+    // The hooks see the file format; no array leaves the size alone.
+    let formats = Formats(std::sync::Mutex::new(Vec::new()), Value::Null);
+    let filtered = with("tone.wav", "audio/wav", &limits, &formats);
+    assert_eq!(filtered.meta, Value::Array(vec![size_only("tone.wav")]));
+    let video = with("clip.mpg", "video/mpeg", &limits, &formats);
+    assert_eq!(video.meta, mpeg.meta);
+    let seen = formats.0.lock().unwrap().clone();
+    let wav_format = Some("wav".to_string());
+    assert_eq!(
+        seen,
+        [
+            ("audio".to_string(), wav_format),
+            ("video".to_string(), None)
+        ]
+    );
+    // What getID3 reads in ways not ported is not made.
+    let bytes = corpus("cbr.mp3");
+    let upload = Upload {
+        bytes: &bytes,
+        file: "x.mp3",
+        attachment: 1,
+    };
+    let unported =
+        wp_generate_attachment_metadata(upload, "audio/mpeg", sizes(), &limits, &NoHooks, b"");
+    assert_eq!(unported, Err(crate::meta::Unported));
+}
+
 #[test]
 fn applies_the_hooks() {
     // A lower threshold scales; a negative one gives no size to scale to.

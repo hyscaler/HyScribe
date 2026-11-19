@@ -7,7 +7,7 @@ use hyscribe_model::{
 };
 use hyscribe_phpser::Value;
 
-pub use crate::outbound::{EmbedHosts, Get, Hooks, Response};
+pub use crate::outbound::{EmbedHosts, Get, Hooks, NavMenuItem, Response};
 
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
@@ -199,7 +199,7 @@ pub trait Site {
     fn delete_site_transient(&self, _name: &str) {}
 
     /// `wp_insert_post()` of the `wp_navigation` post `WP_Navigation_Fallback`
-    /// makes from a classic menu: the title, slug and content as the
+    /// makes from a classic menu or a page list: the title, slug and content as the
     /// function stores them before its filters, written in primary mode
     /// only.
     fn insert_navigation_fallback(&self, _title: &[u8], _name: &[u8], _content: &[u8]) {}

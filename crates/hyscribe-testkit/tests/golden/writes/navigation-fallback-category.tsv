@@ -1,0 +1,69 @@
+# The rows PHP WordPress writes for the action navigation-fallback-category (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-19 13:09:43 to 2026-11-19 13:09:43 UTC.
+# %wp_posts:1% is 67.
+# %wp_posts:2% is 68.
+# %wp_posts:3% is 69.
+# %wp_posts:4% is 70.
+# %wp_posts:5% is 71.
+# %wp_postmeta:1% is 347.
+# %wp_postmeta:2% is 348.
+# %wp_postmeta:3% is 349.
+# %wp_postmeta:4% is 350.
+# %wp_postmeta:5% is 351.
+# %wp_postmeta:6% is 352.
+# %wp_postmeta:7% is 353.
+# %wp_postmeta:8% is 354.
+# %wp_postmeta:9% is 355.
+# %wp_postmeta:10% is 356.
+# %wp_postmeta:11% is 357.
+# %wp_postmeta:12% is 358.
+# %wp_postmeta:13% is 359.
+# %wp_postmeta:14% is 360.
+# %wp_postmeta:15% is 361.
+# %wp_postmeta:16% is 362.
+# %wp_postmeta:17% is 363.
+# %wp_postmeta:18% is 364.
+# %wp_postmeta:19% is 365.
+# %wp_postmeta:20% is 366.
+# %wp_postmeta:21% is 367.
+# %wp_postmeta:22% is 368.
+# %wp_postmeta:23% is 369.
+# %wp_postmeta:24% is 370.
+# %wp_postmeta:25% is 371.
+# %wp_postmeta:26% is 372.
+# %wp_postmeta:27% is 373.
+# %wp_postmeta:28% is 374.
+# %wp_postmeta:29% is 375.
+# %wp_postmeta:30% is 376.
+# %wp_postmeta:31% is 377.
+# %wp_postmeta:32% is 378.
+# %wp_terms:1% is 9001.
+# %wp_terms:2% is 9002.
+# %wp_terms:3% is 9010.
+# %wp_term_taxonomy:1% is 9001.
+# %wp_term_taxonomy:2% is 9002.
+# %wp_term_taxonomy:3% is 9010.
+# %wp_options:1% is 133.
+wp_posts	%wp_posts:5%	+	ID	%wp_posts:5%
+wp_posts	%wp_posts:5%	+	comment_count	0
+wp_posts	%wp_posts:5%	+	comment_status	closed
+wp_posts	%wp_posts:5%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:5%
+wp_posts	%wp_posts:5%	+	menu_order	0
+wp_posts	%wp_posts:5%	+	ping_status	closed
+wp_posts	%wp_posts:5%	+	pinged	
+wp_posts	%wp_posts:5%	+	post_author	0
+wp_posts	%wp_posts:5%	+	post_content	<!-- wp:navigation-submenu {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-category-ancestor current-menu-ancestor current-menu-parent current-category-parent","description":"","id":"9001","kind":"taxonomy","label":"Parent Category","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=9001"} --><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-menu-item","description":"","id":"9002","kind":"taxonomy","label":"Child Category","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=9002"} /--><!-- /wp:navigation-submenu --><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category","description":"","id":"1","kind":"taxonomy","label":"Uncategorized","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=1"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-post_type menu-item-object-post","description":"","id":"1","kind":"post-type","label":"Hello world!","opensInNewTab":false,"rel":null,"title":"","type":"post","url":"http://127.0.0.1:8081/?p=1"} /-->
+wp_posts	%wp_posts:5%	+	post_content_filtered	
+wp_posts	%wp_posts:5%	+	post_date	%now%
+wp_posts	%wp_posts:5%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:5%	+	post_excerpt	
+wp_posts	%wp_posts:5%	+	post_mime_type	
+wp_posts	%wp_posts:5%	+	post_modified	%now%
+wp_posts	%wp_posts:5%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:5%	+	post_name	category-archive
+wp_posts	%wp_posts:5%	+	post_parent	0
+wp_posts	%wp_posts:5%	+	post_password	
+wp_posts	%wp_posts:5%	+	post_status	publish
+wp_posts	%wp_posts:5%	+	post_title	Category archive
+wp_posts	%wp_posts:5%	+	post_type	wp_navigation
+wp_posts	%wp_posts:5%	+	to_ping	

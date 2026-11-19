@@ -4,7 +4,7 @@
 //! a block makes, the answer it reads, the filters around it under
 //! WordPress's names, and the site transients the feed cache keeps.
 
-use hyscribe_model::Post;
+use hyscribe_model::{Post, Term};
 use hyscribe_phpser::{Key, Maybe, Value, maybe_unserialize};
 
 use crate::shortcode::Shortcode;
@@ -51,6 +51,39 @@ impl Get {
             redirects: Redirects::Any,
         }
     }
+}
+
+/// A classic menu's item as `wp_setup_nav_menu_item()` sets it up, with the
+/// properties the navigation block's conversion reads, as the
+/// `wp_get_nav_menu_items` filter gets them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NavMenuItem {
+    /// `ID`, also `db_id`.
+    pub id: u64,
+    /// `menu_item_parent`, as stored.
+    pub menu_item_parent: Vec<u8>,
+    /// `type`: `post_type`, `post_type_archive`, `taxonomy` or `custom`.
+    pub kind: Vec<u8>,
+    /// `object`: the post type, taxonomy or `custom`.
+    pub object: Vec<u8>,
+    /// `object_id`, as stored.
+    pub object_id: Vec<u8>,
+    /// `post_parent`.
+    pub post_parent: u64,
+    /// `title`.
+    pub title: Vec<u8>,
+    /// `url`, `None` for the `false` an archive without a link has.
+    pub url: Option<Vec<u8>>,
+    /// `target`.
+    pub target: Vec<u8>,
+    /// `attr_title`.
+    pub attr_title: Vec<u8>,
+    /// `description`.
+    pub description: Vec<u8>,
+    /// `classes`: the stored ones, then those of the request's context.
+    pub classes: Vec<Vec<u8>>,
+    /// `xfn`.
+    pub xfn: Vec<u8>,
 }
 
 /// Where embeds may fetch from (`EMBED_ALLOWED_HOSTS`, an open question): the
@@ -235,6 +268,25 @@ pub trait Hooks: std::fmt::Debug {
     /// `wp_navigation_should_create_fallback`.
     fn wp_navigation_should_create_fallback(&self, create: bool) -> bool {
         create
+    }
+
+    /// `wp_get_nav_menus`: the classic menus, with the arguments
+    /// `wp_get_nav_menus()` gives `get_terms()` (`taxonomy`, `hide_empty`,
+    /// `orderby`).
+    fn wp_get_nav_menus(&self, menus: Vec<Term>, _args: &[(String, Value)]) -> Vec<Term> {
+        menus
+    }
+
+    /// `wp_get_nav_menu_items`: a menu's items, its valid ones in menu
+    /// order, with the arguments of `wp_get_nav_menu_items()` that are
+    /// not the menu's own term (`tax_query` is left out).
+    fn wp_get_nav_menu_items(
+        &self,
+        items: Vec<NavMenuItem>,
+        _menu: &Term,
+        _args: &[(String, Value)],
+    ) -> Vec<NavMenuItem> {
+        items
     }
 
     /// `nav_menu_attr_title`: a classic menu item's title attribute.

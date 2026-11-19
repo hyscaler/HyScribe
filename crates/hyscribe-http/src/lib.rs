@@ -56,6 +56,7 @@ mod login;
 mod mail;
 mod multipart;
 mod outbound;
+mod preview_nonce;
 pub mod query;
 mod reads;
 mod redirect;
@@ -956,6 +957,10 @@ async fn page(
     let get = parse_str(uri.query().unwrap_or_default().as_bytes());
     if get.get_str("s").is_some_and(|s| s.as_array().is_some()) {
         query.insert("s".into(), String::new());
+    }
+    // `_show_post_preview()` runs on `init`, before the REST API or a query.
+    if let Some(refused) = preview_nonce::refuse(&site, &headers, &get, post).await {
+        return refused;
     }
     let (uri, query) = match pretty_request(&site, uri, query).await {
         Ok(request) => request,

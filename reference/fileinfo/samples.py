@@ -204,3 +204,142 @@ starts = ['import os', 'package main', 'class Foo', 'def run():', 'function f() 
 for n, line in enumerate(starts):
     put('start-%02d.txt' % n, (line + '\n' + sentence() + '\n').encode())
     put('later-%02d.txt' % n, (sentence() + '\n' + line + '\n' + sentence() + '\n').encode())
+
+# Boundaries of each rule: where a marker may start, how long a header is.
+for n in (1000, 1018, 1019, 1020, 1021, 1024, 1025):
+    put('edge-pdf-%04d.bin' % n, b'x' * n + b'%PDF-1.4\n')
+for n in (2, 3, 4, 8, 9, 10, 11, 20):
+    put('edge-gzip-%02d.bin' % n, (b'\x1f\x8b\x08\x00' + b'\0' * 20)[:n])
+for n in (6, 7, 8, 9, 20):
+    put('edge-7z-%02d.bin' % n, (bytes.fromhex('377abcaf271c0004') + b'\0' * 20)[:n])
+for n in (4, 7, 8, 9):
+    put('edge-rar-%02d.bin' % n, (b'Rar!\x1a\x07\x01\x00' + b'\0' * 20)[:n])
+    put('edge-class-%02d.bin' % n, (bytes.fromhex('cafebabe0000003d') + b'\0' * 20)[:n])
+for v in (0x1e, 0x1f, 0x20, 0x2d):
+    put('edge-class-v%02x.bin' % v, bytes.fromhex('cafebabe000000') + bytes([v]) + b'\0' * 20)
+for n in (505, 511, 512, 513):
+    put('edge-tar-%03d.bin' % n, (bytes(tar) + b'\0' * 1024)[:n])
+for field in (b'%06o\x00 ', b'%06o \x00', b' %05o\x00 ', b'%07o\x00', b'%06o  ', b'0000000\x00', b'      \x00 '):
+    t = bytearray(tar)
+    t[148:156] = b'        '
+    total = sum(t)
+    t[148:156] = (field % total) if b'%' in field else field
+    put('edge-tar-field-%s.bin' % field.hex(), bytes(t) + b'\0' * 1024)
+t = bytearray(tar)
+t[257:263] = b'ustar '
+put('edge-tar-gnu.bin', bytes(t) + b'\0' * 1024)
+for n in (1010, 1018, 1019, 1020, 1021, 1022, 1030):
+    put('edge-vtt-%04d.txt' % n, b'WEBVTT\n\n' + b'x' * (n - 8) + b'-->\n')
+for tail in (b'\n', b' ', b'\t', b'\r', b'-', b'x', b''):
+    put('edge-vtt-after-%s.txt' % tail.hex(), b'WEBVTT' + tail + b'\n00:00.000 --> 00:01.000\nHi\n')
+for sep in (b'\n', b'\r\n', b'\r', b'\n\n', b' ', b''):
+    put('edge-ics-%s.txt' % sep.hex(), b'BEGIN:VCALENDAR' + sep + b'VERSION:2.0\nEND:VCALENDAR\n')
+for version in (b'1.0', b'2.1', b'2.0'):
+    put('edge-ics-v%s.txt' % version.hex(), b'BEGIN:VCALENDAR\nVERSION:' + version + b'\nEND:VCALENDAR\n')
+put('edge-ics-lower.txt', b'begin:vcalendar\nversion:2.0\n')
+for ctl in (7, 8, 11, 12, 27, 127, 0x85):
+    put('edge-control-%02x.txt' % ctl, b'Hello there.\n' + chr(ctl).encode() + b'More text.\n')
+for n in (9, 10, 11, 12):
+    put('edge-csv-last-%02d.txt' % n, b''.join(b'a,b,c\n' for _ in range(n - 1)) + b'a,b\n')
+    put('edge-csv-ok-%02d.txt' % n, b''.join(b'a,b,c\n' for _ in range(n)))
+for n in (1, 2, 3):
+    put('edge-csv-rows-%d.txt' % n, b''.join(b'a,b\n' for _ in range(n)))
+put('edge-csv-nonl.txt', b'a,b\nc,d\ne,f')
+put('edge-csv-blank.txt', b'a,b\n\nc,d\n')
+put('edge-csv-crlf.txt', b'a,b\r\nc,d\r\ne,f\r\n')
+put('edge-csv-first-plain.txt', b'name\na,b\nc,d\n')
+put('edge-csv-quote-nl.txt', b'a,"x\ny",b\nc,d,e\nf,g,h\n')
+put('edge-csv-quote-end.txt', b'a,b,"c\nd,e\n')
+for header in ['from', 'to', 'cc', 'subject', 'date', 'received', 'return-path', 'message-id', 'mime-version', 'reply-to', 'delivered-to', 'index', 'path', 'newsgroups', 'xref', 'begin', 'end', 'diff', 'def', 'From', 'SUBJECT', 'x-mailer', 'lines', 'references', 'organization']:
+    put('edge-header-%s.txt' % header, (header + ': value\n' + sentence() + '\n').encode())
+    put('edge-keyword-%s.txt' % header, (header + ' value here\n' + sentence() + '\n').encode())
+    put('edge-keyword-later-%s.txt' % header, (sentence() + '\n   ' + header + ' value here\n').encode())
+for marker in ['#', '[', '{', '<', ';', '@', '%', '\\', '!', '$', '`', '|', '/', '=', '+', '--', '-', '*', '>', '~', '^', '&', '(', '"', "'", '1', '.', ',', ':', '?', '_']:
+    tag = '%02x' % ord(marker[0]) + ('x' if len(marker) > 1 else '')
+    put('edge-marker-%s.txt' % tag, (marker + 'Hello there friend\n' + sentence() + '\n').encode())
+    put('edge-marker-spaced-%s.txt' % tag, (sentence() + '\n  ' + marker + 'Hello there friend\n').encode())
+for text in ['a <b> c', 'a <B>', 'a </b>', 'a <!-- c', 'a <?x', 'a <me@here.com> b', 'a <me> b', 'a <1> b', 'a < b', 'a <', 'a <me@x', 'a <b@c>d<e>', 'a {b', 'a }b', 'a \\ b']:
+    put('edge-inline-%s.txt' % text.encode().hex(), (sentence() + '\n' + text + '\n').encode())
+# MPEG audio headers: the version, layer, bitrate and rate fields.
+for second in range(0xe0, 0x100):
+    for bitrate in (0, 1, 14, 15):
+        for rate in (0, 2, 3):
+            third = bitrate << 4 | rate << 2
+            put('edge-mpeg-%02x%02x.bin' % (second, third), bytes([0xff, second, third]) + b'\0' * 8)
+put('edge-mpeg-short.bin', b'\xff\xfb')
+put('edge-mpeg-two.bin', b'\xff\xfb\x90')
+for size in (0, 1, 2, 127, 128, 129):
+    tag = bytes([0, 0, size >> 7 & 0x7f, size & 0x7f])
+    frame = bytes.fromhex('fffb9000')
+    for version in (2, 3, 4, 5):
+        head = b'ID3' + bytes([version, 0, 0]) + tag
+        put('edge-id3-%d-%03d.bin' % (version, size), head + b'\0' * size + frame + b'\0' * 8)
+        put('edge-id3-%d-%03d-early.bin' % (version, size), head + b'\0' * max(size - 1, 0) + frame + b'\0' * 8)
+        put('edge-id3-%d-%03d-late.bin' % (version, size), head + b'\0' * (size + 1) + frame + b'\0' * 8)
+for flags in (0, 0x10, 0x20, 0x40, 0x80, 0xf0):
+    put('edge-id3-flags-%02x.bin' % flags, b'ID3\x04\x00' + bytes([flags]) + b'\0\0\0\4' + b'\0' * 4 + bytes.fromhex('fffb9000') + b'\0' * 8)
+for bad in (0x80, 0xff):
+    for at in range(4):
+        size = bytearray(4)
+        size[at] = bad
+        put('edge-id3-size-%02x-%d.bin' % (bad, at), b'ID3\x04\x00\x00' + bytes(size) + b'\0' * 64)
+put('edge-id3-revision.bin', b'ID3\x04\x01\x00\0\0\0\4' + b'\0' * 4 + bytes.fromhex('fffb9000') + b'\0' * 8)
+for n in (9, 10, 11):
+    put('edge-id3-cut-%02d.bin' % n, (b'ID3\x04\x00\x00\0\0\0\0' + bytes.fromhex('fffb9000'))[:n])
+# ISO media atoms: the size field, the atom and the brand.
+for size in (0, 1, 7, 8, 9, 12, 20, 0x1000000):
+    for atom in (b'ftyp', b'moov', b'wide', b'mdat', b'free', b'skip'):
+        put('edge-iso-%s-%08x.bin' % (atom.decode(), size), struct.pack('>I', size) + atom + b'isom\0\0\2\0' + b'\0' * 16)
+for n in (7, 8, 11, 12):
+    put('edge-iso-cut-%02d.bin' % n, (struct.pack('>I', 20) + b'ftypisom' + b'\0' * 12)[:n])
+# Ogg: the first page's header fields and where its payload starts.
+good = b'OggS\x00\x02' + b'\x00' * 20 + b'\x01' + b'\x1e' + b'\x01vorbis' + b'\x00' * 24
+put('edge-ogg-good.bin', good)
+for at, value in ((4, 1), (5, 0), (5, 1), (5, 4), (5, 3), (26, 0), (26, 2), (27, 0), (28, 0x02), (28, 0x00)):
+    changed = bytearray(good)
+    changed[at] = value
+    put('edge-ogg-%d-%02x.bin' % (at, value), bytes(changed))
+for n in (5, 6, 26, 27, 28, 29, 35):
+    put('edge-ogg-cut-%02d.bin' % n, good[:n])
+put('edge-ogg-late.bin', good[:27] + b'\0' + good[27:])
+# EBML: where in the first 64 bytes the DocType sits.
+for n in (0, 8, 50, 52, 53, 54, 55, 56, 57, 58, 59, 60, 64):
+    put('edge-ebml-webm-%02d.bin' % n, bytes.fromhex('1a45dfa3') + b'\0' * n + b'\x42\x82\x84webm' + b'\0' * 80)
+    put('edge-ebml-mkv-%02d.bin' % n, bytes.fromhex('1a45dfa3') + b'\0' * n + b'\x42\x82\x88matroska' + b'\0' * 80)
+put('edge-ebml-split.bin', bytes.fromhex('1a45dfa3') + b'\x42\x82\x84web')
+# MPEG programs and sequences, ADTS and the like.
+for tag in (0xb2, 0xb3, 0xb4, 0xb9, 0xba, 0xbb, 0xbc, 0xe0, 0x00, 0x01):
+    put('edge-mpeg-ps-%02x.bin' % tag, bytes([0, 0, 1, tag]) + b'\0' * 16)
+for second in (0xf0, 0xf1, 0xf2, 0xf3, 0xf8, 0xf9, 0xfa, 0xe0, 0xe1):
+    put('edge-adts-%02x.bin' % second, bytes([0xff, second, 0x50, 0x80]) + b'\0' * 16)
+# FLV, RIFF, the ASF GUID, MIDI, FLAC at their lengths.
+for n in (3, 4, 5, 9):
+    put('edge-flv-%d.bin' % n, (b'FLV\x01\x05\0\0\0\x09' + b'\0' * 8)[:n])
+for version in (0, 2, 3):
+    put('edge-flv-v%d.bin' % version, b'FLV' + bytes([version]) + b'\x05\0\0\0\x09' + b'\0' * 8)
+for n in (4, 8, 11, 12):
+    put('edge-riff-%02d.bin' % n, (b'RIFF\x10\0\0\0WAVEfmt ' + b'\0' * 16)[:n])
+for n in (3, 4, 15, 16):
+    put('edge-asf-%02d.bin' % n, bytes.fromhex('3026b2758e66cf11a6d900aa0062ce6c')[:n])
+for n in (3, 4):
+    put('edge-midi-%d.bin' % n, b'MThd\0\0\0\6'[:n])
+    put('edge-flac-%d.bin' % n, b'fLaC\0\0\0\0'[:n])
+# RTF: the digit after the control word.
+for ch in (b'1', b'0', b'9', b'x', b' ', b''):
+    put('edge-rtf-%s.bin' % ch.hex(), b'{\\rtf' + ch + b'\\ansi hi}')
+put('edge-rtf-upper.bin', b'{\\RTF1 hi}')
+# PHP's tag and XCF: the case and what follows.
+for text in (b'<?php', b'<?PHP', b'<?Php', b'<?ph', b'<?phq', b'<?php\n', b'<? php'):
+    put('edge-php-%s.txt' % text.hex(), text + b' echo 1;\n')
+for text in (b'gimp xcf v003\0', b'gimp xcf file\0', b'gimp xcf ', b'gimp xcf', b'GIMP XCF v003\0'):
+    put('edge-xcf-%s.bin' % text.hex(), text + b'\0' * 20)
+for n in (50, 200, 500, 900, 1000, 1010, 1020, 1030, 1100, 2000, 5000):
+    put('edge-vtt-cue-%04d.txt' % n, b'WEBVTT\n\nNOTE ' + b'x' * n + b'\n\n00:00.000 --> 00:01.000\nHi\n')
+for i, cue in enumerate((b'00:00.000 --> 00:01.000', b'00:00:00.000 --> 00:00:01.000', b'0:0.0 --> 0:1.0', b'00:00.000-->00:01.000', b'a --> b', b'1 --> 2', b'00:00.000 --> 00:01.000 align:start', b'00:00 --> 00:01', b'00:00.000 --> 00:01', b'00:00 --> 00:01.000', b'00:00.000  --> 00:01.000', b'00:00.000 -->  00:01.000', b'00:00.000\t-->\t00:01.000', b'00:00:00:00.000 --> 00:01.000', b'000:00.000 --> 00:01.000', b'00:00.00 --> 00:01.00', b'00:00.0000 --> 00:01.0000', b'59:59.999 --> 99:99.999', b'00:60.000 --> 00:01.000')):
+    put('edge-vtt-timing-%02d.txt' % i, b'WEBVTT\n\n' + cue + b'\nHi\n')
+for n in tuple(range(240, 258)) + tuple(range(260, 520, 20)):
+    put('edge-vtt-window-%03d.txt' % n, b'WEBVTT\n\nNOTE ' + b'x' * (n - 14) + b'\n\n00:00.000 --> 00:01.000\nHi\n')
+for pre in (b'', b'\n', b' ', b'\xef\xbb\xbf'):
+    put('edge-vtt-before-%s.txt' % pre.hex(), pre + b'WEBVTT\n\n00:00.000 --> 00:01.000\nHi\n')
+for n in (1000, 1020, 1025, 1030):
+    put('edge-pdf-text-%04d.txt' % n, b'Some words of text. ' * (n // 20) + b'%PDF-1.4\n')

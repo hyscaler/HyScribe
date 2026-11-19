@@ -2,22 +2,18 @@
 
 //! The audio and video containers libmagic names by their first bytes.
 
-/// An MPEG audio frame header libmagic takes: version 1, 2 or 2.5, layer
-/// II or III, a bitrate that is neither free nor reserved, and a sampling
-/// rate that is not the reserved one.
+/// An MPEG audio frame header libmagic takes: its second byte names the
+/// version and layer, and for version 1 layer III (`FA` and `FB`) the
+/// bitrate is neither free nor reserved.
 fn mpeg_frame(b: &[u8]) -> bool {
     let (Some(&0xff), Some(second), Some(third)) = (b.first(), b.get(1), b.get(2)) else {
         return false;
     };
-    let layer = (second >> 1) & 3;
-    let version = (second >> 3) & 3;
-    let bitrate = third >> 4;
-    let rate = (third >> 2) & 3;
-    second & 0xe0 == 0xe0
-        && version != 1
-        && (layer == 1 || layer == 2)
-        && (1..=14).contains(&bitrate)
-        && rate != 3
+    match second {
+        0xe2 | 0xe3 | 0xf2..=0xf7 | 0xfc | 0xfd => true,
+        0xfa | 0xfb => (1..=14).contains(&(third >> 4)),
+        _ => false,
+    }
 }
 
 /// An ID3v2 tag, 2.2 to 2.4, with an MPEG audio frame right after it.

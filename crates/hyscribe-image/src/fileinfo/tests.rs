@@ -61,6 +61,14 @@ fn leaves_what_it_cannot_tell() {
     assert_eq!(finfo_candidates(&compressed), Err(Unported));
 }
 
+/// Text is read up to the limit libmagic reads, and no further.
+#[test]
+fn reads_text_up_to_the_limit() {
+    let words = b"Plain words. ".repeat(LIMIT / 13 + 1);
+    assert_eq!(finfo_candidates(&words[..LIMIT]), Ok(vec!["text/plain"]));
+    assert_eq!(finfo_candidates(&words[..LIMIT + 1]), Err(Unported));
+}
+
 /// What the golden holds that this reads, by file, for the types the
 /// default allowed list takes.
 #[test]

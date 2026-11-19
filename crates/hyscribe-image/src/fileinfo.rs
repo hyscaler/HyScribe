@@ -41,9 +41,9 @@ pub fn finfo_candidates(bytes: &[u8]) -> Result<Vec<&'static str>, Unported> {
     text::text(bytes).ok_or(Unported)
 }
 
-/// `%PDF-` within the first kilobyte, behind nothing but text.
+/// `%PDF-` starting within the first 1,025 bytes, behind nothing but text.
 fn pdf(bytes: &[u8]) -> bool {
-    let head = bytes.get(..bytes.len().min(1024)).unwrap_or_default();
+    let head = bytes.get(..bytes.len().min(1029)).unwrap_or_default();
     let Some(at) = head.windows(5).position(|w| w == b"%PDF-") else {
         return false;
     };
@@ -70,12 +70,24 @@ fn calendar(b: &[u8]) -> bool {
         .is_some_and(|r| r.starts_with(b"VERSION:2.0"))
 }
 
-/// A WebVTT file with a cue in its first kilobyte.
+/// Whether `at` starts a cue's timing: `00:00.000 --> `.
+fn timing(at: &[u8]) -> bool {
+    let digit = |i: usize| at.get(i).is_some_and(u8::is_ascii_digit);
+    [0, 1, 3, 4, 6, 7, 8].iter().all(|i| digit(*i))
+        && at.get(2) == Some(&b':')
+        && at.get(5) == Some(&b'.')
+        && at.get(9..14) == Some(b" --> ")
+}
+
+/// A WebVTT file with a cue's timing in the 256 bytes after its header,
+/// after a byte order mark at most.
 fn webvtt(b: &[u8]) -> bool {
-    let head = b.get(..b.len().min(1024)).unwrap_or_default();
-    let header = b.strip_prefix(b"WEBVTT");
-    header.is_some_and(|r| r.first().is_none_or(|c| b" \t\r\n".contains(c)))
-        && head.windows(3).any(|w| w == b"-->")
+    let b = b.strip_prefix(b"\xef\xbb\xbf").unwrap_or(b);
+    let Some(rest) = b.strip_prefix(b"WEBVTT") else {
+        return false;
+    };
+    let region = rest.get(..rest.len().min(256)).unwrap_or_default();
+    (0..region.len()).any(|at| timing(region.get(at..).unwrap_or_default()))
 }
 
 /// A `ustar` header whose checksum is right: the blocks `tar` writes.

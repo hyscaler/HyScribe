@@ -3,14 +3,15 @@
 //! An upload's type and name as WordPress makes them (MVP 6.2):
 //! `wp_check_filetype()`, `wp_check_filetype_and_ext()`,
 //! `sanitize_file_name()` and `wp_unique_filename()`. A type check PHP
-//! hands to `fileinfo` (any file not an image by its extension, and an
-//! image its header does not name as one WordPress maps) is [`Unported`].
+//! hands to `fileinfo` is [`crate::fileinfo`]'s, [`Unported`] where it
+//! cannot say for certain what libmagic answers.
 
 use std::sync::OnceLock;
 
 use hyscribe_phpser::json_decode;
 use hyscribe_render::formatting::{remove_accents, sanitize_title_for_query};
 
+use crate::fileinfo::finfo_candidates;
 use crate::header::image_mime;
 use crate::meta::Unported;
 
@@ -80,7 +81,42 @@ pub struct Checked {
     pub proper_filename: Option<String>,
 }
 
-/// `wp_check_filetype_and_ext( $file, $filename )` of the upload `bytes`.
+/// Whether `kind`, the type a file's extension gives, stands once
+/// `fileinfo` says the file is `real`: the vetting at the end of
+/// `wp_check_filetype_and_ext()`.
+fn stands(kind: &str, real: &str) -> bool {
+    let major = |mime: &str| mime.split('/').next().unwrap_or(mime).to_string();
+    let nonspecific = [
+        "application/octet-stream",
+        "application/encrypted",
+        "application/CDFV2-encrypted",
+        "application/zip",
+    ];
+    let one_of = |kinds: &[&str]| kinds.contains(&kind);
+    if nonspecific.contains(&real) {
+        ["application", "video", "audio"].contains(&major(kind).as_str())
+    } else if real.starts_with("video/") || real.starts_with("audio/") {
+        major(real) == major(kind)
+    } else {
+        match real {
+            "text/plain" => one_of(&[
+                "text/plain",
+                "text/csv",
+                "application/csv",
+                "text/richtext",
+                "text/tsv",
+                "text/vtt",
+            ]),
+            "application/csv" => one_of(&["text/csv", "text/plain", "application/csv"]),
+            "text/rtf" => one_of(&["text/rtf", "text/plain", "application/rtf"]),
+            _ => kind == real,
+        }
+    }
+}
+
+/// `wp_check_filetype_and_ext( $file, $filename )` of the upload `bytes`,
+/// `fileinfo` read by [`finfo_candidates`]: [`Unported`] where the types
+/// libmagic may give do not agree on the verdict.
 pub fn wp_check_filetype_and_ext(
     bytes: &[u8],
     filename: &str,
@@ -93,28 +129,39 @@ pub fn wp_check_filetype_and_ext(
     let Some((ext, kind)) = checked.ext_type.clone() else {
         return Ok(checked);
     };
-    if !kind.starts_with("image/") {
-        return Err(Unported);
-    }
-    let real = image_mime(bytes).ok_or(Unported)?;
-    if real == kind && !["heif", "heics", "heifs"].contains(&ext.as_str()) {
+    let real = image_mime(bytes).filter(|_| kind.starts_with("image/"));
+    if let Some(real) = real {
+        if real == kind && !["heif", "heics", "heifs"].contains(&ext.as_str()) {
+            return Ok(checked);
+        }
+        let ext = match real {
+            "image/jpeg" => "jpg",
+            "image/png" => "png",
+            "image/gif" => "gif",
+            "image/bmp" => "bmp",
+            "image/tiff" => "tif",
+            "image/webp" => "webp",
+            "image/avif" => "avif",
+            _ => "heic",
+        };
+        let stem = filename.rsplit_once('.').map_or(filename, |(stem, _)| stem);
+        let renamed = format!("{stem}.{ext}");
+        checked.ext_type = wp_check_filetype(&renamed, unfiltered_html);
+        checked.proper_filename = (renamed != filename).then_some(renamed);
         return Ok(checked);
     }
-    let ext = match real {
-        "image/jpeg" => "jpg",
-        "image/png" => "png",
-        "image/gif" => "gif",
-        "image/bmp" => "bmp",
-        "image/tiff" => "tif",
-        "image/webp" => "webp",
-        "image/avif" => "avif",
-        _ => "heic",
-    };
-    let stem = filename.rsplit_once('.').map_or(filename, |(stem, _)| stem);
-    let renamed = format!("{stem}.{ext}");
-    checked.ext_type = wp_check_filetype(&renamed, unfiltered_html);
-    checked.proper_filename = (renamed != filename).then_some(renamed);
-    Ok(checked)
+    let verdicts: Vec<bool> = finfo_candidates(bytes)?
+        .into_iter()
+        .map(|real| stands(kind, real))
+        .collect();
+    if verdicts.iter().all(|stands| *stands) {
+        Ok(checked)
+    } else if verdicts.iter().all(|stands| !stands) {
+        checked.ext_type = None;
+        Ok(checked)
+    } else {
+        Err(Unported)
+    }
 }
 
 /// The characters `sanitize_file_name()` removes.

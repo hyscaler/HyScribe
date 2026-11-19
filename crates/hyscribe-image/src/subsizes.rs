@@ -8,11 +8,12 @@
 //! keeps its width and height and gets no sizes, as PHP keeps an image its
 //! editor fails on.
 
-use hyscribe_phpser::{Key, Value};
+use hyscribe_phpser::{Key, Value, lookup};
 use hyscribe_render::attachment::constrain_dimensions;
 
 use crate::codec::{Error, Limits};
 use crate::editor::{Editor, Saved};
+use crate::getid3::{wp_read_audio_metadata, wp_read_video_metadata};
 use crate::header::{ImageType, getimagesize};
 use crate::hooks::Hooks;
 use crate::meta::{Unported, wp_read_image_metadata};
@@ -328,7 +329,32 @@ pub fn wp_generate_attachment_metadata(
         size,
         mime == "image/heic" || (mime.starts_with("image/") && displayable),
     ) else {
-        let meta = Value::Array(vec![(key("filesize"), int(upload.bytes.len() as i64))]);
+        // A video's or audio file's, which getID3 reads, then the size where
+        // it gives none.
+        let format = |entries: &[(Key, Value)]| {
+            lookup(entries, "fileformat")
+                .map(|v| String::from_utf8_lossy(&v.to_php_string()).into_owned())
+        };
+        let filtered = if mime.starts_with("video/") {
+            let read = wp_read_video_metadata(upload.bytes)?;
+            let file_format = format(&read);
+            hooks.wp_read_video_metadata(Value::Array(read), file_format.as_deref())
+        } else if mime.starts_with("audio/") {
+            let read = wp_read_audio_metadata(upload.bytes)?;
+            let file_format = format(&read);
+            hooks.wp_read_audio_metadata(Value::Array(read), file_format.as_deref())
+        } else {
+            Value::Array(Vec::new())
+        };
+        // A filter that gives anything else leaves no metadata, as PHP does.
+        let mut entries = match filtered {
+            Value::Array(entries) => entries,
+            _ => Vec::new(),
+        };
+        if lookup(&entries, "filesize").is_none() {
+            entries.push((key("filesize"), int(upload.bytes.len() as i64)));
+        }
+        let meta = Value::Array(entries);
         let meta = hooks.wp_generate_attachment_metadata(meta, upload.attachment, "create");
         return Ok(Generated {
             meta,

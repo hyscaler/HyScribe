@@ -8,6 +8,7 @@
 //! makes the sizes.
 
 use hyscribe_db::{DbError, Meta, Write, Writer};
+use hyscribe_image::getid3::{wp_read_audio_metadata, wp_read_video_metadata};
 use hyscribe_image::header::getimagesize;
 use hyscribe_image::meta::wp_read_image_metadata;
 use hyscribe_image::subsizes::Generated;
@@ -54,8 +55,22 @@ type ImageMeta = Option<Vec<(Key, Value)>>;
 
 /// `wp_read_image_metadata( $file )` of an image upload, as the attachment
 /// reads it before it is inserted: `None` for what is not an image, 501
-/// for EXIF and XMP PHP would read in ways not ported.
+/// for EXIF and XMP PHP would read in ways not ported, for a PDF, whose
+/// preview PHP makes with Ghostscript, and for audio and video getID3 reads
+/// in ways not ported. The audio and video ported have no tags, so the
+/// attachment's title and text are the name's.
 fn image_meta(site: &Site, handled: &Handled) -> Result<ImageMeta, Refused> {
+    let kind = handled.mime.as_str();
+    let media = if kind.starts_with("video/") {
+        Some(wp_read_video_metadata(&handled.bytes))
+    } else if kind.starts_with("audio/") {
+        Some(wp_read_audio_metadata(&handled.bytes))
+    } else {
+        None
+    };
+    if kind == "application/pdf" || media.is_some_and(|read| read.is_err()) {
+        return Err(Refused::Unported);
+    }
     let size = getimagesize(&handled.bytes).filter(|_| handled.mime.starts_with("image/"));
     let host = hyscribe_render::link::host(site.raw_option("siteurl"));
     size.map(|size| wp_read_image_metadata(&handled.bytes, &size, &host))
@@ -112,9 +127,16 @@ impl Uploads {
         let stem = dot.and_then(|at| base.get(..at)).unwrap_or(&base);
         let [title, caption, alt] = image_fields(meta.as_deref());
         let title = title.unwrap_or_else(|| sanitize_text_field(stem));
+        // An audio file's text is its title, as no tag is read here.
+        let audio = handled.mime.starts_with("audio");
+        let content = match audio && !title.is_empty() {
+            true => [b"\"".as_slice(), title.as_slice(), b"\".".as_slice()].concat(),
+            false => Vec::new(),
+        };
         // wp_insert_post() unslashes what media_handle_upload() gives it.
         let args = PostArgs {
             title: stripslashes(&title),
+            content: stripslashes(&content),
             excerpt: stripslashes(&caption.unwrap_or_default()),
             parent: post_id,
             ..PostArgs::default()

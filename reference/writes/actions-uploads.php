@@ -144,4 +144,35 @@ return array(
 		)
 	),
 	'upload-rest-form-name' => $uploads_case( $uploads_rest( 'small.jpg', 'small.jpg', array(), true ) ),
+	// Files that are not images: their rows hold the file size alone.
+	'upload-async-text'     => $uploads_case( $uploads_handle( 'plain.txt', 'plain.txt' ) ),
+	'upload-async-csv'      => $uploads_case( $uploads_handle( 'words.csv', 'words.csv', 1 ) ),
+	'upload-async-vtt'      => $uploads_case( $uploads_handle( 'captions.vtt', 'captions.vtt' ) ),
+	'upload-async-docx'     => $uploads_case( $uploads_handle( 'sample.docx', 'sample.docx' ) ),
+	'upload-async-odt'      => $uploads_case( $uploads_handle( 'sample.odt', 'My Notes (1).odt' ) ),
+	'upload-async-zip'      => $uploads_case( $uploads_handle( 'sample.zip', 'sample.docx' ) ),
+	'upload-async-rtf'      => $uploads_case( $uploads_handle( 'sample.rtf', 'sample.rtf' ) ),
+	'upload-async-text-again' => $uploads_case( $uploads_handle( 'plain.txt', 'plain.txt' ), $uploads_handle( 'plain.txt', 'plain.txt' ) ),
+	'upload-rest-raw-text'  => $uploads_case(
+		$uploads_rest(
+			'plain.txt',
+			'plain.txt',
+			array(
+				'title'       => 'Notes',
+				'alt_text'    => 'An alt',
+				'caption'     => 'A caption',
+				'description' => 'Described',
+				'post'        => 1,
+			),
+			false
+		)
+	),
+	'upload-rest-form-docx' => $uploads_case( $uploads_rest( 'sample.docx', 'sample.docx', array( 'title' => 'A form document' ), true ) ),
+	'upload-rest-raw-xlsx'  => $uploads_case( $uploads_rest( 'sample.xlsx', 'sample.xlsx', array(), false ) ),
+	// Audio and video getID3 reads: a WAVE file's metadata, and the size and
+	// type alone of a format WordPress's getID3 has no module for.
+	'upload-async-wav'      => $uploads_case( $uploads_handle( 'tone.wav', 'tone.wav' ) ),
+	'upload-async-aac'      => $uploads_case( $uploads_handle( 'tone.aac', 'tone.aac', 1 ) ),
+	'upload-rest-raw-wav'   => $uploads_case( $uploads_rest( 'tone.wav', 'tone.wav', array( 'title' => 'A tone', 'post' => 1 ), false ) ),
+	'upload-rest-form-aac'  => $uploads_case( $uploads_rest( 'tone.aac', 'tone.aac', array(), true ) ),
 );

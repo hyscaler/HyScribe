@@ -51,6 +51,19 @@ pub trait Hooks: Sync {
         file
     }
 
+    /// `wp_read_audio_metadata`: the metadata read from an audio file and
+    /// the file format getID3 names (`None` for none); getID3's raw data
+    /// is not given.
+    fn wp_read_audio_metadata(&self, meta: Value, _file_format: Option<&str>) -> Value {
+        meta
+    }
+
+    /// `wp_read_video_metadata`, as [`Hooks::wp_read_audio_metadata`] for
+    /// a video file.
+    fn wp_read_video_metadata(&self, meta: Value, _file_format: Option<&str>) -> Value {
+        meta
+    }
+
     /// `wp_generate_attachment_metadata`: the metadata, the attachment
     /// and the context, `create`.
     fn wp_generate_attachment_metadata(

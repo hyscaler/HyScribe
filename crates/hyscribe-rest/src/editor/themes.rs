@@ -138,7 +138,7 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
 }
 
 /// Whether the bundled theme is the site's.
-fn bundled(context: &Context) -> bool {
+pub(super) fn bundled(context: &Context) -> bool {
     context.option("stylesheet").as_deref() == Some(STYLESHEET.as_bytes())
 }
 

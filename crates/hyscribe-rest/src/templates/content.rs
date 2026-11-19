@@ -84,7 +84,7 @@ pub(crate) fn in_parent(content: &[u8], parent: &[u8], theme: &[u8]) -> Vec<u8> 
 
 /// A theme pattern: its title, content, and its description and
 /// categories where it has them.
-fn pattern(slug: &[u8]) -> Option<&'static Value> {
+pub(crate) fn pattern(slug: &[u8]) -> Option<&'static Value> {
     static DATA: OnceLock<Value> = OnceLock::new();
     let data = DATA.get_or_init(|| json_decode(PATTERNS).unwrap_or_default());
     data.get(&Key::String(slug.to_vec()))

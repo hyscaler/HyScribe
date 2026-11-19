@@ -24,6 +24,7 @@ pub use core_blocks::{
 };
 pub mod date;
 mod dimensions;
+pub mod duotone;
 mod elements;
 mod embed;
 mod excerpt;

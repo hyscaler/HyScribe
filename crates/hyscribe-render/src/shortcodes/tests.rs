@@ -140,7 +140,7 @@ fn shortcodes_match_php() {
         let id: u64 = fields[1].parse().unwrap();
         renderer.context.post_id = (id != 0).then_some(id);
         let content = unhex(fields[2]);
-        let ours = renderer.content_filtered(&content);
+        let ours = renderer.the_content_filters(&content);
         cases += 1;
         if sha256(&ours) != fields[3] {
             failures.push(format!("{id} {}", String::from_utf8_lossy(&content)));
@@ -277,7 +277,7 @@ fn filtered(hooks: &dyn Hooks, id: u64, content: &str) -> String {
     let request = Request::default();
     let mut renderer = Renderer::new(&theme, &site, &request);
     renderer.context.post_id = Some(id);
-    let out = renderer.content_filtered(content.as_bytes());
+    let out = renderer.the_content_filters(content.as_bytes());
     String::from_utf8(out).unwrap().trim().to_string()
 }
 
@@ -391,7 +391,7 @@ fn an_attachment_without_a_file_makes_no_player() {
     let mut renderer = Renderer::new(&theme, &Bare, &request);
     renderer.context.post_id = Some(1);
     for tag in ["audio", "video"] {
-        let out = renderer.content_filtered(format!("[{tag}]").as_bytes());
+        let out = renderer.the_content_filters(format!("[{tag}]").as_bytes());
         assert_eq!(out.trim_ascii(), b"");
     }
 }

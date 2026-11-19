@@ -46,6 +46,7 @@ use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 
 mod admin;
+mod attachment_page;
 mod canonical;
 mod comment_post;
 mod feed;
@@ -491,6 +492,23 @@ impl Site {
                 .collect()
         })
         .await
+    }
+
+    /// What `read` gives on a blocking thread, whatever the permalinks, or
+    /// the first database error a read met; `lost` if the task is lost.
+    async fn read_through<T: Send + 'static>(
+        self: &Arc<Self>,
+        lost: T,
+        read: impl FnOnce(&Reads) -> T + Send + 'static,
+    ) -> Result<T, DbError> {
+        let site = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            let reads = Reads::new(&site, tokio::runtime::Handle::current());
+            let value = read(&reads);
+            reads.finish().map(|()| value)
+        })
+        .await
+        .unwrap_or(Ok(lost))
     }
 
     /// `read`'s result under pretty permalinks, or `plain` without them or
@@ -1171,7 +1189,7 @@ fn preview(
     outcome: Outcome,
 ) -> ControlFlow<Outcome, Outcome> {
     let set = php_set(get, "preview");
-    let asked = ["p", "page_id"]
+    let asked = ["p", "page_id", "attachment_id", "subpost_id"]
         .iter()
         .any(|k| query.get(*k).is_some_and(|v| absint(v) > 0));
     let shown = |page: &Page| set && !page.request.not_found && !(asked && page.request.singular);
@@ -1677,12 +1695,19 @@ async fn route(
         .iter()
         .all(|k| !query.contains_key(*k));
     if alone && attachment > 0 {
+        let post = site.db.post(attachment).await?;
+        if let Some(post) = post.filter(|p| p.post_type == "attachment") {
+            return attachment_page::outcome(site, post, raw_query, true).await;
+        }
         return redirect_to(site, attachment, raw_query, not_found(site, false)).await;
     }
     let single = match single_post(query) {
         Some(single) => Some(single),
         None => match by_slug(site, raw_query, query).await? {
             Some(Slug::Moved(location)) => return Ok(Outcome::Redirect(location)),
+            Some(Slug::Attachment(post, asked)) => {
+                return attachment_page::outcome(site, *post, raw_query, asked).await;
+            }
             Some(Slug::Post(single)) => Some(single),
             None => None,
         },
@@ -2014,13 +2039,29 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
         ]
     } else {
         let kind = &post.post_type;
-        vec![
+        let mut candidates = Vec::new();
+        if kind == "attachment" {
+            // `get_attachment_template()`, whose names no block theme has.
+            let (kind, subtype) = post
+                .mime_type
+                .split_once('/')
+                .unwrap_or((&post.mime_type, ""));
+            if !subtype.is_empty() {
+                candidates.push(format!("{kind}-{subtype}"));
+                candidates.push(subtype.to_string());
+            }
+            candidates.push(kind.to_string());
+            candidates.push("attachment".into());
+        }
+        let kind = &post.post_type;
+        candidates.extend([
             format!("single-{kind}-{name}"),
             format!("single-{kind}"),
             "single".into(),
             "singular".into(),
             "index".into(),
-        ]
+        ]);
+        candidates
     };
     let policy = site.option("wp_page_for_privacy_policy");
     if is_privacy_policy(policy.as_bytes(), &post) {
@@ -2514,6 +2555,8 @@ fn queryable_post_type(query: &HashMap<String, String>) -> Option<&str> {
 enum Slug {
     /// The post found, as `(query var, ID, post type)`, ID 0 when none is.
     Post((&'static str, u64, &'static str)),
+    /// The attachment found, and whether the query asked for an attachment.
+    Attachment(Box<Post>, bool),
     /// Where `redirect_guess_404_permalink()` sends a miss.
     Moved(String),
 }
@@ -2531,14 +2574,13 @@ async fn by_slug(
     let queryable = queryable_post_type(query);
     let (key, post_type, found, name) = if let Some(name) = var("name") {
         let name = sanitize_title_for_query(name.as_bytes());
-        // Attachment pages are not served yet: none is found.
         let post = async {
+            let name = String::from_utf8_lossy(&name);
             match queryable {
-                Some("attachment") => Ok(None),
-                _ => {
-                    let name = String::from_utf8_lossy(&name);
-                    narrowed(site, query, site.db.post_by_name(&name).await?).await
+                Some("attachment") => {
+                    narrowed(site, query, site.db.attachment_by_name(&name).await?).await
                 }
+                _ => narrowed(site, query, site.db.post_by_name(&name).await?).await,
             }
         };
         ("name", "post", post.await?, name)
@@ -2563,9 +2605,13 @@ async fn by_slug(
         .iter()
         .find_map(|k| query.get(*k).filter(|v| !v.is_empty()))
     {
-        // get_posts() names the query after the attachment; none is served.
+        // get_posts() names the query after the attachment.
         let name = sanitize_title_for_query(&hyscribe_phpser::wp_basename(attachment.as_bytes()));
-        ("attachment", "attachment", None, name)
+        let post = async {
+            let name = String::from_utf8_lossy(&name);
+            narrowed(site, query, site.db.attachment_by_name(&name).await?).await
+        };
+        ("attachment", "attachment", post.await?, name)
     } else {
         return Ok(None);
     };
@@ -2574,6 +2620,9 @@ async fn by_slug(
     let feed = query.get("feed").is_some_and(|f| !f.is_empty());
     let feed_404 = feed && asks_404(query);
     if let Some(post) = found.filter(|_| !feed_404) {
+        if post.post_type == "attachment" {
+            return Ok(Some(Slug::Attachment(Box::new(post), key == "attachment")));
+        }
         return Ok(Some(Slug::Post((key, post.id, post_type))));
     }
     let post_types = queryable.map_or(vec!["post", "page", "attachment"], |t| vec![t]);
@@ -2761,11 +2810,17 @@ fn singular_args_but(name: &str) -> Vec<&'static str> {
 /// `drop` and `preview` removed, the rest parsed and encoded again, those
 /// `link` has taking its values in place, the others after it.
 fn tack(link: &str, raw_query: Option<&str>, drop: &[&str]) -> String {
-    // A `name` goes unless empty or in the link, where a plain permalink
-    // never has one.
-    let named = parse_str(raw_query.unwrap_or_default().as_bytes())
-        .get_str("name")
-        .is_some_and(|name| !name.is_empty());
+    tack_with(link, raw_query, drop, true)
+}
+
+/// [`tack`], where a `name` goes only with `unset_name`: unless empty or in
+/// the link, where a plain permalink never has one. A link with no query
+/// at all, a file's, keeps it.
+fn tack_with(link: &str, raw_query: Option<&str>, drop: &[&str], unset_name: bool) -> String {
+    let named = unset_name
+        && parse_str(raw_query.unwrap_or_default().as_bytes())
+            .get_str("name")
+            .is_some_and(|name| !name.is_empty());
     let drop: Vec<&[u8]> = drop
         .iter()
         .chain(&["preview"])

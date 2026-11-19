@@ -12,6 +12,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/2026/10/27/hello-world/feed
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/2026/10/27/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
@@ -77,6 +79,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/2026/10/hello-world/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/2026/10/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
@@ -142,6 +146,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/hello-world/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
@@ -207,6 +213,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/hello-world/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
@@ -272,6 +280,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/archives/1/feed
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/archives/1/feed/atom
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/archives/category/uncategorized
 term_link tag	http://127.0.0.1:8081/archives/tag/a-tag
 term_link format	http://127.0.0.1:8081/archives/type/aside
@@ -337,6 +347,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/index.php/2026/10/27/hello-
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/index.php/2026/10/27/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/index.php/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/index.php/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/index.php/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/index.php/tag/a-tag/
 term_link format	http://127.0.0.1:8081/index.php/type/aside/
@@ -402,6 +414,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/index.php/hello-world/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/index.php/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/index.php/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/index.php/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/index.php/topics/uncategorized/
 term_link tag	http://127.0.0.1:8081/index.php/tag/a-tag/
 term_link format	http://127.0.0.1:8081/index.php/type/aside/
@@ -467,6 +481,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/uncategorized/hello-world/f
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/uncategorized/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
@@ -532,6 +548,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/admin/hello-world/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/admin/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
@@ -597,6 +615,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/blog/hello-world/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/blog/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/topics/uncategorized/
 term_link tag	http://127.0.0.1:8081/labels/a-tag/
 term_link format	http://127.0.0.1:8081/blog/type/aside/
@@ -662,6 +682,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/blog/2026/hello-world.html/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/blog/2026/hello-world.html/feed/atom
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/sections//uncategorized
 term_link tag	http://127.0.0.1:8081/tags/a-tag
 term_link format	http://127.0.0.1:8081/blog/type/aside
@@ -727,6 +749,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/1/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/1/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
@@ -792,6 +816,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/27/10/2026/hello-world/feed
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/27/10/2026/hello-world/feed/atom
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized
 term_link tag	http://127.0.0.1:8081/tag/a-tag
 term_link format	http://127.0.0.1:8081/type/aside
@@ -857,6 +883,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/10/27/2026/1/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/10/27/2026/1/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
@@ -922,6 +950,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/2026/10/27/08/08/15/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/2026/10/27/08/08/15/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
@@ -987,6 +1017,8 @@ post_comments_feed_link post 1	http://127.0.0.1:8081/hello-world/feed/
 post_comments_feed_link post 1 atom	http://127.0.0.1:8081/hello-world/feed/atom/
 post_comments_feed_link page 2	http://127.0.0.1:8081/sample-page/feed/
 post_comments_feed_link page 2 rss2	http://127.0.0.1:8081/sample-page/feed/
+post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=13
+post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
 term_link format	http://127.0.0.1:8081/type/aside/

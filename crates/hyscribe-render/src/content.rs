@@ -44,7 +44,7 @@ impl Renderer<'_> {
         if contains(&post.content, b"<!-- wp:nextpage ") {
             content.extend(wp_link_pages(self, &post));
         }
-        let content = self.content_filtered(&content);
+        let content = self.content_filtered(&post, &content);
         self.open_posts.pop();
         if is_empty_string(&content) {
             return Vec::new();
@@ -82,11 +82,21 @@ impl Renderer<'_> {
     /// escape between them.
     pub(crate) fn the_content(&mut self, post: &Post) -> Vec<u8> {
         let content = get_the_content(self, post, true);
-        self.content_filtered(&content)
+        self.content_filtered(post, &content)
+    }
+
+    /// The `the_content` filters on the content of `post`, the global post,
+    /// `]]>` escaped first.
+    fn content_filtered(&mut self, post: &Post, content: &[u8]) -> Vec<u8> {
+        let global = (post.post_type == "attachment").then(|| post.clone());
+        let outer = std::mem::replace(&mut self.attachment, global);
+        let filtered = self.the_content_filters(content);
+        self.attachment = outer;
+        filtered
     }
 
     /// The `the_content` filters on `content`, `]]>` escaped first.
-    pub(crate) fn content_filtered(&mut self, content: &[u8]) -> Vec<u8> {
+    pub(crate) fn the_content_filters(&mut self, content: &[u8]) -> Vec<u8> {
         let content = replace(content, b"]]>", b"]]&gt;");
         // `WP_Embed::autoembed()` runs before `do_blocks()`.
         let content = self.autoembed(&content);

@@ -241,6 +241,10 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
     if request.is_paged() {
         push(b"paged");
     }
+    let attachment = singular.filter(|_| request.attachment);
+    if attachment.is_some() {
+        push(b"attachment");
+    }
     if request.not_found {
         push(b"error404");
     }
@@ -276,7 +280,11 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
             if kind == "post" {
                 push(&[b"single-format-", &post_format(site, post.id)[..]].concat());
             }
-        } else {
+        }
+        if attachment.is_some() {
+            push(format!("attachmentid-{}", post.id).as_bytes());
+            push(format!("attachment-{}", mime_class(&post.mime_type)).as_bytes());
+        } else if kind == "page" {
             push(b"page");
             push(format!("page-id-{}", post.id).as_bytes());
             // get_pages( array( 'parent' => $page_id, 'number' => 1 ) )
@@ -352,6 +360,23 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
         }
     }
     unique.join(&b' ')
+}
+
+/// The mime type without the `application/`, `image/`, `text/`, `audio/`,
+/// `video/` or `music/` prefix that `get_body_class()` takes off it.
+fn mime_class(mime: &str) -> String {
+    let mut class = mime.to_string();
+    for prefix in [
+        "application/",
+        "image/",
+        "text/",
+        "audio/",
+        "video/",
+        "music/",
+    ] {
+        class = class.replace(prefix, "");
+    }
+    class
 }
 
 #[cfg(test)]

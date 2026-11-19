@@ -28,7 +28,6 @@ wp_attachment_pages_enabled=1	/?attachment_id=821	attachment-pages
 	/?m=20100909	rand
 	/?m=20181101	rss
 	/?m=20230113	loading,rss
-	/?s=image	loading
 	/?s=post+format	rand
 	/?s=a	rand,rss
 	/?s=a&paged=2	rss

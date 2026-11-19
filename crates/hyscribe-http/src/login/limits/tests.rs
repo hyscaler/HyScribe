@@ -307,16 +307,17 @@ fn the_registration_counts_stay_bounded() {
         limiter.registered(Some(IpAddr::V4(Ipv4Addr::from(n + 0x0100_0000))), T);
     }
     assert!(limiter.state().registered.len() <= TRACKED);
-    // A full map drops the spent entries first.
+    // A full map drops the spent entries first, however their ages differ.
     let fresh = self::limiter();
     for n in 1..TRACKED as u32 {
-        fresh.registered(Some(IpAddr::V4(Ipv4Addr::from(n + 0x0100_0000))), T);
+        let at = T + i64::from(n / 64);
+        fresh.registered(Some(IpAddr::V4(Ipv4Addr::from(n + 0x0100_0000))), at);
     }
     // One address created an account a second before the sweep.
-    let recent = T + REGISTRATION_WINDOW - 1;
-    fresh.registered(ip("198.51.100.1"), recent);
+    let later = T + REGISTRATION_WINDOW + 2000;
+    fresh.registered(ip("198.51.100.1"), later - 1);
     assert_eq!(fresh.state().registered.len(), TRACKED);
-    fresh.registered(ip("192.0.2.1"), T + REGISTRATION_WINDOW);
+    fresh.registered(ip("192.0.2.1"), later);
     let state = fresh.state();
     assert_eq!(state.registered.len(), 2);
     assert!(state.registered.contains_key(&network(ip("198.51.100.1"))));

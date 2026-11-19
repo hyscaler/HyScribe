@@ -467,6 +467,30 @@ async fn a_themes_read_creates_the_styles_post_as_php() {
     report.unwrap();
 }
 
+/// An attachment's delete planned while it was there and acted once it is
+/// gone is refused as PHP's `wp_delete_post()` returning false is.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_media_delete_of_a_gone_attachment_is_refused() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(include_str!(
+        "../../../../../reference/rest/media-writes.sql"
+    ))
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let target = "/?rest_route=/wp/v2/media/9301&force=true";
+    let pending = planned(&site, "DELETE", target, "").await;
+    // The fixture database has no such attachment.
+    let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+    let fixture = Writer::open(&fixture_database(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome =
+        crate::rest::writes::act(fixture.begin().await, &pending.plan, &ctx, outbox()).await;
+    assert_eq!(outcome.unwrap(), Outcome::Refused("rest_cannot_delete"));
+}
+
 /// The status and body of the administrator's `method target` sent to
 /// `site` with their cookie.
 async fn as_administrator(site: &Arc<Site>, method: &str, target: &str) -> (StatusCode, String) {

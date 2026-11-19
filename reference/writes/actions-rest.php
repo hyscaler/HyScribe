@@ -54,6 +54,19 @@ $note_write = function ( $method, $route, $body, $query = array() ) use ( $rest_
 	);
 };
 
+// The administrator's stored persisted preferences, as
+// reference/rest/user-preferences.sql stores them.
+$stored_preferences = function () {
+	update_user_meta(
+		1,
+		'wp_persisted_preferences',
+		array(
+			'core'      => array( 'editorMode' => 'visual' ),
+			'_modified' => '2026-11-18T10:00:00.000Z',
+		)
+	);
+};
+
 $paragraph = fn( $text ) => "<!-- wp:paragraph -->\n<p>$text</p>\n<!-- /wp:paragraph -->";
 
 return array(
@@ -419,6 +432,46 @@ return array(
 					'reassign' => '1',
 				)
 			);
+		},
+	),
+	'rest-users-preferences'    => array(
+		'action' => function () use ( $rest_send ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/users/me',
+				array(
+					'meta' => array(
+						'persisted_preferences' => array(
+							'note'      => "it's \"q\" \\ \u{e9} <b>",
+							'core'      => array( 'editorMode' => 'visual' ),
+							'_modified' => '2026-11-19T09:30:00.123Z',
+						),
+					),
+				)
+			);
+		},
+	),
+	'rest-users-preferences-update' => array(
+		'setup'  => $stored_preferences,
+		'action' => function () use ( $rest_send ) {
+			$rest_send(
+				'POST',
+				'/wp/v2/users/me',
+				array(
+					'meta' => array(
+						'persisted_preferences' => array(
+							'core'      => array( 'editorMode' => 'text' ),
+							'_modified' => '2026-11-19T04:17:00.000Z',
+						),
+					),
+				)
+			);
+		},
+	),
+	'rest-users-preferences-reset' => array(
+		'setup'  => $stored_preferences,
+		'action' => function () use ( $rest_send ) {
+			$rest_send( 'POST', '/wp/v2/users/me', array( 'meta' => array( 'persisted_preferences' => null ) ) );
 		},
 	),
 	'rest-blocks-create-unsynced'     => array(

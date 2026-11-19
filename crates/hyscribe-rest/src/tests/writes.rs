@@ -36,6 +36,7 @@ struct Changed {
     oracle: Oracle,
     options: Vec<(&'static str, &'static [u8])>,
     meta: Vec<(u64, &'static str, &'static [u8])>,
+    usermeta: Vec<(u64, &'static str, &'static [u8])>,
     posts: Vec<Post>,
     trash: bool,
     media_trash: bool,
@@ -102,7 +103,14 @@ impl Site for Changed {
         self.oracle.count_users(query)
     }
     fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
-        self.oracle.user_meta(id, key)
+        let changed = self
+            .usermeta
+            .iter()
+            .find(|(user, name, _)| *user == id && *name == key);
+        changed.map_or_else(
+            || self.oracle.user_meta(id, key),
+            |(_, _, value)| Some(value.to_vec()),
+        )
     }
     fn user_registered(&self, id: u64) -> String {
         self.oracle.user_registered(id)
@@ -155,6 +163,7 @@ fn changed(options: Vec<(&'static str, &'static [u8])>, posts: Vec<Post>) -> Cha
         oracle: oracle("administrator", &[]),
         options,
         meta: Vec::new(),
+        usermeta: Vec::new(),
         posts,
         trash: true,
         media_trash: false,
@@ -1534,4 +1543,116 @@ fn themes_reads_plan_the_global_styles_post() {
     ] {
         assert!(planned(target).is_none(), "{target}");
     }
+}
+
+/// The preferences `body` (JSON) is saved as, with what `stored` holds, and
+/// the answer once written: `update_value()`'s plan and error.
+fn preferences(
+    stored: Option<&'static [u8]>,
+    target: (&'static str, &str),
+    body: &str,
+) -> (Option<Preferences>, Served) {
+    let site = Changed {
+        usermeta: stored
+            .map(|value| (1, "wp_persisted_preferences", value))
+            .into_iter()
+            .collect(),
+        ..changed(Vec::new(), Vec::new())
+    };
+    let asked = Asked::new("administrator", target.0, target.1, body);
+    let (plan, served) = on(&site, &asked, Outcome::Written(1));
+    let Some(Write::User(save)) = plan.map(|plan| plan.write) else {
+        panic!("not planned");
+    };
+    assert_eq!(save.meta_error.is_some(), served.status >= 400, "{body}");
+    (save.preferences, served)
+}
+
+/// The persisted preferences of the `meta` are written as
+/// `update_value()` writes them: the new value, nothing for what the row
+/// holds already, a delete for `null`.
+#[test]
+fn preferences_are_planned_as_update_value_writes_them() {
+    let me = ("POST", "/wp/v2/users/me");
+    let key = || "wp_persisted_preferences".to_string();
+    let json = |text: &str| hyscribe_phpser::json_decode(text.as_bytes());
+    let given = |value: &str| format!(r#"{{"meta":{{"persisted_preferences":{value}}}}}"#);
+    let stored: &[u8] = br#"a:1:{s:1:"a";i:1;}"#;
+    let set = |value| Some(Preferences { key: key(), value });
+    assert_eq!(
+        preferences(None, me, &given(r#"{"a":1}"#)).0,
+        set(json(r#"{"a":1}"#))
+    );
+    assert_eq!(preferences(Some(stored), me, &given(r#"{"a":1}"#)).0, None);
+    // An array is the same only in its order and types.
+    for other in [r#"{"a":"1"}"#, r#"{"b":2,"a":1}"#, "[]"] {
+        let planned = preferences(Some(stored), me, &given(other)).0;
+        assert_eq!(planned, set(json(other)), "{other}");
+    }
+    for body in ["{}", r#"{"meta":{"other":1}}"#, r#"{"meta":{}}"#] {
+        assert_eq!(preferences(Some(stored), me, body).0, None, "{body}");
+    }
+    // The administrator's user 1, by `me` and by its ID.
+    let by_id = ("POST", "/wp/v2/users/1");
+    assert_eq!(preferences(None, by_id, &given("null")).0, None);
+    assert_eq!(preferences(Some(stored), me, &given("null")).0, set(None));
+    assert_eq!(
+        preferences(Some(stored), by_id, &given("null")).0,
+        set(None)
+    );
+}
+
+/// What PHP answers where `update_value()` refuses a value, once the user
+/// is written: `add_data()` keeps the validation's data as additional.
+#[test]
+fn refused_preferences_are_answered_as_php_answers_them() {
+    let me = ("POST", "/wp/v2/users/me");
+    let given = |value: &str| format!(r#"{{"meta":{{"persisted_preferences":{value}}}}}"#);
+    let answer = |stored, value: &str| {
+        let (write, served) = preferences(stored, me, &given(value));
+        assert_eq!(write, None, "{value}");
+        (
+            served.status,
+            String::from_utf8_lossy(&served.body).into_owned(),
+        )
+    };
+    let type_error = |param: &str, ty: &str| {
+        format!(
+            r#"{{"code":"rest_invalid_type","message":"{param} is not of type {ty}.","data":{{"status":400}},"additional_data":[{{"param":"{param}"}}]}}"#
+        )
+    };
+    assert_eq!(
+        answer(None, r#""x""#),
+        (400, type_error("meta.persisted_preferences", "object"))
+    );
+    assert_eq!(
+        answer(None, r#"{"_modified":5}"#),
+        (
+            400,
+            type_error("meta.persisted_preferences[_modified]", "string")
+        )
+    );
+    let date = r#"{"code":"rest_invalid_date","message":"Invalid date.","data":{"status":400}}"#;
+    assert_eq!(answer(None, r#"{"_modified":"nope"}"#), (400, date.into()));
+    // A stored value the schema refuses cannot be reset.
+    let invalid = r#"{"code":"rest_invalid_stored_value","message":"The persisted_preferences property has an invalid stored value, and cannot be updated to null.","data":{"status":500}}"#;
+    assert_eq!(answer(Some(b"s:1:\"x\";"), "null"), (500, invalid.into()));
+}
+
+/// A new user's `meta` is written as an update's, over no stored value.
+#[test]
+fn a_new_user_s_preferences_are_planned() {
+    let body = r#"{"username":"prefs","email":"prefs@example.test","password":"pw","meta":{"persisted_preferences":{"a":1}}}"#;
+    let asked = Asked::new("administrator", "POST", "/wp/v2/users", body);
+    let (plan, served) = on(&oracle("administrator", &[]), &asked, Outcome::Written(9));
+    let Some(Write::User(save)) = plan.map(|plan| plan.write) else {
+        panic!("not planned");
+    };
+    let value = hyscribe_phpser::json_decode(br#"{"a":1}"#);
+    let expected = Preferences {
+        key: "wp_persisted_preferences".into(),
+        value,
+    };
+    assert_eq!((save.id, save.preferences), (0, Some(expected)));
+    assert_eq!(served.status, 201);
 }

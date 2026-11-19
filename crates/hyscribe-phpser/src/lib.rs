@@ -51,4 +51,5 @@ pub use query::{
 pub use value::{Key, Value, lookup, wp_array_set};
 pub use wp::{
     Maybe, addslashes, is_serialized, maybe_unserialize, php_trim, stripslashes, wp_basename,
+    wp_slash,
 };

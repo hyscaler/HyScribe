@@ -122,6 +122,20 @@ pub fn addslashes(text: &[u8]) -> Vec<u8> {
     out
 }
 
+/// `wp_slash()`: `addslashes()` on every string, in arrays too.
+pub fn wp_slash(value: Value) -> Value {
+    match value {
+        Value::String(text) => Value::String(addslashes(&text)),
+        Value::Array(entries) => Value::Array(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, wp_slash(value)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 /// PHP's `stripslashes()`: a backslash escapes the next byte, `\0` is NUL.
 pub fn stripslashes(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
@@ -140,7 +154,7 @@ pub fn stripslashes(text: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ErrorKind;
+    use crate::{ErrorKind, Key};
 
     #[test]
     fn strict_matches_wordpress() {
@@ -244,5 +258,22 @@ mod tests {
     fn slashes_go_on_and_come_off() {
         assert_eq!(addslashes(b"a'b\"c\\d\0e"), b"a\\'b\\\"c\\\\d\\0e");
         assert_eq!(stripslashes(b"a\\'b\\0c\\"), b"a'b\0c");
+        let nested = Value::Array(vec![
+            (Key::Int(0), Value::String(b"it's".to_vec())),
+            (Key::from_php_string(b"k'".to_vec()), Value::Int(1)),
+            (
+                Key::Int(1),
+                Value::Array(vec![(Key::Int(0), Value::String(b"\\".to_vec()))]),
+            ),
+        ]);
+        let slashed = Value::Array(vec![
+            (Key::Int(0), Value::String(b"it\\'s".to_vec())),
+            (Key::from_php_string(b"k'".to_vec()), Value::Int(1)),
+            (
+                Key::Int(1),
+                Value::Array(vec![(Key::Int(0), Value::String(b"\\\\".to_vec()))]),
+            ),
+        ]);
+        assert_eq!(wp_slash(nested), slashed);
     }
 }

@@ -12,6 +12,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
+pub mod proxies;
 pub mod setup;
 pub mod wpconfig;
 
@@ -187,6 +188,10 @@ pub struct LoginLimits {
     pub account: u32,
     /// `LOGIN_LIMIT_WINDOW`, in seconds, default 900.
     pub window: u32,
+    /// `REGISTRATION_LIMIT_ADDRESS`: accounts one client address may
+    /// create by registration in an hour, default 3; none for no cap
+    ///.
+    pub registrations: Option<u32>,
 }
 
 impl Default for LoginLimits {
@@ -195,6 +200,7 @@ impl Default for LoginLimits {
             address: 5,
             account: 10,
             window: 900,
+            registrations: Some(3),
         }
     }
 }
@@ -258,6 +264,12 @@ pub struct Config {
     /// `HTTP_OUTBOUND`: `on` lets the server fetch from other sites through
     /// the outbound client (ADR 0019); `off` (default) fetches nothing.
     pub http_outbound: bool,
+    /// `TRUSTED_PROXIES`: the peers `X-Forwarded-For` is read from behind a
+    /// proxy; loopback by default.
+    pub trusted_proxies: Vec<proxies::Cidr>,
+    /// `REQUEST_TIME_LIMIT`, in seconds: a request still running past it
+    /// answers 503 and rolls back its write. Default 30.
+    pub request_time_limit: u32,
     /// `RSS_ALLOWED_HOSTS`: the hosts the RSS block may fetch feeds from,
     /// comma separated, lower case; none by default (the decision
     /// of 2026-11-10).
@@ -455,7 +467,18 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         address: limit("LOGIN_LIMIT_ADDRESS", limits.address, 1000)?,
         account: limit("LOGIN_LIMIT_ACCOUNT", limits.account, 1000)?,
         window: limit("LOGIN_LIMIT_WINDOW", limits.window, 86_400)?,
+        registrations: registration_cap(get("REGISTRATION_LIMIT_ADDRESS"))?,
     };
+    let trusted_proxies = match get("TRUSTED_PROXIES") {
+        None => proxies::default_list(),
+        Some(list) => proxies::parse_list(list).ok_or_else(|| {
+            invalid(
+                "TRUSTED_PROXIES",
+                "must be at most 256 IP addresses or ranges such as 10.0.0.0/8, separated by commas",
+            )
+        })?,
+    };
+    let request_time_limit = number(get("REQUEST_TIME_LIMIT"), "REQUEST_TIME_LIMIT", 30, 86_400)?;
 
     let upload_max_size = match get("UPLOAD_MAX_SIZE") {
         None => DEFAULT_UPLOAD_MAX_SIZE,
@@ -501,6 +524,8 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         salts,
         rest_public_users,
         http_outbound,
+        trusted_proxies,
+        request_time_limit,
         rss_allowed_hosts,
         embed_allowed,
         constants,
@@ -711,6 +736,26 @@ fn number(
             .ok()
             .filter(|number| (1..=max).contains(number))
             .ok_or_else(|| invalid(key, &format!("must be a whole number from 1 to {max}"))),
+    }
+}
+
+/// `REGISTRATION_LIMIT_ADDRESS`: 0 to 1000 a client address an hour, 3
+/// unset, `-1` for no cap.
+fn registration_cap(value: Option<&str>) -> Result<Option<u32>, ConfigError> {
+    match value {
+        None => Ok(LoginLimits::default().registrations),
+        Some("-1") => Ok(None),
+        Some(value) => value
+            .parse()
+            .ok()
+            .filter(|cap| *cap <= 1000)
+            .map(Some)
+            .ok_or_else(|| {
+                invalid(
+                    "REGISTRATION_LIMIT_ADDRESS",
+                    "must be a whole number from 0 to 1000, or -1 for no cap",
+                )
+            }),
     }
 }
 

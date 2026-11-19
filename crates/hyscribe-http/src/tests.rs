@@ -11,6 +11,11 @@ use hyscribe_model::Term;
 use hyscribe_phpser::{Key, Value};
 use tower::ServiceExt;
 
+/// The `TRUSTED_PROXIES` list `text` makes, for a site behind a proxy.
+pub(crate) fn trusted(text: &str) -> Option<Vec<hyscribe_config::proxies::Cidr>> {
+    hyscribe_config::proxies::parse_list(text)
+}
+
 pub(crate) fn fixture_config() -> Database {
     hyscribe_testkit::fixture_database()
 }
@@ -258,7 +263,8 @@ async fn database_errors_show_no_details() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
-        behind_proxy: false,
+        proxies: None,
+        time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         uploads: None,
@@ -1005,7 +1011,8 @@ async fn the_front_page_links_to_home() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
-        behind_proxy: false,
+        proxies: None,
+        time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         uploads: None,
@@ -1149,7 +1156,8 @@ async fn failed_reads_answer_defaults() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
-        behind_proxy: false,
+        proxies: None,
+        time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         uploads: None,
@@ -3488,4 +3496,64 @@ async fn duotone_pages_match_php() {
         0
     );
     assert_eq!(golden.lines().count(), 2);
+}
+
+/// A request still running past `REQUEST_TIME_LIMIT` answers 503.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_past_the_time_limit_answers_503() {
+    let site = Arc::try_unwrap(fixture_site(None).await).ok().unwrap();
+    let site = Arc::new(site.with_time_limit(Duration::ZERO));
+    let request = Request::get("/").body(Body::empty()).unwrap();
+    let response = router(site).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.headers()[header::CONNECTION], "close");
+    assert!(response.headers().contains_key("x-content-type-options"));
+    let default = fixture_site(None).await;
+    let request = Request::get("/").body(Body::empty()).unwrap();
+    let response = router(default).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// A write held past the limit is cut off and rolls back: nothing of it is
+/// left, and the row it had written is free for the next write at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_cut_off_by_the_time_limit_rolls_back() {
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let writer = Arc::new(writer);
+    let held = Arc::clone(&writer);
+    let slow = move || {
+        let writer = Arc::clone(&held);
+        async move {
+            let mut write = writer.begin().await.unwrap();
+            let added = write.add_option("cut_off_option", b"half", "no");
+            added.await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            write.commit().await.unwrap();
+            "done"
+        }
+    };
+    let app = Router::new().route("/", axum::routing::get(slow)).layer(
+        axum::middleware::from_fn_with_state(Duration::from_millis(500), time_limited),
+    );
+    let request = Request::get("/").body(Body::empty()).unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let mut write = writer.begin().await.unwrap();
+    let ten = Duration::from_secs(10);
+    let found = tokio::time::timeout(ten, write.option_value("cut_off_option"));
+    assert_eq!(found.await.unwrap().unwrap(), None);
+    let again = write.add_option("cut_off_option", b"whole", "no");
+    tokio::time::timeout(ten, again).await.unwrap().unwrap();
+    write.commit().await.unwrap();
 }

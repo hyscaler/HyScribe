@@ -372,7 +372,8 @@ async fn page_of_comment(
 }
 
 /// `$_SERVER['REMOTE_ADDR']`: the connection's address, or behind a proxy
-/// the last address of `X-Forwarded-For`, the one the proxy added.
+/// listed in `TRUSTED_PROXIES` the last address of `X-Forwarded-For`, the
+/// one the proxy added.
 fn remote_addr(site: &Site, asked: &Asked) -> Vec<u8> {
     client_addr(site, &asked.headers, asked.peer)
 }
@@ -398,8 +399,12 @@ pub(crate) fn client_ip(
     headers: &HeaderMap,
     peer: Option<IpAddr>,
 ) -> Result<Option<IpAddr>, Unnamed> {
+    let trusted = site
+        .proxies
+        .as_ref()
+        .is_some_and(|ranges| peer.is_some_and(|ip| ranges.iter().any(|range| range.contains(ip))));
     let mut lines = headers.get_all("x-forwarded-for").iter();
-    let Some(last) = lines.next_back().filter(|_| site.behind_proxy) else {
+    let Some(last) = lines.next_back().filter(|_| trusted) else {
         return Ok(peer);
     };
     let entry = String::from_utf8_lossy(last.as_bytes());

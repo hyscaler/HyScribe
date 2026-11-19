@@ -121,8 +121,12 @@ pub struct Site {
     defined: Vec<&'static str>,
     /// `REST_PUBLIC_USERS`: the public users REST endpoint is on.
     public_users: bool,
-    /// `BEHIND_PROXY`: the proxy's `X-Forwarded-For` names the client.
-    behind_proxy: bool,
+    /// `BEHIND_PROXY` with `TRUSTED_PROXIES`: the peers whose
+    /// `X-Forwarded-For` names the client; none when not behind a
+    /// proxy.
+    proxies: Option<Arc<[hyscribe_config::proxies::Cidr]>>,
+    /// `REQUEST_TIME_LIMIT`: how long a request may run.
+    time_limit: Duration,
     /// The capability constants of the configuration.
     constants: hyscribe_config::Constants,
     /// The login rate limits and their counts, kept across reloads.
@@ -188,7 +192,8 @@ impl Site {
             writer: None,
             defined: Vec::new(),
             public_users: true,
-            behind_proxy: false,
+            proxies: None,
+            time_limit: DEFAULT_TIME_LIMIT,
             constants: hyscribe_config::Constants::default(),
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             uploads: None,
@@ -236,7 +241,8 @@ impl Site {
             writer: self.writer.clone(),
             defined: self.defined.clone(),
             public_users: self.public_users,
-            behind_proxy: self.behind_proxy,
+            proxies: self.proxies.clone(),
+            time_limit: self.time_limit,
             constants: self.constants,
             limiter: Arc::clone(&self.limiter),
             uploads: self.uploads.clone(),
@@ -313,10 +319,19 @@ impl Site {
             .map_or(0, |uploads| uploads.max_size())
     }
 
-    /// The site behind a proxy or not.
-    pub fn with_proxy(self, behind_proxy: bool) -> Site {
+    /// The site behind a proxy, whose `X-Forwarded-For` is believed from
+    /// the `trusted` peers only, or not behind one.
+    pub fn with_proxy(self, trusted: Option<Vec<hyscribe_config::proxies::Cidr>>) -> Site {
         Site {
-            behind_proxy,
+            proxies: trusted.map(Into::into),
+            ..self
+        }
+    }
+
+    /// The site whose requests are cut off after `limit`.
+    pub fn with_time_limit(self, limit: Duration) -> Site {
+        Site {
+            time_limit: limit,
             ..self
         }
     }
@@ -550,14 +565,20 @@ impl Site {
 /// has it now (ADR 0012).
 fn live(site: Arc<Site>) -> Router {
     let limit = upload_limit(&site);
-    layered(Router::new().fallback(current).with_state(site), limit)
+    let time = site.time_limit;
+    layered(
+        Router::new().fallback(current).with_state(site),
+        limit,
+        time,
+    )
 }
 
 /// The router for `site` as it is, whatever the database holds now.
 #[cfg(test)]
 fn router(site: Arc<Site>) -> Router {
     let limit = upload_limit(&site);
-    layered(Router::new().fallback(page).with_state(site), limit)
+    let time = site.time_limit;
+    layered(Router::new().fallback(page).with_state(site), limit, time)
 }
 
 /// The body an upload may send: `UPLOAD_MAX_SIZE` and its form around it.
@@ -568,11 +589,15 @@ fn upload_limit(site: &Site) -> usize {
         .saturating_add(FORM_ALLOWANCE)
 }
 
-fn layered(router: Router, upload_limit: usize) -> Router {
+fn layered(router: Router, upload_limit: usize, time_limit: Duration) -> Router {
     let bodies = (upload_limit, Arc::new(Semaphore::new(UPLOADS_AT_ONCE)));
     router
         .layer(axum::middleware::from_fn_with_state(bodies, body_limit))
         .layer(axum::extract::DefaultBodyLimit::disable())
+        .layer(axum::middleware::from_fn_with_state(
+            time_limit,
+            time_limited,
+        ))
         .layer(axum::middleware::from_fn(request_line_limit))
         .layer(axum::middleware::map_response(security_headers))
 }
@@ -697,6 +722,27 @@ const BODY_READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// The largest body read: above every route's own limit (axum's 2 MB, the
 /// setup form's 3 MiB), which still applies.
 const MAX_BODY: usize = 4 << 20;
+
+/// How long a request may run unless `REQUEST_TIME_LIMIT` says otherwise.
+const DEFAULT_TIME_LIMIT: Duration = Duration::from_secs(30);
+
+/// Serves a request within `limit`, else answers 503. What it was doing is
+/// dropped: a write's transaction, not yet committed, rolls back.
+async fn time_limited(
+    State(limit): State<Duration>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    match tokio::time::timeout(limit, next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONNECTION, "close")],
+            "Service Unavailable",
+        )
+            .into_response(),
+    }
+}
 
 /// Reads a request's whole body within [`BODY_READ_TIMEOUT`] before it is
 /// served.

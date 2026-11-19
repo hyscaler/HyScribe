@@ -248,3 +248,77 @@ fn a_poisoned_lock_still_counts() {
     guess(&limiter, ip("192.0.2.1"), 1, 5, T);
     assert!(!limiter.allows(ip("192.0.2.1"), 1, T));
 }
+
+fn capped(cap: Option<u32>) -> Limiter {
+    Limiter::new(LoginLimits {
+        registrations: cap,
+        ..LoginLimits::default()
+    })
+}
+
+#[test]
+fn three_registrations_an_hour_fill_an_address() {
+    let limiter = limiter();
+    let client = ip("192.0.2.1");
+    for at in 0..3 {
+        assert!(!limiter.registrations_full(client, T + at));
+        limiter.registered(client, T + at);
+    }
+    assert!(limiter.registrations_full(client, T + 3));
+    // Another address, and an IPv6 neighbour of the first by its /64.
+    assert!(!limiter.registrations_full(ip("192.0.2.2"), T + 3));
+    let six = ip("2001:db8::1");
+    for _ in 0..3 {
+        limiter.registered(six, T);
+    }
+    assert!(limiter.registrations_full(ip("2001:db8::ffff"), T));
+    assert!(!limiter.registrations_full(ip("2001:db8:0:1::1"), T));
+    // The hour passes one account at a time.
+    assert!(limiter.registrations_full(client, T + 3599));
+    assert!(!limiter.registrations_full(client, T + 3600));
+    limiter.registered(client, T + 3600);
+    assert_eq!(
+        limiter.state().registered[&network(client)],
+        [T + 1, T + 2, T + 3600]
+    );
+}
+
+#[test]
+fn the_registration_cap_is_configurable() {
+    let client = ip("192.0.2.1");
+    let none = capped(None);
+    for _ in 0..50 {
+        none.registered(client, T);
+    }
+    assert!(!none.registrations_full(client, T));
+    let zero = capped(Some(0));
+    assert!(zero.registrations_full(client, T));
+    let one = capped(Some(1));
+    assert!(!one.registrations_full(client, T));
+    one.registered(client, T);
+    assert!(one.registrations_full(client, T));
+    assert!(!one.registrations_full(None, T));
+}
+
+#[test]
+fn the_registration_counts_stay_bounded() {
+    let limiter = limiter();
+    for n in 0..=TRACKED as u32 {
+        limiter.registered(Some(IpAddr::V4(Ipv4Addr::from(n + 0x0100_0000))), T);
+    }
+    assert!(limiter.state().registered.len() <= TRACKED);
+    // A full map drops the spent entries first, however their ages differ.
+    let fresh = self::limiter();
+    for n in 1..TRACKED as u32 {
+        let at = T + i64::from(n / 64);
+        fresh.registered(Some(IpAddr::V4(Ipv4Addr::from(n + 0x0100_0000))), at);
+    }
+    // One address created an account a second before the sweep.
+    let later = T + REGISTRATION_WINDOW + 2000;
+    fresh.registered(ip("198.51.100.1"), later - 1);
+    assert_eq!(fresh.state().registered.len(), TRACKED);
+    fresh.registered(ip("192.0.2.1"), later);
+    let state = fresh.state();
+    assert_eq!(state.registered.len(), 2);
+    assert!(state.registered.contains_key(&network(ip("198.51.100.1"))));
+}

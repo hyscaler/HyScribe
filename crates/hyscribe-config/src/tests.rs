@@ -57,6 +57,8 @@ fn defaults_are_safe() {
             salts: Vec::new(),
             rest_public_users: true,
             http_outbound: false,
+            trusted_proxies: crate::proxies::default_list(),
+            request_time_limit: 30,
             rss_allowed_hosts: Vec::new(),
             embed_allowed: EmbedAllowed {
                 providers: true,
@@ -72,6 +74,7 @@ fn defaults_are_safe() {
                 address: 5,
                 account: 10,
                 window: 900,
+                registrations: Some(3),
             },
             disable_wp_cron: false,
             alternate_wp_cron: false,
@@ -278,6 +281,9 @@ fn reads_every_key() {
         ("LOGIN_LIMIT_ADDRESS", "1"),
         ("LOGIN_LIMIT_ACCOUNT", "1000"),
         ("LOGIN_LIMIT_WINDOW", "86400"),
+        ("REGISTRATION_LIMIT_ADDRESS", "-1"),
+        ("TRUSTED_PROXIES", "10.0.0.0/8, 2001:db8::/32"),
+        ("REQUEST_TIME_LIMIT", "5"),
         ("UPLOAD_MAX_SIZE", "512k"),
     ]))
     .unwrap();
@@ -314,8 +320,11 @@ fn reads_every_key() {
         address: 1,
         account: 1000,
         window: 86_400,
+        registrations: None,
     };
     assert_eq!(config.login_limits, limits);
+    assert_eq!(config.request_time_limit, 5);
+    assert_eq!(config.trusted_proxies.len(), 2);
     assert_eq!(config.upload_max_size, 512 << 10);
     let on = from_map(&with(&[
         ("REST_PUBLIC_USERS", "on"),
@@ -328,6 +337,19 @@ fn reads_every_key() {
 
 /// The embed allowlist: the providers by default, plus hosts, hosts alone,
 /// or nothing.
+/// The registration cap: 3 by default, 0 refuses every registration, -1 none.
+#[test]
+fn reads_the_registration_cap() {
+    let cap = |value: &str| {
+        from_map(&with(&[("REGISTRATION_LIMIT_ADDRESS", value)]))
+            .map(|c| c.login_limits.registrations)
+    };
+    assert_eq!(cap("0"), Ok(Some(0)));
+    assert_eq!(cap("1000"), Ok(Some(1000)));
+    assert_eq!(cap("-1"), Ok(None));
+    assert!(cap("x").is_err());
+}
+
 #[test]
 fn embed_hosts_have_forms() {
     let allowed =
@@ -511,6 +533,26 @@ fn rejects_bad_values() {
             "LOGIN_LIMIT_WINDOW",
             "15m",
             "must be a whole number from 1 to 86400",
+        ),
+        (
+            "REGISTRATION_LIMIT_ADDRESS",
+            "-2",
+            "must be a whole number from 0 to 1000, or -1 for no cap",
+        ),
+        (
+            "REGISTRATION_LIMIT_ADDRESS",
+            "1001",
+            "must be a whole number from 0 to 1000, or -1 for no cap",
+        ),
+        (
+            "REQUEST_TIME_LIMIT",
+            "0",
+            "must be a whole number from 1 to 86400",
+        ),
+        (
+            "TRUSTED_PROXIES",
+            "10.0.0.0/33",
+            "must be at most 256 IP addresses or ranges such as 10.0.0.0/8, separated by commas",
         ),
     ];
     let plain = "none is only for a relay on this machine (localhost, 127.0.0.1 or ::1)";

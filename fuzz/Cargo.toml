@@ -400,3 +400,10 @@ path = "fuzz_targets/config_host_lists.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "trusted_proxies"
+path = "fuzz_targets/trusted_proxies.rs"
+test = false
+doc = false
+bench = false

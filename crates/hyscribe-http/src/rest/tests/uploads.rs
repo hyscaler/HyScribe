@@ -5,8 +5,8 @@
 //! over HTTP as a visitor and each role to `wordpress_saves` with a writer
 //! and an uploads folder of PHP's 2 MB limit, the answer, its headers and
 //! the files written matched to PHP's, the database and the folder put
-//! back after a case that writes. The types PHP checks with `fileinfo`
-//! answer 501 once the checks before them pass.
+//! back after a case that writes. What is not ported (see [`UNPORTED`])
+//! answers 501 once the checks before it pass.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -29,9 +29,31 @@ const WHO: [(&str, &str, u64); 6] = [
     ("subscriber", "subscriber", 704),
 ];
 
-/// The cases whose file PHP checks with `fileinfo`: a text file, and a
-/// `.jpg` that is not an image.
-const FILEINFO: [&str; 2] = ["notes.txt", "fake.jpg"];
+/// The cases that answer 501 once the checks before them pass: a PDF, whose
+/// preview PHP makes with Ghostscript, audio and video, whose metadata is
+/// getID3's, a Word 97 file and bytes libmagic gives no type, and a Word
+/// file named as a ZIP, where libmagic may give either.
+const UNPORTED: [&str; 19] = [
+    "sample.pdf",
+    "sample.doc",
+    "random.bin:random.mp3",
+    "sample.docx:sample.zip",
+    "cbr.mp3",
+    "noxing.mp3",
+    "tagged.mp3",
+    "tone.flac",
+    "tone.ogg",
+    "tone.m4a",
+    "tone.wma",
+    "tune.mid",
+    "clip.mp4",
+    "clip-audio.mp4",
+    "clip.mov",
+    "clip.avi",
+    "clip.webm",
+    "clip.3gp",
+    "clip.flv",
+];
 
 /// The files `golden.sh` makes, by name.
 fn made(name: &str) -> Option<Vec<u8>> {
@@ -377,7 +399,8 @@ async fn upload_routes_match_php() {
         let written = files(uploads.path());
         let sent = case.split('\t').nth(3).unwrap();
         let past_checks = matches!(who, "administrator" | "editor" | "author");
-        if FILEINFO.contains(&sent) && past_checks {
+        if status == StatusCode::NOT_IMPLEMENTED && past_checks && f[2] != "501" {
+            assert!(UNPORTED.contains(&sent), "{what}");
             assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{what}");
             assert!(written.is_empty(), "{what}");
             unported += 1;
@@ -429,7 +452,7 @@ async fn upload_routes_match_php() {
             site = uploading(sessions.path(), uploads.path()).await;
         }
     }
-    assert_eq!((matched, unported), (6 * 49 - 3 * 2, 3 * 2));
+    assert_eq!((matched, unported), (6 * 107 - 74, 74));
 }
 
 /// An upload's plan is written by `rest::uploads`, never by `act()`.
@@ -543,10 +566,9 @@ async fn uploads_stop_short() {
         format!("{rest}\traw,type=image/jpeg,md5\tsmall.jpg\t-"),
         format!("{rest}\trestfile,part=other\tsmall.jpg\t-"),
         format!("{rest}\trestfile,kind=image/x-unknown\tsmall.jpg\t-"),
-        format!("{rest}\traw,type=text/plain\tnotes.txt\t-"),
-        format!("{rest}\traw,type=image/jpeg\tfake.jpg\t-"),
-        format!("{async_upload}\tform,nonce\tnotes.txt\tshort=1"),
-        format!("{media_new}\tform,nonce\tnotes.txt\thtml-upload=Upload"),
+        format!("{rest}\traw,type=application/pdf\tsample.pdf\t-"),
+        format!("{async_upload}\tform,nonce\tsample.pdf\tshort=1"),
+        format!("{media_new}\tform,nonce\tsample.pdf\thtml-upload=Upload"),
     ] {
         let (status, _) = sent_case(&site, &line, admin).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{line}");

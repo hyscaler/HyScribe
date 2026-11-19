@@ -105,6 +105,10 @@ async fn uploads_write_php_s_rows() {
         alt_text: Some(b"An alt".to_vec()),
         post: 1,
     };
+    let text = Upload {
+        title: Some(b"Notes".to_vec()),
+        ..given.clone()
+    };
     let form = Upload {
         title: Some(b"A form upload".to_vec()),
         alt_text: Some(b"Alt".to_vec()),
@@ -207,6 +211,81 @@ async fn uploads_write_php_s_rows() {
             ("small.jpg", "small.jpg"),
             How::Rest(true, Upload::default()),
         ),
+        (
+            "upload-async-text",
+            ("plain.txt", "plain.txt"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-csv",
+            ("words.csv", "words.csv"),
+            How::Media(1),
+        ),
+        (
+            "upload-async-vtt",
+            ("captions.vtt", "captions.vtt"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-docx",
+            ("sample.docx", "sample.docx"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-odt",
+            ("sample.odt", "My Notes (1).odt"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-zip",
+            ("sample.zip", "sample.docx"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-rtf",
+            ("sample.rtf", "sample.rtf"),
+            How::Media(0),
+        ),
+        (
+            "upload-rest-raw-text",
+            ("plain.txt", "plain.txt"),
+            How::Rest(false, text),
+        ),
+        (
+            "upload-rest-form-docx",
+            ("sample.docx", "sample.docx"),
+            How::Rest(
+                true,
+                Upload {
+                    title: Some(b"A form document".to_vec()),
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
+            "upload-rest-raw-xlsx",
+            ("sample.xlsx", "sample.xlsx"),
+            How::Rest(false, Upload::default()),
+        ),
+        ("upload-async-wav", ("tone.wav", "tone.wav"), How::Media(0)),
+        ("upload-async-aac", ("tone.aac", "tone.aac"), How::Media(1)),
+        (
+            "upload-rest-raw-wav",
+            ("tone.wav", "tone.wav"),
+            How::Rest(
+                false,
+                Upload {
+                    title: Some(b"A tone".to_vec()),
+                    post: 1,
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
+            "upload-rest-form-aac",
+            ("tone.aac", "tone.aac"),
+            How::Rest(true, Upload::default()),
+        ),
     ];
     for (golden, file, how) in cases {
         let dir = tempfile::tempdir().unwrap();
@@ -238,6 +317,17 @@ async fn uploads_write_php_s_rows() {
         uploaded((&site, &uploads), conn, small, How::Media(0)).await
     };
     let report = check_writes(&fixture_database(), "upload-async-again", setup, again).await;
+    report.unwrap();
+    // A text file's number: its copies are not looked for.
+    let dir = tempfile::tempdir().unwrap();
+    let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+    let plain = ("plain.txt", "plain.txt");
+    let setup =
+        async |conn: &mut Connection| uploaded((&site, &uploads), conn, plain, How::Media(0)).await;
+    let again = async |conn: &mut Connection, ()| {
+        uploaded((&site, &uploads), conn, plain, How::Media(0)).await
+    };
+    let report = check_writes(&fixture_database(), "upload-async-text-again", setup, again).await;
     report.unwrap();
 }
 
@@ -403,6 +493,35 @@ async fn uploads_are_titled_and_hooked_as_php_s() {
         let (_dir, _, uploads) = hooked(threshold);
         let kept = uploads.rest_upload(&site, (sent("small.jpg", "a.jpg"), false), &none, time);
         assert!(kept.is_ok(), "{threshold}");
+    }
+}
+
+/// A PDF, whose preview is Ghostscript's, and audio and video, whose
+/// metadata is getID3's, answer 501 and leave no file behind.
+#[tokio::test(flavor = "multi_thread")]
+async fn unported_types_leave_no_file() {
+    let site = crate::tests::oracle_site().await;
+    let time = (upload_time(&site, None, now()), WHO);
+    for name in ["sample.pdf", "cbr.mp3", "clip.mp4", "tagged.mp3"] {
+        let dir = tempfile::tempdir().unwrap();
+        let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+        let sent = sent(name, name);
+        let media = uploads.media_handle_upload(&site, sent.clone(), 0, (&time.0, WHO));
+        assert_eq!(media.unwrap_err(), Refused::Unported, "{name}");
+        let rest = uploads.rest_upload(&site, (sent, true), &Upload::default(), (&time.0, WHO));
+        assert_eq!(rest.unwrap_err(), Refused::Unported, "{name}");
+        let mut found = Vec::new();
+        let mut folders = vec![dir.path().to_path_buf()];
+        while let Some(folder) = folders.pop() {
+            for entry in std::fs::read_dir(folder).unwrap() {
+                let path = entry.unwrap().path();
+                match path.is_dir() {
+                    true => folders.push(path),
+                    false => found.push(path),
+                }
+            }
+        }
+        assert!(found.is_empty(), "{name}: {found:?}");
     }
 }
 

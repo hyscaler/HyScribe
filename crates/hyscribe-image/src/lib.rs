@@ -7,6 +7,8 @@
 
 pub mod codec;
 pub mod editor;
+pub mod fileinfo;
+pub mod getid3;
 pub mod header;
 pub mod hooks;
 pub mod iptc;

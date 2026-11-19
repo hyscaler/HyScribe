@@ -87,13 +87,28 @@ pub(crate) trait Dialect {
 pub(crate) enum Access {
     Read,
     Write,
+    /// One writable connection that gives up on a lock another holds after
+    /// ten seconds, for creating a site's tables (ADR 0021).
+    Install,
+}
+
+/// `wpdb::set_sql_mode()`'s statement, as a literal, so another can follow it.
+macro_rules! sql_mode {
+    () => {
+        "SET SESSION sql_mode = TRIM(BOTH ',' FROM \
+         REGEXP_REPLACE(CONCAT(',', @@SESSION.sql_mode, ','), \
+         ',(NO_ZERO_DATE|ONLY_FULL_GROUP_BY|STRICT_TRANS_TABLES|STRICT_ALL_TABLES|TRADITIONAL|ANSI)(?=,)', ''))"
+    };
 }
 
 /// `wpdb::set_sql_mode()`: the session's SQL modes without those WordPress
 /// does not work under, so values are written as PHP writes them.
-pub(crate) const WORDPRESS_SQL_MODE: &str = "SET SESSION sql_mode = TRIM(BOTH ',' FROM \
-     REGEXP_REPLACE(CONCAT(',', @@SESSION.sql_mode, ','), \
-     ',(NO_ZERO_DATE|ONLY_FULL_GROUP_BY|STRICT_TRANS_TABLES|STRICT_ALL_TABLES|TRADITIONAL|ANSI)(?=,)', ''))";
+pub(crate) const WORDPRESS_SQL_MODE: &str = sql_mode!();
+
+/// The session of [`Access::Install`]: WordPress's SQL modes and a lock wait
+/// limit, so a table another connection holds fails a drop instead of
+/// waiting on.
+const INSTALL_SESSION: &str = concat!(sql_mode!(), "; SET SESSION lock_wait_timeout = 10");
 
 /// The connection a caller hands the writer to nest an action in its own
 /// transaction (the write oracle).
@@ -121,15 +136,20 @@ impl Dialect for MySql {
             .password(password.expose())
             .charset(&config.charset);
         MySqlPoolOptions::new()
-            .max_connections(8)
+            .max_connections(match access {
+                Access::Install => 1,
+                _ => 8,
+            })
             // Report an unreachable database soon instead of retrying for 30s.
             .acquire_timeout(std::time::Duration::from_secs(5))
             .after_connect(move |conn, _| {
                 Box::pin(async move {
-                    conn.execute(match access {
+                    // `raw_sql()`, which takes the install session's two statements.
+                    conn.execute(sqlx::raw_sql(match access {
                         Access::Read => "SET SESSION TRANSACTION READ ONLY",
                         Access::Write => WORDPRESS_SQL_MODE,
-                    })
+                        Access::Install => INSTALL_SESSION,
+                    }))
                     .await
                     .map(|_| ())
                 })

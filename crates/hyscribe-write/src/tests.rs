@@ -13,6 +13,9 @@ use hyscribe_testkit::writes::check_writes;
 /// counters, so a small one is reached after enough tests (PHP's `HYSCRIBE_MISSING_ID`).
 pub(crate) const MISSING: u64 = 1 << 40;
 
+/// One test at a time over `wordpress_saves`, which each reloads or empties.
+pub(crate) static SAVES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// One test at a time, so no test waits on another's locked rows.
 pub(crate) static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 

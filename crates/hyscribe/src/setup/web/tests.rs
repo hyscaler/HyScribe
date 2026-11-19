@@ -22,6 +22,7 @@ fn shared(home: &Path) -> Arc<Shared> {
             },
             signed_in: false,
             found: None,
+            new_site: false,
         }),
         done: Notify::new(),
     })
@@ -790,4 +791,122 @@ async fn the_secret_file_does_not_outlive_setup_mode() {
             .starts_with(&format!("cannot write {}: ", file.display()))
     );
     assert!(seen.borrow().is_empty());
+}
+
+/// Step 2 offers a new site, and step 3 then asks what PHP's install screen
+/// asks, in place of the mode.
+#[test]
+fn a_new_site_is_installed_through_the_pages() {
+    use crate::tests::{SAVES, empty_saves, saves_scalar, saves_value};
+    let _one = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    empty_saves();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("hyscribe");
+    std::fs::create_dir(&home).unwrap();
+    runtime.block_on(async {
+        let shared = shared(&home);
+        sign_in(&shared).await;
+        let csrf = ("_csrf", "csrf-token");
+        let page = ask(&shared, "GET", STEP_2, SIGNED_IN, &[]).await;
+        assert!(
+            page.body.contains("name=\"new\" value=\"1\""),
+            "{}",
+            page.body
+        );
+        let answer = ask(&shared, "POST", STEP_2, SIGNED_IN, &[csrf, ("new", "1")]).await;
+        assert_eq!(answer.location(), STEP_3);
+        let page = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;
+        for shown in [
+            "<h1>Step 3 of 3: new site, database and network</h1>",
+            "name=\"weblog_title\"",
+            "name=\"user_name\"",
+            "id=\"admin_password\" name=\"admin_password\" value=\"\"",
+            "name=\"admin_password2\"",
+            "name=\"admin_email\"",
+            "name=\"blog_public\" value=\"0\">",
+            "name=\"site_address\" value=\"http://127.0.0.1:8080\"",
+            "name=\"DB_NAME\"",
+        ] {
+            assert!(page.body.contains(shown), "{shown}\n{}", page.body);
+        }
+        assert!(!page.body.contains("Shadow mode"), "{}", page.body);
+
+        let db = hyscribe_testkit::fixture_database();
+        let port = db.port.to_string();
+        let good = [
+            csrf,
+            ("DB_NAME", "wordpress_saves"),
+            ("DB_USER", &db.user),
+            ("DB_PASSWORD", db.password.expose()),
+            ("DB_HOST", &db.host),
+            ("DB_PORT", &port),
+            ("weblog_title", "Web <Site>"),
+            ("user_name", "owner"),
+            ("admin_password", "hunter two"),
+            ("admin_password2", "hunter two"),
+            ("admin_email", "owner@example.org"),
+            ("blog_public", "0"),
+            ("site_address", "http://localhost:8080"),
+        ];
+        // A refused answer shows the others again, and no password.
+        let bad: Vec<(&str, &str)> = good
+            .iter()
+            .map(|&(name, value)| {
+                (
+                    name,
+                    if name == "user_name" {
+                        "bad/name"
+                    } else {
+                        value
+                    },
+                )
+            })
+            .collect();
+        let answer = ask(&shared, "POST", STEP_3, SIGNED_IN, &bad).await;
+        assert_eq!(answer.status, StatusCode::UNPROCESSABLE_ENTITY);
+        for shown in [
+            "<p class=\"error\">The username you provided has invalid characters.</p>",
+            "name=\"weblog_title\" value=\"Web &lt;Site&gt;\"",
+            "name=\"site_address\" value=\"http://localhost:8080\"",
+            "name=\"blog_public\" value=\"0\" checked>",
+        ] {
+            assert!(answer.body.contains(shown), "{shown}\n{}", answer.body);
+        }
+        assert!(!answer.body.contains("hunter"), "{}", answer.body);
+        assert!(!home.join(".env").exists());
+        let tables =
+            "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()";
+        assert_eq!(saves_value(tables).await.as_deref(), Some("0"));
+
+        let answer = ask(&shared, "POST", STEP_3, SIGNED_IN, &good).await;
+        assert_eq!(answer.status, StatusCode::OK, "{}", answer.body);
+        assert!(
+            answer
+                .body
+                .contains("tables and first content in wordpress_saves")
+        );
+        assert!(!answer.body.contains("hunter"), "{}", answer.body);
+        tokio::time::timeout(Duration::from_secs(1), shared.done.notified())
+            .await
+            .unwrap();
+    });
+    let config = hyscribe_config::load(&home, &HashMap::new())
+        .unwrap()
+        .unwrap();
+    assert_eq!(config.mode, hyscribe_config::Mode::Primary);
+    let option = |name: &str| {
+        saves_scalar(&format!(
+            "SELECT option_value FROM wp_options WHERE option_name = '{name}'"
+        ))
+    };
+    assert_eq!(option("blogname").as_deref(), Some("Web &lt;Site&gt;"));
+    assert_eq!(option("home").as_deref(), Some("http://localhost:8080"));
+    assert_eq!(option("blog_public").as_deref(), Some("0"));
+    // The runtime holds the wizard's pools: end it before the tables go.
+    drop(runtime);
+    empty_saves();
 }

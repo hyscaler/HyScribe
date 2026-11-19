@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::cron::{Event, args, wp_next_scheduled, wp_schedule_event, wp_schedule_single_event};
+use crate::tests::SAVES;
 use hyscribe_config::{Database, Mode};
 use hyscribe_db::{Write, Writer};
 
@@ -13,9 +14,6 @@ const PHP_LOCK: &str = "1793088495.8851230144500732421875";
 const PHP_TIME: f64 = 1_793_088_495.885_123;
 /// The time of the fixture's first events, among them two HyScribe runs.
 const FIRST: i64 = 1_793_088_495;
-
-/// One test at a time over `wordpress_saves`, which each reloads.
-static SAVES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The default install afresh in `wordpress_saves`, after `sql`.
 async fn saves(sql: &[&str]) -> Writer {

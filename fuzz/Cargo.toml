@@ -27,6 +27,7 @@ hyscribe-image = { path = "../crates/hyscribe-image" }
 hyscribe-kses = { path = "../crates/hyscribe-kses" }
 hyscribe-mail = { path = "../crates/hyscribe-mail" }
 hyscribe-theme-json = { path = "../crates/hyscribe-theme-json" }
+hyscribe-write = { path = "../crates/hyscribe-write" }
 
 [[bin]]
 name = "phpser_decode"
@@ -404,6 +405,13 @@ bench = false
 [[bin]]
 name = "trusted_proxies"
 path = "fuzz_targets/trusted_proxies.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "install_answers"
+path = "fuzz_targets/install_answers.rs"
 test = false
 doc = false
 bench = false

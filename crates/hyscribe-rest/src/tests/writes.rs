@@ -1451,12 +1451,8 @@ fn what_a_media_update_does_not_port_is_refused_before_it_writes() {
         let asked = Asked::new(who, "POST", "/wp/v2/media/9131", body);
         on(&media(who), &asked, Outcome::Written(9131))
     };
-    // `featured_media` and `meta`, and a negative parent.
-    for body in [
-        r#"{"featured_media":1}"#,
-        r#"{"meta":{}}"#,
-        r#"{"post":-5}"#,
-    ] {
+    // `featured_media`, and a negative parent.
+    for body in [r#"{"featured_media":1}"#, r#"{"post":-5}"#] {
         let (plan, served) = sent(body);
         assert!(
             plan.is_none() && served.status == 501 && served.body.is_empty(),

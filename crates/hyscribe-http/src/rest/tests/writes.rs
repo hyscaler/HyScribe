@@ -187,13 +187,10 @@ async fn theme_reads_create_the_styles_post_as_php() {
 async fn media_writes_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/media-writes.tsv");
     let state = include_str!("../../../../../reference/rest/media-writes.sql");
-    let unported = [
-        (r#"{"featured_media":1}"#, &[][..]),
-        (r#"{"meta":{"x":1}}"#, &[][..]),
-    ];
+    let unported = [(r#"{"featured_media":1}"#, &[][..])];
     assert_eq!(
         writes_match_php(golden, state, &unported).await,
-        (6 * 38, 12)
+        (6 * 38, 6)
     );
 }
 

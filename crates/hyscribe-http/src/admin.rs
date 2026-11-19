@@ -11,7 +11,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::actions::{ActionSite, Asked, Body, Refusal, admin_ajax};
 use hyscribe_admin::admin_bar::{BarSite, Browser};
-use hyscribe_admin::appearance::themes;
+use hyscribe_admin::appearance::{plugins, themes};
 use hyscribe_admin::assets::Urls;
 use hyscribe_admin::comments::{
     CommentArgs, CommentEditSite, CommentQuery, CommentsSite, MODERATED, comment_edit,
@@ -32,7 +32,7 @@ use hyscribe_admin::posts::{
 use hyscribe_admin::profile::{EditArgs, ProfileSite, profile, user_edit};
 use hyscribe_admin::settings::{SettingsSite, general, reading, writing};
 use hyscribe_admin::settings_more;
-use hyscribe_admin::site_health::{HealthSite, Install, info};
+use hyscribe_admin::site_health::{EnvFile, Environment, HealthSite, Install, info, status};
 use hyscribe_admin::terms::{
     Taxonomy as Terms, TermArgs, TermEditArgs, TermsSite, edit_tags, term_edit,
 };
@@ -890,6 +890,36 @@ impl HealthSite for Admin<'_> {
     fn database_server(&self) -> (String, String) {
         self.reads.reads.wait(self.site.db.server())
     }
+    fn environment(&self) -> Environment {
+        environment(&self.site.install.binary)
+    }
+}
+
+/// The `.env` file, the disk and the service of the `hyscribe/` folder the
+/// binary at `binary` is in.
+fn environment(binary: &str) -> Environment {
+    use std::os::unix::fs::PermissionsExt;
+    let home = std::path::Path::new(binary)
+        .parent()
+        .filter(|home| !home.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let env_file = match std::fs::metadata(home.join(".env")) {
+        Ok(file) => EnvFile::Mode(file.permissions().mode() & 0o777),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => EnvFile::Missing,
+        Err(_) => EnvFile::Unreadable,
+    };
+    let service_pid = match hyscribe_service::status(&hyscribe_service::Paths::new(home)) {
+        Ok(
+            hyscribe_service::Status::Running(pid) | hyscribe_service::Status::Starting(Some(pid)),
+        ) => Some(pid),
+        _ => None,
+    };
+    Environment {
+        env_file,
+        disk_free: hyscribe_service::disk_free(home),
+        service_pid,
+        pid: std::process::id(),
+    }
 }
 
 impl SettingsSite for Admin<'_> {
@@ -1411,20 +1441,25 @@ fn screen(
         // Nobody may update here (the updates are HyScribe's releases, an open question;
         // `update_core` is never granted): refused as PHP refuses the menu.
         "/hs-admin/update-core" => Answer::from_page(None),
-        // Refused as PHP refuses, else not ported: its help names the plugins
-        // folder.
+        // Refused as PHP refuses; its arguments and actions are not ported.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
+        "/hs-admin/plugins" if request_uri.contains('?') => return None,
+        "/hs-admin/plugins" => plugins(admin, &request)?,
         "/hs-admin/site-health" if !admin.can("view_site_health_checks") => Answer::from_page(None),
-        // The Info tab of the bundled theme; the Status tab's checks
-        // are not decided.
+        // The Info tab of the bundled theme, and the Status tab with
+        // HyScribe's own checks.
         "/hs-admin/site-health" => {
-            only_argument(query, "tab").filter(|tab| tab.as_deref() == Some("debug"))?;
+            let tab = only_argument(query, "tab")?;
             let bundled =
                 |name| PostsSite::option(admin, name).as_deref() == Some(&b"twentytwentyfive"[..]);
             if !bundled("stylesheet") || !bundled("template") {
                 return None;
             }
-            Answer::from_page(info(admin, &request))
+            match tab.as_deref() {
+                None => Answer::from_page(status(admin, &request)),
+                Some("debug") => Answer::from_page(info(admin, &request)),
+                Some(_) => return None,
+            }
         }
         "/hs-admin/site-editor" if !admin.can("edit_theme_options") => Answer::from_page(None),
         "/hs-admin/site-editor" => hyscribe_admin::site_editor::site_editor(query, request_uri)

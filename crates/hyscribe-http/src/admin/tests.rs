@@ -368,8 +368,8 @@ async fn logged_in_users_are_let_in() {
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
     for path in [
-        "/hs-admin/plugins",
-        "/hs-admin/site-health",
+        "/hs-admin/plugins?plugin_status=active",
+        "/hs-admin/site-health?tab=status",
         "/hs-admin/site-editor",
         "/hs-admin/site-editor?p=%2Fpage",
     ] {
@@ -1249,6 +1249,96 @@ async fn a_missing_theme_is_php_s() {
     let kid = Arc::new(kid);
     let page = page_of(get(&kid, "/hs-admin/themes", host, &cookies).await).await;
     assert_eq!(with_values(&php("j9child"), &page), page);
+}
+
+/// The Plugins screen as PHP shows the default install, but for the
+/// plugins folder, which it names relative to HyScribe's.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_plugins_screen_is_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/appearance.tsv");
+    let row = golden
+        .lines()
+        .find(|l| l.starts_with("default\tplugins.php\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap())
+        .replace("/var/www/html/wp-content/plugins", "hyscribe/plugins/");
+    let page = page_of(get(&site, "/hs-admin/plugins", "127.0.0.1:8081", &cookies).await).await;
+    assert_eq!(with_values(&php, &page), page);
+    assert!(page.contains("<code>hyscribe/plugins/</code> directory"));
+}
+
+/// Site Health's Status tab: PHP's page around HyScribe's checks,
+/// of the bundled theme only.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_health_status_tab() {
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies) = logged_in("wordpress", dir.path()).await;
+    let host = "127.0.0.1:8081";
+    let path = "/hs-admin/site-health";
+    let page = page_of(get(&site, path, host, &cookies).await).await;
+    let golden = include_str!("../../../hyscribe-admin/tests/golden/site-health.tsv");
+    let row = golden
+        .lines()
+        .find(|l| l.starts_with("site-health.php\tadministrator\t"))
+        .unwrap();
+    let php = hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap());
+    let php = hyscribe_testkit::hs_admin_page(&String::from_utf8(php).unwrap());
+    let frame = |page: &str| {
+        let (head, rest) = page.split_once("\"direct\":").unwrap();
+        let (_, tail) = rest.split_once(",\"issues\":").unwrap();
+        format!("{head}{tail}")
+    };
+    let (php, framed) = (frame(&php), frame(&page));
+    assert_eq!(with_values(&php, &framed), framed);
+    for test in [
+        "hyscribe_version",
+        "sql_server",
+        "https_status",
+        "hyscribe_env_permissions",
+        "available_updates_disk_space",
+        "hyscribe_service",
+    ] {
+        assert!(page.contains(&format!("\"test\":\"{test}\"")), "{test}");
+    }
+    // The fixture's MariaDB is current, and the Info tab sends no results.
+    assert!(!page.contains("Outdated SQL server"));
+    let info = page_of(get(&site, "/hs-admin/site-health?tab=debug", host, &cookies).await).await;
+    assert!(info.contains("\"direct\":[]"));
+    let mut gone = Arc::try_unwrap(site).ok().unwrap();
+    gone.options.insert("template".into(), b"gone".to_vec());
+    let response = get(&Arc::new(gone), path, host, &cookies).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// The machine's facts: the `.env` beside the binary, the disk, and the
+/// holder of the pid file.
+#[test]
+fn the_environment_is_read_from_the_folder() {
+    use hyscribe_admin::site_health::EnvFile;
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let binary = dir.path().join("hyscribe").display().to_string();
+    let env = || super::environment(&binary);
+    assert_eq!(env().env_file, EnvFile::Missing);
+    assert_eq!(env().pid, std::process::id());
+    assert!(env().disk_free.is_some());
+    assert_eq!(env().service_pid, None);
+    let file = dir.path().join(".env");
+    std::fs::write(&file, "").unwrap();
+    for mode in [0o600, 0o644] {
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
+        assert_eq!(env().env_file, EnvFile::Mode(mode));
+    }
+    let _lock = hyscribe_service::hold(&hyscribe_service::Paths::new(dir.path())).unwrap();
+    assert_eq!(env().service_pid, Some(std::process::id()));
+    // A binary named alone is in the working folder, and a path through a
+    // file cannot be read.
+    assert!(super::environment("hyscribe").disk_free.is_some());
+    let through = file.join("hyscribe").display().to_string();
+    assert_eq!(super::environment(&through).env_file, EnvFile::Unreadable);
 }
 
 /// Paged comments link to their page, on the comments list and the
@@ -2801,7 +2891,6 @@ async fn the_site_health_info_tab() {
         assert!(page.contains(&row), "{row}");
     }
     for path in [
-        "/hs-admin/site-health",
         "/hs-admin/site-health?tab=",
         "/hs-admin/site-health?tab=status",
         "/hs-admin/site-health?tab=debug&x=1",

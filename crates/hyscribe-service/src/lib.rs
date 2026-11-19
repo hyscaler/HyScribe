@@ -568,5 +568,12 @@ pub fn effective_uid() -> u32 {
     rustix::process::geteuid().as_raw()
 }
 
+/// The bytes free for this user on the file system holding `path`, as
+/// PHP's `disk_free_space()` counts them; `None` when it cannot be read.
+pub fn disk_free(path: &Path) -> Option<u64> {
+    let stat = rustix::fs::statvfs(path).ok()?;
+    Some(stat.f_bavail.saturating_mul(stat.f_frsize))
+}
+
 #[cfg(test)]
 mod tests;

@@ -10,8 +10,8 @@
 # would run its code on that machine). Fixture containers start through the
 # runner's rootless Docker (scripts/ci-net.sh joins them to the job).
 # Mutation testing runs before a merge, not here. The containers run
-# as root without DAC_OVERRIDE and DAC_READ_SEARCH, so file permissions bind
-# them as they bind the ordinary user the tests expect.
+# as root; the steps that run HyScribe or its tests go through
+# scripts/ci-as-user.sh, as the ordinary user they expect.
 name: CI
 
 on:
@@ -44,7 +44,6 @@ jobs:
         SCCACHE_DIR: /cache/sccache
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
-      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
@@ -100,7 +99,6 @@ jobs:
         SCCACHE_DIR: /cache/sccache
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
-      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
@@ -133,14 +131,15 @@ jobs:
           reference/default-install/db.sh up
       - name: Tests with the 100% gate (ADR 0007)
         run: |
-          cargo llvm-cov --workspace --ignore-filename-regex '/tests/' \
+          scripts/ci-as-user.sh prepare
+          scripts/ci-as-user.sh cargo llvm-cov --workspace --ignore-filename-regex '/tests/' \
             --fail-under-lines 100 --fail-under-regions 100 \
-            --lcov --output-path lcov.info
-      - run: cargo llvm-cov report --ignore-filename-regex '/tests/' --summary-only
+            --lcov --output-path target/lcov.info
+      - run: scripts/ci-as-user.sh cargo llvm-cov report --ignore-filename-regex '/tests/' --summary-only
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage
-          path: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/lcov.info
+          path: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/lcov.info
       - name: Remove the fixture containers
         if: always()
         run: |
@@ -156,7 +155,6 @@ jobs:
         SCCACHE_DIR: /cache/sccache
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
-      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
@@ -185,7 +183,8 @@ jobs:
           scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 28992=db:3306
           reference/default-install/db.sh up
           scripts/package.sh x86_64-unknown-linux-musl dist
-          scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
+          scripts/ci-as-user.sh prepare
+          scripts/ci-as-user.sh scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
       - name: Remove the fixture containers
         if: always()
         run: |
@@ -204,7 +203,6 @@ jobs:
         SCCACHE_DIR: /cache/sccache
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
-      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}

@@ -26,7 +26,6 @@ jobs:
         CARGO_HOME: /cache/cargo
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
-      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}
@@ -67,12 +66,15 @@ jobs:
         run: |
           scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" 28993=db:3306
           reference/default-install/db.sh up
-          scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
+          scripts/ci-as-user.sh prepare
+          scripts/ci-as-user.sh scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
       - name: Switch back to PHP WordPress (MVP 8.5, GOALS S7)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" "8093=$HYSCRIBE_PHP_CONTAINER:80"
-          reference/switch-back/run.sh
+          scripts/ci-as-user.sh prepare
+          # World writable folders: HyScribe's test runs as the ordinary user.
+          (umask 000; CARGO="$PWD/scripts/ci-cargo.sh" reference/switch-back/run.sh)
       - name: Remove the fixture containers
         if: always() && matrix.target == 'x86_64-unknown-linux-musl'
         run: |
@@ -99,7 +101,6 @@ jobs:
         CARGO_HOME: /cache/cargo
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
-      options: --cap-drop DAC_OVERRIDE --cap-drop DAC_READ_SEARCH
       volumes:
         - ${{ vars.HYSCRIBE_CI_DOCKER }}:${{ vars.HYSCRIBE_CI_DOCKER }}
         - ${{ vars.HYSCRIBE_CI_WORK }}:${{ vars.HYSCRIBE_CI_WORK }}

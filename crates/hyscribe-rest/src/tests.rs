@@ -601,7 +601,7 @@ fn arguments_use_ported_keywords() {
 }
 
 /// The default install with `options` changed.
-fn changed(options: &[(&str, &[u8])]) -> &'static Content {
+pub(crate) fn changed(options: &[(&str, &[u8])]) -> &'static Content {
     let default = content::default_install();
     let mut changed = default.options.clone();
     for (name, value) in options {
@@ -619,7 +619,7 @@ fn changed(options: &[(&str, &[u8])]) -> &'static Content {
     }))
 }
 
-fn get(content: &'static Content, who: &str, target: &str) -> Served {
+pub(crate) fn get(content: &'static Content, who: &str, target: &str) -> Served {
     let case = RestCase {
         who: who.into(),
         method: "GET".into(),

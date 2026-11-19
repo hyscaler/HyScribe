@@ -9,6 +9,8 @@ use hyscribe_phpser::{Key, Value};
 use crate::fields::{Properties, fields_for_response, is_field_included};
 use crate::request::Params;
 use crate::response::{Response, RestError, list, text};
+use hyscribe_render::theme::under_site;
+
 use crate::templates::content::{pattern as theme_pattern, resolve_patterns};
 use crate::types::can_edit_any;
 use crate::{Context, Endpoint};
@@ -146,19 +148,25 @@ fn patterns(context: &Context, params: &Params) -> Result<Response, RestError> {
     let registered: Vec<&Value> = (core("patterns").iter().chain(theme("patterns")))
         .map(|(_, item)| item)
         .collect();
-    prepared(&registered, &wanted).map(|data| Response::new(list(data), 200))
+    let siteurl = context.option("siteurl").unwrap_or_default();
+    prepared(&registered, &wanted, &siteurl).map(|data| Response::new(list(data), 200))
 }
 
 /// `prepare_item_for_response()` of each registered pattern, with its pattern
 /// blocks resolved.
-pub(super) fn prepared(registered: &[&Value], wanted: &[Vec<u8>]) -> Result<Vec<Value>, RestError> {
+pub(super) fn prepared(
+    registered: &[&Value],
+    wanted: &[Vec<u8>],
+    siteurl: &[u8],
+) -> Result<Vec<Value>, RestError> {
     let mut data = Vec::new();
     for item in registered.iter().copied() {
         // A theme's patterns keep their content in the export of its files.
         let name = item.get_str("name").and_then(Value::as_bytes);
         let source = name.and_then(theme_pattern).unwrap_or(item);
         let content = source.get_str("content").map(Value::to_php_string);
-        let content = text(resolve_patterns(&content.unwrap_or_default())?);
+        let content = under_site(&content.unwrap_or_default(), siteurl);
+        let content = text(resolve_patterns(&content, siteurl)?);
         let kept: Vec<(Key, Value)> = ITEM_KEYS
             .iter()
             .zip(PATTERN_PROPERTIES)

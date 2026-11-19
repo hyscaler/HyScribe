@@ -76,6 +76,13 @@ browser() {
     -v "$HERE:/shots:ro" -v "$OUT:/out" "$IMAGE" python3 "$@"
 }
 
+# The posts table after a side's pictures (posts-<side>.tsv), to compare what
+# each server wrote while the pages were viewed.
+posts() {
+  "$DOCKER" exec "$DB" mariadb -uroot -preference-only wordpress -N \
+    -e "SELECT ID, post_type, post_status, post_name, post_author FROM wp_posts ORDER BY ID" > "$OUT/posts-$1.tsv"
+}
+
 wait_for() {
   local tries=0
   until "$DOCKER" run --rm --network "$NETWORK" "$IMAGE" python3 -c \
@@ -95,6 +102,7 @@ if [ -z "$KEEP_PHP" ]; then
   MU=/var/www/html/wp-content/mu-plugins
   "$DOCKER" exec -i "$PHP_NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-screenshots.php" < "$HERE/mu-plugin.php"
   browser /shots/capture.py php "$URL" /shots/screens.list /out/php
+  posts php
   "$DOCKER" rm -f "$PHP_NAME" >/dev/null
 fi
 
@@ -117,6 +125,7 @@ chmod 600 "$HOME_DIR/.env"
   'cp -r /seed /run/hyscribe && chown -R 1000:1000 /run/hyscribe && cd /run/hyscribe && exec setpriv --reuid=1000 --regid=1000 --clear-groups ./hyscribe start' >/dev/null
 wait_for HyScribe
 browser /shots/capture.py hyscribe "$URL" /shots/screens.list /out/hyscribe
+posts hyscribe
 "$DOCKER" logs "$HS_NAME" > "$OUT/hyscribe.log" 2>&1 || true
 "$DOCKER" exec "$HS_NAME" sh -c 'cat /run/hyscribe/logs/hyscribe.log 2>/dev/null' >> "$OUT/hyscribe.log" || true
 "$DOCKER" rm -f "$HS_NAME" >/dev/null

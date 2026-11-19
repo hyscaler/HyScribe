@@ -91,6 +91,10 @@ with sync_playwright() as p:
         except Exception:
             pass
         page.wait_for_timeout(500)
+        if "post-new.php" in path:
+            # The editor draws the starter patterns' previews one idle frame
+            # at a time, so a picture taken early shows a different stage.
+            page.wait_for_timeout(6000)
         masks = [] if mask == "-" else [page.locator(s) for s in mask.split(",")]
         page.screenshot(path=f"{out}/{name}.png", full_page=True, animations="disabled",
                         caret="hide", mask=masks, mask_color="#ff00ff")

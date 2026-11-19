@@ -12,7 +12,7 @@ use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
 
 use crate::templates::tests::CREDIT;
 use crate::tests::content::{Content, default_install_with};
-use crate::tests::{serve_case, serve_over, sha256_hex};
+use crate::tests::{changed, get, serve_case, serve_over, sha256_hex};
 
 /// The identities PHP lets read the editors' registries.
 const EDITORS: [&str; 4] = ["administrator", "editor", "author", "contributor"];
@@ -178,6 +178,19 @@ fn old_categories_are_migrated() {
     );
 }
 
+/// Theme file URLs in pattern content, nested patterns included, are the
+/// site's own, whatever address the theme export ran under.
+#[test]
+fn pattern_urls_follow_the_site() {
+    let site = changed(&[("siteurl", b"https://wp.test")]);
+    let target = "/?rest_route=/wp/v2/block-patterns/patterns&_fields=content";
+    let served = get(site, "administrator", target);
+    let body = String::from_utf8_lossy(&served.body);
+    let own = r"https:\/\/wp.test\/wp-content\/themes\/twentytwentyfive\/assets\/images\/";
+    assert!(body.contains(own));
+    assert!(!body.contains("127.0.0.1"));
+}
+
 /// A pattern naming a pattern that is not the theme's (core's or the pattern
 /// directory's) is not ported.
 #[test]
@@ -188,7 +201,7 @@ fn a_foreign_pattern_block_is_not_ported() {
         Value::String(content.as_bytes().to_vec()),
     )]);
     let wanted = vec![b"content".to_vec()];
-    let served = super::patterns::prepared(&[&pattern], &wanted);
+    let served = super::patterns::prepared(&[&pattern], &wanted, b"http://example.test");
     assert!(served.is_err());
 }
 

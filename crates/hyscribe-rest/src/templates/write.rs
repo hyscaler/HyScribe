@@ -8,7 +8,7 @@
 
 use hyscribe_phpser::{Value, is_empty_string, lookup};
 
-use super::content::{hooked, resolve_patterns};
+use super::content::resolve_patterns;
 use super::query::{self, Kind, Query, Template, names_an_entity, stylesheet};
 use super::{base, prepare, template_id};
 use crate::Context;
@@ -230,7 +230,8 @@ fn answerable(
         content.unwrap_or_default(),
         &title.unwrap_or_default(),
     );
-    resolve_patterns(&hooked(&content, kind == Kind::Part, &stylesheet(context)))?;
+    let siteurl = context.option("siteurl").unwrap_or_default();
+    resolve_patterns(&content, &siteurl)?;
     let slug = save.slug.clone().unwrap_or_default();
     let untitled = is_empty_string(&title) || title == slug;
     let described = description.is_some_and(|description| !is_empty_string(&description));

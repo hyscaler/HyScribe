@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, lookup, php_trim};
 use hyscribe_render::blocks::{Block, parse_blocks, serialize_blocks};
 use hyscribe_render::formatting::sanitize_text_field;
+use hyscribe_render::theme::under_site;
 
 use crate::response::{RestError, text};
 
@@ -151,24 +152,29 @@ fn names_foreign_pattern(blocks: &[Block]) -> bool {
 /// `resolve_pattern_blocks()` of blocks naming only the theme's patterns,
 /// with the inner content of the block whose inner blocks these are. No
 /// theme pattern holds itself, so none is skipped as recursive.
-fn resolve(mut blocks: Vec<Block>, mut inner: Option<&mut Vec<Option<Vec<u8>>>>) -> Vec<Block> {
+fn resolve(
+    mut blocks: Vec<Block>,
+    mut inner: Option<&mut Vec<Option<Vec<u8>>>>,
+    siteurl: &[u8],
+) -> Vec<Block> {
     let mut i = 0;
     while let Some(block) = blocks.get_mut(i) {
         let found = pattern_slug(block).and_then(|slug| pattern(&slug).map(|found| (slug, found)));
         let Some((slug, pattern)) = found else {
             if block.name.as_deref() != Some("core/pattern") {
                 let children = std::mem::take(&mut block.inner_blocks);
-                block.inner_blocks = resolve(children, Some(&mut block.inner_content));
+                block.inner_blocks = resolve(children, Some(&mut block.inner_content), siteurl);
             }
             i += 1;
             continue;
         };
         let content = pattern.get_str("content").map(Value::to_php_string);
-        let mut inserted = parse_blocks(php_trim(&content.unwrap_or_default()));
+        let content = under_site(&content.unwrap_or_default(), siteurl);
+        let mut inserted = parse_blocks(php_trim(&content));
         if let [root] = inserted.as_mut_slice() {
             name_root(root, &slug, pattern);
         }
-        let inserted = resolve(inserted, None);
+        let inserted = resolve(inserted, None, siteurl);
         let count = inserted.len();
         blocks.splice(i..=i, inserted);
         // The inner content of a block with inner blocks is never empty.
@@ -188,10 +194,10 @@ fn resolve(mut blocks: Vec<Block>, mut inner: Option<&mut Vec<Option<Vec<u8>>>>)
 }
 
 /// A template's content with its patterns resolved, serialized again.
-pub(crate) fn resolve_patterns(content: &[u8]) -> Result<Vec<u8>, RestError> {
+pub(crate) fn resolve_patterns(content: &[u8], siteurl: &[u8]) -> Result<Vec<u8>, RestError> {
     let blocks = parse_blocks(content);
     if names_foreign_pattern(&blocks) {
         return Err(RestError::not_ported());
     }
-    Ok(serialize_blocks(&resolve(blocks, None)))
+    Ok(serialize_blocks(&resolve(blocks, None, siteurl)))
 }

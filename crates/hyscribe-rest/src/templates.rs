@@ -337,7 +337,8 @@ fn prepare(
     let response = if context.head {
         Ok(Response::new(Value::Array(Vec::new()), 200))
     } else {
-        resolve_patterns(&template.content)
+        let siteurl = context.option("siteurl").unwrap_or_default();
+        resolve_patterns(&template.content, &siteurl)
             .and_then(|content| prepare_resolved(context, params, template, kind, &content))
     };
     let hook = format!("rest_prepare_{}", kind.name());

@@ -574,6 +574,9 @@ async fn uploads_stop_short() {
         format!("{rest}\traw,type=image/jpeg,md5\tsmall.jpg\t-"),
         format!("{rest}\trestfile,part=other\tsmall.jpg\t-"),
         format!("{rest}\trestfile,kind=image/x-unknown\tsmall.jpg\t-"),
+        format!("{rest}\traw,type=application/pdf\tsample.pdf\t-"),
+        format!("{async_upload}\tform,nonce\tsample.pdf\tshort=1"),
+        format!("{media_new}\tform,nonce\tsample.pdf\thtml-upload=Upload"),
     ] {
         let (status, _) = sent_case(&site, &line, admin).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{line}");

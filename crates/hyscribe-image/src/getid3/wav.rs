@@ -47,9 +47,9 @@ pub(super) fn wav(b: &[u8]) -> Result<Vec<Entry>, Unported> {
     if data == 0
         || tag != 1
         || !(1..=2).contains(&channels)
-        || rate < 1
-        || bytes_per_second < 1
-        || bits < 1
+        || rate == 0
+        || bytes_per_second == 0
+        || bits == 0
     {
         return Err(Unported);
     }

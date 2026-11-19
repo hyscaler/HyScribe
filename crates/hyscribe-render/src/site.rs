@@ -7,7 +7,7 @@ use hyscribe_model::{
 };
 use hyscribe_phpser::Value;
 
-pub use crate::outbound::{Get, Hooks, Response};
+pub use crate::outbound::{EmbedHosts, Get, Hooks, Response};
 
 /// The site's data, as blocks read it while rendering.
 pub trait Site {
@@ -175,6 +175,16 @@ pub trait Site {
     /// `RSS_ALLOWED_HOSTS` names it. None may by default.
     fn feed_allowed(&self, _host: &[u8]) -> bool {
         false
+    }
+
+    /// Where embeds may fetch from: nowhere, as sites without a
+    /// client fetch nothing.
+    fn embed_hosts(&self) -> &EmbedHosts {
+        static NOWHERE: EmbedHosts = EmbedHosts {
+            providers: false,
+            hosts: Vec::new(),
+        };
+        &NOWHERE
     }
 
     /// `update_post_meta( $post_id, $key, $value )`, which a page view

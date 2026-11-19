@@ -7,7 +7,7 @@
 
 use std::sync::LazyLock;
 
-use hyscribe_kses::{esc_attr, esc_html, esc_url};
+use hyscribe_kses::{esc_attr, esc_html, esc_url, url_host};
 use hyscribe_phpser::{
     Pattern, Value, add_query_arg, is_empty_string, json_decode, php_trim, urlencode,
 };
@@ -100,13 +100,19 @@ fn text<'a>(data: &'a Data, name: &[u8]) -> Option<&'a [u8]> {
 /// `wp_oembed_get( $url, $args )` with `$args` the embed's size and
 /// `discover` on.
 pub(super) fn wp_oembed_get(site: &dyn Site, url: &[u8], args: Size) -> Got {
+    // A URL the list does not allow stays a link, as one with no provider.
+    let allowed = site.embed_hosts();
+    let listed = url_host(url)
+        .map(|host| host.to_ascii_lowercase())
+        .is_some_and(|host| allowed.hosts.contains(&host));
     let provider = match get_provider(site, url) {
-        Some(provider) => provider,
-        None => match discover(site, url) {
+        Some(provider) if listed || allowed.providers => provider,
+        _ if listed => match discover(site, url) {
             Some(Some(provider)) => provider,
             Some(None) => return Got::Failed,
             None => return Got::Off,
         },
+        _ => return Got::Off,
     };
     let data = match fetch(site, &provider, url, args) {
         Some(Some(data)) => data,

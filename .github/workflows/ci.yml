@@ -233,8 +233,6 @@ jobs:
       HYSCRIBE_DB_PORT: "28994"
       HYSCRIBE_TEST_DB_PORT: "28994"
       HYSCRIBE_PHP_PORT: "8094"
-      # The checkout at the path the host also has: php.sh's bind mounts need it.
-      WS: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
       HYSCRIBE_CI_FIXTURES: ${{ vars.HYSCRIBE_CI_FIXTURES }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -252,19 +250,20 @@ jobs:
           test -f target/fixtures/theme-test-data/7.1.3/database.sql
       - name: Fixture network and port forwards
         run: scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" "28994=db:3306" "8094=$HYSCRIBE_PHP_CONTAINER:80"
-      - name: DEBUGPATHS
-        run: |
-          pwd; pwd -P; echo "PWD=$PWD WS=$WS"; ls -ld ${{ vars.HYSCRIBE_CI_WORK }} /__w "$WS" || true
-          (cd "$WS" && pwd && pwd -P); readlink -f "$WS"; grep -E "_work|__w" /proc/self/mountinfo | cut -c1-200; env | grep -i "^GITHUB_WORKSPACE\|^RUNNER_" || true
       - name: Docker for the tests' SQL steps (they run as the ordinary user)
         run: scripts/ci-docker-proxy.sh
       - name: Switch back to PHP WordPress, default install
         run: |
+          # The runner rewrites _work paths in a step's environment to /__w,
+          # which the host's Docker cannot mount: the scripts get the host
+          # path (also mounted in the job) from this literal.
+          ws=${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
           # World writable folders: HyScribe's test runs as the ordinary user.
-          (umask 000; CARGO="$WS/scripts/ci-cargo.sh" "$WS/reference/switch-back/run.sh" "$WS/target/switch-back/default")
+          (umask 000; CARGO="$ws/scripts/ci-cargo.sh" "$ws/reference/switch-back/run.sh" "$ws/target/switch-back/default")
       - name: Switch back to PHP WordPress, Theme Test Data
         run: |
-          (umask 000; HYSCRIBE_SWITCH_BACK_FIXTURE=ttd CARGO="$WS/scripts/ci-cargo.sh" "$WS/reference/switch-back/run.sh" "$WS/target/switch-back/ttd")
+          ws=${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+          (umask 000; HYSCRIBE_SWITCH_BACK_FIXTURE=ttd CARGO="$ws/scripts/ci-cargo.sh" "$ws/reference/switch-back/run.sh" "$ws/target/switch-back/ttd")
       - name: Logs of a failed run
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -305,8 +304,6 @@ jobs:
       HYSCRIBE_DB_CONTAINER: ci-shots-db-${{ github.run_id }}
       HYSCRIBE_REF_NETWORK: ci-shots-ref-${{ github.run_id }}
       HYSCRIBE_DB_PORT: "28995"
-      # The checkout at the path the host also has: the bind mounts need it.
-      WS: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools (system packages, cargo tools from the cache volume)
@@ -324,7 +321,10 @@ jobs:
       - name: Screenshots of every screen, PHP against HyScribe
         env:
           HYSCRIBE_BIN: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/target/x86_64-unknown-linux-musl/release/hyscribe
-        run: '"$WS/reference/screenshots/golden.sh" "$WS/target/screenshots"'
+        run: |
+          # The host path of the checkout, for the bind mounts (see the switch-back job).
+          ws=${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe
+          "$ws/reference/screenshots/golden.sh" "$ws/target/screenshots"
       - name: Report of a failed run
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

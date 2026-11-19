@@ -322,16 +322,15 @@ impl Plan {
 fn expand(text: &str, fill: &dyn Fn(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
-    while let Some(at) = rest.find('%') {
-        out.push_str(&rest[..at]);
-        let after = &rest[at + 1..];
+    while let Some((before, after)) = rest.split_once('%') {
+        out.push_str(before);
         let known = after
-            .find('%')
-            .and_then(|end| fill(&after[..end]).map(|value| (value, end)));
+            .split_once('%')
+            .and_then(|(token, tail)| fill(token).map(|value| (value, tail)));
         match known {
-            Some((value, end)) => {
+            Some((value, tail)) => {
                 out.push_str(&value);
-                rest = &after[end + 1..];
+                rest = tail;
             }
             None => {
                 out.push('%');
@@ -382,13 +381,9 @@ fn tables(fill: &dyn Fn(&str) -> Option<String>, nag: bool) -> Vec<Rows> {
                 columns: names.map(String::from).collect(),
                 rows: Vec::new(),
             });
-        } else {
+        } else if let Some(table) = tables.last_mut() {
             let values = line.split('\t').map(|value| unescape(value, fill));
-            tables
-                .last_mut()
-                .expect("a header before the rows")
-                .rows
-                .push(values.collect());
+            table.rows.push(values.collect());
         }
     }
     tables.retain(|table| !table.rows.is_empty());
@@ -402,26 +397,27 @@ fn tables(fill: &dyn Fn(&str) -> Option<String>, nag: bool) -> Vec<Rows> {
 /// `wp_install()` calls for a password it made, right before
 /// `show_welcome_panel`, which takes the next ID.
 fn password_nag(tables: &mut [Rows]) {
-    let meta = tables.iter_mut().find(|table| table.table == "usermeta");
-    let meta = meta.expect("the user's meta");
-    let welcome = meta
-        .rows
-        .iter()
-        .position(|row| row[2].as_deref() == Some("show_welcome_panel"))
-        .expect("show_welcome_panel");
-    let id: u64 = meta.rows[welcome][0]
-        .as_deref()
-        .and_then(|id| id.parse().ok())
-        .expect("an ID");
-    meta.rows[welcome][0] = Some((id + 1).to_string());
-    let user = meta.rows[welcome][1].clone();
-    let nag = vec![
-        Some(id.to_string()),
-        user,
-        Some("default_password_nag".into()),
-        Some("1".into()),
-    ];
-    meta.rows.insert(welcome, nag);
+    for table in tables.iter_mut().filter(|table| table.table == "usermeta") {
+        // The columns are umeta_id, user_id, meta_key and meta_value.
+        for mut row in std::mem::take(&mut table.rows) {
+            if let [Some(id), user, Some(key), _] = row.as_mut_slice()
+                && key == "show_welcome_panel"
+            {
+                let nag_id = id.clone();
+                *id = nag_id
+                    .parse::<u64>()
+                    .map_or(nag_id.clone(), |n| (n + 1).to_string());
+                let nag = [
+                    Some(nag_id),
+                    user.clone(),
+                    Some("default_password_nag".into()),
+                    Some("1".into()),
+                ];
+                table.rows.push(nag.into());
+            }
+            table.rows.push(row);
+        }
+    }
 }
 
 #[cfg(test)]

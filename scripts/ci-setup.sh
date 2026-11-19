@@ -9,6 +9,9 @@
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
+# The container has no DAC_OVERRIDE (ci.yml), so apt cannot hand its download
+# folders to the _apt user and read them back; it downloads as root.
+echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99ci
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends docker-cli socat clang jq >/dev/null
 

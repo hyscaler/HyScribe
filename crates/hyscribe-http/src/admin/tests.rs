@@ -1268,6 +1268,17 @@ async fn the_plugins_screen_is_php_s() {
     let page = page_of(get(&site, "/hs-admin/plugins", "127.0.0.1:8081", &cookies).await).await;
     assert_eq!(with_values(&php, &page), page);
     assert!(page.contains("<code>hyscribe/plugins/</code> directory"));
+    // An option PHP would repair by writing is not ported.
+    let mut odd = Arc::try_unwrap(site).ok().unwrap();
+    odd.options.insert("active_plugins".into(), b"abc".to_vec());
+    let response = get(
+        &Arc::new(odd),
+        "/hs-admin/plugins",
+        "127.0.0.1:8081",
+        &cookies,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
 }
 
 /// Site Health's Status tab: PHP's page around HyScribe's checks,

@@ -241,6 +241,7 @@ fn missing_of_scaled(deny: &'static [&'static str]) -> (u16, String) {
         origin: None,
         nonce: Some(b"%nonce%"),
         remote_addr: b"",
+        postpass: false,
         user_agent: None,
         method_override: None,
         content_type: None,

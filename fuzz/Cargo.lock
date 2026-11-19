@@ -767,6 +767,7 @@ dependencies = [
  "hyscribe-render",
  "hyscribe-rest",
  "hyscribe-theme-json",
+ "hyscribe-write",
  "libfuzzer-sys",
 ]
 

@@ -19,6 +19,7 @@ use hyscribe_render::kses::wp_kses_data;
 pub mod caps;
 pub mod comments;
 pub mod cron;
+pub mod install;
 pub mod options;
 pub mod posts;
 pub mod privacy;

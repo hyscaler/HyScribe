@@ -1215,6 +1215,26 @@ fn the_new_site_wizard_reaches_a_home_page_within_s4_s_time() {
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
     assert!(page.contains("A New Site"), "{page}");
     assert!(page.contains("Hello world!"), "{page}");
+    // The first post is at its pretty URL, which answers too.
+    let prefix = format!("href=\"http://127.0.0.1:{port}/");
+    let link = page
+        .split(&prefix)
+        .skip(1)
+        .find_map(|rest| {
+            rest.split('"')
+                .next()
+                .filter(|p| p.ends_with("/hello-world/"))
+        })
+        .unwrap_or_else(|| panic!("no pretty link to the first post in {page}"));
+    let parts: Vec<&str> = link.trim_end_matches('/').split('/').collect();
+    let digits = |part: &str, n: usize| part.len() == n && part.bytes().all(|b| b.is_ascii_digit());
+    assert!(
+        matches!(parts[..], [y, m, d, "hello-world"] if digits(y, 4) && digits(m, 2) && digits(d, 2)),
+        "{link}"
+    );
+    let post = http_get(port, &format!("/{link}"));
+    assert!(post.starts_with("HTTP/1.1 200 OK"), "{post}");
+    assert!(post.contains("Welcome to WordPress."), "{post}");
     let took = started.elapsed();
     assert!(took < Duration::from_secs(5 * 60), "{took:?}");
     assert_eq!(service("stop").code, 0);

@@ -432,3 +432,23 @@ async fn database_errors_end_an_attachment_delete() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn database_errors_end_an_attachment_update() {
+    let ctx = admin();
+    fails_at_each_step(
+        async |w| {
+            oracle_attachment(w, &ctx, (9301, 1, None), Extras::None)
+                .await
+                .unwrap();
+        },
+        async |w, ()| {
+            let change = |args: &mut PostArgs| {
+                args.title = b"Renamed".to_vec();
+                args.name = Some(b"renamed-picture".to_vec());
+            };
+            wp_update_post(w, &ctx, 9301, &change).await.map(drop)
+        },
+    )
+    .await;
+}

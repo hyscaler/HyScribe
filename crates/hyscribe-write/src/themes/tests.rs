@@ -243,6 +243,25 @@ async fn pattern_caches_are_deleted_as_php_deletes_them() {
     .await;
 }
 
+/// A site without a sidebar gets its widgets back to the inactive ones.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_site_without_sidebars_is_php_s() {
+    let none = async |write: &mut Write<'_>| {
+        let version = Key::String(b"array_version".to_vec());
+        let sidebars = Value::Array(vec![(version, Value::Int(3))]);
+        update_option(write, "sidebars_widgets", &sidebars, None)
+            .await
+            .unwrap();
+        switch_theme(write, FOUR, FIVE).await.unwrap();
+        next_load(write, FOUR).await;
+        switch_theme(write, FIVE, FOUR).await.unwrap();
+    };
+    check_case("admin-themes-no-sidebars", none, async |write, ()| {
+        next_load(write, FIVE).await;
+    })
+    .await;
+}
+
 /// Without a switch nothing is done on the next load.
 #[tokio::test(flavor = "multi_thread")]
 async fn no_switch_leaves_the_next_load_alone() {

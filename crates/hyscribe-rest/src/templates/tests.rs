@@ -181,3 +181,17 @@ fn what_is_not_ported_answers_501() {
         assert!(served.headers.is_empty() && served.body.is_empty());
     }
 }
+
+/// A pattern block naming a pattern the theme does not have, and that is not
+/// core's, is skipped as PHP skips an unregistered pattern; core's are not
+/// ported.
+#[test]
+fn an_unregistered_pattern_is_left_as_it_is() {
+    let theme = hyscribe_render::theme::load("twentytwentyfour", None);
+    let resolve = |content: &[u8]| super::content::resolve_patterns(&theme, content, b"http://x");
+    for slug in ["clients-section", "other/x", "twentytwentyfive/header"] {
+        let content = format!("<!-- wp:pattern {{\"slug\":\"{slug}\"}} /-->");
+        assert_eq!(resolve(content.as_bytes()).unwrap(), content.as_bytes());
+    }
+    assert!(resolve(b"<!-- wp:pattern {\"slug\":\"core/x\"} /-->").is_err());
+}

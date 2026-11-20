@@ -156,6 +156,16 @@ return array(
 			$themes_next_load();
 		}
 	),
+	// A site without a sidebar, which gets back to a theme that kept none.
+	'admin-themes-no-sidebars'                => $themes_case(
+		function () use ( $themes_activate, $themes_next_load ) {
+			update_option( 'sidebars_widgets', array( 'array_version' => 3 ) );
+			$themes_activate( 'twentytwentyfour' );
+			$themes_next_load();
+			$themes_activate( 'twentytwentyfive' );
+		},
+		$themes_next_load
+	),
 	// A switch the Customizer carried the menus and widgets over for.
 	'admin-themes-via-customizer'             => $themes_case(
 		function () use ( $themes_activate ) {

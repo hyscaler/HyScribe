@@ -2377,7 +2377,7 @@ async fn written_answers_past_the_goldens() {
         (
             "POST",
             templates(""),
-            r#"{"slug":"x","content":"<!-- wp:pattern {\"slug\":\"other/x\"} /-->"}"#,
+            r#"{"slug":"x","content":"<!-- wp:pattern {\"slug\":\"core/x\"} /-->"}"#,
         ),
     ];
     let (cookie, nonce) = log_in(&site).await;
@@ -2456,7 +2456,7 @@ async fn template_writes_past_the_goldens() {
     let more = "INSERT INTO wp_posts (ID, post_author, post_content, post_title, post_excerpt, \
         post_status, post_name, post_type, to_ping, pinged, post_content_filtered) VALUES \
         (770, 1, 'x', '', '', 'publish', 'single-post-hello-world', 'wp_template', '', '', ''), \
-        (771, 1, '<!-- wp:pattern {\"slug\":\"other/x\"} /-->', 'Odd', '', 'publish', 'my-odd', \
+        (771, 1, '<!-- wp:pattern {\"slug\":\"core/x\"} /-->', 'Odd', '', 'publish', 'my-odd', \
         'wp_template', '', '', ''); \
         INSERT INTO wp_term_relationships VALUES (770, 711, 0), (771, 711, 0);\n-- cleanup\n";
     let _saves = crate::admin::tests::SAVES.lock().await;
@@ -2469,7 +2469,7 @@ async fn template_writes_past_the_goldens() {
     let site = saves_site(dir.path()).await;
     let login = log_in(&site).await;
     let at = |path: &str| format!("/?rest_route=/wp/v2/{path}");
-    let foreign = r#"{"content":"<!-- wp:pattern {\"slug\":\"other/x\"} /-->"}"#;
+    let foreign = r#"{"content":"<!-- wp:pattern {\"slug\":\"core/x\"} /-->"}"#;
     let cases = [
         (
             "POST",

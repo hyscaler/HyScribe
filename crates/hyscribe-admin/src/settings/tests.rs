@@ -56,7 +56,7 @@ fn pages_are_php_s() {
         let (php, ours) = match screen {
             Some(Answer::Page(page)) => (hs_admin_page(&recorded), page),
             Some(Answer::Denied(message)) => {
-                let page = crate::die::page(true, "WordPress &rsaquo; Error", message);
+                let page = crate::die::page(true, "HyScribe &rsaquo; Error", message);
                 (
                     recorded,
                     format!("403\t{}", String::from_utf8(page).unwrap()),

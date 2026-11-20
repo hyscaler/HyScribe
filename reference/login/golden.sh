@@ -26,8 +26,10 @@ HEADERS=$(mktemp)
 cleanup() {
   rm -f "$TMP" "$HEADERS"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-use-ssl.php" "$MU/hyscribe-private.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 HASH=$(printf %s "$BASE" | md5sum | cut -d ' ' -f 1)
 : > "$OUT"
 record() {

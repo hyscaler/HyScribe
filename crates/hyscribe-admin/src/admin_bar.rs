@@ -314,54 +314,7 @@ pub fn admin_bar(site: &dyn BarSite, browser: &Browser, view: Option<(&str, &str
     // wp_admin_bar_sidebar_toggle().
     let toggle = format!("{icon}<span class=\"screen-reader-text\">Menu</span>");
     bar.add("menu-toggle", "", toggle, "#".into(), Meta::default());
-    // wp_admin_bar_wp_menu().
-    let meta = Meta {
-        menu_title: "About WordPress".into(),
-        ..Meta::default()
-    };
-    let logo = format!("{icon}<span class=\"screen-reader-text\">About WordPress</span>");
-    bar.add("wp-logo", "", logo, site.admin_url("about.php"), meta);
-    bar.add(
-        "about",
-        "wp-logo",
-        "About WordPress".into(),
-        site.admin_url("about.php"),
-        Meta::default(),
-    );
-    bar.add(
-        "contribute",
-        "wp-logo",
-        "Get Involved".into(),
-        site.admin_url("contribute.php"),
-        Meta::default(),
-    );
-    for (id, title, href) in [
-        ("wporg", "WordPress.org", "https://wordpress.org/"),
-        (
-            "documentation",
-            "Documentation",
-            "https://wordpress.org/documentation/",
-        ),
-        ("learn", "Learn WordPress", "https://learn.wordpress.org/"),
-        (
-            "support-forums",
-            "Support",
-            "https://wordpress.org/support/forums/",
-        ),
-        (
-            "feedback",
-            "Feedback",
-            "https://wordpress.org/support/forum/requests-and-feedback",
-        ),
-    ] {
-        bar.add(
-            id,
-            "wp-logo-external",
-            title.into(),
-            href.into(),
-            Meta::default(),
-        );
-    }
+    // wp_admin_bar_wp_menu() is left out: no WordPress logo menu (ADR 0008).
     // wp_admin_bar_site_menu(), without a site icon.
     let mut blogname = site.blogname();
     if hyscribe_phpser::is_empty_string(blogname.as_bytes()) {
@@ -476,7 +429,6 @@ pub fn admin_bar(site: &dyn BarSite, browser: &Browser, view: Option<(&str, &str
     }
     // wp_admin_bar_add_secondary_groups().
     bar.add_group("top-secondary", "", "ab-top-secondary");
-    bar.add_group("wp-logo-external", "wp-logo", "ab-sub-secondary");
     // wp_admin_bar_my_account_item().
     let howdy = format!("Howdy, <span class=\"display-name\">{display_name}</span>");
     let avatar = site.avatar(28);

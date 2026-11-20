@@ -134,7 +134,7 @@ pub(crate) fn hyscribe_version() -> Check {
         format!("Your version of HyScribe ({version})"),
     )
     .describe(format!(
-        "<p>This site runs HyScribe {version} in place of WordPress {}. HyScribe does not look for new versions by itself: to update, replace the binary with the new release and restart the service.</p>",
+        "<p>This site runs HyScribe {version} on a database of version {}. HyScribe does not look for new versions by itself: to update, replace the binary with the new release and restart the service.</p>",
         VERSION.trim()
     ))
 }
@@ -171,7 +171,7 @@ pub(crate) fn sql_server(server: &str) -> Check {
     };
     let mut check = Check::new("sql_server", "Performance", "SQL server is up to date");
     let mut description = String::from(
-        "<p>The SQL server is a required piece of software for the database WordPress uses to store all your site&#8217;s content and settings.</p>",
+        "<p>The SQL server is a required piece of software for the database HyScribe uses to store all your site&#8217;s content and settings.</p>",
     );
     if !at_least(server, recommended) {
         check.level = Level::Recommended;
@@ -182,13 +182,13 @@ pub(crate) fn sql_server(server: &str) -> Check {
         check.level = Level::Critical;
         check.label = "Severely outdated SQL server".into();
         check.badge = "Security";
-        description.push_str(&format!("<p>WordPress requires {engine} version {MYSQL_REQUIRED} or higher. Contact your web hosting company to correct this.</p>"));
+        description.push_str(&format!("<p>HyScribe requires {engine} version {MYSQL_REQUIRED} or higher. Contact your web hosting company to correct this.</p>"));
     }
     Check {
         description,
         actions: external(
             "https://wordpress.org/about/requirements/",
-            "Learn more about what WordPress requires to run.",
+            "Learn more about what HyScribe requires to run.",
         ),
         ..check
     }
@@ -226,7 +226,7 @@ pub(crate) fn https_status(site: &dyn HealthSite) -> Check {
         )
     } else {
         format!(
-            "Your <a href=\"{}\">WordPress Address</a> and <a href=\"{}\">Site Address</a> are not set up to use HTTPS.",
+            "Your <a href=\"{}\">HyScribe Address</a> and <a href=\"{}\">Site Address</a> are not set up to use HTTPS.",
             link("siteurl"),
             link("home")
         )

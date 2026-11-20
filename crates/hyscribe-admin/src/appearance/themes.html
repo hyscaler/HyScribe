@@ -35,8 +35,8 @@
 		<# } else { #>
 			<div class="update-message notice inline notice-error notice-alt"><p>
 				<# if ( ! data.updateResponse.compatibleWP && ! data.updateResponse.compatiblePHP ) { #>
-					There is a new version of {{{ data.name }}} available, but it does not work with your versions of WordPress and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.				<# } else if ( ! data.updateResponse.compatibleWP ) { #>
-					There is a new version of {{{ data.name }}} available, but it does not work with your version of WordPress.				<# } else if ( ! data.updateResponse.compatiblePHP ) { #>
+					There is a new version of {{{ data.name }}} available, but it does not work with your versions of HyScribe and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.				<# } else if ( ! data.updateResponse.compatibleWP ) { #>
+					There is a new version of {{{ data.name }}} available, but it does not work with your version of HyScribe.				<# } else if ( ! data.updateResponse.compatiblePHP ) { #>
 					There is a new version of {{{ data.name }}} available, but it does not work with your version of PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.				<# } #>
 			</p></div>
 		<# } #>
@@ -45,8 +45,8 @@
 	<# if ( ! data.compatibleWP || ! data.compatiblePHP ) { #>
 		<div class="notice notice-error notice-alt"><p>
 			<# if ( ! data.compatibleWP && ! data.compatiblePHP ) { #>
-				This theme does not work with your versions of WordPress and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.			<# } else if ( ! data.compatibleWP ) { #>
-				This theme does not work with your version of WordPress.			<# } else if ( ! data.compatiblePHP ) { #>
+				This theme does not work with your versions of HyScribe and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.			<# } else if ( ! data.compatibleWP ) { #>
+				This theme does not work with your version of HyScribe.			<# } else if ( ! data.compatiblePHP ) { #>
 				This theme does not work with your version of PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.			<# } #>
 		</p></div>
 	<# } #>
@@ -131,8 +131,8 @@
 				<# if ( ! data.compatibleWP || ! data.compatiblePHP ) { #>
 					<div class="notice notice-error notice-alt notice-large"><p>
 						<# if ( ! data.compatibleWP && ! data.compatiblePHP ) { #>
-							This theme does not work with your versions of WordPress and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.						<# } else if ( ! data.compatibleWP ) { #>
-							This theme does not work with your version of WordPress.						<# } else if ( ! data.compatiblePHP ) { #>
+							This theme does not work with your versions of HyScribe and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.						<# } else if ( ! data.compatibleWP ) { #>
+							This theme does not work with your version of HyScribe.						<# } else if ( ! data.compatiblePHP ) { #>
 							This theme does not work with your version of PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.						<# } #>
 					</p></div>
 				<# } #>
@@ -148,8 +148,8 @@
 							<h3 class="notice-title">Update Incompatible</h3>
 							<p>
 								<# if ( ! data.updateResponse.compatibleWP && ! data.updateResponse.compatiblePHP ) { #>
-									There is a new version of {{{ data.name }}} available, but it does not work with your versions of WordPress and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.								<# } else if ( ! data.updateResponse.compatibleWP ) { #>
-									There is a new version of {{{ data.name }}} available, but it does not work with your version of WordPress.								<# } else if ( ! data.updateResponse.compatiblePHP ) { #>
+									There is a new version of {{{ data.name }}} available, but it does not work with your versions of HyScribe and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.								<# } else if ( ! data.updateResponse.compatibleWP ) { #>
+									There is a new version of {{{ data.name }}} available, but it does not work with your version of HyScribe.								<# } else if ( ! data.updateResponse.compatiblePHP ) { #>
 									There is a new version of {{{ data.name }}} available, but it does not work with your version of PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.								<# } #>
 							</p>
 						</div>

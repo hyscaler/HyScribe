@@ -70,7 +70,7 @@ fn answer(
     let args = AttachmentArgs::parse(query, referer).unwrap();
     let site = Role(Box::leak(format!("{variant}:{role}").into_boxed_str()));
     let die = |status: u16, message: &str| {
-        let page = crate::die::page(true, "WordPress &rsaquo; Error", message);
+        let page = crate::die::page(true, "HyScribe &rsaquo; Error", message);
         format!("{status}\t{}", String::from_utf8(page).unwrap())
     };
     Some(match attachment_edit(&site, &args, &request)? {

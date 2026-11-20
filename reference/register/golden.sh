@@ -22,8 +22,10 @@ HEADERS=$(mktemp)
 cleanup() {
   rm -f "$TMP" "$HEADERS"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-register.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-register.php" < "$ROOT/reference/register/variants.php"
 : > "$OUT"
 grep -v '^#' "$ROOT/reference/register/cases.list" | while IFS= read -r line; do

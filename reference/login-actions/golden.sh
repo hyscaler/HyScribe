@@ -22,8 +22,10 @@ HEADERS=$(mktemp)
 cleanup() {
   rm -f "$TMP" "$HEADERS"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-login-variants.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-login-variants.php" < "$ROOT/reference/login-actions/variants.php"
 HASH=$(printf %s "$BASE" | md5sum | cut -d ' ' -f 1)
 : > "$OUT"

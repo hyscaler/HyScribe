@@ -22,8 +22,10 @@ NONCES=$(mktemp)
 cleanup() {
   rm -f "$TMP" "$TMP.head" "$NONCES"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/settings-more/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts discussion-options media-options update-permalink create-privacy-page set-privacy-page"

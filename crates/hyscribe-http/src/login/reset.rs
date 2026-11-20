@@ -25,8 +25,7 @@ pub(super) type Written = ((StatusCode, Vec<u8>), Vec<Mail>);
 
 /// Shadow mode's answer to a form that writes, as hs-admin's.
 fn read_only(reads: &LoginReads) -> Written {
-    let page =
-        hyscribe_admin::die::page(reads.site.public(), "WordPress &rsaquo; Error", READ_ONLY);
+    let page = hyscribe_admin::die::page(reads.site.public(), "HyScribe &rsaquo; Error", READ_ONLY);
     ((StatusCode::FORBIDDEN, page), Vec::new())
 }
 

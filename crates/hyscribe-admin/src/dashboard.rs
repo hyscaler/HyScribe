@@ -144,7 +144,7 @@ fn welcome_panel(site: &dyn DashboardSite) -> String {
                 "<h3>Start Customizing</h3>\n\t\t\t\t<p>Configure your site&#8217;s logo, header, menus, and more in the Customizer.</p>\n\t\t\t\t\t\t\t\t\t<a class=\"load-customize hide-if-no-customize\" href=\"{}\">Open the Customizer</a>\n\t\t\t\t\t\t\t\t\t\t",
                 url("customize.php")
             ),
-            "<h3>Discover a new way to build your site.</h3>\n\t\t\t\t<p>There is a new kind of WordPress theme, called a block theme, that lets you build the site you&#8217;ve always wanted &#8212; with blocks and styles.</p>\n\t\t\t\t<a href=\"https://wordpress.org/documentation/article/block-themes/\">Learn about block themes</a>\n\t\t\t\t\t\t".into(),
+            "<h3>Discover a new way to build your site.</h3>\n\t\t\t\t<p>There is a new kind of theme, called a block theme, that lets you build the site you&#8217;ve always wanted &#8212; with blocks and styles.</p>\n\t\t\t\t<a href=\"https://wordpress.org/documentation/article/block-themes/\">Learn about block themes</a>\n\t\t\t\t\t\t".into(),
         )
     };
     WELCOME
@@ -317,8 +317,7 @@ fn right_now(site: &dyn DashboardSite) -> String {
         theme
     };
     out.push_str(&format!(
-        "\t</ul>\n\t<p id='wp-version-message'><span id=\"wp-version\">WordPress {} running {theme} theme.</span></p>",
-        VERSION.trim()
+        "\t</ul>\n\t<p id='wp-version-message'><span id=\"wp-version\">Running {theme} theme.</span></p>"
     ));
     let public = !is_empty_string(&site.option("blog_public").unwrap_or_default());
     if site.can("manage_options") && !public {
@@ -783,12 +782,7 @@ fn widgets(site: &dyn DashboardSite, data: &Activity, request_uri: &str) -> Vec<
             quick_press(site, request_uri, None),
         );
     }
-    add(
-        "dashboard_primary",
-        "WordPress Events and News",
-        "side",
-        events(site),
-    );
+    add("dashboard_primary", "Events and News", "side", events(site));
     widgets
 }
 
@@ -1021,8 +1015,8 @@ pub fn dashboard(site: &dyn DashboardSite, request: &Request) -> Option<String> 
     admin_page(site, &page, browser)
 }
 
-const HELP_OVERVIEW: &str = "<p>Welcome to your WordPress Dashboard!</p><p>The Dashboard is the first place you will come to every time you log into your site. It is where you will find all your WordPress tools. If you need help, just click the &#8220;Help&#8221; tab above the screen title.</p>";
-const HELP_NAVIGATION: &str = "<p>The left-hand navigation menu provides links to all of the WordPress administration screens, with submenu items displayed on hover. You can minimize this menu to a narrow icon strip by clicking on the Collapse Menu arrow at the bottom.</p><p>Links in the Toolbar at the top of the screen connect your dashboard and the front end of your site, and provide access to your profile and helpful WordPress information.</p>";
+const HELP_OVERVIEW: &str = "<p>Welcome to your HyScribe Dashboard!</p><p>The Dashboard is the first place you will come to every time you log into your site. It is where you will find all your HyScribe tools. If you need help, just click the &#8220;Help&#8221; tab above the screen title.</p>";
+const HELP_NAVIGATION: &str = "<p>The left-hand navigation menu provides links to all of the HyScribe administration screens, with submenu items displayed on hover. You can minimize this menu to a narrow icon strip by clicking on the Collapse Menu arrow at the bottom.</p><p>Links in the Toolbar at the top of the screen connect your dashboard and the front end of your site, and provide access to your profile and helpful HyScribe information.</p>";
 const HELP_LAYOUT: &str = "<p>You can use the following controls to arrange your Dashboard screen to suit your workflow. This is true on most other administration screens as well.</p><p><strong>Screen Options</strong> &mdash; Use the Screen Options tab to choose which Dashboard boxes to show.</p><p><strong>Drag and Drop</strong> &mdash; To rearrange the boxes, drag and drop by clicking on the title bar of the selected box and releasing when you see a gray dotted-line rectangle appear in the location you want to place the box.</p><p><strong>Box Controls</strong> &mdash; Click the title bar of the box to expand or collapse it. Some boxes added by plugins may have configurable content, and will show a &#8220;Configure&#8221; link in the title bar if you hover over it.</p>";
 
 /// The Content help tab: the boxes the user sees.
@@ -1035,13 +1029,13 @@ fn help_content(site: &dyn DashboardSite) -> String {
         help.push_str("<p><strong>Site Health Status</strong> &mdash; Informs you of any potential issues that should be addressed to improve the performance or security of your website.</p>");
     }
     if site.can("edit_posts") {
-        help.push_str("<p><strong>At a Glance</strong> &mdash; Displays a summary of the content on your site and identifies which theme and version of WordPress you are using.</p>");
+        help.push_str("<p><strong>At a Glance</strong> &mdash; Displays a summary of the content on your site and identifies which theme you are using.</p>");
     }
     help.push_str("<p><strong>Activity</strong> &mdash; Shows the upcoming scheduled posts, recently published posts, and the most recent comments on your posts and allows you to moderate them.</p>");
     if site.can("edit_posts") {
         help.push_str("<p><strong>Quick Draft</strong> &mdash; Allows you to create a new post and save it as a draft. Also displays links to the 3 most recent draft posts you've started.</p>");
     }
-    help.push_str("<p><strong>WordPress Events and News</strong> &mdash; Upcoming events near you as well as the latest news from the official WordPress project and the <a href=\"https://planet.wordpress.org/\">WordPress Planet</a>.</p>");
+    help.push_str("<p><strong>Events and News</strong> &mdash; Upcoming events near you as well as the latest news.</p>");
     help
 }
 

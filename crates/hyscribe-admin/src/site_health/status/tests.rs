@@ -43,11 +43,11 @@ fn the_sql_server_is_graded_as_php_s() {
     assert_eq!(good.test, "sql_server");
     assert_eq!(
         good.description,
-        "<p>The SQL server is a required piece of software for the database WordPress uses to store all your site&#8217;s content and settings.</p>"
+        "<p>The SQL server is a required piece of software for the database HyScribe uses to store all your site&#8217;s content and settings.</p>"
     );
     assert_eq!(
         good.actions,
-        "<p><a href=\"https://wordpress.org/about/requirements/\" target=\"_blank\">Learn more about what WordPress requires to run.<span class=\"screen-reader-text\"> (opens in a new tab)</span><span aria-hidden=\"true\" class=\"dashicons dashicons-external\"></span></a></p>"
+        "<p><a href=\"https://wordpress.org/about/requirements/\" target=\"_blank\">Learn more about what HyScribe requires to run.<span class=\"screen-reader-text\"> (opens in a new tab)</span><span aria-hidden=\"true\" class=\"dashicons dashicons-external\"></span></a></p>"
     );
     assert_eq!(level(&sql_server("10.11.0-MariaDB")), "good");
     assert_eq!(level(&sql_server("8.0.36-0ubuntu0.22.04.1")), "good");
@@ -71,9 +71,9 @@ fn the_sql_server_is_graded_as_php_s() {
             .description
             .contains("running MySQL version 8.0 or higher")
     );
-    assert!(ancient.description.ends_with("<p>WordPress requires MySQL version 5.5 or higher. Contact your web hosting company to correct this.</p>"));
+    assert!(ancient.description.ends_with("<p>HyScribe requires MySQL version 5.5 or higher. Contact your web hosting company to correct this.</p>"));
     let maria = sql_server("5.1.0-MariaDB");
-    assert!(maria.description.ends_with("<p>WordPress requires MariaDB version 5.5 or higher. Contact your web hosting company to correct this.</p>"));
+    assert!(maria.description.ends_with("<p>HyScribe requires MariaDB version 5.5 or higher. Contact your web hosting company to correct this.</p>"));
     assert!(
         maria
             .description
@@ -98,7 +98,7 @@ fn https_is_graded_by_the_addresses() {
         good.actions,
         "<p><a href=\"https://developer.wordpress.org/advanced-administration/security/https/\" target=\"_blank\">Learn more about why you should use HTTPS<span class=\"screen-reader-text\"> (opens in a new tab)</span><span aria-hidden=\"true\" class=\"dashicons dashicons-external\"></span></a></p>"
     );
-    let both = "<p>Your <a href=\"http://127.0.0.1:8081/hs-admin/options-general#siteurl\">WordPress Address</a> and <a href=\"http://127.0.0.1:8081/hs-admin/options-general#home\">Site Address</a> are not set up to use HTTPS.</p><p>HyScribe serves plain HTTP.";
+    let both = "<p>Your <a href=\"http://127.0.0.1:8081/hs-admin/options-general#siteurl\">HyScribe Address</a> and <a href=\"http://127.0.0.1:8081/hs-admin/options-general#home\">Site Address</a> are not set up to use HTTPS.</p><p>HyScribe serves plain HTTP.";
     // Neither address is https, or only the Site Address (`home`).
     for role in ["administrator", "h9home:administrator"] {
         let none = https_status(&Role(role));
@@ -234,11 +234,9 @@ fn the_version_check_names_both_versions() {
     let version = env!("CARGO_PKG_VERSION");
     assert_eq!(check.label, format!("Your version of HyScribe ({version})"));
     assert_eq!((level(&check), check.badge), ("good", "Performance"));
-    assert!(
-        check
-            .description
-            .contains(&format!("HyScribe {version} in place of WordPress 7.1.3."))
-    );
+    assert!(check.description.contains(&format!(
+        "HyScribe {version} on a database of version 7.1.3."
+    )));
     assert_eq!(check.test, "hyscribe_version");
 }
 

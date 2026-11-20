@@ -25,8 +25,10 @@ cleanup() {
   rm -f "$TMP" "$TMP.head" "$NONCES"
   echo "DELETE FROM wp_posts WHERE ID IN (701, 702);" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/settings/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts reset-password-for-0 general-options writing-options reading-options dismiss-1-new_admin_email media-form media-send-to-editor set-attachment-thumbnail"

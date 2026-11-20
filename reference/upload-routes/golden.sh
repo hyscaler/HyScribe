@@ -38,8 +38,10 @@ cleanup() {
   echo "DELETE FROM wp_users WHERE ID BETWEEN 701 AND 704; DELETE FROM wp_usermeta WHERE user_id BETWEEN 701 AND 704;" | sql
   "$DOCKER" exec "$DB" rm -f /tmp/upload-routes.sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-no-cron.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 echo '<?php define( "DISABLE_WP_CRON", true ); define( "DISALLOW_UNFILTERED_HTML", true );' | "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-no-cron.php"
 sql < "$ROOT/reference/rest/users.sql"
 sql < "$HERE/state.sql"

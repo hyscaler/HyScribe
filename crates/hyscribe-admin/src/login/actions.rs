@@ -416,7 +416,7 @@ fn check_email(site: &dyn Site, request: &Request) -> Action {
 fn refused(site: &dyn Site, text: &str) -> Action {
     Action::Died(crate::die::page(
         site.public(),
-        "WordPress &rsaquo; Error",
+        "HyScribe &rsaquo; Error",
         text,
     ))
 }

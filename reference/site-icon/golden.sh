@@ -25,8 +25,10 @@ cleanup() {
   rm -f "$TMP" "$NONCES"
   echo "DELETE FROM wp_posts WHERE ID BETWEEN 951 AND 954; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 951 AND 958;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 sql < "$ROOT/reference/site-icon/content.sql"
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-variants.php" < "$ROOT/reference/site-icon/variants.php"
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \

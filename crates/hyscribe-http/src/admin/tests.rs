@@ -662,11 +662,12 @@ async fn media_screens_are_php_s() {
             };
             pages += 1;
             // The fixture's pages are kept as hashes, every nonce masked;
-            // the database breaks the ties of sorts by author or parent as
-            // it goes, so their rows are left out.
+            // the database breaks the ties of sorts by author or parent, and
+            // of the search for jpg's dates, as it goes, so their rows are left out.
             if let [_, _, _, _, hash] = f[..] {
                 let page = masked_nonces(&page);
-                let page = if query.contains("orderby=author") || query.contains("orderby=parent") {
+                let tied = ["orderby=author", "orderby=parent", "s=jpg"];
+                let page = if tied.iter().any(|tie| query.contains(tie)) {
                     let start = page.find("<tbody id=\"the-list\"").unwrap();
                     let end = page.find("\t</tbody>").unwrap();
                     format!("{}{}", page.get(..start).unwrap(), page.get(end..).unwrap())
@@ -2163,7 +2164,7 @@ async fn actions_read_the_site() {
     let response = send(&site, "GET", &promote, &cookies, None).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     let page = page_of(response).await;
-    let read_only = hyscribe_admin::die::page(true, "WordPress &rsaquo; Error", READ_ONLY);
+    let read_only = hyscribe_admin::die::page(true, "HyScribe &rsaquo; Error", READ_ONLY);
     assert_eq!(page.into_bytes(), read_only);
     let form = Some((
         "application/x-www-form-urlencoded",

@@ -62,7 +62,7 @@ fn pages_are_php_s() {
             | Answer::Died(message)
             | Answer::Missing(message)
             | Answer::Conflict(message) => {
-                let page = crate::die::page(true, "WordPress &rsaquo; Error", message);
+                let page = crate::die::page(true, "HyScribe &rsaquo; Error", message);
                 (
                     recorded,
                     format!("403\t{}", String::from_utf8(page).unwrap()),

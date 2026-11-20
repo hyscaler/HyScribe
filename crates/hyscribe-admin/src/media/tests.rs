@@ -121,7 +121,10 @@ fn compare(golden: &str, ttd: bool) -> (Vec<String>, usize) {
             Box::leak(format!("{variant}:{}", f[2]).into_boxed_str())
         };
         let ours = answer(role, f[1], f[0]);
-        let tied = f[1].contains("orderby=author") || f[1].contains("orderby=parent");
+        // The search for jpg finds images that tie on their dates.
+        let tied = ["orderby=author", "orderby=parent", "s=jpg"]
+            .iter()
+            .any(|tie| f[1].contains(tie));
         // The fixture's pages are kept as hashes of their own parts.
         if let [_, _, _, own_hash, _] = f[..] {
             let ours = nonces(&ours);

@@ -25,8 +25,10 @@ cleanup() {
   rm -f "$TMP" "$TMP.head" "$NONCES"
   echo "DELETE FROM wp_posts WHERE ID BETWEEN 861 AND 874; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 861 AND 866;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/privacy-requests/variants.php"
 sql < "$ROOT/reference/privacy-requests/content.sql"

@@ -29,8 +29,10 @@ cleanup() {
   rm -f "$TMP" "$HEADERS"
   echo "DELETE FROM wp_users WHERE ID BETWEEN 701 AND 708; DELETE FROM wp_usermeta WHERE user_id BETWEEN 701 AND 708;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-lost-password.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-lost-password.php" < "$ROOT/reference/lost-password/variants.php"
 sql < "$ROOT/reference/lost-password/content.sql"
 HASH=$(printf %s "$BASE" | md5sum | cut -d ' ' -f 1)

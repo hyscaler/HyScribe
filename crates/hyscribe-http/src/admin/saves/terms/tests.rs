@@ -412,7 +412,7 @@ async fn answers_for_another_taxonomy_are_php_s() {
     let Err(Stop::Died(Answer::Died(message))) = died else {
         panic!("no wp_die()");
     };
-    let page = hyscribe_admin::die::page(true, "WordPress &rsaquo; Error", message);
+    let page = hyscribe_admin::die::page(true, "HyScribe &rsaquo; Error", message);
     assert_eq!(
         String::from_utf8(page).unwrap(),
         php_answer("terms-edited-other").2

@@ -9,7 +9,8 @@
 // relative form actions' `.php`; the oracle shows no update notice) with every
 // nonce as %nonce%: sha256 of its screen meta and content, a tab, and
 // sha256 of all of it. A list sorted
-// by author or parent, whose ties the database breaks as it goes, is
+// by author or parent, or the search for jpg (its results tie on their dates),
+// whose ties the database breaks as it goes, is
 // hashed without its rows (argv[4] is the screen).
 $page = file_get_contents( $argv[1] );
 foreach ( file( $argv[2], FILE_IGNORE_NEW_LINES ) as $line ) {
@@ -53,7 +54,7 @@ foreach ( array( "href='", 'href="', '"url":"' ) as $prefix ) {
 	$page = $out . $page;
 }
 $page = preg_replace( '/%nonce:[^%]*%/', '%nonce%', $page );
-if ( preg_match( '/orderby=(author|parent)/', $argv[4] ) ) {
+if ( preg_match( '/orderby=(author|parent)|s=jpg/', $argv[4] ) ) {
 	$start = strpos( $page, '<tbody id="the-list"' );
 	$page  = substr( $page, 0, $start ) . substr( $page, strpos( $page, "\t</tbody>" ) );
 }

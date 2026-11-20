@@ -42,8 +42,9 @@ const EMPTY: &str = "File is empty. Please upload something more substantial. Th
 /// `_wp_handle_upload()`'s refusal of a type not allowed.
 const NOT_ALLOWED: &str = "Sorry, you are not allowed to upload this file type.";
 
-/// WordPress's upload hook points under their names, plain calls until the
-/// extension runtime (docs/EXTENSIONS.md); each default changes nothing.
+/// WordPress's upload hook points under their names (docs/EXTENSIONS.md);
+/// each default changes nothing, and `add_attachment` reaches the
+/// extensions (`hyscribe_model::hooks`).
 /// The image hooks are `hyscribe-image`'s.
 pub trait UploadHooks: Hooks + Send + Sync {
     /// `wp_handle_upload_prefilter`: the file as `$_FILES` gives it; an
@@ -64,7 +65,9 @@ pub trait UploadHooks: Hooks + Send + Sync {
     }
 
     /// `add_attachment`: an attachment was inserted.
-    fn add_attachment(&self, _id: u64) {}
+    fn add_attachment(&self, id: u64) {
+        hyscribe_model::hooks::do_action("add_attachment", &[&id]);
+    }
 }
 
 /// No hook attached.

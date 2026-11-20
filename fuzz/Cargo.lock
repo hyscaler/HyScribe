@@ -1008,6 +1008,8 @@ dependencies = [
 name = "hyscribe-ext"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-model",
+ "hyscribe-phpser",
  "wasmtime",
 ]
 
@@ -1087,6 +1089,7 @@ version = "0.1.0"
 dependencies = [
  "color_quant",
  "gif",
+ "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",
  "image-webp",
@@ -1107,6 +1110,7 @@ dependencies = [
  "hyscribe-config",
  "hyscribe-fetch",
  "hyscribe-kses",
+ "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-render",
  "lettre",
@@ -1116,6 +1120,9 @@ dependencies = [
 [[package]]
 name = "hyscribe-model"
 version = "0.1.0"
+dependencies = [
+ "hyscribe-phpser",
+]
 
 [[package]]
 name = "hyscribe-phpser"

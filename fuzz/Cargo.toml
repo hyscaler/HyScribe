@@ -423,3 +423,10 @@ path = "fuzz_targets/ext_load.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "ext_faults"
+path = "fuzz_targets/ext_faults.rs"
+test = false
+doc = false
+bench = false

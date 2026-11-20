@@ -370,3 +370,14 @@ fn files_stay_inside_the_folder() {
     assert!(exists("2026/05") && link.symlink_metadata().is_ok());
     assert!(outside.path().join("d.png").exists());
 }
+
+#[test]
+fn add_attachment_reaches_the_extensions() {
+    let ((), fired) = hyscribe_testkit::hooks::recorded(&[], || NoHooks.add_attachment(5));
+    let expected = (
+        "add_attachment".to_string(),
+        Value::Null,
+        vec![Value::Int(5)],
+    );
+    assert_eq!(fired, [expected]);
+}

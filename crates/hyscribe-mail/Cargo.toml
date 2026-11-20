@@ -13,6 +13,7 @@ publish.workspace = true
 hyscribe-config.workspace = true
 hyscribe-fetch.workspace = true
 hyscribe-kses.workspace = true
+hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
 # The transport only (ADR 0016): no `hostname` or `native-tls`, so no FFI;

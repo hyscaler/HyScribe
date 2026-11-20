@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `wp_mail()`'s hook points under WordPress's names, with its arguments
-//! and in its order (ADR 0016), plain calls until the extension runtime:
-//! each default returns its value unchanged, as WordPress does with
-//! nothing attached. What a filter returns goes through the same checks
-//! as the message it replaced.
+//! and in its order (ADR 0016): each default returns its value unchanged,
+//! as WordPress does with nothing attached, and the sender's filters reach
+//! the extensions (`hyscribe_model::hooks`). What a filter returns goes
+//! through the same checks as the message it replaced.
+
+use hyscribe_model::hooks::apply_filters;
 
 use crate::Mail;
 use crate::mailer::Outgoing;
@@ -25,22 +27,22 @@ pub trait Hooks: Send + Sync {
     /// `wp_mail_from`: the sender address. The address sent is always
     /// `MAIL_FROM`'s, so the result changes nothing.
     fn wp_mail_from(&self, from_email: Vec<u8>) -> Vec<u8> {
-        from_email
+        apply_filters("wp_mail_from", from_email, &[])
     }
 
     /// `wp_mail_from_name`: the sender's name shown.
     fn wp_mail_from_name(&self, from_name: Vec<u8>) -> Vec<u8> {
-        from_name
+        apply_filters("wp_mail_from_name", from_name, &[])
     }
 
     /// `wp_mail_content_type`: `text/plain` unless the headers say.
     fn wp_mail_content_type(&self, content_type: Vec<u8>) -> Vec<u8> {
-        content_type
+        apply_filters("wp_mail_content_type", content_type, &[])
     }
 
     /// `wp_mail_charset`: `UTF-8`, the site's, unless the headers say.
     fn wp_mail_charset(&self, charset: Vec<u8>) -> Vec<u8> {
-        charset
+        apply_filters("wp_mail_charset", charset, &[])
     }
 
     /// The stand-in for `phpmailer_init`: given the message once checked,
@@ -60,3 +62,6 @@ pub trait Hooks: Send + Sync {
 pub struct NoHooks;
 
 impl Hooks for NoHooks {}
+
+#[cfg(test)]
+mod tests;

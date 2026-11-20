@@ -1,0 +1,192 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! What a manifest grants (ADR 0022): nothing unless named. Every host call
+//! checks its grant here before it touches anything.
+
+use std::collections::BTreeSet;
+
+/// The manifest's `[capabilities]` and `[hooks]`, once the administrator
+/// approved them.
+#[derive(Clone, Debug, Default)]
+pub struct Grants {
+    /// `[hooks] actions`: actions it adds callbacks to, cron hooks among them.
+    pub actions: BTreeSet<String>,
+    /// `[hooks] filters`.
+    pub filters: BTreeSet<String>,
+    /// `[hooks] shortcodes`: the tags it adds.
+    pub shortcodes: BTreeSet<String>,
+    /// `[hooks] sensitive`: the security sensitive hooks it adds callbacks
+    /// to, actions and filters alike.
+    pub sensitive: BTreeSet<String>,
+    /// Option names it reads and writes.
+    pub options: BTreeSet<String>,
+    /// Meta keys it reads and writes: a name, or a prefix ending in `*`.
+    pub meta: BTreeSet<String>,
+    /// Post types it registers or reads beyond the public ones.
+    pub post_types: BTreeSet<String>,
+    /// Taxonomies it registers.
+    pub taxonomies: BTreeSet<String>,
+    /// Its REST namespaces, such as `contact-form-7/v1`.
+    pub rest: BTreeSet<String>,
+    /// `wp_mail()`.
+    pub mail: bool,
+    /// Folders under `uploads/` whose files it may attach to mail.
+    pub filesystem: BTreeSet<String>,
+}
+
+/// The hooks that change who is logged in, what they may do, what is
+/// filtered, or that see passwords, keys or mail: a grant of their own.
+const SENSITIVE: [&str; 19] = [
+    "after_password_reset",
+    "authenticate",
+    "determine_current_user",
+    "map_meta_cap",
+    "password_reset",
+    "pre_wp_mail",
+    "rest_authentication_errors",
+    "retrieve_password_key",
+    "upload_mimes",
+    "user_has_cap",
+    "wp_kses_allowed_html",
+    "wp_mail",
+    "wp_mail_charset",
+    "wp_mail_content_type",
+    "wp_mail_failed",
+    "wp_mail_from",
+    "wp_mail_from_name",
+    "wp_mail_succeeded",
+    "wp_set_password",
+];
+
+/// The option filters that are sensitive for an option outside the
+/// extension's own options grant.
+const OPTION_HOOKS: [&str; 3] = ["pre_option_", "option_", "pre_update_option_"];
+
+/// Hooks no extension attaches to: the stand-in for `phpmailer_init`
+/// replaces the transport (ADR 0022 refuses its object).
+const REFUSED: [&str; 1] = ["phpmailer_init"];
+
+impl Grants {
+    /// Whether `hook` needs the sensitive grant for this extension.
+    pub fn is_sensitive(&self, hook: &str) -> bool {
+        SENSITIVE.contains(&hook)
+            || OPTION_HOOKS.iter().any(|prefix| {
+                hook.strip_prefix(prefix)
+                    .is_some_and(|option| !self.options.contains(option))
+            })
+    }
+
+    /// The checks the manifest passes before anything loads: a sensitive
+    /// hook named only as an action or filter, a meta grant of every key, or
+    /// a hook no extension may have refuses the package.
+    pub fn check(&self) -> Result<(), String> {
+        let named = self.actions.iter().chain(&self.filters);
+        if let Some(hook) = named.clone().find(|hook| self.is_sensitive(hook)) {
+            return Err(format!(
+                "{hook} is a sensitive hook: name it under [hooks] sensitive"
+            ));
+        }
+        if let Some(hook) = named
+            .chain(&self.sensitive)
+            .find(|hook| REFUSED.contains(&hook.as_str()))
+        {
+            return Err(format!("{hook} is not a hook extensions attach to"));
+        }
+        if self.meta.contains("*") {
+            return Err("a meta grant names its keys or their prefix".into());
+        }
+        Ok(())
+    }
+
+    /// An action or filter callback on `hook`.
+    pub(crate) fn hook(&self, hook: &str, action: bool) -> Result<(), String> {
+        let granted = if self.is_sensitive(hook) {
+            &self.sensitive
+        } else if action {
+            &self.actions
+        } else {
+            &self.filters
+        };
+        allow(granted.contains(hook), || {
+            format!("{hook} is not in the manifest")
+        })
+    }
+
+    /// A cron event on `hook`, which fires it as an action.
+    pub(crate) fn cron(&self, hook: &str) -> Result<(), String> {
+        self.hook(hook, true)
+    }
+
+    /// The option `name`.
+    pub(crate) fn option(&self, name: &str) -> Result<(), String> {
+        allow(self.options.contains(name), || {
+            format!("option {name} is not in the manifest")
+        })
+    }
+
+    /// The meta key `key`, by name or by a prefix ending in `*`.
+    pub(crate) fn meta(&self, key: &str) -> Result<(), String> {
+        let granted = self.meta.iter().any(|grant| match grant.strip_suffix('*') {
+            Some(prefix) => key.starts_with(prefix),
+            None => grant == key,
+        });
+        allow(granted, || format!("meta key {key} is not in the manifest"))
+    }
+
+    /// The post type `name`, to register or read.
+    pub(crate) fn post_type(&self, name: &str) -> Result<(), String> {
+        allow(self.post_types.contains(name), || {
+            format!("post type {name} is not in the manifest")
+        })
+    }
+
+    /// The taxonomy `name`, to register.
+    pub(crate) fn taxonomy(&self, name: &str) -> Result<(), String> {
+        allow(self.taxonomies.contains(name), || {
+            format!("taxonomy {name} is not in the manifest")
+        })
+    }
+
+    /// A REST route in `namespace`.
+    pub(crate) fn rest(&self, namespace: &str) -> Result<(), String> {
+        allow(self.rest.contains(namespace), || {
+            format!("REST namespace {namespace} is not in the manifest")
+        })
+    }
+
+    /// A shortcode `tag`.
+    pub(crate) fn shortcode(&self, tag: &str) -> Result<(), String> {
+        allow(self.shortcodes.contains(tag), || {
+            format!("shortcode {tag} is not in the manifest")
+        })
+    }
+
+    /// `wp_mail()` with `attachments`, each a path under a granted folder.
+    pub(crate) fn mail(&self, attachments: &[String]) -> Result<(), String> {
+        allow(self.mail, || "mail is not in the manifest".into())?;
+        let outside = attachments.iter().find(|path| {
+            !relative(path)
+                || !self.filesystem.iter().any(|folder| {
+                    path.strip_prefix(folder.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+                })
+        });
+        outside.map_or(Ok(()), |path| {
+            Err(format!("{path} is not in a folder the manifest grants"))
+        })
+    }
+}
+
+/// A path inside a folder: relative, no `..` or `.` step, no empty step,
+/// no backslash, colon or NUL.
+pub(crate) fn relative(path: &str) -> bool {
+    !path.contains(['\\', ':', '\0'])
+        && path.split('/').all(|step| !matches!(step, "" | "." | ".."))
+}
+
+fn allow(granted: bool, why: impl FnOnce() -> String) -> Result<(), String> {
+    if granted { Ok(()) } else { Err(why()) }
+}
+
+#[cfg(test)]
+mod tests;

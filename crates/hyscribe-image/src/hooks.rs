@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! WordPress's image hook points under their names and with their
-//! arguments (ADR 0015), plain calls until the extension runtime: each
-//! default returns its value unchanged, as WordPress does with nothing
-//! attached.
+//! arguments (ADR 0015): each default returns its value unchanged, as
+//! WordPress does with nothing attached, and those whose values cross reach
+//! the extensions (`hyscribe_model::hooks`).
 
-use hyscribe_phpser::Value;
+use hyscribe_model::hooks::apply_filters;
+use hyscribe_phpser::{Key, Value};
 
 use crate::subsizes::SubSize;
 
@@ -36,19 +37,30 @@ pub trait Hooks: Sync {
 
     /// `wp_editor_set_quality`: the quality, the output MIME type and the
     /// size it is for.
-    fn wp_editor_set_quality(&self, quality: i64, _mime: &str, _size: (u32, u32)) -> i64 {
-        quality
+    fn wp_editor_set_quality(&self, quality: i64, mime: &str, (width, height): (u32, u32)) -> i64 {
+        let size = Value::Array(vec![
+            (Key::String(b"width".to_vec()), Value::Int(i64::from(width))),
+            (
+                Key::String(b"height".to_vec()),
+                Value::Int(i64::from(height)),
+            ),
+        ]);
+        apply_filters(
+            "wp_editor_set_quality",
+            quality,
+            &[&mime.to_string(), &size],
+        )
     }
 
     /// `jpeg_quality`: a JPEG's quality and the context, `image_resize`.
-    fn jpeg_quality(&self, quality: i64, _context: &str) -> i64 {
-        quality
+    fn jpeg_quality(&self, quality: i64, context: &str) -> i64 {
+        apply_filters("jpeg_quality", quality, &[&context.to_string()])
     }
 
     /// `image_make_intermediate_size`: the path of a size just saved,
     /// whose base name the metadata keeps.
     fn image_make_intermediate_size(&self, file: String) -> String {
-        file
+        apply_filters("image_make_intermediate_size", file, &[])
     }
 
     /// `wp_read_audio_metadata`: the metadata read from an audio file and
@@ -69,10 +81,11 @@ pub trait Hooks: Sync {
     fn wp_generate_attachment_metadata(
         &self,
         meta: Value,
-        _attachment: u64,
-        _context: &str,
+        attachment: u64,
+        context: &str,
     ) -> Value {
-        meta
+        let args: [&dyn std::any::Any; 2] = [&attachment, &context.to_string()];
+        apply_filters("wp_generate_attachment_metadata", meta, &args)
     }
 }
 

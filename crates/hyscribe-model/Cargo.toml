@@ -9,6 +9,9 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+hyscribe-phpser.workspace = true
+
 [features]
 # Tests read the actions fired from `hooks::FIRED`.
 hook-log = []

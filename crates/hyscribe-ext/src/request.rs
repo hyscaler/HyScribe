@@ -192,6 +192,22 @@ impl Request {
     }
 }
 
+/// The subsystems' hook points reach the extensions through the request,
+/// within `hyscribe_model::hooks::scoped`.
+impl hyscribe_model::hooks::Dispatch for Request {
+    fn attached(&self, hook: &str) -> bool {
+        Request::attached(self, hook)
+    }
+
+    fn filter(&self, hook: &str, value: Value, args: &[Value]) -> Value {
+        Request::filter(self, hook, value, args)
+    }
+
+    fn action(&self, hook: &str, args: &[Value]) {
+        Request::action(self, hook, args);
+    }
+}
+
 impl Shared {
     /// `hook`'s callbacks across the extensions, in the order they run.
     pub(crate) fn chain(&self, hook: &str) -> &[(usize, usize)] {

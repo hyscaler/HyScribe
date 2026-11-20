@@ -57,3 +57,25 @@ fn a_spent_budget_ends_the_extension_s_request() -> Result<(), Fault> {
     assert_eq!(faults(&request), [Fault::Timeout]);
     Ok(())
 }
+
+#[test]
+fn the_subsystems_hook_points_reach_the_extensions() -> Result<(), Fault> {
+    use hyscribe_model::hooks::{Dispatch, apply_filters, do_action, scoped};
+    let loaded = load(&["ext"], Limits::default())?;
+    let site = TestSite::new();
+    let dispatch: Arc<dyn Dispatch> = Arc::new(loaded.request(&site));
+    let (content, order, title) = scoped(&dispatch, || {
+        do_action("ext_action", &[&"w".to_string(), &2_i64]);
+        (
+            apply_filters("the_content", String::from("<p>x</p>"), &[]),
+            apply_filters("ext_order", b"".to_vec(), &[]),
+            apply_filters("the_title", String::from("Hi"), &[]),
+        )
+    });
+    assert_eq!(content, "<p>x</p><!-- ext -->");
+    assert_eq!(order, b"ab");
+    assert_eq!(title, "Hi");
+    assert_eq!(site.logged(), ["ext:seen"]);
+    assert_eq!(apply_filters("the_content", String::from("x"), &[]), "x");
+    Ok(())
+}

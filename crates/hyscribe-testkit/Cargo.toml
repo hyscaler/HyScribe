@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 hyscribe-config.workspace = true
+hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
 sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }
 

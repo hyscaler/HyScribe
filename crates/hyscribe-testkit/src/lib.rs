@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+pub mod hooks;
 pub mod pages;
 pub mod unshuffle;
 pub mod writes;

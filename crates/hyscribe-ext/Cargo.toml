@@ -10,6 +10,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
 # Cranelift only (no Winch), components, no WASI, no cache on disk, no async,
 # no GC proposals, no profiling or debugging support (ADR 0022).

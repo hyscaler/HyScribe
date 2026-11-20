@@ -368,15 +368,26 @@ fn comment_date(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
 /// `get_comment_link( $comment )`: the post's permalink, on paged comments
 /// the comment's page past the first newest one, and the comment's anchor.
 pub(crate) fn comment_link(context: &Context<'_>, comment: &Comment) -> Vec<u8> {
+    let mut page = page_of_comment(context, comment);
+    let oldest = context
+        .site
+        .option("default_comments_page")
+        .unwrap_or_default()
+        == b"oldest";
+    if page == 1 && oldest {
+        page = 0;
+    }
+    comment_link_at(context, comment, page)
+}
+
+/// `get_comment_link( $comment )` of a comment on its post's comment
+/// `page`, the post's own for page 0.
+pub(crate) fn comment_link_at(context: &Context<'_>, comment: &Comment, page: i64) -> Vec<u8> {
     let site = context.site;
     let permalink = site
         .post(comment.post_id)
         .map(|post| context.permalink(&post))
         .unwrap_or_default();
-    let mut page = page_of_comment(context, comment);
-    if page == 1 && site.option("default_comments_page").unwrap_or_default() == b"oldest" {
-        page = 0;
-    }
     let links = Permalinks::of(site);
     let link = if links.pretty() {
         let permalink = String::from_utf8_lossy(&permalink);
@@ -537,34 +548,56 @@ fn comment_edit_link(_context: &Context<'_>, _block: &Block<'_>) -> Vec<u8> {
     vec![]
 }
 
-/// `render_block_core_comment_reply_link()` with
-/// `get_comment_reply_link()`: a reply link while the thread can go deeper
-/// and the post takes comments.
+/// `render_block_core_comment_reply_link()`: the reply link in a
+/// wrapper.
 fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let Some(comment) = &context.comment else {
         return Vec::new();
     };
-    let option = |name| context.site.option(name).unwrap_or_default();
-    if is_empty_string(&option("thread_comments")) {
-        return Vec::new();
-    }
-    let max_depth = Value::String(option("thread_comments_depth")).to_int();
-    if max_depth <= i64::try_from(context.comment_depth).unwrap_or(i64::MAX) {
-        return Vec::new();
-    }
-    let Some(post) = context
-        .site
-        .post(comment.post_id)
-        .filter(|post| comments_open(context, post))
-    else {
+    let url = || comment_link(context, comment);
+    let Some(link) = reply_link(context, comment, ("comment", context.comment_depth), &url) else {
         return Vec::new();
     };
+    [
+        format!(
+            "<div {}>",
+            block.wrapper(context, &align_link_classes(block, Vec::new()))
+        )
+        .as_bytes(),
+        &link,
+        b"</div>",
+    ]
+    .concat()
+}
+
+/// `get_comment_reply_link()`: a reply link while the thread can go deeper
+/// and the post takes comments. `below` is its `add_below` and the
+/// comment's `depth`; on paged comments it goes to the page of `url`, the
+/// comment's link.
+pub(crate) fn reply_link(
+    context: &Context<'_>,
+    comment: &Comment,
+    (below, depth): (&str, usize),
+    url: &dyn Fn() -> Vec<u8>,
+) -> Option<Vec<u8>> {
+    let option = |name| context.site.option(name).unwrap_or_default();
+    if is_empty_string(&option("thread_comments")) {
+        return None;
+    }
+    let max_depth = Value::String(option("thread_comments_depth")).to_int();
+    if max_depth <= i64::try_from(depth).unwrap_or(i64::MAX) {
+        return None;
+    }
+    let post = context
+        .site
+        .post(comment.post_id)
+        .filter(|post| comments_open(context, post))?;
     // On paged comments, the link to the comment's page.
     let permalink = if is_empty_string(&option("page_comments")) {
         context.permalink(&post)
     } else {
         let anchor = format!("#comment-{}", comment.id);
-        replace(&comment_link(context, comment), anchor.as_bytes(), b"")
+        replace(&url(), anchor.as_bytes(), b"")
     };
     let author = comment_author(context, comment);
     let reply_to = [&b"Reply to "[..], &author].concat();
@@ -583,7 +616,7 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
             .concat(),
         );
         let data = format!(
-            "data-commentid=\"{}\" data-postid=\"{}\" data-belowelement=\"comment-{}\" data-respondelement=\"respond\" data-replyto=\"{}\"",
+            "data-commentid=\"{}\" data-postid=\"{}\" data-belowelement=\"{below}-{}\" data-respondelement=\"respond\" data-replyto=\"{}\"",
             comment.id,
             post.id,
             comment.id,
@@ -615,16 +648,7 @@ fn comment_reply_link(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         ]
         .concat()
     };
-    [
-        format!(
-            "<div {}>",
-            block.wrapper(context, &align_link_classes(block, Vec::new()))
-        )
-        .as_bytes(),
-        &link,
-        b"</div>",
-    ]
-    .concat()
+    Some(link)
 }
 
 /// `comments_open( $post )`, with `_close_comments_for_old_post()`.
@@ -669,26 +693,48 @@ fn wp_login_url(context: &Context<'_>, redirect: &[u8]) -> Vec<u8> {
 }
 
 /// `render_block_core_comments()`: the saved markup, where the post takes
-/// comments or has some. The legacy form, which runs `comments_template()`,
-/// is not ported and renders nothing.
+/// comments or has some. The legacy form runs `comments_template()`.
 fn comments(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
-    let Some(post) = context.post_id.map(|id| context.site.post(id)) else {
+    // Without a post nothing takes comments and it has none.
+    let Some(post) = context.post() else {
         return Vec::new();
     };
     // comments_open() and get_comments_number()
-    let open = post
-        .as_ref()
-        .is_some_and(|post| comments_open(context, post));
-    let count = post.as_ref().map_or(0, |post| post.comment_count);
-    if !open && count == 0 {
+    if !comments_open(context, &post) && post.comment_count == 0 {
         return Vec::new();
     }
-    let legacy = block.name == "core/post-comments"
-        || block.attribute("legacy").is_some_and(|v| !v.is_empty());
-    if legacy {
-        return Vec::new();
+    if is_legacy_comments(block.name, &block.attributes) {
+        return legacy_comments::legacy_comments(context, block, &post);
     }
     block.content.to_vec()
+}
+
+/// The comments block that runs `comments_template()`: the old
+/// `core/post-comments`, or `core/comments` with `legacy` set.
+fn is_legacy_comments(name: &str, attributes: &Value) -> bool {
+    name == "core/post-comments"
+        || attributes
+            .get_str("legacy")
+            .is_some_and(|legacy| !legacy.is_empty())
+}
+
+/// The post of a legacy comments block `render_block_core_comments()`
+/// goes on to render, which then enqueues `comment-reply.js`.
+pub(crate) fn legacy_comments_ran(
+    context: &Context<'_>,
+    name: &str,
+    parsed: &[(Key, Value)],
+) -> Option<Post> {
+    let legacy = matches!(name, "core/post-comments" | "core/comments")
+        && is_legacy_comments(name, &prepared(name, parsed));
+    context
+        .post()
+        .filter(|post| legacy && (comments_open(context, post) || post.comment_count > 0))
+}
+
+/// The `cpage` query var the legacy template sets, if any.
+pub(crate) fn legacy_cpage(context: &Context<'_>, post: &Post) -> Option<i64> {
+    legacy_comments::legacy_cpage(context, post).filter(|_| context.request.singular)
 }
 
 /// `render_block_core_comments_title()`: how many responses the post has,
@@ -1701,6 +1747,7 @@ mod heading_list;
 mod icon;
 mod image;
 mod latest_comments;
+mod legacy_comments;
 mod loginout;
 mod site_logo;
 pub(crate) mod tag_cloud;

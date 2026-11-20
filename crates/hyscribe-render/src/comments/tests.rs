@@ -44,8 +44,15 @@ impl Site for WithComments {
         } else {
             Vec::new()
         };
+        // PHP counts the approved comments of a post, notes aside.
+        let count = self
+            .comments
+            .iter()
+            .filter(|c| c.post_id == id && c.comment_type != b"note")
+            .count();
         self.base.post(id).map(|post| Post {
             password,
+            comment_count: i64::try_from(count).unwrap(),
             // The golden opens comments on every post, or closes them all.
             comment_status: if self.closed { "closed" } else { "open" }.into(),
             ..post
@@ -157,7 +164,7 @@ fn matches_php() {
         failures.len(),
         failures[..failures.len().min(3)].join("\n")
     );
-    assert_eq!(golden.lines().count(), 2310);
+    assert_eq!(golden.lines().count(), 2365);
 }
 
 /// A held comment shows only to its author, from the link
@@ -169,7 +176,7 @@ fn held_comments_preview_as_php() {
     let golden = include_str!("../../tests/golden/held-comments.tsv");
     let failures = differences(golden);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 641);
+    assert_eq!(golden.lines().count(), 659);
 }
 
 /// A site without comment data has no held comments for anyone.
@@ -495,4 +502,31 @@ fn a_preview_lasts_ten_minutes_on_its_post() {
     assert_eq!(shown(3, expiry - 1), 1);
     assert_eq!(shown(3, expiry), 0);
     assert_eq!(shown(4, expiry - 1), 0);
+}
+
+/// An empty `cpage` names no page: with several comment pages the legacy
+/// template sets the page, as it does for a request without one.
+#[test]
+fn an_empty_cpage_names_no_page() {
+    let comments = (1..=4)
+        .map(|id| Comment {
+            id,
+            post_id: 1,
+            date_gmt: format!("2026-11-12 00:00:0{id}"),
+            ..Comment::default()
+        })
+        .collect();
+    let site = linked_site(b"page_comments=1&comments_per_page=2", comments);
+    let theme = twentytwentyfive();
+    let post = site.post(1).unwrap();
+    for vars in ["", "cpage="] {
+        let request = Request {
+            singular: true,
+            vars: parse_str(vars.as_bytes()),
+            ..Request::default()
+        };
+        let renderer = Renderer::new(&theme, &site, &request);
+        let page = crate::core_blocks::legacy_cpage(&renderer.context, &post);
+        assert_eq!(page, Some(2), "{vars}");
+    }
 }

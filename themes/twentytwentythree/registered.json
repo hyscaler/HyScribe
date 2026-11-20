@@ -326,5 +326,6 @@
         ]
     },
     "post_formats": [],
+    "block_styles_support": false,
     "styles": []
 }

@@ -216,7 +216,12 @@ fn themes_are_chosen_by_slug() {
     let slugs: Vec<&str> = slugs().collect();
     assert_eq!(
         slugs,
-        ["twentytwentyfive", "twentytwentyfour", "twentytwentythree"]
+        [
+            "twentytwentyfive",
+            "twentytwentyfour",
+            "twentytwentythree",
+            "twentytwentytwo"
+        ]
     );
     for slug in &slugs {
         assert_eq!(resolve(slug), *slug);
@@ -232,6 +237,7 @@ fn themes_are_chosen_by_slug() {
         load("twentytwentythree", None).name(),
         "Twenty Twenty-Three"
     );
+    assert_eq!(load("twentytwentytwo", None).name(), "Twenty Twenty-Two");
     assert_eq!(theme_file("nope", "style.css"), None);
     assert!(theme_file("twentytwentyfour", "style.css").is_some());
     assert_eq!(theme_file("twentytwentyfour", "patterns.json"), None);
@@ -266,6 +272,21 @@ fn the_themes_enqueued_stylesheets_are_read() {
     // The query block's handle is enqueued by an interactive query only.
     assert!(five.style_handles["core/query"].is_empty());
     assert!(load("twentytwentythree", None).styles.is_empty());
+    // Theme support for wp-block-styles adds every core block's -theme handle.
+    assert_eq!(
+        load("twentytwentytwo", None).style_handles["core/group"],
+        ["wp-block-group", "wp-block-group-theme"]
+    );
+    assert!(block_styles_support(br#"{"block_styles_support":true}"#));
+    assert!(!block_styles_support(br#"{"block_styles_support":false}"#));
+    assert!(!block_styles_support(b"{}"));
+    // A pinned theme, with the stylesheet its functions.php enqueues.
+    let two = load("twentytwentytwo", None);
+    assert_eq!(two.styles.len(), 1);
+    assert_eq!(two.styles[0].block, None);
+    assert_eq!(two.styles[0].handle, "twentytwentytwo-style");
+    assert_eq!(two.styles[0].src, "style.min.css");
+    assert_eq!(two.styles[0].version.as_deref(), Some("2.2"));
 }
 
 /// Post formats come from the export, only the known ones, in WordPress's

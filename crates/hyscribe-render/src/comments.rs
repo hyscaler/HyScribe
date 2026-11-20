@@ -134,57 +134,79 @@ impl Renderer<'_> {
         content
     }
 
-    /// `get_comment_class()`, joined, with its alternation counters.
+    /// `get_comment_class()` with the template's alternation counters.
     fn comment_class(&mut self, comment: &Comment) -> String {
-        let site = self.context.site;
-        let mut classes: Vec<Vec<u8>> = vec![if comment.comment_type.is_empty() {
-            b"comment".to_vec()
-        } else {
-            comment.comment_type.clone()
-        }];
-        if let Some(user) = (comment.user_id != 0)
-            .then(|| site.user(comment.user_id))
-            .flatten()
-        {
-            classes.push(b"byuser".to_vec());
-            let fallback = comment.user_id.to_string();
-            classes.push(
-                [
-                    &b"comment-author-"[..],
-                    &sanitize_html_class(&user.nicename, fallback.as_bytes()),
-                ]
-                .concat(),
-            );
-            if site
-                .post(comment.post_id)
-                .is_some_and(|post| post.author == comment.user_id)
-            {
-                classes.push(b"bypostauthor".to_vec());
-            }
-        }
-        if self.comment_alt % 2 == 1 {
-            classes.push(b"odd".to_vec());
-            classes.push(b"alt".to_vec());
-        } else {
-            classes.push(b"even".to_vec());
-        }
-        self.comment_alt += 1;
-        if self.comment_depth == 1 {
-            if self.comment_thread_alt % 2 == 1 {
-                classes.push(b"thread-odd".to_vec());
-                classes.push(b"thread-alt".to_vec());
-            } else {
-                classes.push(b"thread-even".to_vec());
-            }
-            self.comment_thread_alt += 1;
-        }
-        classes.push(format!("depth-{}", self.comment_depth).into_bytes());
-        let classes: Vec<String> = classes
-            .iter()
-            .map(|class| hyscribe_kses::esc_attr(class))
-            .collect();
-        classes.join(" ")
+        get_comment_class(
+            self.context.site,
+            comment,
+            (&mut self.comment_alt, &mut self.comment_thread_alt),
+            self.comment_depth,
+            "",
+        )
     }
+}
+
+/// `get_comment_class()`, joined, with its alternation counters (the
+/// comment's, then the thread's) and the `extra` class it ends with.
+pub(crate) fn get_comment_class(
+    site: &dyn Site,
+    comment: &Comment,
+    (alt, thread_alt): (&mut u64, &mut u64),
+    depth: u64,
+    extra: &str,
+) -> String {
+    let mut classes: Vec<Vec<u8>> = vec![if comment.comment_type.is_empty() {
+        b"comment".to_vec()
+    } else {
+        comment.comment_type.clone()
+    }];
+    if let Some(user) = (comment.user_id != 0)
+        .then(|| site.user(comment.user_id))
+        .flatten()
+    {
+        classes.push(b"byuser".to_vec());
+        let fallback = comment.user_id.to_string();
+        classes.push(
+            [
+                &b"comment-author-"[..],
+                &sanitize_html_class(&user.nicename, fallback.as_bytes()),
+            ]
+            .concat(),
+        );
+        if site
+            .post(comment.post_id)
+            .is_some_and(|post| post.author == comment.user_id)
+        {
+            classes.push(b"bypostauthor".to_vec());
+        }
+    }
+    if *alt % 2 == 1 {
+        classes.push(b"odd".to_vec());
+        classes.push(b"alt".to_vec());
+    } else {
+        classes.push(b"even".to_vec());
+    }
+    *alt += 1;
+    if depth == 1 {
+        if *thread_alt % 2 == 1 {
+            classes.push(b"thread-odd".to_vec());
+            classes.push(b"thread-alt".to_vec());
+        } else {
+            classes.push(b"thread-even".to_vec());
+        }
+        *thread_alt += 1;
+    }
+    classes.push(format!("depth-{depth}").into_bytes());
+    classes.extend(
+        extra
+            .split_whitespace()
+            .map(|class| class.as_bytes().to_vec()),
+    );
+    let classes: Vec<String> = classes
+        .iter()
+        .map(|class| hyscribe_kses::esc_attr(class))
+        .collect();
+    classes.join(" ")
 }
 
 /// The comments a comment query lists on `post_id`, oldest first, then by

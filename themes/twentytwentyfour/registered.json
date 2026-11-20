@@ -986,6 +986,7 @@
         ]
     },
     "post_formats": [],
+    "block_styles_support": false,
     "styles": [
         {
             "block": "core/button",

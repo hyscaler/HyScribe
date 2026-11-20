@@ -25,7 +25,7 @@ mod block_styles;
 mod embed;
 mod footer;
 
-use block_styles::BLOCK_STYLES;
+use block_styles::{BLOCK_STYLES, THEME_STYLES};
 pub use embed::{Share, embed_page, embed_secret, post_embed_html};
 pub use footer::{emoji_detection_script, wp_footer};
 #[cfg(test)]
@@ -76,6 +76,8 @@ pub struct Assets {
     pub(crate) global_presets: String,
     /// What `wp_footer()` prints first of the blocks': duotone filters.
     pub(crate) footer: Vec<u8>,
+    /// The `cpage` query var the legacy comments template set.
+    pub(crate) cpage: Option<i64>,
 }
 
 impl Assets {
@@ -155,7 +157,7 @@ pub fn wp_head(
         )
         .into_bytes(),
     );
-    out.extend(head.canonical(true));
+    out.extend(head.canonical(true, assets.cpage));
     let registry = registered_modules(&head.siteurl());
     out.extend(
         Modules {
@@ -396,7 +398,7 @@ impl Head<'_> {
     }
 
     /// `rel_canonical()`, and with `shortlink`, `wp_shortlink_wp_head()`.
-    fn canonical(&self, shortlink: bool) -> Vec<u8> {
+    fn canonical(&self, shortlink: bool, set_cpage: Option<i64>) -> Vec<u8> {
         let Some(post) = self.queried_post().filter(|post| post.id != 0) else {
             return Vec::new();
         };
@@ -407,7 +409,7 @@ impl Head<'_> {
             if self.request.page >= 2 {
                 url = permalinks::paged(self.site, &url, self.request.page);
             }
-            let cpage = cpage(self.request);
+            let cpage = set_cpage.map_or_else(|| cpage(self.request), Value::Int);
             if !cpage.is_empty() {
                 url = comments_pagenum_link(self.context, cpage.to_int(), 0);
             }
@@ -783,9 +785,20 @@ fn block_style(handle: &str, siteurl: &str) -> Style {
         }
         _ => {}
     }
-    let css = handle
-        .strip_prefix("wp-block-")
-        .and_then(|name| BLOCK_STYLES.iter().find(|(folder, _)| *folder == name));
+    let name = handle.strip_prefix("wp-block-");
+    // `wp-block-<name>-theme`, from a theme's `wp-block-styles` support.
+    if let Some(folder) = name.and_then(|name| name.strip_suffix("-theme")) {
+        return match THEME_STYLES.iter().find(|(known, _)| *known == folder) {
+            Some((_, css)) => Style::file(
+                handle,
+                &format!("{siteurl}/wp-includes/blocks/{folder}/theme.min.css"),
+                css,
+                None,
+            ),
+            None => Style::inline(handle, ""),
+        };
+    }
+    let css = name.and_then(|name| BLOCK_STYLES.iter().find(|(folder, _)| *folder == name));
     match css {
         Some((folder, css)) => Style::file(
             handle,

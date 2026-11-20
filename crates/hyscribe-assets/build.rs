@@ -4,7 +4,10 @@
 //!: downloaded, or read from `HYSCRIBE_WORDPRESS_TARBALL` for
 //! offline builds, and checked against its SHA-256 before anything in it
 //! is used. PHP is left out, and so is a `.js` or `.css` that has a `.min`
-//! twin, which pages only request with `SCRIPT_DEBUG`. Each file served
+//! twin, which pages only request with `SCRIPT_DEBUG`. A theme the release
+//! no longer bundles comes from its pinned wordpress.org archive
+//! (`themes/pinned.tsv`, an open question), checked the same way before it is unpacked
+//! (`HYSCRIBE_THEME_ZIPS` is a folder of them for offline builds). Each file served
 //! from the release, the embedded themes' too, keeps its modification time
 //! and SHA-256 for `Last-Modified` and `ETag`.
 
@@ -17,18 +20,22 @@ use std::time::UNIX_EPOCH;
 const VERSION: &str = "7.1.3";
 const SHA256: &str = "d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e283b2a5";
 const TARBALL_ENV: &str = "HYSCRIBE_WORDPRESS_TARBALL";
+const THEME_ZIPS_ENV: &str = "HYSCRIBE_THEME_ZIPS";
 const THEMES: &str = "wp-content/themes";
 /// Files with a `.min` twin, so not served, that PHP reads as they are.
 const READ: [&str; 1] = ["css/dist/block-editor/default-editor-styles.css"];
 /// As the web server sends them; a file with no extension gets no type.
-const CONTENT_TYPES: [(&str, &str); 15] = [
+const CONTENT_TYPES: [(&str, &str); 18] = [
     ("css", "text/css"),
     ("crt", "application/x-x509-ca-cert"),
     ("eot", "application/vnd.ms-fontobject"),
     ("gif", "image/gif"),
+    ("html", "text/html"),
+    ("jpg", "image/jpeg"),
     ("js", "text/javascript"),
     ("json", "application/json"),
     ("md", "text/markdown"),
+    ("mp4", "video/mp4"),
     ("png", "image/png"),
     // Sass sources, which Apache sends without a type.
     ("scss", ""),
@@ -45,7 +52,9 @@ fn main() -> io::Result<()> {
     println!("cargo::rerun-if-changed=../../wordpress/VERSION");
     println!("cargo::rerun-if-changed=../../themes");
     println!("cargo::rerun-if-changed=../../wordpress/wp-includes/dependencies.json");
+    println!("cargo::rerun-if-changed=../../themes/pinned.tsv");
     println!("cargo::rerun-if-env-changed={TARBALL_ENV}");
+    println!("cargo::rerun-if-env-changed={THEME_ZIPS_ENV}");
     let pinned = std::fs::read_to_string("../../wordpress/VERSION")?;
     let pinned = pinned.trim();
     if pinned != VERSION {
@@ -70,6 +79,11 @@ fn main() -> io::Result<()> {
         }
     }
     themes.sort();
+    let pinned_themes = read_pins("../../themes/pinned.tsv")?;
+    let bundled: Vec<&String> = themes
+        .iter()
+        .filter(|slug| !pinned_themes.iter().any(|(pinned, _, _)| pinned == *slug))
+        .collect();
     run(Command::new("tar")
         .arg("-xzf")
         .arg(&tarball)
@@ -78,10 +92,16 @@ fn main() -> io::Result<()> {
         .arg("wordpress/wp-includes")
         .arg("wordpress/wp-admin")
         .args(
-            themes
+            bundled
                 .iter()
                 .map(|slug| format!("wordpress/{THEMES}/{slug}")),
         ))?;
+    for (slug, version, sha) in &pinned_themes {
+        if themes.contains(slug) {
+            let zip = theme_zip(&out, slug, version, sha)?;
+            unpack_theme(&zip, slug, &tree.join("wordpress").join(THEMES))?;
+        }
+    }
     // Files a registered style or script names are served even with a
     // `.min` twin: WordPress asks for them as they are.
     let dependencies = std::fs::read_to_string("../../wordpress/wp-includes/dependencies.json")?;
@@ -178,15 +198,80 @@ fn tarball(out: &Path) -> io::Result<PathBuf> {
 }
 
 fn verify(path: &Path) -> io::Result<()> {
+    verify_digest(path, SHA256)
+}
+
+fn verify_digest(path: &Path, expected: &str) -> io::Result<()> {
     let digest = hex(&Sha256::digest(std::fs::read(path)?));
-    if digest == SHA256 {
+    if digest == expected {
         Ok(())
     } else {
         Err(io::Error::other(format!(
-            "{} has SHA-256 {digest}, expected {SHA256}",
+            "{} has SHA-256 {digest}, expected {expected}",
             path.display()
         )))
     }
+}
+
+/// The rows of `themes/pinned.tsv`: slug, version and SHA-256.
+fn read_pins(path: &str) -> io::Result<Vec<(String, String, String)>> {
+    let mut rows = Vec::new();
+    for line in std::fs::read_to_string(path)?.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [slug, version, sha] = fields[..] else {
+            return Err(io::Error::other(format!("{path}: bad row {line:?}")));
+        };
+        rows.push((slug.to_owned(), version.to_owned(), sha.to_owned()));
+    }
+    Ok(rows)
+}
+
+/// A pinned theme's verified archive, like the release's: the offline copy,
+/// a verified earlier download, or a fresh one.
+fn theme_zip(out: &Path, slug: &str, version: &str, sha: &str) -> io::Result<PathBuf> {
+    let name = format!("{slug}.{version}.zip");
+    if let Some(dir) = std::env::var_os(THEME_ZIPS_ENV) {
+        let path = PathBuf::from(dir).join(&name);
+        verify_digest(&path, sha)?;
+        return Ok(path);
+    }
+    let path = out.join(&name);
+    if verify_digest(&path, sha).is_ok() {
+        return Ok(path);
+    }
+    let partial = out.join("theme-download.part");
+    run(Command::new("curl")
+        .args(["-fsSL", "--proto", "=https", "--tlsv1.2", "-o"])
+        .arg(&partial)
+        .arg(format!("https://downloads.wordpress.org/theme/{name}")))?;
+    verify_digest(&partial, sha)?;
+    std::fs::rename(&partial, &path)?;
+    Ok(path)
+}
+
+/// Unpacks a verified archive into a new folder of `themes`, in UTC as
+/// `reference/themes/pin.sh` does, so file times agree with the oracle's.
+fn unpack_theme(zip: &Path, slug: &str, themes: &Path) -> io::Result<()> {
+    let listing = Command::new("unzip").arg("-Z1").arg(zip).output()?;
+    if !listing.status.success()
+        || String::from_utf8_lossy(&listing.stdout)
+            .lines()
+            .any(|entry| !entry.starts_with(&format!("{slug}/")))
+    {
+        return Err(io::Error::other(format!(
+            "{} has an entry outside {slug}/",
+            zip.display()
+        )));
+    }
+    std::fs::create_dir_all(themes)?;
+    run(Command::new("unzip")
+        .env("TZ", "UTC")
+        .args(["-q", "-d"])
+        .arg(themes)
+        .arg(zip))
 }
 
 fn run(command: &mut Command) -> io::Result<()> {

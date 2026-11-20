@@ -173,12 +173,13 @@ fn with_user_styles(slug: &str, user: Option<&[u8]>, styles: &[(String, String)]
         .map(|(block, _, css)| (block, css))
         .collect();
     let own = own_styles(data);
+    let theme_styles = block_styles_support(data.registered);
     let mut style_handles: HashMap<String, Vec<String>> = blocks
         .iter()
         .map(|block| {
             (
                 block.name.clone(),
-                style_handles(&block.name, &block.metadata),
+                style_handles(&block.name, &block.metadata, theme_styles),
             )
         })
         .collect();
@@ -238,6 +239,16 @@ fn own_styles(data: &Data) -> Vec<OwnStyle> {
         .collect()
 }
 
+/// `registered.json`'s `block_styles_support`: whether `functions.php` adds
+/// theme support for `wp-block-styles`.
+fn block_styles_support(registered: &[u8]) -> bool {
+    let root = json_decode(registered).unwrap_or_default();
+    matches!(
+        root.get_str("block_styles_support"),
+        Some(Value::Bool(true))
+    )
+}
+
 /// `registered.json`'s `post_formats`, the formats `functions.php` adds
 /// theme support for.
 fn post_formats(registered: &[u8]) -> Vec<&'static str> {
@@ -272,15 +283,25 @@ fn header(css: &str, name: &str) -> String {
 /// `register_block_type_from_metadata()` does: `wp-block-<name>` first,
 /// whatever `block.json` names there, then the other handles it lists. The
 /// query block's own is left out: `render_block_core_query()` removes it
-/// unless the query is interactive, which `Renderer::query` enqueues.
-fn style_handles(name: &str, metadata: &Value) -> Vec<String> {
+/// unless the query is interactive, which `Renderer::query` enqueues. A theme
+/// with `wp-block-styles` support adds the block's `-theme` handle last.
+fn style_handles(name: &str, metadata: &Value, theme_styles: bool) -> Vec<String> {
     let text = |handle: &Value| String::from_utf8_lossy(&handle.to_php_string()).into_owned();
     let mut handles = Vec::new();
-    if name != "core/query" {
+    // A block registered without a block.json (the legacy post comments)
+    // has no handle of its own, as its metadata names the handles of others.
+    let from_file = metadata.get_str("apiVersion").is_some();
+    if name != "core/query" && from_file {
         handles.push(format!("wp-block-{}", name.trim_start_matches("core/")));
     }
     if let Some(Value::Array(listed)) = metadata.get_str("style") {
         handles.extend(listed.iter().skip(1).map(|(_, handle)| text(handle)));
+    }
+    if theme_styles && from_file {
+        handles.push(format!(
+            "wp-block-{}-theme",
+            name.trim_start_matches("core/")
+        ));
     }
     handles
 }

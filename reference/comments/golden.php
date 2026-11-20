@@ -434,6 +434,133 @@ $GLOBALS['wp_rewrite']->init();
 $wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
 clean_post_cache( 1 );
 
+// The legacy comments block runs comments_template() (the compat template,
+// wp_list_comments() and the classic form) on a single post or page only.
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$three_status = get_post( 3 )->comment_status;
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 3 ) );
+clean_post_cache( 3 );
+$legacy_markups = array(
+	'<!-- wp:post-comments /-->',
+	'<!-- wp:comments {"legacy":true,"textAlign":"right","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
+	'<!-- wp:comments {"legacy":false} /-->',
+);
+$legacy = function ( $options, $post_id, $markup, $cpage, $singular, $closed = false ) use ( $option_names, $render, $reset, $elements ) {
+	// The pagination blocks above leave their link attributes filters on.
+	remove_all_filters( 'previous_comments_link_attributes' );
+	remove_all_filters( 'next_comments_link_attributes' );
+	foreach ( array_merge( $option_names, array( 'permalink_structure', 'time_format' ) ) as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	foreach ( $options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	$GLOBALS['wp_rewrite']->init();
+	$GLOBALS['wp_query']->is_singular = $singular;
+	$GLOBALS['wp_query']->is_single   = $singular;
+	$GLOBALS['wp_query']->set( 'cpage', $cpage );
+	$uri                    = '' === $cpage ? '/?p=1' : "/?p=1&cpage=$cpage";
+	$_SERVER['REQUEST_URI'] = $uri;
+	$GLOBALS['post']        = get_post( 1 );
+	$reset();
+	// A single template runs in the main loop, where the first images are not lazy.
+	$GLOBALS['wp_query']->in_the_loop = $singular;
+	wp_increase_content_media_count( -wp_increase_content_media_count( 0 ) );
+	wp_high_priority_element_flag( true );
+	$context = $post_id ? array( 'postId' => $post_id ) : array();
+	$counter = $elements();
+	$html    = $render( $markup, $context );
+	$html   .= $render( $markup, $context );
+	$GLOBALS['wp_query']->in_the_loop = false;
+	$state   = array( 'options' => $options, 'elements' => $counter, 'post' => $post_id, 'password' => false, 'closed' => $closed, 'now' => time(), 'uri' => $uri, 'global' => 1, 'singular' => $singular );
+	$GLOBALS['post'] = null;
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+};
+foreach ( array(
+	array(),
+	array( 'thread_comments' => '0' ),
+	array( 'thread_comments_depth' => '2' ),
+	array( 'thread_comments_depth' => '1' ),
+	array( 'comment_order' => 'desc' ),
+	array( 'comment_order' => 'desc', 'thread_comments' => '0' ),
+	array( 'comment_registration' => '1' ),
+	array( 'date_format' => 'Y/m/d', 'time_format' => 'H:i', 'thread_comments_depth' => '4' ),
+	array( 'show_avatars' => '' ),
+	array( 'avatar_default' => 'initials', 'use_smilies' => '0' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '1' ),
+) as $options ) {
+	$legacy( $options, 1, $legacy_markups[0], '', true );
+}
+foreach ( array( 1, 2, 3, 0 ) as $post_id ) {
+	foreach ( $legacy_markups as $markup ) {
+		$legacy( array(), $post_id, $markup, '', true );
+	}
+}
+// The global post is the block's own: its login link and page links.
+$legacy( array( 'comment_registration' => '1' ), 2, $legacy_markups[0], '', true );
+$legacy( array( 'page_comments' => '1', 'comments_per_page' => '100' ), 1, $legacy_markups[0], '', true );
+$legacy( array(), 1, $legacy_markups[0], '', false );
+$legacy( array(), 1, $legacy_markups[1], '2', false );
+foreach ( array(
+	array( 'page_comments' => '1', 'comments_per_page' => '3' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'default_comments_page' => 'oldest' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'thread_comments' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'comment_order' => 'desc' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'permalink_structure' => '/%postname%/' ),
+) as $options ) {
+	foreach ( array( '', '1', '2', '99', 'abc' ) as $cpage ) {
+		$legacy( $options, 1, $legacy_markups[0], $cpage, true );
+	}
+}
+foreach ( array_merge( $option_names, array( 'permalink_structure', 'time_format' ) ) as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+$GLOBALS['wp_rewrite']->init();
+$GLOBALS['wp_query']->is_singular = false;
+$GLOBALS['wp_query']->is_single   = false;
+$GLOBALS['wp_query']->set( 'cpage', '' );
+$_SERVER['REQUEST_URI'] = '/';
+// A closed post that still has comments lists them, and a password protected one shows a note.
+foreach ( array( array( 'closed', 'comment_status' ), array( 'pw', 'post_password' ) ) as list( $kind, $column ) ) {
+	$wpdb->update( $wpdb->posts, array( $column => 'closed' === $kind ? 'closed' : 'pw' ), array( 'ID' => 1 ) );
+	clean_post_cache( 1 );
+	$GLOBALS['wp_query']->is_singular = true;
+	$GLOBALS['wp_query']->is_single   = true;
+	$GLOBALS['post']                  = get_post( 1 );
+	$reset();
+	$GLOBALS['wp_query']->in_the_loop = true;
+	wp_increase_content_media_count( -wp_increase_content_media_count( 0 ) );
+	wp_high_priority_element_flag( true );
+	$counter = $elements();
+	$markup  = $legacy_markups[0];
+	$html    = $render( $markup, array( 'postId' => 1 ) );
+	$html   .= $render( $markup, array( 'postId' => 1 ) );
+	$GLOBALS['wp_query']->in_the_loop = false;
+	$state   = array( 'options' => array(), 'elements' => $counter, 'post' => 1, 'password' => 'pw' === $kind, 'closed' => 'closed' === $kind, 'now' => time(), 'uri' => '/', 'global' => 1, 'singular' => true );
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+	$GLOBALS['wp_query']->is_singular = false;
+	$GLOBALS['wp_query']->is_single   = false;
+	$GLOBALS['post']                  = null;
+	$wpdb->update( $wpdb->posts, array( 'closed' === $kind ? 'comment_status' : 'post_password' => 'closed' === $kind ? 'open' : '' ), array( 'ID' => 1 ) );
+	clean_post_cache( 1 );
+}
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+// Closed to comments, a page past the last holds none and says so.
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$legacy( array( 'page_comments' => '1', 'comments_per_page' => '3' ), 1, $legacy_markups[0], '99', true, true );
+foreach ( $option_names as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+$GLOBALS['wp_query']->is_singular = false;
+$GLOBALS['wp_query']->is_single   = false;
+$GLOBALS['wp_query']->set( 'cpage', '' );
+$_SERVER['REQUEST_URI'] = '/';
+$wpdb->update( $wpdb->posts, array( 'comment_status' => $three_status ), array( 'ID' => 3 ) );
+clean_post_cache( 3 );
+
 // Outside a singular page there are no links.
 $GLOBALS['wp_query']->is_singular = false;
 $GLOBALS['wp_query']->set( 'cpage', '2' );

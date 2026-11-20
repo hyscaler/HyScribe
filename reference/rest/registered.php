@@ -18,7 +18,9 @@
 //           which patterns.json holds], "rest": the theme as the themes route
 //           gives it, without links (reading them creates its global styles
 //           post), with the site URL as %siteurl%, "post_formats": the formats
-//           it adds theme support for, "styles": the stylesheets of its own
+//           it adds theme support for, "block_styles_support": whether it
+//           adds theme support for wp-block-styles (every core block then
+//           also enqueues its wp-block-<name>-theme style), "styles": the stylesheets of its own
 //           files it enqueues as {block, handle, src, ver}: block is null for
 //           those of wp_enqueue_scripts, else the block whose rendering
 //           enqueues it (wp_enqueue_block_style()), src is relative to the
@@ -109,7 +111,7 @@ if ( 'theme' === $argv[1] ) {
 		}
 	}
 	$enqueued = array_map( fn( $s ) => array_diff_key( $s, array( 'deps' => 0 ) ), $enqueued );
-	$out  = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme, 'patterns' => $patterns, 'rest' => $rest, 'post_formats' => $formats ? $formats[0] : array(), 'styles' => $enqueued );
+	$out  = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme, 'patterns' => $patterns, 'rest' => $rest, 'post_formats' => $formats ? $formats[0] : array(), 'block_styles_support' => current_theme_supports( 'wp-block-styles' ), 'styles' => $enqueued );
 } else {
 	$controller = new WP_REST_Block_Types_Controller();
 	$request    = new WP_REST_Request( 'GET', '/wp/v2/block-types' );

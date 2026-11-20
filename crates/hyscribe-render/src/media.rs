@@ -18,6 +18,9 @@ pub(crate) struct Loading {
     pub(crate) in_the_content: bool,
     /// `doing_filter( 'widget_block_content' )`: a block widget's content.
     pub(crate) in_widget_block_content: bool,
+    /// The context `template_part_header`, whose elements count as in the
+    /// viewport.
+    pub(crate) in_header: bool,
     shared: Rc<Shared>,
 }
 
@@ -72,6 +75,14 @@ impl Loading {
         }
     }
 
+    /// The request's counts in the context `template_part_<area>`.
+    pub(crate) fn in_area(&self, area: &[u8]) -> Loading {
+        Loading {
+            in_header: area == b"header",
+            ..self.clone()
+        }
+    }
+
     /// `wp_get_loading_optimization_attributes( 'img', $attr, $context )`
     /// for an image with a width and height and none of `loading`,
     /// `fetchpriority` or `decoding` given, in a context that is neither
@@ -116,7 +127,11 @@ impl Loading {
             _ => {}
         }
         let mut counted = false;
-        if in_viewport.is_none() && self.in_the_loop {
+        let mut counted_when_large = false;
+        if in_viewport.is_none() && self.in_header {
+            in_viewport = Some(true);
+            counted_when_large = true;
+        } else if in_viewport.is_none() && self.in_the_loop {
             // wp_omit_loading_attr_threshold()
             in_viewport = Some(self.shared.media_count.get() < 3);
             counted = true;
@@ -140,7 +155,9 @@ impl Loading {
         } else if !low {
             attributes.loading = Some("lazy");
         }
-        if counted && given.fetchpriority != Some(b"auto") {
+        // wp_min_priority_img_pixels
+        let large = width.saturating_mul(height) >= 50_000;
+        if (counted || counted_when_large && large) && given.fetchpriority != Some(b"auto") {
             let count = &self.shared.media_count;
             count.set(count.get() + 1);
         }

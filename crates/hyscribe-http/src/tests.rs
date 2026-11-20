@@ -1618,6 +1618,10 @@ async fn theme_files_match_php() {
             include_str!("../tests/golden/theme-files-twentytwentythree.tsv"),
             44,
         ),
+        (
+            include_str!("../tests/golden/theme-files-twentytwentytwo.tsv"),
+            69,
+        ),
     ];
     for (golden, count) in goldens {
         for line in golden.lines() {
@@ -3325,6 +3329,11 @@ theme_pages!(
     twenty_twenty_three_theme_test_data_pages_match_php,
     "tt3"
 );
+theme_pages!(
+    twenty_twenty_two_default_pages_match_php,
+    twenty_twenty_two_theme_test_data_pages_match_php,
+    "tt2"
+);
 
 /// A visitor's page view over the Theme Test Data, which has classic menus
 /// and no `wp_navigation` post, in primary mode: the navigation block's
@@ -3407,6 +3416,7 @@ async fn the_stylesheet_option_picks_the_theme() {
     for (stylesheet, served) in [
         ("twentytwentyfour", "twentytwentyfour"),
         ("twentytwentythree", "twentytwentythree"),
+        ("twentytwentytwo", "twentytwentytwo"),
         ("missing", "twentytwentyfive"),
         ("twentytwentyfour", "twentytwentyfour"),
     ] {

@@ -14,7 +14,9 @@
 # HYSCRIBE_PHP_HOME=<url> sets WP_HOME and WP_SITEURL to that address, and
 # HYSCRIBE_PHP_ALIAS=<name> gives the container that network alias, so
 # another container of the network (the screenshot browser) reaches the
-# site by name. HYSCRIBE_PHP_EXTRA is PHP added to wp-config.php.
+# site by name. HYSCRIBE_PHP_EXTRA is PHP added to wp-config.php. The themes
+# pinned in themes/pinned.tsv that reference/themes/pin.sh unpacked
+# are mounted read only into wp-content/themes.
 set -euo pipefail
 
 DOCKER="${DOCKER:-docker}"
@@ -35,6 +37,10 @@ fi
 if [ -n "${HYSCRIBE_PHP_UPLOADS:-}" ]; then
   UPLOADS=(-v "$HYSCRIBE_PHP_UPLOADS:/var/www/html/wp-content/uploads")
 fi
+for pinned in "$ROOT"/target/pinned-themes/*/; do
+  [ -d "$pinned" ] || continue
+  UPLOADS+=(-v "${pinned%/}:/var/www/html/wp-content/themes/$(basename "$pinned"):ro")
+done
 
 case "${1:-}" in
   up)

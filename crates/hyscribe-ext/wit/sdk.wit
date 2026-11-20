@@ -285,8 +285,3 @@ world plugin {
     import i18n;
     export guest;
 }
-
-/// A theme's `functions.php` logic (MVP phase 10): the plugin's surface.
-world theme {
-    include plugin;
-}

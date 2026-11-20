@@ -1,0 +1,300 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+/// HyScribe's extension SDK 0.1 (ADR 0022): what a plugin or theme component
+/// imports from the host and exports to it. Every import is checked against
+/// the extension's manifest on every call; nothing is granted by default.
+package hyscribe:sdk@0.1.0;
+
+interface types {
+    /// The kind of a PHP value.
+    enum value-kind {
+        null,
+        boolean,
+        int,
+        float,
+        text,
+        json,
+    }
+
+    /// A PHP value crossing a hook: its kind, then the field that kind
+    /// reads, the others zero. `int` holds integers and booleans (0 or 1),
+    /// `float` floats, `text` strings and arrays and objects as JSON, as
+    /// `wp_json_encode()` writes them. One layout for every kind, so the
+    /// host lowers a string where it lies, without copying it first.
+    type value = tuple<value-kind, s64, f64, string>;
+
+    /// Why the host refused or failed a call.
+    variant sdk-error {
+        /// The manifest does not grant this.
+        denied(string),
+        /// An argument the host does not accept.
+        invalid(string),
+        /// The host could not do it (a database error, a full queue).
+        failed(string),
+    }
+
+    /// The four kinds of object WordPress keeps meta for.
+    enum object-kind {
+        post,
+        user,
+        term,
+        comment,
+    }
+}
+
+/// `add_action()`, `add_filter()`, `apply_filters()`, `do_action()`.
+interface hooks {
+    use types.{value, sdk-error};
+
+    enum hook-kind {
+        action,
+        filter,
+    }
+
+    /// `add_filter( $hook, $callback, $priority, $accepted_args )`, where
+    /// `callback` is the guest's own number for it, handed back to
+    /// `guest.invoke`; only during `guest.init`, and only to a hook the
+    /// manifest declares.
+    add: func(hook: string, kind: hook-kind, callback: u32, priority: s32, accepted-args: u32) -> result<_, sdk-error>;
+
+    /// `remove_action()` and `remove_filter()` of the extension's own callbacks.
+    remove: func(hook: string, callback: u32, priority: s32) -> bool;
+
+    /// A hook's chain as the calling extension sees it: its own callbacks
+    /// (`mine`) by number, every other run of callbacks as one opaque step. A component
+    /// cannot be entered while it is running, so the SDK runs its own
+    /// callbacks itself and hands each other step back to `run-step`.
+    variant link {
+        mine(u32),
+        others(u32),
+    }
+
+    /// `apply_filters()` and `do_action()` fired by the extension: the chain
+    /// for `hook`, with a token valid for this call only.
+    chain: func(hook: string) -> result<tuple<u64, list<link>>, sdk-error>;
+
+    /// Runs one `others` step of a chain with the values so far.
+    run-step: func(token: u64, step: u32, args: list<value>) -> result<value, sdk-error>;
+
+    /// `doing_filter()`, `current_filter()` and `did_action()`.
+    current: func() -> option<string>;
+    did-action: func(hook: string) -> u32;
+}
+
+/// `get_option()`, `update_option()`, `add_option()`, `delete_option()`, for
+/// the option names the manifest grants.
+interface options {
+    use types.{value, sdk-error};
+
+    get: func(name: string) -> result<option<value>, sdk-error>;
+    update: func(name: string, value: value, autoload: option<bool>) -> result<bool, sdk-error>;
+    add: func(name: string, value: value, autoload: option<bool>) -> result<bool, sdk-error>;
+    delete: func(name: string) -> result<bool, sdk-error>;
+}
+
+/// `get_metadata()` and friends, for the meta keys the manifest grants.
+interface meta {
+    use types.{value, object-kind, sdk-error};
+
+    get: func(kind: object-kind, id: u64, key: string) -> result<list<value>, sdk-error>;
+    add: func(kind: object-kind, id: u64, key: string, value: value, unique: bool) -> result<option<u64>, sdk-error>;
+    update: func(kind: object-kind, id: u64, key: string, value: value, previous: option<value>) -> result<bool, sdk-error>;
+    delete: func(kind: object-kind, id: u64, key: string, value: option<value>) -> result<bool, sdk-error>;
+    /// `register_meta()`: its arguments as JSON.
+    register: func(kind: object-kind, subtype: string, key: string, args: string) -> result<_, sdk-error>;
+}
+
+/// `register_post_type()` and `register_taxonomy()`, their arguments as JSON.
+interface content {
+    use types.{sdk-error};
+
+    register-post-type: func(name: string, args: string) -> result<_, sdk-error>;
+    register-taxonomy: func(name: string, object-types: list<string>, args: string) -> result<_, sdk-error>;
+}
+
+/// `WP_Query` and `get_post()`, through the host's typed queries.
+interface query {
+    use types.{sdk-error};
+
+    record post {
+        id: u64,
+        post-type: string,
+        status: string,
+        author: u64,
+        parent: u64,
+        menu-order: s32,
+        name: string,
+        title: string,
+        content: string,
+        excerpt: string,
+        date-gmt: string,
+        modified-gmt: string,
+    }
+
+    record found {
+        posts: list<post>,
+        total: u64,
+        max-pages: u32,
+    }
+
+    /// `new WP_Query( $args )`: the query variables as JSON; the post types
+    /// it may read are those the manifest grants and the public ones.
+    posts: func(args: string) -> result<found, sdk-error>;
+    get-post: func(id: u64) -> result<option<post>, sdk-error>;
+}
+
+/// `register_rest_route()`. Requests reach `guest.invoke` as one JSON value
+/// (method, route, params, headers, body) and answer one JSON value
+/// (status, headers, data).
+interface rest {
+    use types.{sdk-error};
+
+    record route {
+        namespace: string,
+        path: string,
+        methods: list<string>,
+        callback: u32,
+        /// The `permission_callback`; none is refused, as WordPress warns.
+        permission: u32,
+        /// The `args` schema as JSON.
+        args: string,
+    }
+
+    register: func(route: route) -> result<_, sdk-error>;
+}
+
+/// `add_shortcode()`; the callback gets the attributes as JSON, the content
+/// and the tag.
+interface shortcodes {
+    use types.{sdk-error};
+
+    add: func(tag: string, callback: u32) -> result<_, sdk-error>;
+    remove: func(tag: string) -> bool;
+}
+
+/// `register_block_type()` from the package's `block.json`.
+interface blocks {
+    use types.{sdk-error};
+
+    /// `path` is the block's folder inside the package; `render` the
+    /// callback for a dynamic block.
+    register: func(path: string, render: option<u32>) -> result<_, sdk-error>;
+}
+
+/// `wp_register_script()`, `wp_enqueue_style()` and friends, for files of
+/// the package's `public/` folder or registered handles.
+interface assets {
+    use types.{sdk-error};
+
+    enum asset-kind {
+        script,
+        style,
+    }
+
+    record asset {
+        kind: asset-kind,
+        handle: string,
+        /// A path inside `public/`, empty for a handle with no file.
+        src: string,
+        deps: list<string>,
+        version: option<string>,
+        /// `in_footer` for a script, `media` for a style.
+        placement: string,
+    }
+
+    register: func(asset: asset) -> result<_, sdk-error>;
+    enqueue: func(kind: asset-kind, handle: string) -> result<_, sdk-error>;
+    /// `wp_add_inline_script()` and `wp_add_inline_style()`.
+    add-inline: func(kind: asset-kind, handle: string, data: string, before: bool) -> result<_, sdk-error>;
+}
+
+/// `wp_schedule_event()` and friends, for the hooks the manifest declares.
+interface cron {
+    use types.{value, sdk-error};
+
+    schedule: func(timestamp: s64, recurrence: option<string>, hook: string, args: list<value>) -> result<_, sdk-error>;
+    unschedule: func(hook: string, args: list<value>) -> result<u32, sdk-error>;
+    next: func(hook: string, args: list<value>) -> option<s64>;
+}
+
+/// `wp_mail()`, when the manifest grants mail.
+interface mail {
+    use types.{sdk-error};
+
+    record message {
+        to: list<string>,
+        subject: string,
+        body: string,
+        headers: list<string>,
+        /// Files inside a folder the manifest grants.
+        attachments: list<string>,
+    }
+
+    send: func(message: message) -> result<bool, sdk-error>;
+}
+
+/// The current user, `current_user_can()` and nonces.
+interface auth {
+    use types.{value};
+
+    current-user: func() -> u64;
+    user-can: func(capability: string, args: list<value>) -> bool;
+    create-nonce: func(action: string) -> string;
+    /// 1 or 2 as `wp_verify_nonce()` answers, 0 for a bad nonce.
+    verify-nonce: func(nonce: string, action: string) -> u8;
+}
+
+/// `__()`, `_x()`, `_n()` in the extension's own text domain, from its
+/// `languages/` folder.
+interface i18n {
+    translate: func(text: string, context: option<string>) -> string;
+    translate-plural: func(single: string, plural: string, number: u64, context: option<string>) -> string;
+}
+
+/// What the host calls in the extension.
+interface guest {
+    use types.{value};
+
+    /// Runs once when the package is loaded: registers hooks, routes,
+    /// shortcodes, blocks and assets. Never per request.
+    init: func() -> result<_, string>;
+
+    /// `register_activation_hook()` and `register_deactivation_hook()`.
+    activate: func() -> result<_, string>;
+    deactivate: func() -> result<_, string>;
+
+    /// Runs one callback the extension registered, with its arguments.
+    invoke: func(callback: u32, args: list<value>) -> result<value, string>;
+}
+
+/// A plugin. Nothing else is imported: no WASI, so no files, clocks,
+/// sockets or environment but through these interfaces.
+world plugin {
+    import hooks;
+    import options;
+    import meta;
+    import content;
+    import query;
+    import rest;
+    import shortcodes;
+    import blocks;
+    import assets;
+    import cron;
+    import mail;
+    import auth;
+    import i18n;
+    export guest;
+}
+
+/// A theme's `functions.php` logic (MVP phase 10): the plugin's surface.
+world theme {
+    include plugin;
+}
+
+/// The extension host spike: hooks, options and cron.
+world spike {
+    import hooks;
+    import options;
+    import cron;
+    export guest;
+}

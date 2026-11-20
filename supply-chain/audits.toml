@@ -37,6 +37,12 @@ criteria = "safe-to-deploy"
 delta = "0.4.4 -> 0.5.2"
 notes = "Trait restructuring for 0.5 (block and mode backends, tweakable ciphers, stream wrapper behind a feature). The crate now declares #![forbid(unsafe_code)], removing the two unsafe blocks 0.4.4 had. No build script, proc macros, or I/O; include_bytes appears only in feature gated test macros."
 
+[[audits.cpp_demangle]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.5.1"
+notes = "Itanium C++ symbol demangler, about 13,200 lines, depending only on cfg-if (afl only behind its fuzz feature). The crate denies unsafe_code and allows it at two sites, both sound: reference_newtype in ast.rs casts &Vec<TypeHandle> to a shared reference of a single field newtype whose Drop is unreachable (no repr(transparent), which rustc lays out identically in practice), and parse_number calls from_utf8_unchecked on bytes already filtered to ASCII digits and letters. Parsing is capped by ParseOptions recursion_limit (default 96) and printing by DemangleOptions recursion_limit (default 128), TooMuchRecursion propagating rather than backtracking, so hostile input cannot overflow the stack; output size is not capped, a denial of service risk only for a caller demangling untrusted symbols. The build script generates tests into OUT_DIR from in/ and tests/, which the published package excludes, so it writes nothing. No filesystem, network, process or environment access in the library. HyScribe compiles it out: wasmtime's demangle feature is off."
+
 [[audits.email-encoding]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
@@ -85,6 +91,12 @@ criteria = "safe-to-deploy"
 delta = "0.2.2 -> 0.2.5"
 notes = "Lint fixes (as casts replaced by ptr::from_ref, ptr::from_mut and cast) and a rework of PaddedInOutBuf to hold raw pointers, fixing a Stacked Borrows violation. The reworked unsafe code checks that the output buffer holds every block it writes and returns PadError instead of trusting the padding implementation. No build script, new dependencies or I/O."
 
+[[audits.itertools]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.14.0"
+notes = "Iterator adaptors over caller supplied iterators, 14,505 lines, depending only on either with default features off; build = false and no proc macro. Eight unsafe sites in two files, all sound. next_array.rs: ArrayBuilder keeps arr[..len] initialised; push indexes arr[len] (panicking at N before any state changes), writes, then increments len; take calls assume_init only when len equals N, after resetting len to 0 and swapping in an uninitialised array, so nothing drops twice; AsMut and Drop cast only the initialised prefix from [MaybeUninit<T>] to [T], which share a layout. either_or_both.rs: insert_left and insert_right move the old value out with ptr::read and write Both back with ptr::write, with nothing between that can panic, and unreachable_unchecked follows an assignment of Both. Size hints only set capacities. No filesystem, network, process or environment access. wasmtime's Cranelift glue uses zip_eq, join and Either."
+
 [[audits.jiff-tzdb]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
@@ -114,6 +126,12 @@ who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
 delta = "0.11.23 -> 0.11.24"
 notes = "The RUSTSEC-2026-0565 fix: SMTP replies are read line by line into a buffer capped at MAX_RESPONSE_BYTES (100,000) through a new ResponseParser, so a line that never ends cannot take memory without bound. Also: bytes already buffered after the STARTTLS reply end the connection instead of being read as if they came over TLS; DATA and the message end must get replies of the expected class; NOOP needs a 250; an opt-in for partially rejected recipients (off by default). Still #![forbid(unsafe_code)]; no build script, proc macros, or new filesystem, process or environment access; dependency changes are only minimum version bumps of existing ones."
+
+[[audits.memfd]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.5 -> 0.6.6"
+notes = "Packaging only: the CI workflow, the order of Cargo.toml's metadata tables and the version. No change to any Rust source, build script or dependency."
 
 [[audits.mutate_once]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
@@ -145,6 +163,12 @@ criteria = "safe-to-deploy"
 version = "0.5.2"
 notes = "#![forbid(unsafe_code)] and no dependencies. Quoted-printable encode and decode (RFC 2045) over byte slices with Strict and Robust decode modes and line wrapping at 76; pure functions returning owned buffers. No build script, proc macros, or filesystem, network, process or environment access."
 
+[[audits.rustc-hash]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "2.1.1 -> 2.1.3"
+notes = "No unsafe code added. The 64 by 64 bit multiply picks its path with cfg! instead of the pointer width and uses wrapping_mul; byte hashing walks 16 byte chunks with split_first_chunk instead of indexing; Default is derived; the optional rand dependency moves to 0.9. No I/O, build script or new dependency."
+
 [[audits.rustls-webpki]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
@@ -175,6 +199,24 @@ criteria = "safe-to-deploy"
 version = "0.5.15"
 notes = "Pure Rust baseline and progressive JPEG decoder over a caller supplied byte source. All unsafe code is SIMD intrinsics compiled only with the x86 or neon feature; with default features off lib.rs applies forbid(unsafe_code), so the crate builds with no unsafe at all. Certified for use without x86 and neon. Width and height are checked against the options' limits before buffers are allocated. No build script, filesystem, network, process or environment access. Depends only on zune-core."
 
+[[trusted.addr2line]]
+criteria = "safe-to-deploy"
+user-id = 4415 # Philip Craig (philipc)
+start = "2019-05-01"
+end = "2027-11-18"
+
+[[trusted.anyhow]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-10-05"
+end = "2027-11-18"
+
+[[trusted.arbitrary]]
+criteria = "safe-to-deploy"
+user-id = 696 # Nick Fitzgerald (fitzgen)
+start = "2020-01-14"
+end = "2027-11-18"
+
 [[trusted.cc]]
 criteria = "safe-to-deploy"
 user-id = 55123 # rust-lang-owner
@@ -187,6 +229,36 @@ user-id = 539 # Josh Stone (cuviper)
 start = "2025-08-29"
 end = "2027-11-16"
 
+[[trusted.gimli]]
+criteria = "safe-to-deploy"
+user-id = 4415 # Philip Craig (philipc)
+start = "2019-04-25"
+end = "2027-11-18"
+
+[[trusted.id-arena]]
+criteria = "safe-to-deploy"
+user-id = 696 # Nick Fitzgerald (fitzgen)
+start = "2026-01-14"
+end = "2027-11-18"
+
+[[trusted.libm]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2024-10-26"
+end = "2027-11-18"
+
+[[trusted.mach2]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:JohnTitor/mach2"
+start = "2025-11-16"
+end = "2027-11-18"
+
+[[trusted.object]]
+criteria = "safe-to-deploy"
+user-id = 4415 # Philip Craig (philipc)
+start = "2019-04-26"
+end = "2027-11-18"
+
 [[trusted.openssl-probe]]
 criteria = "safe-to-deploy"
 user-id = 4556 # Dirkjan Ochtman (djc)
@@ -198,6 +270,12 @@ criteria = "safe-to-deploy"
 user-id = 2751 # Joe Birr-Pixton (ctz)
 start = "2025-02-22"
 end = "2027-11-16"
+
+[[trusted.rustc-demangle]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2023-03-23"
+end = "2027-11-18"
 
 [[trusted.rustls]]
 criteria = "safe-to-deploy"
@@ -217,11 +295,35 @@ user-id = 2751 # Joe Birr-Pixton (ctz)
 start = "2023-01-09"
 end = "2027-11-16"
 
+[[trusted.rustversion]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-07-08"
+end = "2027-11-18"
+
+[[trusted.target-lexicon]]
+criteria = "safe-to-deploy"
+user-id = 6825 # Dan Gohman (sunfishcode)
+start = "2019-03-06"
+end = "2027-11-18"
+
+[[trusted.termcolor]]
+criteria = "safe-to-deploy"
+user-id = 189 # Andrew Gallant (BurntSushi)
+start = "2019-06-04"
+end = "2027-11-18"
+
 [[trusted.tokio-rustls]]
 criteria = "safe-to-deploy"
 user-id = 4556 # Dirkjan Ochtman (djc)
 start = "2023-06-09"
 end = "2027-11-16"
+
+[[trusted.winapi-util]]
+criteria = "safe-to-deploy"
+user-id = 189 # Andrew Gallant (BurntSushi)
+start = "2020-01-11"
+end = "2027-11-18"
 
 [[trusted.windows-sys]]
 criteria = "safe-to-deploy"

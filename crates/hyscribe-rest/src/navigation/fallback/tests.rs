@@ -52,7 +52,7 @@ fn a_site_with_menus_answers_as_php() {
     for case in &cases {
         answers_as_php(existing(), case);
     }
-    assert_eq!(cases.len(), 6 * 15);
+    assert_eq!(cases.len(), 6 * 17);
 }
 
 /// Without a menu, what PHP refuses is refused as PHP refuses it, and what

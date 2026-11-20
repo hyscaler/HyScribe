@@ -41,6 +41,27 @@ def normal(url):
     return path + ("?" + query if query else "")
 
 
+def settle(page):
+    """Wait until the block editor's spinners are gone, in the page and its canvas frame.
+
+    The editor loads the navigation fallback, menus and template parts after
+    the load event; a slow machine used to photograph it half drawn.
+    """
+    script = "() => [...document.querySelectorAll('.components-spinner')].filter(e => e.getClientRects().length).length"
+    stable = 0
+    for _ in range(120):
+        busy = 0
+        for frame in page.frames:
+            try:
+                busy += frame.evaluate(script)
+            except Exception:
+                busy += 1
+        stable = 0 if busy else stable + 1
+        if stable >= 3:
+            return
+        page.wait_for_timeout(250)
+
+
 def log_in(browser, role):
     context = browser.new_context(
         viewport={"width": 1280, "height": 800}, locale="en-US", timezone_id="UTC",
@@ -91,6 +112,8 @@ with sync_playwright() as p:
         except Exception:
             pass
         page.wait_for_timeout(500)
+        if "site-editor.php" in path:
+            settle(page)
         if "post-new.php" in path:
             # The editor draws the starter patterns' previews one idle frame
             # at a time, so a picture taken early shows a different stage.

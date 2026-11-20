@@ -4,6 +4,8 @@
 GET	/?rest_route=/wp-block-editor/v1/navigation-fallback
 GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_embed=1
 GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_embed
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_embed=true&_locale=user
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_locale=user
 GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=edit
 GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=embed
 GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=view

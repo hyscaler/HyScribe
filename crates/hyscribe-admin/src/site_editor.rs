@@ -269,7 +269,7 @@ pub fn site_editor_page(
         custom.set(key, value);
     }
     let settings = get_block_editor_settings(site, custom, Editor::Site(post));
-    let [categories, definitions, bindings] = block_scripts();
+    let [categories, definitions, bindings] = block_scripts(site.theme());
     let edit_site = format!(
         "wp.domReady( function() {{\n\t\t\twp.editSite.initializeEditor( \"site-editor\", {} );\n\t\t}} );",
         page_json(&settings)

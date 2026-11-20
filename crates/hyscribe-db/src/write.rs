@@ -931,6 +931,22 @@ impl<'w> Write<'w> {
         .transpose()
     }
 
+    /// The names and values of the options whose names start with `prefix`,
+    /// in name order, as `delete_site_transient()`'s callers look for them.
+    pub async fn options_starting(
+        &mut self,
+        prefix: &str,
+    ) -> Result<Vec<(String, Vec<u8>)>, DbError> {
+        let length = i64::try_from(prefix.len()).unwrap_or_default();
+        let query = self.sql(
+            "SELECT option_name, option_value FROM {prefix}options WHERE LEFT(option_name, ?) = ? ORDER BY option_name",
+        );
+        let rows = self.rows(query.bind(length).bind(prefix)).await?;
+        rows.iter()
+            .map(|row| Ok((text(row, "option_name"), bytes(row, "option_value"))))
+            .collect()
+    }
+
     /// The autoload of option `name`, as `update_option()` reads it.
     pub async fn option_autoload(&mut self, name: &str) -> Result<Option<String>, DbError> {
         let query = self.sql("SELECT autoload FROM {prefix}options WHERE option_name = ? LIMIT 1");

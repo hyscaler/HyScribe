@@ -5,7 +5,8 @@
 # and Status tab (site-health.php) for each role, on the site reference/site-health/variants.php describes,
 # as crates/hyscribe-admin/tests/golden/site-health.tsv:
 #   screen<TAB>role<TAB>hex(page)
-# A refusal is kept as 403<TAB>page. Masks as reference/profile/golden.sh.
+# (a role after a variant, as tt4:administrator, is that variant: tt4 and tt3 are another embedded
+# theme active, reference/admin-menu/as-role.php). A refusal is kept as 403<TAB>page. Masks as reference/profile/golden.sh.
 # The update checks the tab runs write their transients: start from a fresh
 # db.sh up, then php.sh up, and take both down after.
 set -euo pipefail
@@ -30,7 +31,8 @@ actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts health-chec
   $actions > "$NONCES"
 record() {
   : > "$TMP"
-  status=$(curl -s -o "$TMP" -w '%{http_code}' -b "hyscribe_role=$2" "$BASE/wp-admin/$1")
+  variant=; [[ "$2" != *:* ]] || variant=${2%%:*}
+  status=$(curl -s -o "$TMP" -w '%{http_code}' -b "hyscribe_role=${2#*:}; hyscribe_variant=$variant" "$BASE/wp-admin/$1")
   case "$status" in
     200) ;;
     403) { printf '403\t'; cat "$TMP"; } > "$TMP.403" && mv "$TMP.403" "$TMP" ;;
@@ -50,5 +52,9 @@ record() {
 for role in administrator editor; do
   record 'site-health.php?tab=debug' "$role"
   record 'site-health.php' "$role"
+done
+for variant in tt4 tt3; do
+  record 'site-health.php?tab=debug' "$variant:administrator"
+  record 'site-health.php' "$variant:administrator"
 done
 wc -l "$OUT"

@@ -105,8 +105,20 @@ fn copied(clipboard: &str, id: &str, keep: impl Fn(&str) -> bool) -> String {
 /// PHP's settings are left out.
 #[test]
 fn the_info_tab_is_php_s() {
-    let php = hs_admin_page(&golden("administrator"));
-    let page = ours("administrator").unwrap();
+    info_tab_is_php_s("administrator");
+}
+
+/// The same with another embedded theme active: its name, version, author
+/// and theme features are its own.
+#[test]
+fn the_info_tab_of_another_theme_is_php_s() {
+    info_tab_is_php_s("tt4:administrator");
+    info_tab_is_php_s("tt3:administrator");
+}
+
+fn info_tab_is_php_s(role: &'static str) {
+    let php = hs_admin_page(&golden(role));
+    let page = ours(role).unwrap();
     let (php_frame, php_copied, php_sections) = parts(&php);
     let (frame, clipboard, sections) = parts(&page);
     assert!(
@@ -291,10 +303,16 @@ fn without_results(page: &str) -> String {
 /// byte; only the results differ, as HyScribe runs its own checks.
 #[test]
 fn the_status_tab_is_php_s() {
-    let php = hs_admin_page(&status_golden("administrator"));
+    status_tab_is_php_s("administrator");
+    status_tab_is_php_s("tt4:administrator");
+    status_tab_is_php_s("tt3:administrator");
+}
+
+fn status_tab_is_php_s(role: &'static str) {
+    let php = hs_admin_page(&status_golden(role));
     let canonical = format!("{SITE}/hs-admin/site-health");
     let request = request(&canonical, "/hs-admin/site-health", &BROWSER);
-    let page = status(&Role("administrator"), &request).unwrap();
+    let page = status(&Role(role), &request).unwrap();
     let (php, page) = (without_results(&php), without_results(&page));
     assert!(page == php, "{}", first_difference(&php, &page));
     assert!(page.contains("<title>Site Health - Status &lsaquo;"));

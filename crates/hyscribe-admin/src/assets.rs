@@ -170,6 +170,8 @@ struct Dependencies {
     /// The admin color scheme's stylesheet, `wp_style_loader_src()`'s.
     color_scheme: Option<String>,
     queue: Vec<String>,
+    /// The styles this request registers, a theme's own.
+    added: HashMap<String, &'static Item>,
     to_do: Vec<(String, &'static Item)>,
     done: Vec<String>,
     groups: HashMap<String, i64>,
@@ -203,6 +205,37 @@ impl Assets {
     /// `wp_enqueue_style()` of a registered handle.
     pub fn enqueue_style(&mut self, handle: &str) {
         self.styles.queue.push(handle.to_string());
+    }
+
+    /// `wp_register_style( $handle, $src, array(), $ver )` of a file of the
+    /// theme, `$src` a path under the site's address; its registration is
+    /// kept once, as those of the registry are.
+    pub fn register_style(&mut self, handle: &str, src: &str, ver: &str) {
+        type Known = HashMap<(String, String, String), &'static Item>;
+        static KNOWN: OnceLock<std::sync::Mutex<Known>> = OnceLock::new();
+        let key = (handle.to_string(), src.to_string(), ver.to_string());
+        let known = KNOWN.get_or_init(Default::default).lock();
+        let mut known = known.unwrap_or_else(std::sync::PoisonError::into_inner);
+        let item = *known.entry(key).or_insert_with(|| {
+            Box::leak(Box::new(Item {
+                src: Some(src.to_string()),
+                color_scheme: false,
+                deps: Vec::new(),
+                ver: ver.to_string(),
+                footer: false,
+                extra: Value::Null,
+                textdomain: false,
+            }))
+        });
+        self.styles.added.insert(handle.to_string(), item);
+    }
+
+    /// `wp_enqueue_style()` of a registered handle, queued right after
+    /// `after` if that is queued, else last.
+    pub fn enqueue_style_after(&mut self, after: &str, handle: &str) {
+        let queue = &mut self.styles.queue;
+        let at = queue.iter().position(|queued| queued == after);
+        queue.insert(at.map_or(queue.len(), |at| at + 1), handle.to_string());
     }
 
     /// A style taken as printed already, as `$wp_styles->done` lists it.
@@ -312,6 +345,7 @@ impl Dependencies {
     fn item(&self, handle: &str) -> Option<&'static Item> {
         registry()
             .get(&(self.scripts, handle.to_string()))
+            .or_else(|| self.added.get(handle).copied())
             .or_else(|| {
                 let added = !self.scripts && self.extra.keys().any(|(h, _)| h == handle);
                 added.then_some(&ALIAS)

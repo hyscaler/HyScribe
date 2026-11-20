@@ -994,5 +994,190 @@
             "src": "assets/css/button-outline.css",
             "ver": "1.6"
         }
-    ]
+    ],
+    "template_files": [
+        "archive",
+        "404",
+        "page-with-sidebar",
+        "search",
+        "index",
+        "single",
+        "page-no-title",
+        "single-with-sidebar",
+        "page-wide",
+        "page",
+        "home"
+    ],
+    "part_files": [
+        "sidebar",
+        "header",
+        "footer",
+        "post-meta"
+    ],
+    "theme_features": [
+        "core-block-patterns",
+        "post-thumbnails",
+        "responsive-embeds",
+        "editor-styles",
+        "html5",
+        "automatic-feed-links",
+        "widgets-block-editor",
+        "block-templates"
+    ],
+    "themes_screen": {
+        "id": "twentytwentyfour",
+        "name": "Twenty Twenty-Four",
+        "description": "Twenty Twenty-Four is designed to be flexible, versatile and applicable to any website. Its collection of templates and patterns tailor to different needs, such as presenting a business, blogging and writing or showcasing work. A multitude of possibilities open up with just a few adjustments to color and typography. Twenty Twenty-Four comes with style variations and full page designs to help speed up the site building process, is fully compatible with the site editor, and takes advantage of new design tools introduced in WordPress 6.4.",
+        "author": "the WordPress team",
+        "authorAndUri": "<a href=\"https://wordpress.org\">the WordPress team</a>",
+        "tags": "One Column, Custom Colors, custom-menu, Custom Logo, Editor Style, Featured Images, Site Editor, Block Editor Patterns, rtl-language-support, Sticky Post, threaded-comments, translation-ready, Wide Blocks, Block Editor Styles, Style Variations, Accessibility Ready, Blog, Portfolio, News",
+        "version": "1.6"
+    },
+    "block_variations": {
+        "core/template-part": [
+            {
+                "name": "area_header",
+                "title": "Header",
+                "description": "The Header template defines a page area that typically contains a title, logo, and main navigation.",
+                "attributes": {
+                    "area": "header"
+                },
+                "scope": [],
+                "icon": "header"
+            },
+            {
+                "name": "area_footer",
+                "title": "Footer",
+                "description": "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
+                "attributes": {
+                    "area": "footer"
+                },
+                "scope": [],
+                "icon": "footer"
+            },
+            {
+                "name": "instance_sidebar",
+                "title": "Sidebar",
+                "description": "1",
+                "attributes": {
+                    "slug": "sidebar",
+                    "theme": "twentytwentyfour",
+                    "area": "uncategorized"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "layout",
+                "example": {
+                    "attributes": {
+                        "slug": "sidebar",
+                        "theme": "twentytwentyfour",
+                        "area": "uncategorized"
+                    }
+                }
+            },
+            {
+                "name": "instance_header",
+                "title": "Header",
+                "description": "1",
+                "attributes": {
+                    "slug": "header",
+                    "theme": "twentytwentyfour",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header",
+                        "theme": "twentytwentyfour",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_footer",
+                "title": "Footer",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer",
+                    "theme": "twentytwentyfour",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer",
+                        "theme": "twentytwentyfour",
+                        "area": "footer"
+                    }
+                }
+            },
+            {
+                "name": "instance_post-meta",
+                "title": "Post Meta",
+                "description": "1",
+                "attributes": {
+                    "slug": "post-meta",
+                    "theme": "twentytwentyfour",
+                    "area": "uncategorized"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "layout",
+                "example": {
+                    "attributes": {
+                        "slug": "post-meta",
+                        "theme": "twentytwentyfour",
+                        "area": "uncategorized"
+                    }
+                }
+            }
+        ],
+        "core/navigation-link": [
+            {
+                "name": "post",
+                "title": "Post link",
+                "description": " ",
+                "attributes": {
+                    "type": "post",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "page",
+                "title": "Page link",
+                "description": " ",
+                "attributes": {
+                    "type": "page",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "category",
+                "title": "Category link",
+                "description": " ",
+                "attributes": {
+                    "type": "category",
+                    "kind": "taxonomy"
+                }
+            },
+            {
+                "name": "tag",
+                "title": "Tag link",
+                "description": " ",
+                "attributes": {
+                    "type": "tag",
+                    "kind": "taxonomy"
+                }
+            }
+        ]
+    },
+    "binding_sources": []
 }

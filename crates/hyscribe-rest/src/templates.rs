@@ -22,7 +22,7 @@ use crate::{Context, Endpoint};
 
 use content::resolve_patterns;
 pub(crate) use query::Template;
-use query::{Kind, Query, file_template, hierarchy, resolve, templates, theme};
+use query::{Kind, Query, file_template, hierarchy, resolve, templates};
 pub(crate) use write::writing;
 
 /// The template's ID: a theme folder, maybe in a subfolder, and a slug.
@@ -317,7 +317,7 @@ fn original_source(template: &Template) -> &'static str {
 /// `get_wp_templates_author_text_field()`.
 fn author_text(context: &Context, template: &Template) -> Vec<u8> {
     match original_source(template) {
-        "theme" => theme().name().into_bytes(),
+        "theme" => context.site.theme().name().into_bytes(),
         "site" => context.option("blogname").unwrap_or_default(),
         _ => context
             .site
@@ -338,7 +338,7 @@ fn prepare(
         Ok(Response::new(Value::Array(Vec::new()), 200))
     } else {
         let siteurl = context.option("siteurl").unwrap_or_default();
-        resolve_patterns(&template.content, &siteurl)
+        resolve_patterns(context.site.theme(), &template.content, &siteurl)
             .and_then(|content| prepare_resolved(context, params, template, kind, &content))
     };
     let hook = format!("rest_prepare_{}", kind.name());

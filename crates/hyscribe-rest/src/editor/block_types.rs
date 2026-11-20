@@ -11,7 +11,8 @@ use crate::response::{Response, RestError, list};
 use crate::types::{can_edit_any, context_arg};
 use crate::{Context, Endpoint};
 
-use super::{core, theme};
+use super::core;
+use hyscribe_render::theme::Theme;
 
 const EVERY: &[&str] = &["embed", "view", "edit"];
 
@@ -137,9 +138,17 @@ fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
 
 /// The block styles registered for `name`: the theme's, then its partials'
 /// once they are.
-fn registered_styles(name: &[u8], partials: bool) -> impl Iterator<Item = Value> {
-    let partial = theme("partial_styles").iter().filter(move |_| partials);
-    theme("block_styles")
+fn registered_styles<'a>(
+    theme: &'a Theme,
+    name: &'a [u8],
+    partials: bool,
+) -> impl Iterator<Item = Value> + 'a {
+    let partial = theme
+        .registered("partial_styles")
+        .iter()
+        .filter(move |_| partials);
+    theme
+        .registered("block_styles")
         .iter()
         .chain(partial)
         .filter(move |(_, entry)| entry.get(&Key::Int(0)).and_then(Value::as_bytes) == Some(name))
@@ -161,13 +170,23 @@ fn prepare(context: &Context, params: &Params, block: &Value, partials: bool) ->
         .iter()
         .filter(|(key, _)| included(&key.to_php_string()))
         .map(|(key, value)| {
+            // The variations the theme changes are its own.
+            if key.to_php_string() == b"variations" {
+                let themed = context.site.theme().registered("block_variations");
+                let own = themed
+                    .iter()
+                    .find(|(block, _)| block.to_php_string() == name);
+                return (key.clone(), own.map_or(value, |(_, own)| own).clone());
+            }
             if key.to_php_string() != b"styles" {
                 return (key.clone(), value.clone());
             }
             let own = value.as_array().unwrap_or_default().iter();
-            let styles = own
-                .map(|(_, style)| style.clone())
-                .chain(registered_styles(name, partials));
+            let styles = own.map(|(_, style)| style.clone()).chain(registered_styles(
+                context.site.theme(),
+                name,
+                partials,
+            ));
             (key.clone(), list(styles.collect()))
         })
         .collect();

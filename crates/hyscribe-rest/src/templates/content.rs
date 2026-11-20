@@ -6,19 +6,12 @@
 //! pattern blocks replaced by their patterns, as `resolve_pattern_blocks()`
 //! replaces them.
 
-use std::sync::OnceLock;
-
-use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, lookup, php_trim};
+use hyscribe_phpser::{Key, Value, is_empty_string, lookup, php_trim};
 use hyscribe_render::blocks::{Block, parse_blocks, serialize_blocks};
 use hyscribe_render::formatting::sanitize_text_field;
-use hyscribe_render::theme::under_site;
+use hyscribe_render::theme::{Theme, under_site};
 
 use crate::response::{RestError, text};
-
-const PATTERNS: &[u8] = include_bytes!("../../../../themes/twentytwentyfive/patterns.json");
-
-/// The prefix of the theme's own patterns, every one of which is exported.
-const THEME_PATTERNS: &[u8] = b"twentytwentyfive/";
 
 /// `$attrs[ $key ] = $value`, in place when it is set.
 fn set(attrs: &mut Vec<(Key, Value)>, key: &str, value: Value) {
@@ -83,14 +76,6 @@ pub(crate) fn in_parent(content: &[u8], parent: &[u8], theme: &[u8]) -> Vec<u8> 
     serialized.get(start..end).unwrap_or_default().to_vec()
 }
 
-/// A theme pattern: its title, content, and its description and
-/// categories where it has them.
-pub(crate) fn pattern(slug: &[u8]) -> Option<&'static Value> {
-    static DATA: OnceLock<Value> = OnceLock::new();
-    let data = DATA.get_or_init(|| json_decode(PATTERNS).unwrap_or_default());
-    data.get(&Key::String(slug.to_vec()))
-}
-
 /// `sanitize_text_field()` of a value, each item of an array: the theme's
 /// patterns hold strings and lists of strings.
 fn sanitized(value: &Value) -> Value {
@@ -140,11 +125,12 @@ fn pattern_slug(block: &Block) -> Option<Vec<u8>> {
     slug.filter(|_| block.name.as_deref() == Some("core/pattern"))
 }
 
-/// Whether a pattern block names a pattern not the theme's: core's or the
-/// pattern directory's, which are not ported.
+/// Whether a pattern block names a pattern of core's or the pattern
+/// directory's (both `core/`), which are not ported. Any other slug is the
+/// theme's, which is exported, or not registered, which PHP skips.
 fn names_foreign_pattern(blocks: &[Block]) -> bool {
     blocks.iter().any(|block| {
-        pattern_slug(block).is_some_and(|slug| !slug.starts_with(THEME_PATTERNS))
+        pattern_slug(block).is_some_and(|slug| slug.starts_with(b"core/"))
             || names_foreign_pattern(&block.inner_blocks)
     })
 }
@@ -153,17 +139,20 @@ fn names_foreign_pattern(blocks: &[Block]) -> bool {
 /// with the inner content of the block whose inner blocks these are. No
 /// theme pattern holds itself, so none is skipped as recursive.
 fn resolve(
+    theme: &Theme,
     mut blocks: Vec<Block>,
     mut inner: Option<&mut Vec<Option<Vec<u8>>>>,
     siteurl: &[u8],
 ) -> Vec<Block> {
     let mut i = 0;
     while let Some(block) = blocks.get_mut(i) {
-        let found = pattern_slug(block).and_then(|slug| pattern(&slug).map(|found| (slug, found)));
+        let found = pattern_slug(block)
+            .and_then(|slug| theme.pattern_entry(&slug).map(|found| (slug, found)));
         let Some((slug, pattern)) = found else {
             if block.name.as_deref() != Some("core/pattern") {
                 let children = std::mem::take(&mut block.inner_blocks);
-                block.inner_blocks = resolve(children, Some(&mut block.inner_content), siteurl);
+                block.inner_blocks =
+                    resolve(theme, children, Some(&mut block.inner_content), siteurl);
             }
             i += 1;
             continue;
@@ -174,7 +163,7 @@ fn resolve(
         if let [root] = inserted.as_mut_slice() {
             name_root(root, &slug, pattern);
         }
-        let inserted = resolve(inserted, None, siteurl);
+        let inserted = resolve(theme, inserted, None, siteurl);
         let count = inserted.len();
         blocks.splice(i..=i, inserted);
         // The inner content of a block with inner blocks is never empty.
@@ -194,10 +183,14 @@ fn resolve(
 }
 
 /// A template's content with its patterns resolved, serialized again.
-pub(crate) fn resolve_patterns(content: &[u8], siteurl: &[u8]) -> Result<Vec<u8>, RestError> {
+pub(crate) fn resolve_patterns(
+    theme: &Theme,
+    content: &[u8],
+    siteurl: &[u8],
+) -> Result<Vec<u8>, RestError> {
     let blocks = parse_blocks(content);
     if names_foreign_pattern(&blocks) {
         return Err(RestError::not_ported());
     }
-    Ok(serialize_blocks(&resolve(blocks, None, siteurl)))
+    Ok(serialize_blocks(&resolve(theme, blocks, None, siteurl)))
 }

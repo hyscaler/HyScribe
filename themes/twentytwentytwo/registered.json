@@ -853,5 +853,192 @@
             "src": "style.min.css",
             "ver": "2.2"
         }
-    ]
+    ],
+    "template_files": [
+        "archive",
+        "404",
+        "page-no-separators",
+        "search",
+        "index",
+        "single",
+        "page-large-header",
+        "blank",
+        "single-no-separators",
+        "page",
+        "home"
+    ],
+    "part_files": [
+        "header-small-dark",
+        "header",
+        "header-large-dark",
+        "footer"
+    ],
+    "theme_features": [
+        "core-block-patterns",
+        "post-thumbnails",
+        "responsive-embeds",
+        "editor-styles",
+        "html5",
+        "automatic-feed-links",
+        "widgets-block-editor",
+        "block-templates",
+        "wp-block-styles",
+        "editor-style"
+    ],
+    "themes_screen": {
+        "id": "twentytwentytwo",
+        "name": "Twenty Twenty-Two",
+        "description": "Built on a solidly designed foundation, Twenty Twenty-Two embraces the idea that everyone deserves a truly unique website. The theme’s subtle styles are inspired by the diversity and versatility of birds: its typography is lightweight yet strong, its color palette is drawn from nature, and its layout elements sit gently on the page. The true richness of Twenty Twenty-Two lies in its opportunity for customization. The theme is built to take advantage of the Site Editor features introduced in WordPress 5.9, which means that colors, typography, and the layout of every single page on your site can be customized to suit your vision. It also includes dozens of block patterns, opening the door to a wide range of professionally designed layouts in just a few clicks. Whether you’re building a single-page website, a blog, a business website, or a portfolio, Twenty Twenty-Two will help you create a site that is uniquely yours.",
+        "author": "the WordPress team",
+        "authorAndUri": "<a href=\"https://wordpress.org/\">the WordPress team</a>",
+        "tags": "One Column, Custom Colors, custom-menu, Custom Logo, Editor Style, Featured Images, Site Editor, Block Editor Patterns, rtl-language-support, Sticky Post, threaded-comments, Style Variations, Wide Blocks, Block Editor Styles, Accessibility Ready, Blog, Portfolio, News",
+        "version": "2.2"
+    },
+    "block_variations": {
+        "core/template-part": [
+            {
+                "name": "area_header",
+                "title": "Header",
+                "description": "The Header template defines a page area that typically contains a title, logo, and main navigation.",
+                "attributes": {
+                    "area": "header"
+                },
+                "scope": [],
+                "icon": "header"
+            },
+            {
+                "name": "area_footer",
+                "title": "Footer",
+                "description": "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
+                "attributes": {
+                    "area": "footer"
+                },
+                "scope": [],
+                "icon": "footer"
+            },
+            {
+                "name": "instance_header-small-dark",
+                "title": "Header (Dark, small)",
+                "description": "1",
+                "attributes": {
+                    "slug": "header-small-dark",
+                    "theme": "twentytwentytwo",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header-small-dark",
+                        "theme": "twentytwentytwo",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_header",
+                "title": "Header",
+                "description": "1",
+                "attributes": {
+                    "slug": "header",
+                    "theme": "twentytwentytwo",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header",
+                        "theme": "twentytwentytwo",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_header-large-dark",
+                "title": "Header (Dark, large)",
+                "description": "1",
+                "attributes": {
+                    "slug": "header-large-dark",
+                    "theme": "twentytwentytwo",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header-large-dark",
+                        "theme": "twentytwentytwo",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_footer",
+                "title": "Footer",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer",
+                    "theme": "twentytwentytwo",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer",
+                        "theme": "twentytwentytwo",
+                        "area": "footer"
+                    }
+                }
+            }
+        ],
+        "core/navigation-link": [
+            {
+                "name": "post",
+                "title": "Post link",
+                "description": " ",
+                "attributes": {
+                    "type": "post",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "page",
+                "title": "Page link",
+                "description": " ",
+                "attributes": {
+                    "type": "page",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "category",
+                "title": "Category link",
+                "description": " ",
+                "attributes": {
+                    "type": "category",
+                    "kind": "taxonomy"
+                }
+            },
+            {
+                "name": "tag",
+                "title": "Tag link",
+                "description": " ",
+                "attributes": {
+                    "type": "tag",
+                    "kind": "taxonomy"
+                }
+            }
+        ]
+    },
+    "binding_sources": []
 }

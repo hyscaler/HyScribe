@@ -7,6 +7,7 @@
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
 use hyscribe_phpser::{Value, is_empty_string};
+use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::BarSite;
 use crate::assets::Urls;
@@ -27,9 +28,6 @@ const STATUS: &str = include_str!("site_health/status.html");
 const OVERVIEW: &str = "<p>This screen allows you to obtain a health diagnosis of your site, and displays an overall rating of the status of your installation.</p><p>In the Status tab, you can see critical information about your WordPress configuration, along with anything else that requires your attention.</p><p>In the Info tab, you will find all the details about the configuration of your WordPress site, server, and database. There is also an export feature that allows you to copy all of the information about your site to the clipboard, to help solve problems on your site when obtaining support.</p>";
 
 const SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/site-health-screen/\">Documentation on Site Health tool</a></p>";
-
-/// The features core and Twenty Twenty-Five add, `$_wp_theme_features`.
-const THEME_FEATURES: &str = "core-block-patterns, post-thumbnails, responsive-embeds, editor-styles, html5, automatic-feed-links, widgets-block-editor, block-templates, post-formats, editor-style";
 
 /// The system of the target HyScribe was built for, after its architecture.
 #[cfg(all(target_os = "linux", target_env = "musl"))]
@@ -234,16 +232,40 @@ fn core(site: &dyn HealthSite) -> Section {
     Section::new("wp-core", "WordPress", fields)
 }
 
-/// `get_wp_active_theme()` for the bundled Twenty Twenty-Five, which is
-/// built into the binary: no theme folder to name.
-fn active_theme() -> Section {
+/// `get_wp_active_theme()` for an embedded theme, which is built into the
+/// binary: no theme folder to name. Its fields are those the REST themes
+/// route and `$_wp_theme_features` give, as `reference/rest/registered.php`
+/// exports them.
+fn active_theme(theme: &Theme) -> Section {
+    let rest = theme.registered("rest");
+    let text = |value: Option<&Value>| {
+        String::from_utf8_lossy(&value.map(Value::to_php_string).unwrap_or_default()).into_owned()
+    };
+    let field = |name: &str| {
+        rest.iter()
+            .find(|(key, _)| key.to_php_string() == name.as_bytes())
+    };
+    let raw = |name: &str| text(field(name).and_then(|(_, value)| value.get_str("raw")));
+    let features: Vec<String> = theme
+        .registered("theme_features")
+        .iter()
+        .map(|(_, feature)| text(Some(feature)))
+        .collect();
     let fields = vec![
-        Field::new("name", "Name", "Twenty Twenty-Five (twentytwentyfive)"),
-        Field::new("version", "Version", "1.5"),
-        Field::new("author", "Author", "the WordPress team"),
-        Field::new("author_website", "Author website", "https://wordpress.org"),
+        Field::new(
+            "name",
+            "Name",
+            format!("{} ({})", theme.name(), theme.slug()),
+        ),
+        Field::new(
+            "version",
+            "Version",
+            text(field("version").map(|(_, value)| value)),
+        ),
+        Field::new("author", "Author", raw("author")),
+        Field::new("author_website", "Author website", raw("author_uri")),
         Field::new("parent_theme", "Parent theme", "None").debug(Debug::Text("none".into())),
-        Field::new("theme_features", "Theme features", THEME_FEATURES),
+        Field::new("theme_features", "Theme features", features.join(", ")),
     ];
     Section::new("wp-active-theme", "Active Theme", fields)
 }
@@ -321,7 +343,7 @@ fn debug_data(site: &dyn HealthSite) -> Vec<Section> {
     vec![
         core(site),
         Section::none("wp-dropins", "Drop-ins"),
-        active_theme(),
+        active_theme(site.active_theme()),
         Section::new("wp-parent-theme", "Parent Theme", Vec::new()),
         Section::none("wp-themes-inactive", "Inactive Themes"),
         Section::none("wp-mu-plugins", "Must Use Plugins"),

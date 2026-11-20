@@ -11,8 +11,7 @@ use hyscribe_phpser::json_encode;
 use hyscribe_testkit::{RestCase, rest_cases, rest_headers, unhex};
 
 use super::content::hooked;
-use super::query::{PART_FILES, hierarchy};
-use super::theme;
+use super::query::{Kind, file_slugs, hierarchy};
 use crate::response::{list, text};
 use crate::tests::content::{Content, default_install, default_install_with};
 use crate::tests::serve_over;
@@ -56,12 +55,13 @@ fn hierarchies_are_php_s() {
 /// block, as PHP hooks it, or not.
 #[test]
 fn theme_parts_need_no_wrapper() {
-    for slug in PART_FILES {
-        let (content, _) = theme().part(slug.as_bytes()).unwrap();
-        let theme = b"twentytwentyfive";
+    let theme = hyscribe_render::theme::twentytwentyfive();
+    for slug in file_slugs(&theme, Kind::Part) {
+        let (content, _) = theme.part(slug.as_bytes()).unwrap();
+        let stylesheet = b"twentytwentyfive";
         assert_eq!(
-            hooked(content, true, theme),
-            hooked(content, false, theme),
+            hooked(content, true, stylesheet),
+            hooked(content, false, stylesheet),
             "{slug}"
         );
     }
@@ -180,4 +180,18 @@ fn what_is_not_ported_answers_501() {
         assert_eq!(served.status, 501, "{method} {target}");
         assert!(served.headers.is_empty() && served.body.is_empty());
     }
+}
+
+/// A pattern block naming a pattern the theme does not have, and that is not
+/// core's, is skipped as PHP skips an unregistered pattern; core's are not
+/// ported.
+#[test]
+fn an_unregistered_pattern_is_left_as_it_is() {
+    let theme = hyscribe_render::theme::load("twentytwentyfour", None);
+    let resolve = |content: &[u8]| super::content::resolve_patterns(&theme, content, b"http://x");
+    for slug in ["clients-section", "other/x", "twentytwentyfive/header"] {
+        let content = format!("<!-- wp:pattern {{\"slug\":\"{slug}\"}} /-->");
+        assert_eq!(resolve(content.as_bytes()).unwrap(), content.as_bytes());
+    }
+    assert!(resolve(b"<!-- wp:pattern {\"slug\":\"core/x\"} /-->").is_err());
 }

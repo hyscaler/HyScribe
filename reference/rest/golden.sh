@@ -12,7 +12,11 @@
 # over the database php.sh runs on, with the rows of <list name>.sql beside
 # it if there is one (added before, and its statements after a `-- cleanup`
 # line run after) and the must-use plugin <list name>.php beside it if there
-# is one (added for the run and removed after); on the Theme Test Data fixture
+# is one (added for the run and removed after); with HYSCRIBE_THEME=<stylesheet> every request carries
+# X-HyScribe-Theme (reference/rest/theme.php, for theme.list, serves it as that active theme), %theme% in a
+# target is the stylesheet, <list name>-<stylesheet>.list beside the list adds that theme's requests, and the answers
+# are <list name>-<stylesheet>.tsv (start from a fresh db.sh up: the requests are sent once first, as
+# the theme's pattern caches are written); on the Theme Test Data fixture
 # (HYSCRIBE_PHP_DB=wordpress_ttd), whose content is not ours to commit, as
 # <list name>-ttd.tsv with each body's SHA-256:
 #   who<TAB>method<TAB>hex(target)<TAB>flags<TAB>status<TAB>hex(headers)<TAB>hex(body)[<TAB>hex(sent)]
@@ -55,6 +59,7 @@ OUT="$ROOT/crates/hyscribe-rest/tests/golden/rest.tsv"
 MU=/var/www/html/wp-content/mu-plugins
 TMP=$(mktemp -d)
 STATE="${1:-}"; PLUGIN="${STATE%.list}.php"; STATE="${STATE%.list}.sql"
+if [ -n "${HYSCRIBE_THEME:-}" ] && [ -f "${STATE%.sql}-$HYSCRIBE_THEME.sql" ]; then STATE="${STATE%.sql}-$HYSCRIBE_THEME.sql"; fi
 [ -f "$STATE" ] || STATE=/dev/null
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "${HYSCRIBE_PHP_DB:-wordpress}" "$@"; }
 cleanup() {
@@ -152,6 +157,12 @@ LIST
 if [ $# -gt 0 ]; then
   REQUESTS=$(grep -v '^#' "$1")
   OUT="$ROOT/crates/hyscribe-rest/tests/golden/$(basename "$1" .list)$([ "${HYSCRIBE_PHP_DB:-}" = wordpress_ttd ] && echo -ttd || true).tsv"
+  if [ -n "${HYSCRIBE_THEME:-}" ]; then
+    EXTRA="${1%.list}-$HYSCRIBE_THEME.list"
+    [ ! -f "$EXTRA" ] || REQUESTS=$(printf '%s\n%s' "$REQUESTS" "$(grep -v '^#' "$EXTRA")")
+    REQUESTS=${REQUESTS//%theme%/$HYSCRIBE_THEME}
+    OUT="${OUT%.tsv}-$HYSCRIBE_THEME.tsv"
+  fi
 fi
 
 curl_args() {
@@ -167,6 +178,7 @@ curl_args() {
     args+=(-b "$jar")
     [[ "$flags" == *nononce* ]] || args+=(-H "X-WP-Nonce: $nonce")
   fi
+  [ -z "${HYSCRIBE_THEME:-}" ] || args+=(-H "X-HyScribe-Theme: $HYSCRIBE_THEME")
   [[ "$flags" == *originnull* ]] && args+=(-H "Origin: null")
   [[ "$flags" == *origin* && "$flags" != *originnull* ]] && args+=(-H "Origin: http://example.test")
   [[ "$flags" == *pretty* ]] && args+=(-H "X-HyScribe-Permalinks: /%postname%/|||")
@@ -196,6 +208,15 @@ for who in "${WHO[@]:1}"; do
   [[ "${NONCE[$who]}" =~ ^[0-9a-f]{10}$ ]] || { echo "no nonce for $who" >&2; exit 1; }
 done
 
+# PHP caches a theme's patterns in site transients on the first request that reads them, which the
+# default install has for its own theme only: every request of a theme list is sent once first.
+if [ -n "${HYSCRIBE_THEME:-}" ]; then
+  while IFS=$'\t' read -r method target flags sent; do
+    [ "$method" != HEAD ] || continue
+    curl_args administrator "$flags" "${NONCE[administrator]}" "${sent:-}"
+    curl -s -o /dev/null -X "$method" "${args[@]}" "$BASE${target//%nonce%/${NONCE[administrator]}}" || true
+  done <<< "$REQUESTS"
+fi
 before=$(checksums)
 if grep -q $'^[^\t]*\t[^\t]*\t[^\t]*restore' <<< "$REQUESTS"; then
   "$DOCKER" exec "$DB" sh -c "mariadb-dump -uroot -preference-only ${HYSCRIBE_PHP_DB:-wordpress} > /tmp/rest-golden.sql"

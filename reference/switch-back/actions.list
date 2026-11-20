@@ -188,3 +188,8 @@ trash-comment-11	admin	GET	/hs-admin/comment?action=trashcomment&c=11	-	delete-c
 age-trash	-	SQL	UPDATE wp_postmeta SET meta_value = CAST(meta_value AS UNSIGNED) - 3456000 WHERE meta_key = '_wp_trash_meta_time' AND post_id = %scratch-cron-old%; UPDATE wp_commentmeta SET meta_value = CAST(meta_value AS UNSIGNED) - 3456000 WHERE meta_key = '_wp_trash_meta_time' AND comment_id = 11	-	-	-	-
 wait-for-future	-	SLEEP	67	-	-	-	-
 cron-run	-	CRON	-	-	-	-	-
+# Themes: Twenty Twenty-Four activated and its next load, then the Twenty Twenty-Five the site had.
+theme-switch	admin	GET	/hs-admin/themes?action=activate&stylesheet=twentytwentyfour	-	switch-theme_twentytwentyfour	_wpnonce	302
+theme-view	admin	GET	/hs-admin/themes?activated=true	-	-	-	200
+theme-back	admin	GET	/hs-admin/themes?action=activate&stylesheet=twentytwentyfive	-	switch-theme_twentytwentyfive	_wpnonce	302
+theme-back-view	admin	GET	/hs-admin/themes?activated=true	-	-	-	200

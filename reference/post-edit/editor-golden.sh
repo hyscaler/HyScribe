@@ -15,7 +15,8 @@
 # and the user settings' times %time%. With RAW=<dir> each page is kept
 # there, also masked. The views write (the auto-drafts, the edit locks, the
 # theme's global styles post): start from a fresh db.sh up and php.sh up,
-# and take both down after.
+# and take both down after. A case ending in -tt4 or -tt3 is recorded with Twenty
+# Twenty-Four or Twenty Twenty-Three active (reference/admin-menu/as-role.php).
 set -euo pipefail
 DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
@@ -34,8 +35,8 @@ DESKTOP='Mozilla/5.0 (X11; Linux x86_64)'
 CHROME='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
 : > "$OUT"
 record() {
-  local case=$1 target=$2 role=$3 agent=$4
-  status=$(curl -s -o "$TMP/page" -w '%{http_code}' -A "$agent" -b "hyscribe_role=$role" "$BASE/wp-admin/$target")
+  local case=$1 target=$2 role=$3 agent=$4 variant=${5:-}
+  status=$(curl -s -o "$TMP/page" -w '%{http_code}' -A "$agent" -b "hyscribe_role=$role; hyscribe_variant=$variant" "$BASE/wp-admin/$target")
   [ "$status" = 200 ] || { echo "PHP answered $status for $target as $role" >&2; exit 1; }
   [ -z "${RAW:-}" ] || cp "$TMP/page" "$RAW/$case.html"
   id=$(grep -oP "initializeEditor\( 'editor', \"[a-z]+\", \K[0-9]+" "$TMP/page")
@@ -59,5 +60,9 @@ for role in administrator editor author; do
 done
 for role in administrator editor; do
   record "edit-page-$role" 'post.php?post=2&action=edit' "$role" "$DESKTOP"
+done
+for variant in tt4 tt3; do
+  record "new-post-administrator-$variant" post-new.php administrator "$DESKTOP" "$variant"
+  record "edit-post-administrator-$variant" 'post.php?post=1&action=edit' administrator "$DESKTOP" "$variant"
 done
 wc -l "$OUT"

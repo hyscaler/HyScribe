@@ -335,3 +335,30 @@ fn a_folder_lists_its_own_files() {
     let found: Vec<_> = data.folder("templates", ".html").collect();
     assert_eq!(found, [("a", &b"a"[..])]);
 }
+
+/// The Themes screen's entry of an embedded theme, and none for another.
+#[test]
+fn the_themes_screen_lists_embedded_themes() {
+    let entry = screen_entry("twentytwentyfour").unwrap();
+    let name = entry.get_str("name").map(Value::to_php_string);
+    assert_eq!(name.unwrap(), b"Twenty Twenty-Four");
+    assert!(screen_entry("gone").is_none());
+}
+
+/// The block styles a theme's own stylesheets enqueue in the editor, and
+/// whether it adds an editor stylesheet, as its registered data says.
+#[test]
+fn the_editor_s_own_styles_follow_the_theme() {
+    let four = load("twentytwentyfour", None);
+    let styles = four.editor_styles();
+    let (handle, src, version) = styles.first().unwrap();
+    assert_eq!(*handle, "twentytwentyfour-button-style-outline");
+    assert_eq!(
+        src,
+        "/wp-content/themes/twentytwentyfour/assets/css/button-outline.css"
+    );
+    assert_eq!(*version, "1.6");
+    assert!(!four.has_editor_style());
+    assert!(load("twentytwentyfive", None).has_editor_style());
+    assert!(load("twentytwentythree", None).editor_styles().is_empty());
+}

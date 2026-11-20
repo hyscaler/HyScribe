@@ -25,6 +25,7 @@ pub mod posts;
 pub mod privacy;
 mod steps;
 pub mod terms;
+pub mod themes;
 pub mod users;
 
 /// Why a write function stopped.

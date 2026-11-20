@@ -334,7 +334,7 @@ fn nonces_of(text: &str, to: &str) -> String {
 
 /// `text` with its nonces masked: PHP's `%nonce:<action>%` and any ten
 /// hexadecimal digits standing alone.
-fn unnonced(text: &str) -> String {
+pub(in crate::admin) fn unnonced(text: &str) -> String {
     let mut placed = String::new();
     let mut rest = text;
     while let Some(at) = rest.find("%nonce:") {

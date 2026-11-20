@@ -53,18 +53,26 @@ fn themes_are_php_s() {
         let php = php
             .as_ref()
             .map(|php| php.replace("%auto-update%", &message));
-        let broken = role.variant() == "g9broken";
-        let path = if broken {
-            "/hs-admin/themes?broken=1"
-        } else {
-            "/hs-admin/themes"
+        let (path, asked) = match role.variant() {
+            "g9broken" => ("/hs-admin/themes?broken=1", Notice::Broken),
+            "a5activated" => ("/hs-admin/themes?activated=true", Notice::Activated),
+            "a5previewed" => (
+                "/hs-admin/themes?activated=true&previewed=true",
+                Notice::Previewed,
+            ),
+            _ => ("/hs-admin/themes", Notice::None),
         };
-        let canonical = format!("{SITE}{path}");
-        let ours = themes(role, &request(&canonical, path, &BROWSER), broken);
+        // `activated` is a removable query argument, `previewed` is not.
+        let canonical = match asked {
+            Notice::Activated => format!("{SITE}/hs-admin/themes"),
+            Notice::Previewed => format!("{SITE}/hs-admin/themes?previewed=true"),
+            _ => format!("{SITE}{path}"),
+        };
+        let ours = themes(role, &request(&canonical, path, &BROWSER), asked);
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows.len(), 18);
+    assert_eq!(rows.len(), 22);
 }
 
 /// The dashboard with an active theme or parent the site does not have.
@@ -80,7 +88,7 @@ fn the_dashboard_of_a_missing_theme_is_php_s() {
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows.len(), 6);
+    assert_eq!(rows.len(), 10);
 }
 
 /// The Tools screen's frame with a missing child or parent of the bundled

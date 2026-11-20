@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Block themes as data (docs/EXTENSIONS.md): templates, template parts and
-//! patterns. Twenty Twenty-Five, the default install's theme, is built in;
-//! its port lives in `themes/twentytwentyfive/`.
+//! patterns. The embedded themes, Twenty Twenty-Five (the default install's)
+//! among them, are built in; each port lives in `themes/<slug>/`.
 
 use std::collections::HashMap;
 
@@ -54,6 +54,15 @@ pub const DEFAULT: &str = "twentytwentyfive";
 /// The slugs of the embedded themes, in order.
 pub fn slugs() -> impl Iterator<Item = &'static str> {
     THEMES.iter().map(|data| data.slug)
+}
+
+/// What the Themes screen lists of the embedded theme `slug` that its files
+/// give, as `reference/rest/registered.php` exports it: `id`, `name`,
+/// `description`, `author`, `authorAndUri`, `tags` and `version`.
+pub fn screen_entry(slug: &str) -> Option<Value> {
+    let data = THEMES.iter().find(|data| data.slug == slug)?;
+    let registered = json_decode(data.registered).unwrap_or_default();
+    registered.get_str("themes_screen").cloned()
 }
 
 /// The embedded theme `slug` names, or else the default, as WordPress
@@ -120,6 +129,11 @@ pub struct Theme {
     /// The stylesheets of its own files the theme enqueues.
     pub(crate) styles: Vec<OwnStyle>,
     pub(crate) post_formats: Vec<&'static str>,
+    /// `registered.json` as decoded: what the theme registers.
+    pub(crate) registered: Value,
+    /// `patterns.json` as decoded: each pattern's title, content, and its
+    /// description and categories where it has them.
+    pub(crate) pattern_data: Value,
 }
 
 /// The post formats WordPress knows, which `add_theme_support( 'post-formats' )`
@@ -210,6 +224,8 @@ fn with_user_styles(slug: &str, user: Option<&[u8]>, styles: &[(String, String)]
         inline_block_styles,
         styles: own,
         post_formats: post_formats(data.registered),
+        registered: json_decode(data.registered).unwrap_or_default(),
+        pattern_data: json_decode(data.patterns).unwrap_or_default(),
     }
 }
 
@@ -319,6 +335,44 @@ impl Theme {
         style_variations(self.data)
             .map(|variation| self.global.theme_json(variation))
             .collect()
+    }
+
+    /// The list `name` of what the theme registers, as
+    /// `reference/rest/registered.php` exports it: `block_styles`,
+    /// `partial_styles`, `pattern_categories`, `patterns`, `rest`,
+    /// `template_files` and `part_files`.
+    pub fn registered(&self, name: &str) -> &[(Key, Value)] {
+        let list = self.registered.get_str(name);
+        list.and_then(Value::as_array).unwrap_or_default()
+    }
+
+    /// A theme pattern as exported: its title, content, and its description
+    /// and categories where it has them.
+    pub fn pattern_entry(&self, slug: &[u8]) -> Option<&Value> {
+        self.pattern_data.get(&Key::String(slug.to_vec()))
+    }
+
+    /// The stylesheets of the theme's own files that `wp_enqueue_block_style()`
+    /// enqueues in the block editor: each one's handle, its path under the
+    /// site's address, and its `ver` (empty for the WordPress version).
+    pub fn editor_styles(&self) -> Vec<(&str, String, &str)> {
+        let own = self.styles.iter().filter(|style| style.block.is_some());
+        own.map(|style| {
+            let src = format!("/wp-content/themes/{}/{}", self.slug, style.src);
+            (
+                style.handle.as_str(),
+                src,
+                style.version.as_deref().unwrap_or_default(),
+            )
+        })
+        .collect()
+    }
+
+    /// Whether the theme adds an editor stylesheet, `add_editor_style()`: its
+    /// theme support `editor-style`.
+    pub fn has_editor_style(&self) -> bool {
+        let mut features = self.registered("theme_features").iter();
+        features.any(|(_, feature)| feature.as_bytes() == Some(b"editor-style"))
     }
 
     /// The post formats `functions.php` adds theme support for.

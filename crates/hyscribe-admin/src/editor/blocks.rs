@@ -9,6 +9,7 @@
 use std::sync::OnceLock;
 
 use hyscribe_phpser::{Key, Value, json_decode};
+use hyscribe_render::theme::Theme;
 
 use crate::page::{object, text};
 
@@ -48,8 +49,8 @@ pub fn block_categories() -> Value {
 /// The block bindings sources core registers, by name, then the bundled
 /// theme's: their label and the context they use (`null` for none), as
 /// `edit-form-blocks.php` gives them to the editor.
-pub fn bindings_sources() -> Value {
-    let sources: [(&str, &str, &[&str]); 5] = [
+pub fn bindings_sources(theme: &Theme) -> Value {
+    let core: [(&str, &str, &[&str]); 4] = [
         (
             "core/pattern-overrides",
             "Pattern Overrides",
@@ -58,27 +59,44 @@ pub fn bindings_sources() -> Value {
         ("core/post-data", "Post Data", &["postId", "postType"]),
         ("core/post-meta", "Post Meta", &["postId", "postType"]),
         ("core/term-data", "Term Data", &["termId", "taxonomy"]),
-        ("twentytwentyfive/format", "Post format name", &[]),
     ];
-    let list = sources.iter().zip(0..).map(|((name, label, context), i)| {
-        let listed = context.iter().zip(0..).map(|(c, j)| (Key::Int(j), text(c)));
-        let context = match context.is_empty() {
-            true => Value::Null,
-            false => Value::Array(listed.collect()),
+    let source = |name: &str, label: &str, context: Value| {
+        let context = match context.as_array() {
+            Some(listed) if !listed.is_empty() => context,
+            _ => Value::Null,
         };
-        let source = object(vec![
+        object(vec![
             ("name", text(name)),
             ("label", text(label)),
             ("usesContext", context),
-        ]);
-        (Key::Int(i), source)
+        ])
+    };
+    let own = theme.registered("binding_sources").iter().map(|(_, own)| {
+        let field = |name: &str| {
+            String::from_utf8_lossy(
+                &own.get_str(name)
+                    .map(Value::to_php_string)
+                    .unwrap_or_default(),
+            )
+            .into_owned()
+        };
+        let context = own.get_str("uses_context").cloned().unwrap_or(Value::Null);
+        source(&field("name"), &field("label"), context)
     });
+    let core = core.iter().map(|(name, label, context)| {
+        let listed = context.iter().zip(0..).map(|(c, j)| (Key::Int(j), text(c)));
+        source(name, label, Value::Array(listed.collect()))
+    });
+    let list = core
+        .chain(own)
+        .zip(0..)
+        .map(|(source, i)| (Key::Int(i), source));
     Value::Array(list.collect())
 }
 
 /// `get_block_editor_server_block_settings()`: each block type's fields
 /// that are set, under the editor's names.
-pub fn server_block_settings() -> Value {
+pub fn server_block_settings(theme: &Theme) -> Value {
     const FIELDS: [(&str, &str); 19] = [
         ("api_version", "apiVersion"),
         ("title", "title"),
@@ -110,7 +128,7 @@ pub fn server_block_settings() -> Value {
             };
             let value = block.get_str(field).filter(|v| !unset(v))?;
             let value = match *field {
-                "variations" => instance_descriptions(value),
+                "variations" => instance_descriptions(&themed_variations(theme, block, value)),
                 _ => value.clone(),
             };
             Some((Key::String(key.as_bytes().to_vec()), value))
@@ -118,6 +136,15 @@ pub fn server_block_settings() -> Value {
         (name(block), Value::Array(set.collect()))
     });
     Value::Array(blocks.collect())
+}
+
+/// The variations of `block`, those the theme changes (its template parts,
+/// its post format link) as it registers them.
+fn themed_variations(theme: &Theme, block: &Value, core: &Value) -> Value {
+    let name = block.get_str("name").map(Value::to_php_string);
+    let mut themed = theme.registered("block_variations").iter();
+    let own = themed.find(|(key, _)| Some(key.to_php_string()) == name);
+    own.map_or_else(|| core.clone(), |(_, variations)| variations.clone())
 }
 
 /// `variations` as the block type has them: a template part instance's

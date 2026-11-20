@@ -83,7 +83,7 @@ fn page_templates_match_php() {
             .collect();
         let ours = with_page_template(&site, &request, &own);
         assert_eq!(ours[..ours.len() - 2], php[..], "{line}");
-        let classes = body_class(&site, &request, "twentytwentyfive");
+        let classes = body_class(&site, &request, ("twentytwentyfive", "twentytwentyfive"));
         assert_eq!(String::from_utf8_lossy(&classes), fields[3], "{line}");
     }
     assert_eq!(golden.lines().count(), 36);
@@ -266,7 +266,12 @@ fn privacy_policy_pages_match_php() {
             policy: Some(policy.to_vec()),
         };
         let request = site.base.request("page_id=2");
-        String::from_utf8(body_class(&site, &request, "twentytwentyfive")).unwrap()
+        String::from_utf8(body_class(
+            &site,
+            &request,
+            ("twentytwentyfive", "twentytwentyfive"),
+        ))
+        .unwrap()
     };
     let mut count = 0;
     for line in golden.lines() {

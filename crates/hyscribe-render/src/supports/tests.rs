@@ -22,6 +22,7 @@ fn global() -> &'static GlobalStyles {
                 "../../../../themes/twentytwentyfive/theme.json"
             )),
             theme_styles: &[],
+            parent_theme: None,
             user: None,
         })
     })

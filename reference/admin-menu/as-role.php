@@ -19,15 +19,18 @@ if ( 0 === strpos( $_COOKIE['hyscribe_variant'] ?? '', 'e0' ) ) {
 }
 
 // The variants tt4 and tt3 are a site whose active theme is Twenty Twenty-Four
-// or Twenty Twenty-Three, as an option filter has it (nothing is written).
+// or Twenty Twenty-Three, and kid5 one whose active theme is the fixture
+// child of Twenty Twenty-Five (reference/themes/fixtures), as an option
+// filter has it (nothing is written): the stylesheet, then the template.
 $hyscribe_themes = array(
-	'tt4' => 'twentytwentyfour',
-	'tt3' => 'twentytwentythree',
+	'tt4'  => array( 'twentytwentyfour', 'twentytwentyfour' ),
+	'tt3'  => array( 'twentytwentythree', 'twentytwentythree' ),
+	'kid5' => array( 'hyscribe-fixture-child', 'twentytwentyfive' ),
 );
-$hyscribe_theme  = $hyscribe_themes[ $_COOKIE['hyscribe_variant'] ?? '' ] ?? '';
+$hyscribe_theme  = $hyscribe_themes[ $_COOKIE['hyscribe_variant'] ?? '' ] ?? array();
 if ( $hyscribe_theme ) {
-	add_filter( 'pre_option_template', fn() => $hyscribe_theme );
-	add_filter( 'pre_option_stylesheet', fn() => $hyscribe_theme );
+	add_filter( 'pre_option_stylesheet', fn() => $hyscribe_theme[0] );
+	add_filter( 'pre_option_template', fn() => $hyscribe_theme[1] );
 }
 
 function auth_redirect() {}

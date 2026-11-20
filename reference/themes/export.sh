@@ -8,7 +8,10 @@
 # the block styles and pattern categories registered with the theme active
 # (registered.json, from reference/rest/registered.php).
 #   reference/themes/export.sh [slug]   (default twentytwentyfive)
-# Writes themes/<slug>/. Needs reference/default-install/php.sh up (for a theme
+# Writes themes/<slug>/, or fixtures/themes/<slug>/ for a fixture theme of
+# reference/themes/fixtures (10.3, a child block theme: its own files, and the
+# patterns, style partials and registrations of the theme it runs with, its
+# parent's too). Needs reference/default-install/php.sh up (for a theme
 # WordPress 7.1.3 does not bundle, themes/pinned.tsv, run
 # reference/themes/pin.sh first, which php.sh then mounts). The PHP
 # runs with that theme active through a must-use plugin (theme.php), which
@@ -20,6 +23,7 @@ NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 SLUG="${1:-twentytwentyfive}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/themes/$SLUG"
+[ ! -d "$ROOT/reference/themes/fixtures/$SLUG" ] || OUT="$ROOT/fixtures/themes/$SLUG"
 SRC="/var/www/html/wp-content/themes/$SLUG"
 
 MU=/var/www/html/wp-content/mu-plugins
@@ -35,16 +39,29 @@ find "$OUT" -name '*.php' -delete
 find "$OUT" -type d -empty -delete
 "$DOCKER" cp "$ROOT/reference/themes/export.php" "$NAME:/tmp/export.php"
 php_in_theme /tmp/export.php > "$OUT/patterns.json"
-# shellcheck disable=SC2016
+# The block style partials (blocks and sections) of the stylesheet's styles
+# folder, then the template's (a child theme's parent), as
+# WP_Theme_JSON_Resolver::get_style_variations() reads them: a parent's file
+# of a basename the child has is left out.
 php_in_theme -r '
-  $dir = "'"$SRC"'/styles";
+  require "/var/www/html/wp-load.php";
+  $dirs = array( get_stylesheet_directory() );
+  if ( get_template_directory() !== get_stylesheet_directory() ) {
+    $dirs[] = get_template_directory();
+  }
   $partials = array();
-  foreach ( array( "blocks", "sections" ) as $kind ) {
-    foreach ( glob( "$dir/$kind/*.json" ) ?: array() as $file ) {
-      $json = file_get_contents( $file );
-      if ( str_contains( $json, "blockTypes" ) ) {
-        $partials[ "$kind/" . basename( $file ) ] = $json;
+  $seen     = array();
+  foreach ( $dirs as $dir ) {
+    foreach ( array( "blocks", "sections" ) as $kind ) {
+      foreach ( glob( "$dir/styles/$kind/*.json" ) ?: array() as $file ) {
+        $json = file_get_contents( $file );
+        if ( str_contains( $json, "blockTypes" ) && ! isset( $seen[ basename( $file ) ] ) ) {
+          $partials[ "$kind/" . basename( $file ) ] = $json;
+        }
       }
+    }
+    foreach ( array_merge( glob( "$dir/styles/*.json" ) ?: array(), glob( "$dir/styles/*/*.json" ) ?: array() ) as $file ) {
+      $seen[ basename( $file ) ] = true;
     }
   }
   ksort( $partials );

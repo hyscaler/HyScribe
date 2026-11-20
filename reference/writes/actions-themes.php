@@ -16,9 +16,14 @@
 // writes).
 $themes_base = function () {
 	global $wpdb;
-	$wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '%wp_theme_files_patterns-%' OR option_name = 'theme_mods_twentytwentyfive'" );
+	$wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '%wp_theme_files_patterns-%' OR option_name IN ( 'theme_mods_twentytwentyfive', 'theme_mods_hyscribe-fixture-child' )" );
 	wp_cache_flush();
 	update_option( 'theme_mods_twentytwentyfive', array( 'custom_css_post_id' => -1 ) );
+	// A switch involving a child theme makes PHP scan its themes folder and
+	// keep the roots it finds in a transient, which depends on the folder
+	// and which HyScribe, with no folder, does not keep: the scan is made
+	// here, so that the case finds the transient as it is and writes none.
+	search_theme_directories( true );
 };
 
 // themes.php's activation of `$stylesheet`, as the administrator's request.
@@ -111,6 +116,38 @@ return array(
 	'admin-themes-activate-twentytwentythree' => $themes_case(
 		null,
 		fn() => $themes_activate( 'twentytwentythree' )
+	),
+	// The fixture child of Twenty Twenty-Five (10.3, reference/themes/fixtures):
+	// `template` is its parent, `stylesheet` its own, and back to the parent.
+	'admin-themes-activate-hyscribe-fixture-child' => $themes_case(
+		null,
+		fn() => $themes_activate( 'hyscribe-fixture-child' )
+	),
+	'admin-themes-next-load-hyscribe-fixture-child' => $themes_case(
+		fn() => $themes_activate( 'hyscribe-fixture-child' ),
+		$themes_next_load
+	),
+	'admin-themes-child-to-parent'            => $themes_case(
+		function () use ( $themes_activate, $themes_next_load ) {
+			$themes_activate( 'hyscribe-fixture-child' );
+			$themes_next_load();
+		},
+		fn() => $themes_activate( 'twentytwentyfive' )
+	),
+	'admin-themes-child-to-other'             => $themes_case(
+		function () use ( $themes_activate, $themes_next_load ) {
+			$themes_activate( 'hyscribe-fixture-child' );
+			$themes_next_load();
+		},
+		fn() => $themes_activate( 'twentytwentyfour' )
+	),
+	'admin-themes-next-load-child-to-parent'  => $themes_case(
+		function () use ( $themes_activate, $themes_next_load ) {
+			$themes_activate( 'hyscribe-fixture-child' );
+			$themes_next_load();
+			$themes_activate( 'twentytwentyfive' );
+		},
+		$themes_next_load
 	),
 	'admin-themes-activate-active'            => $themes_case(
 		null,

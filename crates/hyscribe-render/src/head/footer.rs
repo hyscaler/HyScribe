@@ -171,8 +171,10 @@ fn speculation_rules(site: &dyn Site, siteurl: &str) -> Vec<u8> {
         format!("{base}/wp-content/uploads/*"),
         format!("{base}/wp-content/*"),
         format!("{base}/wp-content/plugins/*"),
-        themes("template"),
+        // WordPress names its `template` context after the stylesheet's
+        // directory and its `stylesheet` context after the template's.
         themes("stylesheet"),
+        themes("template"),
     ];
     // `array_unique()`: a theme that is not a child theme once.
     excluded.dedup();
@@ -298,7 +300,7 @@ mod tests {
             "{rules}"
         );
         assert!(rules.contains(
-            r#""/wp/wp-content/themes/parent/*","/wp/wp-content/themes/child\\(1\\)/*","/a\\+b\u003Cc\u003E/*\\?(.+)"]"#
+            r#""/wp/wp-content/themes/child\\(1\\)/*","/wp/wp-content/themes/parent/*","/a\\+b\u003Cc\u003E/*\\?(.+)"]"#
         ), "{rules}");
         assert_eq!(json_string("a\"b"), r#""a\"b""#);
         // The rest of the test site is empty.

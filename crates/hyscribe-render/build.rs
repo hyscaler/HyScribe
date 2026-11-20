@@ -3,12 +3,14 @@
 //! Embeds the theme ports of `themes/`, one folder per theme slug: the
 //! files pages link to under the theme's URL, with the content type
 //! the web server sends each, and the export's own data files, which are
-//! not WordPress's to serve.
+//! not WordPress's to serve. With the `fixture-themes` feature the fixture
+//! themes of `fixtures/themes/` (the child block theme of 10.3) follow them.
 
 use std::io;
 use std::path::Path;
 
 const THEMES: &str = "../../themes";
+const FIXTURE_THEMES: &str = "../../fixtures/themes";
 const EXPORTED: [&str; 3] = ["patterns.json", "registered.json", "styles.json"];
 const CONTENT_TYPES: [(&str, &str); 11] = [
     ("css", "text/css"),
@@ -26,17 +28,19 @@ const CONTENT_TYPES: [(&str, &str); 11] = [
 
 fn main() -> io::Result<()> {
     println!("cargo::rerun-if-changed={THEMES}");
-    let mut slugs = Vec::new();
-    for entry in std::fs::read_dir(THEMES)? {
-        let entry = entry?;
-        if entry.file_type()?.is_dir() {
-            slugs.push(entry.file_name().to_string_lossy().into_owned());
-        }
+    println!("cargo::rerun-if-changed={FIXTURE_THEMES}");
+    // The shipped themes first, sorted: the first is the default theme.
+    let mut folders = vec![(THEMES, slugs_in(THEMES)?)];
+    if std::env::var_os("CARGO_FEATURE_FIXTURE_THEMES").is_some() {
+        folders.push((FIXTURE_THEMES, slugs_in(FIXTURE_THEMES)?));
     }
-    slugs.sort();
+    let slugs: Vec<(&str, &String)> = folders
+        .iter()
+        .flat_map(|(folder, slugs)| slugs.iter().map(move |slug| (*folder, slug)))
+        .collect();
     let mut themes = String::new();
-    for slug in &slugs {
-        let root = format!("{THEMES}/{slug}");
+    for (folder, slug) in &slugs {
+        let root = format!("{folder}/{slug}");
         let mut files = Vec::new();
         collect(Path::new(&root), "", &mut files)?;
         files.sort();
@@ -63,6 +67,19 @@ fn main() -> io::Result<()> {
         Path::new(&out).join("themes.rs"),
         format!("const THEMES: &[Data; {}] = &[\n{themes}];\n", slugs.len()),
     )
+}
+
+/// The sorted slugs of the theme folders in `folder`.
+fn slugs_in(folder: &str) -> io::Result<Vec<String>> {
+    let mut slugs = Vec::new();
+    for entry in std::fs::read_dir(folder)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            slugs.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    slugs.sort();
+    Ok(slugs)
 }
 
 /// `include_bytes!` of a theme's file.

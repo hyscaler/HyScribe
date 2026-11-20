@@ -150,5 +150,6 @@ posts-inline-save-draft-name	POST	admin-ajax.php	action=inline-save&post_ID=3&po
 posts-bulk-edit-pages	GET	edit.php?post_type=page&action=edit&bulk_edit=Update&post[]=2&post[]=3&post_parent=2&post_author=-1&comment_status=&ping_status=&_status=-1&page_template=-1&mode=list	-	bulk-posts	_wpnonce	->
 themes-activate-tt4	GET	themes.php?action=activate&stylesheet=twentytwentyfour	-	switch-theme_twentytwentyfour	_wpnonce	->
 themes-activate-tt3	GET	themes.php?action=activate&stylesheet=twentytwentythree	-	switch-theme_twentytwentythree	_wpnonce	->
+themes-activate-kid	GET	themes.php?action=activate&stylesheet=hyscribe-fixture-child	-	switch-theme_hyscribe-fixture-child	_wpnonce	->
 themes-activate-active	GET	themes.php?action=activate&stylesheet=twentytwentyfive	-	switch-theme_twentytwentyfive	_wpnonce	->
 themes-activate-missing	GET	themes.php?action=activate&stylesheet=nope	-	switch-theme_nope	_wpnonce

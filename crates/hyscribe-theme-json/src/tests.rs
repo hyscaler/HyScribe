@@ -25,6 +25,7 @@ impl Fixture {
             block_styles: &self.styles,
             theme: Some(&self.theme),
             theme_styles: &self.theme_styles,
+            parent_theme: None,
             user: None,
         }
     }
@@ -265,6 +266,7 @@ fn empty_sources() {
         block_styles: &[],
         theme: None,
         theme_styles: &[],
+        parent_theme: None,
         user: None,
     });
     assert!(!styles.use_root_padding_aware_alignments());

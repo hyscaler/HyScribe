@@ -81,7 +81,8 @@ fn script_modules_match_php() {
 #[test]
 fn fonts_and_css_links_match_php() {
     let golden = include_str!("../../tests/golden/fonts-css.tsv");
-    let theme_uri = "http://127.0.0.1:8081/wp-content/themes/twentytwentyfive";
+    let theme_uri =
+        |path: &str| format!("http://127.0.0.1:8081/wp-content/themes/twentytwentyfive/{path}");
     let mut failures = Vec::new();
     for line in golden.lines() {
         let fields: Vec<Vec<u8>> = line.split('\t').skip(1).map(unhex).collect();
@@ -89,7 +90,7 @@ fn fonts_and_css_links_match_php() {
             let families = json_decode(&fields[0]).unwrap();
             (
                 fields[0].clone(),
-                font_faces(Some(&families), theme_uri),
+                font_faces(Some(&families), &theme_uri),
                 fields[1].clone(),
             )
         } else if line.starts_with("style") {

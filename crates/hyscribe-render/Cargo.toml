@@ -20,7 +20,14 @@ icu_properties.workspace = true
 jiff-tzdb.workspace = true
 sha2.workspace = true
 
+[features]
+# Embeds the fixture themes of `fixtures/themes/` beside the shipped ones, which
+# the tests that check child block themes (10.3) switch on; no shipped
+# build has it.
+fixture-themes = []
+
 [dev-dependencies]
+hyscribe-render = { path = ".", features = ["fixture-themes"] }
 hyscribe-testkit.workspace = true
 
 [lints]

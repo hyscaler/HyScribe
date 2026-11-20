@@ -20,6 +20,7 @@ hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
 
 [dev-dependencies]
+hyscribe-render = { workspace = true, features = ["fixture-themes"] }
 hyscribe-testkit.workspace = true
 sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }

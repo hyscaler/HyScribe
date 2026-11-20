@@ -2,6 +2,10 @@
 
 use super::*;
 
+/// The fixture child of Twenty Twenty-Five (10.3), which these tests have
+/// built in.
+const CHILD: &str = "hyscribe-fixture-child";
+
 #[test]
 fn twentytwentyfive_is_built_in() {
     let theme = twentytwentyfive();
@@ -46,15 +50,16 @@ fn pattern_urls_move_to_the_site() {
     assert_eq!(moved, expected);
 }
 
+/// The entries of the JSON list `json`.
+fn list(json: &[u8]) -> Vec<(Key, Value)> {
+    json_decode(json).unwrap().as_array().unwrap().to_vec()
+}
+
 #[test]
 fn malformed_theme_data_is_empty() {
-    assert!(part_areas(b"not json").is_empty());
-    assert!(
-        part_areas(b"{\"templateParts\":[1,{\"name\":\"x\"},{\"area\":\"y\"},{\"name\":\"a\",\"area\":\"b\"}]}")
-            .len()
-            == 1
-    );
-    assert!(part_areas(b"{\"version\":3}").is_empty());
+    assert!(part_areas(&[]).is_empty());
+    let parts = list(b"[1,{\"name\":\"x\"},{\"area\":\"y\"},{\"name\":\"a\",\"area\":\"b\"}]");
+    assert_eq!(part_areas(&parts).len(), 1);
     assert!(patterns(b"[").is_empty());
     assert_eq!(
         patterns(b"{\"a\":{\"content\":\"x\"},\"b\":{\"title\":\"no content\"},\"c\":3,\"7\":{\"content\":\"y\"}}").len(),
@@ -189,14 +194,14 @@ fn page_templates_are_the_custom_ones_for_the_type() {
     assert!(theme.page_templates("post").is_empty());
     // Templates naming no post types are for pages and need a name, titled by
     // it if they have no title; the last of a title is kept, numbers sorted as numbers.
-    let json = br#"{"customTemplates":[{"name":"z","title":"Zed"},{"name":"a","title":"Ay","postTypes":["post","page"]},{"name":"x"},{"title":"No name"},{"name":"t10","title":"10"},{"name":"old","title":"9"},{"name":"t9","title":"9"}]}"#;
+    let json = list(br#"[{"name":"z","title":"Zed"},{"name":"a","title":"Ay","postTypes":["post","page"]},{"name":"x"},{"title":"No name"},{"name":"t10","title":"10"},{"name":"old","title":"9"},{"name":"t9","title":"9"}]"#);
     let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
         list.iter()
             .map(|(a, b)| ((*a).into(), (*b).into()))
             .collect()
     };
     assert_eq!(
-        custom_templates(json, "page"),
+        custom_templates(&json, "page"),
         pairs(&[
             ("t9", "9"),
             ("t10", "10"),
@@ -205,8 +210,8 @@ fn page_templates_are_the_custom_ones_for_the_type() {
             ("x", "x")
         ])
     );
-    assert_eq!(custom_templates(json, "post"), pairs(&[("a", "Ay")]));
-    assert!(custom_templates(b"[]", "page").is_empty());
+    assert_eq!(custom_templates(&json, "post"), pairs(&[("a", "Ay")]));
+    assert!(custom_templates(&[], "page").is_empty());
 }
 
 /// Every embedded theme is a theme of the folders of `themes/`, and an
@@ -220,7 +225,8 @@ fn themes_are_chosen_by_slug() {
             "twentytwentyfive",
             "twentytwentyfour",
             "twentytwentythree",
-            "twentytwentytwo"
+            "twentytwentytwo",
+            CHILD
         ]
     );
     for slug in &slugs {
@@ -303,14 +309,14 @@ fn post_formats_are_exported() {
 /// whose file is not in the theme has no CSS.
 #[test]
 fn malformed_enqueued_styles_are_skipped() {
-    let data = Data {
+    static DATA: Data = Data {
         slug: "t",
         files: &[],
         patterns: b"",
         styles: b"",
         registered: br#"{"styles":[{"src":"a.css"},{"handle":"h"},{"handle":"x","src":"gone.css","block":null,"ver":false}]}"#,
     };
-    let styles = own_styles(&data);
+    let styles = own_styles(&DATA, None);
     assert_eq!(styles.len(), 1);
     assert_eq!((styles[0].handle.as_str(), styles[0].css), ("x", ""));
     assert_eq!((&styles[0].block, &styles[0].version), (&None, &None));
@@ -371,4 +377,162 @@ fn the_editor_s_own_styles_follow_the_theme() {
     assert!(!four.has_editor_style());
     assert!(load("twentytwentyfive", None).has_editor_style());
     assert!(load("twentytwentythree", None).editor_styles().is_empty());
+}
+
+/// A child theme has only its own files, and its parent's are the ones it
+/// has no file of the same name for.
+#[test]
+fn a_child_theme_finds_its_files_then_its_parent_s() {
+    let child = load(CHILD, None);
+    assert_eq!((child.slug(), child.template_slug()), (CHILD, DEFAULT));
+    assert_eq!(template_of(CHILD), Some(DEFAULT));
+    assert_eq!(template_of(DEFAULT), Some(DEFAULT));
+    assert_eq!(template_of("gone"), None);
+    assert_eq!(parent_name(CHILD).as_deref(), Some("Twenty Twenty-Five"));
+    assert_eq!(parent_name(DEFAULT), None);
+    assert_eq!(parent_name("gone"), None);
+    let candidates = |slugs: &[&str]| slugs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    // Its own 404, then the parent's home.
+    let (_, own) = child.template(&candidates(&["404"])).unwrap();
+    assert!(own.windows(10).any(|w| w == b"is-child-n"));
+    let (_, inherited) = child.template(&candidates(&["home"])).unwrap();
+    let five = twentytwentyfive();
+    assert_eq!(inherited, five.template(&candidates(&["home"])).unwrap().1);
+    assert!(child.template(&candidates(&["child-wide"])).is_some());
+    assert!(five.template(&candidates(&["child-wide"])).is_none());
+    // Its footer replaces the parent's, the header is the parent's.
+    let (footer, _) = child.part(b"footer").unwrap();
+    assert!(footer.windows(8).any(|w| w == b"A child "));
+    assert_eq!(
+        child.part(b"header").unwrap().0,
+        five.part(b"header").unwrap().0
+    );
+    // `templateParts` merge by position, so the child's first entry takes
+    // the parent's first, the header's.
+    assert_eq!(child.part(b"child-footer").unwrap().1, b"footer");
+    assert_eq!(child.part(b"header").unwrap().1, b"uncategorized");
+    assert_eq!(child.part(b"vertical-header").unwrap().1, b"header");
+    assert_eq!(child.theme_json_list("templateParts").len(), 7);
+    let pages = child.page_templates("page");
+    assert_eq!(
+        pages,
+        [("child-wide".to_string(), "Child Wide".to_string())]
+    );
+    // The patterns of both, the child's replacing the parent's of its slug.
+    assert!(child.pattern(b"hyscribe-fixture-child/note").is_some());
+    assert!(child.pattern(b"twentytwentyfive/footer").is_some());
+    let replaced = child.pattern(b"twentytwentyfive/hidden-404").unwrap();
+    assert!(replaced.windows(14).any(|w| w == b"said the child"));
+}
+
+/// The listings of templates and parts, a child's own first.
+#[test]
+fn a_child_theme_lists_its_files_then_its_parent_s() {
+    let child = load(CHILD, None);
+    assert_eq!(
+        child.file_slugs("template_files"),
+        [
+            "404",
+            "child-wide",
+            "archive",
+            "search",
+            "index",
+            "single",
+            "page-no-title",
+            "page",
+            "home"
+        ]
+    );
+    let parts = child.file_slugs("part_files");
+    assert_eq!(parts[..2], ["footer", "child-footer"]);
+    assert_eq!(parts.len(), 8);
+    let five = twentytwentyfive();
+    assert_eq!(five.file_slugs("part_files").len(), 7);
+    assert!(five.file_slugs("nope").is_empty());
+}
+
+/// A child theme's `theme.json` is merged over its parent's, a list of
+/// presets in the child replacing the parent's.
+#[test]
+fn a_child_theme_s_theme_json_is_merged_over_its_parent_s() {
+    let child = load(CHILD, None);
+    let palette = child
+        .global
+        .setting(&["color", "palette", "theme"])
+        .unwrap();
+    assert_eq!(palette.as_array().unwrap().len(), 5);
+    let accent = &palette.as_array().unwrap()[2].1;
+    assert_eq!(accent.get_str("color").unwrap().to_php_string(), b"#2E7D32");
+    // What only the parent's has is kept.
+    assert!(child.global.setting(&["layout", "contentSize"]).is_some());
+}
+
+/// Style variations of both themes, the parent's of a file name the child
+/// has left out, the child's first.
+#[test]
+fn a_child_theme_s_style_variations_follow_its_files() {
+    let titles: Vec<Vec<u8>> = load(CHILD, None)
+        .style_variations()
+        .iter()
+        .map(|variation| variation.get_str("title").unwrap().to_php_string())
+        .collect();
+    assert_eq!(titles[0], b"Evening (child)");
+    assert_eq!(titles[1], b"Child Night");
+    // 23 variations of the parent, less those named `01-evening.json`, and
+    // the child's own 2.
+    assert!(!titles.contains(&b"Evening".to_vec()));
+    assert_eq!(titles.len(), 23 - 2 + 2);
+}
+
+/// The stylesheet the parent enqueues is the parent's file, at the
+/// parent's URL, with the child's version; URLs of files are the child's
+/// when it has the file.
+#[test]
+fn a_child_theme_enqueues_its_parent_s_stylesheet() {
+    let child = load(CHILD, None);
+    assert_eq!(child.styles.len(), 1);
+    let style = &child.styles[0];
+    assert_eq!(
+        (style.theme, style.src.as_str()),
+        (DEFAULT, "style.min.css")
+    );
+    assert_eq!(style.version.as_deref(), Some("1.0"));
+    assert_eq!(
+        style.css.len(),
+        include_str!("../../../../themes/twentytwentyfive/style.min.css").len()
+    );
+    assert_eq!(
+        child.editor_styles().len(),
+        0,
+        "the parent enqueues none of its own for blocks"
+    );
+    let uri = |path| child.file_uri("http://h", path);
+    assert_eq!(
+        uri("assets/images/child-mark.png"),
+        "http://h/wp-content/themes/hyscribe-fixture-child/assets/images/child-mark.png"
+    );
+    assert_eq!(
+        uri("assets/images/location.webp"),
+        "http://h/wp-content/themes/twentytwentyfive/assets/images/location.webp"
+    );
+    let five = twentytwentyfive();
+    assert_eq!(
+        five.file_uri("http://h", "style.css"),
+        "http://h/wp-content/themes/twentytwentyfive/style.css"
+    );
+    // A theme that is not a child has its stylesheet at its own URL.
+    assert_eq!(five.styles[0].theme, DEFAULT);
+}
+
+/// The child's own files are served at its URL, and the parent's are not.
+#[test]
+fn a_child_theme_serves_its_own_files() {
+    assert_eq!(
+        theme_file(CHILD, "screenshot.png").map(|(kind, bytes)| (kind, bytes.len())),
+        Some(("image/png", 4476))
+    );
+    assert!(theme_file(CHILD, "style.min.css").is_none());
+    assert!(theme_file(CHILD, "patterns.json").is_none());
+    assert_eq!(load(CHILD, None).name(), "HyScribe Fixture Child");
+    assert!(screen_entry(CHILD).is_some());
 }

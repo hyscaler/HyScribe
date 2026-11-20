@@ -1,0 +1,1818 @@
+{
+    "block_styles": [
+        [
+            "core/list",
+            {
+                "name": "checkmark-list",
+                "label": "Checkmark",
+                "inline_style": "\n\t\t\t\tul.is-style-checkmark-list {\n\t\t\t\t\tlist-style-type: \"\\2713\";\n\t\t\t\t}\n\n\t\t\t\tul.is-style-checkmark-list li {\n\t\t\t\t\tpadding-inline-start: 1ch;\n\t\t\t\t}"
+            }
+        ]
+    ],
+    "partial_styles": [
+        [
+            "core/heading",
+            {
+                "name": "text-display",
+                "label": "Display"
+            }
+        ],
+        [
+            "core/heading",
+            {
+                "name": "text-subtitle",
+                "label": "Subtitle"
+            }
+        ],
+        [
+            "core/heading",
+            {
+                "name": "text-annotation",
+                "label": "Annotation"
+            }
+        ],
+        [
+            "core/paragraph",
+            {
+                "name": "text-display",
+                "label": "Display"
+            }
+        ],
+        [
+            "core/paragraph",
+            {
+                "name": "text-subtitle",
+                "label": "Subtitle"
+            }
+        ],
+        [
+            "core/paragraph",
+            {
+                "name": "text-annotation",
+                "label": "Annotation"
+            }
+        ],
+        [
+            "core/post-terms",
+            {
+                "name": "post-terms-1",
+                "label": "Pill shaped"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-1",
+                "label": "Style 1"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-2",
+                "label": "Style 2"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-3",
+                "label": "Style 3"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-4",
+                "label": "Style 4"
+            }
+        ],
+        [
+            "core/group",
+            {
+                "name": "section-5",
+                "label": "Style 5"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-1",
+                "label": "Style 1"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-2",
+                "label": "Style 2"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-3",
+                "label": "Style 3"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-4",
+                "label": "Style 4"
+            }
+        ],
+        [
+            "core/columns",
+            {
+                "name": "section-5",
+                "label": "Style 5"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-1",
+                "label": "Style 1"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-2",
+                "label": "Style 2"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-3",
+                "label": "Style 3"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-4",
+                "label": "Style 4"
+            }
+        ],
+        [
+            "core/column",
+            {
+                "name": "section-5",
+                "label": "Style 5"
+            }
+        ]
+    ],
+    "pattern_categories": [
+        {
+            "name": "twentytwentyfive_page",
+            "label": "Pages",
+            "description": "A collection of full page layouts."
+        },
+        {
+            "name": "twentytwentyfive_post-format",
+            "label": "Post formats",
+            "description": "A collection of post format patterns."
+        }
+    ],
+    "patterns": [
+        {
+            "title": "404 (child)",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfive/hidden-404"
+        },
+        {
+            "title": "Child note",
+            "description": "A note with an image from the child theme and two from its parent.",
+            "viewportWidth": 1100,
+            "categories": [
+                "text"
+            ],
+            "keywords": [
+                "note",
+                "child"
+            ],
+            "name": "hyscribe-fixture-child/note"
+        },
+        {
+            "title": "Banner with book description",
+            "description": "Banner with book description and accompanying image for promotion.",
+            "categories": [
+                "banner"
+            ],
+            "name": "twentytwentyfive/banner-about-book"
+        },
+        {
+            "title": "Cover with big heading",
+            "description": "A full-width cover section with a large background image and an oversized heading.",
+            "categories": [
+                "banner",
+                "about",
+                "featured"
+            ],
+            "name": "twentytwentyfive/banner-cover-big-heading"
+        },
+        {
+            "title": "Short heading and paragraph and image on the left",
+            "description": "A Intro pattern with Short heading, paragraph and image on the left.",
+            "categories": [
+                "banner",
+                "featured"
+            ],
+            "name": "twentytwentyfive/banner-intro-image"
+        },
+        {
+            "title": "Intro with left-aligned description",
+            "description": "A large left-aligned heading with a brand name emphasized in bold.",
+            "categories": [
+                "banner"
+            ],
+            "name": "twentytwentyfive/banner-intro"
+        },
+        {
+            "title": "Poster-like section",
+            "description": "A section that can be used as a banner or a landing page to announce an event.",
+            "categories": [
+                "banner",
+                "media"
+            ],
+            "name": "twentytwentyfive/banner-poster"
+        },
+        {
+            "title": "Banner with description and images grid",
+            "description": "A banner with a short paragraph, and two images displayed in a grid layout.",
+            "categories": [
+                "banner",
+                "featured"
+            ],
+            "name": "twentytwentyfive/banner-description-images-grid"
+        },
+        {
+            "title": "Post format name",
+            "description": "Prints the name of the post format with the help of the Block Bindings API.",
+            "categories": [
+                "twentytwentyfive_post-format"
+            ],
+            "name": "twentytwentyfive/binding-format"
+        },
+        {
+            "title": "Comments",
+            "description": "Comments area with comments list, pagination, and comment form.",
+            "categories": [
+                "text"
+            ],
+            "blockTypes": [
+                "core/comments"
+            ],
+            "name": "twentytwentyfive/comments"
+        },
+        {
+            "title": "Centered link and social links",
+            "description": "Centered contact section with a prominent message and social media links.",
+            "categories": [
+                "contact"
+            ],
+            "keywords": [
+                "contact",
+                "faq",
+                "questions"
+            ],
+            "name": "twentytwentyfive/contact-centered-social-link"
+        },
+        {
+            "title": "Contact, info and locations",
+            "description": "Contact section with social media links, email, and multiple location details.",
+            "viewportWidth": 1400,
+            "categories": [
+                "contact"
+            ],
+            "keywords": [
+                "contact",
+                "location"
+            ],
+            "name": "twentytwentyfive/contact-info-locations"
+        },
+        {
+            "title": "Contact location and link",
+            "description": "Contact section with a location address, a directions link, and an image of the location.",
+            "categories": [
+                "contact",
+                "featured"
+            ],
+            "name": "twentytwentyfive/contact-location-and-link"
+        },
+        {
+            "title": "Call to action with book links",
+            "description": "A call to action section with links to get the book in different websites.",
+            "categories": [
+                "call-to-action"
+            ],
+            "name": "twentytwentyfive/cta-book-links"
+        },
+        {
+            "title": "Call to action with locations",
+            "description": "A call to action section with links to get the book in the most popular locations.",
+            "categories": [
+                "call-to-action"
+            ],
+            "name": "twentytwentyfive/cta-book-locations"
+        },
+        {
+            "title": "Centered heading",
+            "description": "A hero with a centered heading, paragraph and button.",
+            "categories": [
+                "call-to-action"
+            ],
+            "name": "twentytwentyfive/cta-centered-heading"
+        },
+        {
+            "title": "Events list",
+            "description": "A list of events with call to action.",
+            "categories": [
+                "call-to-action"
+            ],
+            "name": "twentytwentyfive/cta-events-list"
+        },
+        {
+            "title": "Call to action with grid layout with products and link",
+            "description": "A call to action featuring product images.",
+            "viewportWidth": 1400,
+            "categories": [
+                "call-to-action",
+                "featured"
+            ],
+            "name": "twentytwentyfive/cta-grid-products-link"
+        },
+        {
+            "title": "Heading and search form",
+            "description": "Large heading with a search form for quick navigation.",
+            "categories": [
+                "call-to-action"
+            ],
+            "name": "twentytwentyfive/cta-heading-search"
+        },
+        {
+            "title": "Newsletter sign-up",
+            "description": "",
+            "categories": [
+                "call-to-action"
+            ],
+            "keywords": [
+                "call-to-action",
+                "newsletter"
+            ],
+            "name": "twentytwentyfive/cta-newsletter"
+        },
+        {
+            "title": "Events, 3 columns with event images and titles",
+            "description": "A header with title and text and three columns that show 3 events with their images and titles.",
+            "categories": [
+                "banner"
+            ],
+            "keywords": [
+                "events",
+                "columns",
+                "images"
+            ],
+            "name": "twentytwentyfive/event-3-col"
+        },
+        {
+            "title": "Event RSVP",
+            "description": "RSVP for an upcoming event with a cover image and event details.",
+            "viewportWidth": 1400,
+            "categories": [
+                "call-to-action"
+            ],
+            "keywords": [
+                "call-to-action",
+                "rsvp",
+                "event"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "name": "twentytwentyfive/event-rsvp"
+        },
+        {
+            "title": "Event schedule",
+            "description": "A section with specified dates and times for an event.",
+            "categories": [
+                "about"
+            ],
+            "keywords": [
+                "events",
+                "agenda",
+                "schedule",
+                "lectures"
+            ],
+            "name": "twentytwentyfive/event-schedule"
+        },
+        {
+            "title": "Centered footer",
+            "description": "Footer with centered site title and tagline.",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentyfive/footer-centered"
+        },
+        {
+            "title": "Footer with columns",
+            "description": "Footer columns with title, tagline and links.",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentyfive/footer-columns"
+        },
+        {
+            "title": "Footer with newsletter signup",
+            "description": "Footer with large site title and newsletter signup.",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentyfive/footer-newsletter"
+        },
+        {
+            "title": "Centered footer with social links",
+            "description": "Footer with centered site title and social links.",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentyfive/footer-social"
+        },
+        {
+            "title": "Footer",
+            "description": "Footer columns with logo, title, tagline and links.",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentyfive/footer"
+        },
+        {
+            "title": "Audio format",
+            "description": "An audio post format with an image, title, audio player, and description.",
+            "categories": [
+                "twentytwentyfive_post-format"
+            ],
+            "name": "twentytwentyfive/format-audio"
+        },
+        {
+            "title": "Link format",
+            "description": "A link post format with a description and an emphasized link for key content.",
+            "categories": [
+                "twentytwentyfive_post-format"
+            ],
+            "name": "twentytwentyfive/format-link"
+        },
+        {
+            "title": "Grid with videos",
+            "description": "A grid with videos.",
+            "categories": [
+                "about"
+            ],
+            "name": "twentytwentyfive/grid-videos"
+        },
+        {
+            "title": "Grid with categories",
+            "description": "A grid section with different categories.",
+            "viewportWidth": 1400,
+            "categories": [
+                "banner"
+            ],
+            "name": "twentytwentyfive/grid-with-categories"
+        },
+        {
+            "title": "Centered site header",
+            "description": "Site header with centered site title and navigation.",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentyfive/header-centered"
+        },
+        {
+            "title": "Header with columns",
+            "description": "Site header with site title and navigation in columns.",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentyfive/header-columns"
+        },
+        {
+            "title": "Header with large title",
+            "description": "Site header with large site title and right-aligned navigation.",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentyfive/header-large-title"
+        },
+        {
+            "title": "Header",
+            "description": "Site header with site title and navigation.",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentyfive/header"
+        },
+        {
+            "title": "Heading and paragraph with image on the right",
+            "description": "A two-column section with a heading and paragraph on the left, and an image on the right.",
+            "categories": [
+                "about"
+            ],
+            "name": "twentytwentyfive/heading-and-paragraph-with-image"
+        },
+        {
+            "title": "Hero book",
+            "description": "A hero section for the book with a description and pre-order link.",
+            "categories": [
+                "banner"
+            ],
+            "keywords": [
+                "podcast",
+                "hero",
+                "stories"
+            ],
+            "name": "twentytwentyfive/hero-book"
+        },
+        {
+            "title": "Hero, full width image",
+            "description": "A hero with a full width image, heading, short paragraph and button.",
+            "categories": [
+                "banner"
+            ],
+            "name": "twentytwentyfive/hero-full-width-image"
+        },
+        {
+            "title": "Hero, overlapped book cover with links",
+            "description": "A hero with an overlapped book cover and links.",
+            "categories": [
+                "banner"
+            ],
+            "name": "twentytwentyfive/hero-overlapped-book-cover-with-links"
+        },
+        {
+            "title": "Hero podcast",
+            "description": "",
+            "categories": [
+                "banner"
+            ],
+            "keywords": [
+                "podcast",
+                "hero",
+                "stories"
+            ],
+            "name": "twentytwentyfive/hero-podcast"
+        },
+        {
+            "title": "Hidden blog heading",
+            "description": "Hidden heading for the home page and index template.",
+            "inserter": false,
+            "name": "twentytwentyfive/hidden-blog-heading"
+        },
+        {
+            "title": "Search",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfive/hidden-search"
+        },
+        {
+            "title": "Sidebar",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfive/hidden-sidebar"
+        },
+        {
+            "title": "Written by",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfive/hidden-written-by"
+        },
+        {
+            "title": "Logos",
+            "description": "Showcasing the podcast's clients with a heading and a series of client logos.",
+            "categories": [
+                "banner"
+            ],
+            "name": "twentytwentyfive/logos"
+        },
+        {
+            "title": "Instagram grid",
+            "description": "A grid section with photos and a link to an Instagram profile.",
+            "viewportWidth": 1440,
+            "categories": [
+                "media",
+                "gallery",
+                "featured"
+            ],
+            "name": "twentytwentyfive/media-instagram-grid"
+        },
+        {
+            "title": "More posts",
+            "description": "Displays a list of posts with title and date.",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentyfive/more-posts"
+        },
+        {
+            "title": "Overlapping images and paragraph on right",
+            "description": "A section with overlapping images, and a description.",
+            "categories": [
+                "about",
+                "featured"
+            ],
+            "name": "twentytwentyfive/overlapped-images"
+        },
+        {
+            "title": "Business homepage",
+            "description": "A business homepage pattern.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfive/page-business-home"
+        },
+        {
+            "title": "Coming soon",
+            "description": "A full-width cover banner that can be applied to a page or it can work as a single landing page.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfive/page-coming-soon"
+        },
+        {
+            "title": "CV/bio",
+            "description": "A pattern for a CV/Bio landing page.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "about",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "name": "twentytwentyfive/page-cv-bio"
+        },
+        {
+            "title": "Landing page for book",
+            "description": "A landing page for the book with a hero section, pre-order links, locations, FAQs and newsletter signup.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfive/page-landing-book"
+        },
+        {
+            "title": "Landing page for event",
+            "description": "A landing page for the event with a hero section, description, FAQs and call to action.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfive/page-landing-event"
+        },
+        {
+            "title": "Landing page for podcast",
+            "description": "A landing page for the podcast with a hero section, description, logos, grid with videos and newsletter signup.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfive/page-landing-podcast"
+        },
+        {
+            "title": "Link in bio heading, paragraph, links and full-height image",
+            "description": "A link in bio landing page with a heading, paragraph, links and a full height image.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "banner",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "name": "twentytwentyfive/page-link-in-bio-heading-paragraph-links-image"
+        },
+        {
+            "title": "Link in bio with profile, links and wide margins",
+            "description": "A link in bio landing page with social links, a profile photo and a brief description.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "banner",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "name": "twentytwentyfive/page-link-in-bio-wide-margins"
+        },
+        {
+            "title": "Link in bio with tight margins",
+            "description": "A full-width, full-height link in bio section with an image, a paragraph and social links.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "banner"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfive/page-link-in-bio-with-tight-margins"
+        },
+        {
+            "title": "Portfolio homepage",
+            "description": "A portfolio homepage pattern.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page",
+                "posts"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfive/page-portfolio-home"
+        },
+        {
+            "title": "Shop homepage",
+            "description": "A shop homepage pattern.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfive_page"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfive/page-shop-home"
+        },
+        {
+            "title": "Post navigation",
+            "description": "Next and previous post links.",
+            "categories": [
+                "text"
+            ],
+            "blockTypes": [
+                "core/post-navigation-link"
+            ],
+            "name": "twentytwentyfive/post-navigation"
+        },
+        {
+            "title": "Pricing, 2 columns",
+            "description": "Pricing section with two columns, pricing plan, description, and call-to-action buttons.",
+            "viewportWidth": 1400,
+            "categories": [
+                "call-to-action"
+            ],
+            "name": "twentytwentyfive/pricing-2-col"
+        },
+        {
+            "title": "Pricing, 3 columns",
+            "description": "A three-column boxed pricing table designed to showcase services, descriptions, and pricing options.",
+            "categories": [
+                "call-to-action",
+                "banner",
+                "services"
+            ],
+            "name": "twentytwentyfive/pricing-3-col"
+        },
+        {
+            "title": "Services, 3 columns",
+            "description": "Three columns with images and text to showcase services.",
+            "categories": [
+                "call-to-action",
+                "banner",
+                "services"
+            ],
+            "name": "twentytwentyfive/services-3-col"
+        },
+        {
+            "title": "Services, subscriber only section",
+            "description": "A subscriber-only section highlighting exclusive services and offerings.",
+            "categories": [
+                "call-to-action",
+                "services"
+            ],
+            "name": "twentytwentyfive/services-subscriber-only-section"
+        },
+        {
+            "title": "Services, team photos",
+            "description": "Display team photos in a services section with grid layout.",
+            "categories": [
+                "banner",
+                "call-to-action",
+                "featured"
+            ],
+            "name": "twentytwentyfive/services-team-photos"
+        },
+        {
+            "title": "Right-aligned 404",
+            "description": "",
+            "viewportWidth": 1400,
+            "templateTypes": [
+                "404"
+            ],
+            "name": "twentytwentyfive/template-404-vertical-header-blog"
+        },
+        {
+            "title": "News blog archive",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "archive"
+            ],
+            "name": "twentytwentyfive/template-archive-news-blog"
+        },
+        {
+            "title": "Photo blog archive",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "archive"
+            ],
+            "name": "twentytwentyfive/template-archive-photo-blog"
+        },
+        {
+            "title": "Text blog archive",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "archive"
+            ],
+            "name": "twentytwentyfive/template-archive-text-blog"
+        },
+        {
+            "title": "Right-aligned archive",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "archive"
+            ],
+            "name": "twentytwentyfive/template-archive-vertical-header-blog"
+        },
+        {
+            "title": "News blog home",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "front-page",
+                "index",
+                "home"
+            ],
+            "name": "twentytwentyfive/template-home-news-blog"
+        },
+        {
+            "title": "Photo blog home",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "front-page",
+                "index",
+                "home"
+            ],
+            "name": "twentytwentyfive/template-home-photo-blog"
+        },
+        {
+            "title": "News blog with featured posts grid",
+            "description": "",
+            "inserter": false,
+            "templateTypes": [
+                "front-page",
+                "index",
+                "home"
+            ],
+            "name": "twentytwentyfive/template-home-posts-grid-news-blog"
+        },
+        {
+            "title": "Text blog home",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "front-page",
+                "home"
+            ],
+            "name": "twentytwentyfive/template-home-text-blog"
+        },
+        {
+            "title": "Right-aligned home",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "front-page",
+                "index",
+                "home"
+            ],
+            "name": "twentytwentyfive/template-home-vertical-header-blog"
+        },
+        {
+            "title": "News blog with sidebar",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "front-page",
+                "index",
+                "home"
+            ],
+            "name": "twentytwentyfive/template-home-with-sidebar-news-blog"
+        },
+        {
+            "title": "Photo blog page",
+            "description": "",
+            "viewportWidth": 1400,
+            "templateTypes": [
+                "page"
+            ],
+            "name": "twentytwentyfive/template-page-photo-blog"
+        },
+        {
+            "title": "Right-aligned page",
+            "description": "",
+            "viewportWidth": 1400,
+            "templateTypes": [
+                "page"
+            ],
+            "name": "twentytwentyfive/template-page-vertical-header-blog"
+        },
+        {
+            "title": "News blog query loop",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfive/template-query-loop-news-blog"
+        },
+        {
+            "title": "Photo blog posts",
+            "description": "A list of posts, 3 columns, with only featured images.",
+            "viewportWidth": 1400,
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentyfive/template-query-loop-photo-blog"
+        },
+        {
+            "title": "Text blog query loop",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfive/template-query-loop-text-blog"
+        },
+        {
+            "title": "Right-aligned query loop",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfive/template-query-loop-vertical-header-blog"
+        },
+        {
+            "title": "List of posts, 1 column",
+            "description": "A list of posts, 1 column, with featured image and post date.",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentyfive/template-query-loop"
+        },
+        {
+            "title": "News blog search results",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "search"
+            ],
+            "name": "twentytwentyfive/template-search-news-blog"
+        },
+        {
+            "title": "Photo blog search results",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "search"
+            ],
+            "name": "twentytwentyfive/template-search-photo-blog"
+        },
+        {
+            "title": "Text blog search results",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "search"
+            ],
+            "name": "twentytwentyfive/template-search-text-blog"
+        },
+        {
+            "title": "Right-aligned blog, search",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "search"
+            ],
+            "name": "twentytwentyfive/template-search-vertical-header-blog"
+        },
+        {
+            "title": "Post with left-aligned content",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "posts",
+                "single"
+            ],
+            "name": "twentytwentyfive/post-with-left-aligned-content"
+        },
+        {
+            "title": "News blog single post with sidebar",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "posts",
+                "single"
+            ],
+            "name": "twentytwentyfive/template-single-news-blog"
+        },
+        {
+            "title": "Offset post without featured image",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "posts",
+                "single"
+            ],
+            "name": "twentytwentyfive/template-single-offset"
+        },
+        {
+            "title": "Photo blog single post",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "posts",
+                "single"
+            ],
+            "name": "twentytwentyfive/template-single-photo-blog"
+        },
+        {
+            "title": "Text blog single post",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "posts",
+                "single"
+            ],
+            "name": "twentytwentyfive/template-single-text-blog"
+        },
+        {
+            "title": "Right-aligned single post",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "posts",
+                "single"
+            ],
+            "name": "twentytwentyfive/template-single-vertical-header-blog"
+        },
+        {
+            "title": "2 columns with avatar",
+            "description": "Two columns with testimonials and avatars.",
+            "categories": [
+                "testimonials"
+            ],
+            "keywords": [
+                "testimonial"
+            ],
+            "name": "twentytwentyfive/testimonials-2-col"
+        },
+        {
+            "title": "3 column layout with 6 testimonials",
+            "description": "A section with three columns and two rows, each containing a testimonial and citation.",
+            "categories": [
+                "testimonials"
+            ],
+            "keywords": [
+                "testimonial"
+            ],
+            "name": "twentytwentyfive/testimonials-6-col"
+        },
+        {
+            "title": "Review with large image on right",
+            "description": "A testimonial with a large image on the right.",
+            "categories": [
+                "testimonials"
+            ],
+            "keywords": [
+                "testimonial"
+            ],
+            "name": "twentytwentyfive/testimonials-large"
+        },
+        {
+            "title": "FAQs",
+            "description": "A FAQs section with a FAQ heading and list of questions and answers.",
+            "viewportWidth": 1400,
+            "categories": [
+                "text",
+                "about"
+            ],
+            "keywords": [
+                "faq",
+                "about",
+                "frequently",
+                "asked",
+                "questions"
+            ],
+            "name": "twentytwentyfive/text-faqs"
+        },
+        {
+            "title": "Vertical site header",
+            "description": "Vertical site header with site title and navigation.",
+            "viewportWidth": 300,
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/vertical-header"
+            ],
+            "name": "twentytwentyfive/vertical-header"
+        }
+    ],
+    "rest": {
+        "stylesheet": "hyscribe-fixture-child",
+        "template": "twentytwentyfive",
+        "requires_php": "7.2",
+        "requires_wp": "6.7",
+        "textdomain": "hyscribe-fixture-child",
+        "version": "1.0",
+        "screenshot": "%siteurl%/wp-content/themes/hyscribe-fixture-child/screenshot.png",
+        "author": {
+            "raw": "HyScaler",
+            "rendered": "<a href=\"https://hyscaler.com\">HyScaler</a>"
+        },
+        "author_uri": {
+            "raw": "https://hyscaler.com",
+            "rendered": "https://hyscaler.com"
+        },
+        "description": {
+            "raw": "A child of Twenty Twenty-Five that HyScribe's tests use to check the lookup of a child block theme: its own templates, parts, patterns and style variations over the parent's.",
+            "rendered": "A child of Twenty Twenty-Five that HyScribe&#8217;s tests use to check the lookup of a child block theme: its own templates, parts, patterns and style variations over the parent&#8217;s."
+        },
+        "name": {
+            "raw": "HyScribe Fixture Child",
+            "rendered": "HyScribe Fixture Child"
+        },
+        "tags": {
+            "raw": [
+                "block-patterns",
+                "full-site-editing",
+                "style-variations"
+            ],
+            "rendered": "block-patterns, full-site-editing, style-variations"
+        },
+        "theme_uri": {
+            "raw": "https://github.com/hyscaler/HyScribe",
+            "rendered": "https://github.com/hyscaler/HyScribe"
+        },
+        "status": "active",
+        "theme_supports": {
+            "align-wide": false,
+            "automatic-feed-links": true,
+            "block-templates": true,
+            "block-template-parts": false,
+            "custom-background": false,
+            "custom-header": false,
+            "custom-logo": false,
+            "customize-selective-refresh-widgets": false,
+            "dark-editor-style": false,
+            "disable-custom-colors": false,
+            "disable-custom-font-sizes": false,
+            "disable-custom-gradients": false,
+            "disable-layout-styles": false,
+            "editor-color-palette": false,
+            "editor-font-sizes": false,
+            "editor-gradient-presets": false,
+            "editor-spacing-sizes": false,
+            "editor-styles": true,
+            "html5": [
+                "comment-form",
+                "comment-list",
+                "search-form",
+                "gallery",
+                "caption",
+                "style",
+                "script"
+            ],
+            "formats": [
+                "standard",
+                "aside",
+                "audio",
+                "chat",
+                "gallery",
+                "image",
+                "link",
+                "quote",
+                "status",
+                "video"
+            ],
+            "post-thumbnails": true,
+            "responsive-embeds": true,
+            "title-tag": false,
+            "wp-block-styles": false
+        },
+        "is_block_theme": true,
+        "stylesheet_uri": "%siteurl%/wp-content/themes/hyscribe-fixture-child",
+        "template_uri": "%siteurl%/wp-content/themes/twentytwentyfive",
+        "default_template_types": [
+            {
+                "title": "Index",
+                "description": "Used as a fallback template for all pages when a more specific template is not defined.",
+                "slug": "index"
+            },
+            {
+                "title": "Blog Home",
+                "description": "Displays the latest posts as either the site homepage or as the \"Posts page\" as defined under reading settings. If it exists, the Front Page template overrides this template when posts are shown on the homepage.",
+                "slug": "home"
+            },
+            {
+                "title": "Front Page",
+                "description": "Displays your site's homepage, whether it is set to display latest posts or a static page. The Front Page template takes precedence over all templates.",
+                "slug": "front-page"
+            },
+            {
+                "title": "Single Entries",
+                "description": "Displays any single entry, such as a post or a page. This template will serve as a fallback when a more specific template (e.g. Single Post, Page, or Attachment) cannot be found.",
+                "slug": "singular"
+            },
+            {
+                "title": "Single Posts",
+                "description": "Displays a single post on your website unless a custom template has been applied to that post or a dedicated template exists.",
+                "slug": "single"
+            },
+            {
+                "title": "Pages",
+                "description": "Displays a static page unless a custom template has been applied to that page or a dedicated template exists.",
+                "slug": "page"
+            },
+            {
+                "title": "All Archives",
+                "description": "Displays any archive, including posts by a single author, category, tag, taxonomy, custom post type, and date. This template will serve as a fallback when more specific templates (e.g. Category or Tag) cannot be found.",
+                "slug": "archive"
+            },
+            {
+                "title": "Author Archives",
+                "description": "Displays a single author's post archive. This template will serve as a fallback when a more specific template (e.g. Author: Admin) cannot be found.",
+                "slug": "author"
+            },
+            {
+                "title": "Category Archives",
+                "description": "Displays a post category archive. This template will serve as a fallback when a more specific template (e.g. Category: Recipes) cannot be found.",
+                "slug": "category"
+            },
+            {
+                "title": "Taxonomy",
+                "description": "Displays a custom taxonomy archive. Like categories and tags, taxonomies have terms which you use to classify things. For example: a taxonomy named \"Art\" can have multiple terms, such as \"Modern\" and \"18th Century.\" This template will serve as a fallback when a more specific template (e.g. Taxonomy: Art) cannot be found.",
+                "slug": "taxonomy"
+            },
+            {
+                "title": "Date Archives",
+                "description": "Displays a post archive when a specific date is visited (e.g., example.com/2023/).",
+                "slug": "date"
+            },
+            {
+                "title": "Tag Archives",
+                "description": "Displays a post tag archive. This template will serve as a fallback when a more specific template (e.g. Tag: Pizza) cannot be found.",
+                "slug": "tag"
+            },
+            {
+                "title": "Attachment Pages",
+                "description": "Displays when a visitor views the dedicated page that exists for any media attachment.",
+                "slug": "attachment"
+            },
+            {
+                "title": "Search Results",
+                "description": "Displays when a visitor performs a search on your website.",
+                "slug": "search"
+            },
+            {
+                "title": "Privacy Policy",
+                "description": "Displays your site's Privacy Policy page.",
+                "slug": "privacy-policy"
+            },
+            {
+                "title": "Page: 404",
+                "description": "Displays when a visitor views a non-existent page, such as a dead link or a mistyped URL.",
+                "slug": "404"
+            },
+            {
+                "title": "Post Format: Standard",
+                "description": "Displays the Standard post format archive.",
+                "slug": "taxonomy-post_format-post-format-standard"
+            },
+            {
+                "title": "Post Format: Aside",
+                "description": "Displays the Aside post format archive.",
+                "slug": "taxonomy-post_format-post-format-aside"
+            },
+            {
+                "title": "Post Format: Chat",
+                "description": "Displays the Chat post format archive.",
+                "slug": "taxonomy-post_format-post-format-chat"
+            },
+            {
+                "title": "Post Format: Gallery",
+                "description": "Displays the Gallery post format archive.",
+                "slug": "taxonomy-post_format-post-format-gallery"
+            },
+            {
+                "title": "Post Format: Link",
+                "description": "Displays the Link post format archive.",
+                "slug": "taxonomy-post_format-post-format-link"
+            },
+            {
+                "title": "Post Format: Image",
+                "description": "Displays the Image post format archive.",
+                "slug": "taxonomy-post_format-post-format-image"
+            },
+            {
+                "title": "Post Format: Quote",
+                "description": "Displays the Quote post format archive.",
+                "slug": "taxonomy-post_format-post-format-quote"
+            },
+            {
+                "title": "Post Format: Status",
+                "description": "Displays the Status post format archive.",
+                "slug": "taxonomy-post_format-post-format-status"
+            },
+            {
+                "title": "Post Format: Video",
+                "description": "Displays the Video post format archive.",
+                "slug": "taxonomy-post_format-post-format-video"
+            },
+            {
+                "title": "Post Format: Audio",
+                "description": "Displays the Audio post format archive.",
+                "slug": "taxonomy-post_format-post-format-audio"
+            }
+        ],
+        "default_template_part_areas": [
+            {
+                "area": "uncategorized",
+                "label": "General",
+                "description": "General templates often perform a specific role like displaying post content, and are not tied to any particular area.",
+                "icon": "layout",
+                "area_tag": "div"
+            },
+            {
+                "area": "header",
+                "label": "Header",
+                "description": "The Header template defines a page area that typically contains a title, logo, and main navigation.",
+                "icon": "header",
+                "area_tag": "header"
+            },
+            {
+                "area": "footer",
+                "label": "Footer",
+                "description": "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
+                "icon": "footer",
+                "area_tag": "footer"
+            },
+            {
+                "area": "navigation-overlay",
+                "label": "Navigation Overlay",
+                "description": "The Navigation Overlay template defines an overlay area that typically contains navigation links and can be toggled open and closed.",
+                "icon": "navigation-overlay",
+                "area_tag": "div"
+            }
+        ]
+    },
+    "post_formats": [
+        "aside",
+        "audio",
+        "chat",
+        "gallery",
+        "image",
+        "link",
+        "quote",
+        "status",
+        "video"
+    ],
+    "block_styles_support": false,
+    "styles": [
+        {
+            "block": null,
+            "handle": "twentytwentyfive-style",
+            "src": "style.min.css",
+            "ver": "1.0",
+            "parent": true
+        }
+    ],
+    "template_files": [
+        "404",
+        "child-wide"
+    ],
+    "part_files": [
+        "footer",
+        "child-footer"
+    ],
+    "theme_features": [
+        "core-block-patterns",
+        "post-thumbnails",
+        "responsive-embeds",
+        "editor-styles",
+        "html5",
+        "automatic-feed-links",
+        "widgets-block-editor",
+        "block-templates",
+        "post-formats",
+        "editor-style"
+    ],
+    "themes_screen": {
+        "id": "hyscribe-fixture-child",
+        "name": "HyScribe Fixture Child",
+        "description": "A child of Twenty Twenty-Five that HyScribe&#8217;s tests use to check the lookup of a child block theme: its own templates, parts, patterns and style variations over the parent&#8217;s.",
+        "author": "HyScaler",
+        "authorAndUri": "<a href=\"https://hyscaler.com\">HyScaler</a>",
+        "tags": "Block Editor Patterns, Site Editor, Style Variations",
+        "version": "1.0"
+    },
+    "block_variations": {
+        "core/template-part": [
+            {
+                "name": "area_header",
+                "title": "Header",
+                "description": "The Header template defines a page area that typically contains a title, logo, and main navigation.",
+                "attributes": {
+                    "area": "header"
+                },
+                "scope": [],
+                "icon": "header"
+            },
+            {
+                "name": "area_footer",
+                "title": "Footer",
+                "description": "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
+                "attributes": {
+                    "area": "footer"
+                },
+                "scope": [],
+                "icon": "footer"
+            },
+            {
+                "name": "instance_footer",
+                "title": "Footer",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer",
+                    "theme": "hyscribe-fixture-child",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer",
+                        "theme": "hyscribe-fixture-child",
+                        "area": "footer"
+                    }
+                }
+            },
+            {
+                "name": "instance_child-footer",
+                "title": "Child Footer",
+                "description": "1",
+                "attributes": {
+                    "slug": "child-footer",
+                    "theme": "hyscribe-fixture-child",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "child-footer",
+                        "theme": "hyscribe-fixture-child",
+                        "area": "footer"
+                    }
+                }
+            },
+            {
+                "name": "instance_sidebar",
+                "title": "Sidebar",
+                "description": "1",
+                "attributes": {
+                    "slug": "sidebar",
+                    "theme": "hyscribe-fixture-child",
+                    "area": "uncategorized"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "layout",
+                "example": {
+                    "attributes": {
+                        "slug": "sidebar",
+                        "theme": "hyscribe-fixture-child",
+                        "area": "uncategorized"
+                    }
+                }
+            },
+            {
+                "name": "instance_header",
+                "title": "header",
+                "description": "1",
+                "attributes": {
+                    "slug": "header",
+                    "theme": "hyscribe-fixture-child",
+                    "area": "uncategorized"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "layout",
+                "example": {
+                    "attributes": {
+                        "slug": "header",
+                        "theme": "hyscribe-fixture-child",
+                        "area": "uncategorized"
+                    }
+                }
+            },
+            {
+                "name": "instance_footer-newsletter",
+                "title": "Footer Newsletter",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer-newsletter",
+                    "theme": "hyscribe-fixture-child",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer-newsletter",
+                        "theme": "hyscribe-fixture-child",
+                        "area": "footer"
+                    }
+                }
+            },
+            {
+                "name": "instance_footer-columns",
+                "title": "Footer Columns",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer-columns",
+                    "theme": "hyscribe-fixture-child",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer-columns",
+                        "theme": "hyscribe-fixture-child",
+                        "area": "footer"
+                    }
+                }
+            },
+            {
+                "name": "instance_vertical-header",
+                "title": "Vertical site header",
+                "description": "1",
+                "attributes": {
+                    "slug": "vertical-header",
+                    "theme": "hyscribe-fixture-child",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "vertical-header",
+                        "theme": "hyscribe-fixture-child",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_header-large-title",
+                "title": "Header with large title",
+                "description": "1",
+                "attributes": {
+                    "slug": "header-large-title",
+                    "theme": "hyscribe-fixture-child",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header-large-title",
+                        "theme": "hyscribe-fixture-child",
+                        "area": "header"
+                    }
+                }
+            }
+        ],
+        "core/navigation-link": [
+            {
+                "name": "post",
+                "title": "Post link",
+                "description": " ",
+                "attributes": {
+                    "type": "post",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "page",
+                "title": "Page link",
+                "description": " ",
+                "attributes": {
+                    "type": "page",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "category",
+                "title": "Category link",
+                "description": " ",
+                "attributes": {
+                    "type": "category",
+                    "kind": "taxonomy"
+                }
+            },
+            {
+                "name": "tag",
+                "title": "Tag link",
+                "description": " ",
+                "attributes": {
+                    "type": "tag",
+                    "kind": "taxonomy"
+                }
+            },
+            {
+                "name": "post_format",
+                "title": "Post Format Link",
+                "description": "A link to a post format",
+                "attributes": {
+                    "type": "post_format",
+                    "kind": "taxonomy"
+                }
+            }
+        ]
+    },
+    "binding_sources": [
+        {
+            "name": "twentytwentyfive/format",
+            "label": "Post format name",
+            "uses_context": null
+        }
+    ]
+}

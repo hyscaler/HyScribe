@@ -11,6 +11,12 @@ First-party theme ports, one folder per WordPress theme slug (docs/EXTENSIONS.md
 
 Never edit these files by hand; re-export them when the pinned WordPress version changes.
 
+## Child themes
+
+A child block theme is a folder of its own files and the export's data: its `style.css` names its parent in `Template:`, and HyScribe looks a file up in the child first and then in the parent, as PHP does (`stylesheet` over `template`). Its `theme.json` is merged over the parent's, its style variations add to the parent's (a parent file of a name the child has is left out), and its `patterns.json`, `styles.json` and `registered.json` are the export's with the child active, so they hold what the parent registers too. Only the child's own files are served at its URL; the parent's are at the parent's.
+
+The one child HyScribe has is a test fixture, `hyscribe-fixture-child` (10.3), a child of Twenty Twenty-Five. It is not a shipped theme, so it is not in this folder: its source is `reference/themes/fixtures/hyscribe-fixture-child/` (what the oracle mounts), its export `fixtures/themes/hyscribe-fixture-child/` (`reference/themes/export.sh hyscribe-fixture-child`), and the binary embeds it only with the `fixture-themes` feature of `hyscribe-render`, which the tests of the crates that read themes switch on. A shipped build lists the four themes above and no more.
+
 ## Pinned themes
 
 A theme WordPress 7.1.3 no longer bundles is pinned from wordpress.org at its latest release: `pinned.tsv` records each slug, version and the SHA-256 of `https://downloads.wordpress.org/theme/<slug>.<version>.zip`. `reference/themes/pin.sh` downloads the archives, checks each against its checksum before unpacking, and unpacks it into its own new folder, `target/pinned-themes/<slug>`, which `reference/default-install/php.sh` mounts read only into the PHP oracle, so the export, the goldens and the theme files golden read the theme as PHP runs it. HyScribe's build (`crates/hyscribe-assets/build.rs`) verifies and unpacks the same archive for the files' times and digests (`HYSCRIBE_THEME_ZIPS=<folder>` for offline builds). Nothing from an archive is run on the host.

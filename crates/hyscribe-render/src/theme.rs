@@ -2,7 +2,9 @@
 
 //! Block themes as data (docs/EXTENSIONS.md): templates, template parts and
 //! patterns. The embedded themes, Twenty Twenty-Five (the default install's)
-//! among them, are built in; each port lives in `themes/<slug>/`.
+//! among them, are built in; each port lives in `themes/<slug>/`. A child
+//! theme (`Template:` in its `style.css`) has only its own files: lookups go
+//! to it first and then to its parent, as PHP's do.
 
 use std::collections::HashMap;
 
@@ -30,6 +32,21 @@ impl Data {
             .iter()
             .find(|(name, _, _)| *name == path)
             .map(|(_, content_type, bytes)| (*content_type, *bytes))
+    }
+
+    /// The embedded theme this one is a child of: the one `Template` in its
+    /// `style.css` names, when it names another.
+    fn parent(&self) -> Option<&'static Data> {
+        let template = header(self.style_css(), "Template");
+        THEMES
+            .iter()
+            .find(|data| data.slug == template && data.slug != self.slug)
+    }
+
+    /// The text of the theme's `style.css`.
+    fn style_css(&self) -> &'static str {
+        let css = self.file("style.css").map_or(&[][..], |(_, bytes)| bytes);
+        std::str::from_utf8(css).unwrap_or_default()
     }
 
     /// The names (without folder and extension) and contents of the theme's
@@ -65,6 +82,21 @@ pub fn screen_entry(slug: &str) -> Option<Value> {
     registered.get_str("themes_screen").cloned()
 }
 
+/// The template of the embedded theme `slug`, `get_template()`: its
+/// parent's slug when it is a child theme, else its own.
+pub fn template_of(slug: &str) -> Option<&'static str> {
+    let data = THEMES.iter().find(|data| data.slug == slug)?;
+    Some(data.parent().map_or(data.slug, |parent| parent.slug))
+}
+
+/// The `Theme Name` of the parent of the embedded child theme `slug`, none
+/// for a theme that is no child.
+pub fn parent_name(slug: &str) -> Option<String> {
+    let data = THEMES.iter().find(|data| data.slug == slug)?;
+    let parent = data.parent()?;
+    Some(header(parent.style_css(), "Theme Name"))
+}
+
 /// The embedded theme `slug` names, or else the default, as WordPress
 /// falls back to its default theme.
 pub fn resolve(slug: &str) -> &'static str {
@@ -81,11 +113,30 @@ pub fn theme_file(slug: &str, path: &str) -> Option<(&'static str, &'static [u8]
 }
 
 /// The theme's style variations, `WP_Theme_JSON_Resolver::get_style_variations()`
-/// in path order: its `styles/` files that are not for a block type.
-pub(crate) fn style_variations(data: &Data) -> impl Iterator<Item = Value> {
-    data.files
-        .iter()
-        .filter(|(name, _, _)| name.starts_with("styles/") && name.ends_with(".json"))
+/// in path order: its `styles/` files that are not for a block type, and
+/// those of its parent's that a child has no file of the same name for. A
+/// path starts with the theme's slug, as PHP's start with its folder.
+pub(crate) fn style_variations(theme: &Theme) -> impl Iterator<Item = Value> {
+    let files = |data: &'static Data| {
+        data.files
+            .iter()
+            .filter(|(name, _, _)| name.starts_with("styles/") && name.ends_with(".json"))
+            .map(move |(name, _, bytes)| {
+                let base = name.rsplit('/').next().unwrap_or(name);
+                (base, format!("{}/{name}", data.slug), *bytes)
+            })
+    };
+    let mut found: Vec<(&str, String, &[u8])> = files(theme.data).collect();
+    if let Some(parent) = theme.parent {
+        let own: Vec<&str> = found.iter().map(|(base, _, _)| *base).collect();
+        let inherited: Vec<_> = files(parent)
+            .filter(|(base, _, _)| !own.contains(base))
+            .collect();
+        found.extend(inherited);
+    }
+    found.sort_by(|a, b| a.1.cmp(&b.1));
+    found
+        .into_iter()
         .filter_map(|(_, _, bytes)| json_decode(bytes))
         .filter(|variation| variation.get_str("blockTypes").is_none())
 }
@@ -100,8 +151,11 @@ pub(crate) struct OwnStyle {
     /// The block whose rendering enqueues it, `None` for `wp_enqueue_scripts`.
     pub(crate) block: Option<String>,
     pub(crate) handle: String,
-    /// Its path in the theme's folder.
+    /// Its path in the folder of the theme named by `theme`.
     pub(crate) src: String,
+    /// The slug of the theme whose folder has it: a child theme enqueues
+    /// its parent's stylesheet from the parent's URL.
+    pub(crate) theme: &'static str,
     pub(crate) css: &'static str,
     /// `ver`; `None` for the WordPress version.
     pub(crate) version: Option<String>,
@@ -110,8 +164,13 @@ pub(crate) struct OwnStyle {
 /// A block theme.
 #[derive(Debug)]
 pub struct Theme {
+    /// The theme's stylesheet, a child theme's own slug.
     pub(crate) slug: &'static str,
+    /// The theme's template, its parent's slug for a child theme.
+    pub(crate) template: &'static str,
     pub(crate) data: &'static Data,
+    /// The theme this one is a child of.
+    pub(crate) parent: Option<&'static Data>,
     pub(crate) templates: HashMap<&'static str, &'static [u8]>,
     pub(crate) parts: HashMap<&'static str, &'static [u8]>,
     /// The area of each template part, from `theme.json`.
@@ -167,7 +226,11 @@ fn with_user_styles(slug: &str, user: Option<&[u8]>, styles: &[(String, String)]
         .iter()
         .find(|data| data.slug == slug)
         .unwrap_or(&THEMES[0]);
-    let theme_json = data.file("theme.json").map_or(&[][..], |(_, bytes)| bytes);
+    let parent = data.parent();
+    // `WP_Theme::get_file_path( 'theme.json' )`: the child's own file, else
+    // its parent's, which a child's own is merged over.
+    let own_json = data.file("theme.json").map(|(_, bytes)| bytes);
+    let parent_json = parent.and_then(|parent| parent.file("theme.json").map(|(_, bytes)| bytes));
     let blocks = registered_blocks(REGISTERED_BLOCKS);
     let registered = block_styles(data.registered);
     let mut block_styles: Vec<(String, String)> = registered
@@ -180,7 +243,7 @@ fn with_user_styles(slug: &str, user: Option<&[u8]>, styles: &[(String, String)]
         .filter(|(_, _, css)| !css.is_empty())
         .map(|(block, _, css)| (block, css))
         .collect();
-    let own = own_styles(data);
+    let own = own_styles(data, parent);
     let theme_styles = block_styles_support(data.registered);
     let mut style_handles: HashMap<String, Vec<String>> = blocks
         .iter()
@@ -199,21 +262,35 @@ fn with_user_styles(slug: &str, user: Option<&[u8]>, styles: &[(String, String)]
                 .push(style.handle.clone());
         }
     }
+    // The parent's files first, which the child's of the same name replace.
+    let inherited = |folder| {
+        parent
+            .into_iter()
+            .flat_map(move |p| p.folder(folder, ".html"))
+    };
+    let global = GlobalStyles::resolve(&Sources {
+        core: CORE_THEME_JSON,
+        blocks: &blocks,
+        block_styles: &block_styles,
+        theme: Some(own_json.or(parent_json).unwrap_or_default()),
+        parent_theme: own_json.and(parent_json),
+        theme_styles: &style_partials(data.styles),
+        user,
+    });
     Theme {
         slug: data.slug,
+        template: parent.map_or(data.slug, |parent| parent.slug),
         data,
-        templates: data.folder("templates", ".html").collect(),
-        parts: data.folder("parts", ".html").collect(),
-        areas: part_areas(theme_json),
+        parent,
+        templates: inherited("templates")
+            .chain(data.folder("templates", ".html"))
+            .collect(),
+        parts: inherited("parts")
+            .chain(data.folder("parts", ".html"))
+            .collect(),
+        areas: part_areas(global.list("templateParts")),
         patterns: patterns(data.patterns),
-        global: GlobalStyles::resolve(&Sources {
-            core: CORE_THEME_JSON,
-            blocks: &blocks,
-            block_styles: &block_styles,
-            theme: Some(theme_json),
-            theme_styles: &style_partials(data.styles),
-            user,
-        }),
+        global,
         style_handles,
         inline_block_styles,
         styles: own,
@@ -224,8 +301,9 @@ fn with_user_styles(slug: &str, user: Option<&[u8]>, styles: &[(String, String)]
 }
 
 /// `registered.json`'s `styles`: the stylesheets of the theme's files it
-/// enqueues, with their contents.
-fn own_styles(data: &Data) -> Vec<OwnStyle> {
+/// enqueues, with their contents; those the export marks `parent` are files
+/// of the child's parent.
+fn own_styles(data: &'static Data, parent: Option<&'static Data>) -> Vec<OwnStyle> {
     let root = json_decode(data.registered).unwrap_or_default();
     let text = |value: Option<&Value>| {
         let bytes = value.and_then(Value::as_bytes)?;
@@ -237,12 +315,17 @@ fn own_styles(data: &Data) -> Vec<OwnStyle> {
         .iter()
         .filter_map(|(_, style)| {
             let src = text(style.get_str("src"))?;
-            let css = data.file(&src).map_or(&[][..], |(_, bytes)| bytes);
+            let from = match style.get_str("parent") {
+                Some(Value::Bool(true)) => parent.unwrap_or(data),
+                _ => data,
+            };
+            let css = from.file(&src).map_or(&[][..], |(_, bytes)| bytes);
             Some(OwnStyle {
                 block: text(style.get_str("block")),
                 handle: text(style.get_str("handle"))?,
                 css: std::str::from_utf8(css).unwrap_or_default(),
                 version: text(style.get_str("ver")),
+                theme: from.slug,
                 src,
             })
         })
@@ -326,7 +409,7 @@ impl Theme {
     /// `WP_Theme_JSON_Resolver::get_style_variations()`: the theme's style
     /// variations as raw data, each titled.
     pub fn style_variations(&self) -> Vec<Value> {
-        style_variations(self.data)
+        style_variations(self)
             .map(|variation| self.global.theme_json(variation))
             .collect()
     }
@@ -352,7 +435,7 @@ impl Theme {
     pub fn editor_styles(&self) -> Vec<(&str, String, &str)> {
         let own = self.styles.iter().filter(|style| style.block.is_some());
         own.map(|style| {
-            let src = format!("/wp-content/themes/{}/{}", self.slug, style.src);
+            let src = format!("/wp-content/themes/{}/{}", style.theme, style.src);
             (
                 style.handle.as_str(),
                 src,
@@ -377,18 +460,14 @@ impl Theme {
     /// `get_page_templates( null, $post_type )`: the slug and title of each
     /// of `theme.json`'s custom templates for `post_type`, by title.
     pub fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {
-        custom_templates(self.theme_json(), post_type)
+        custom_templates(self.global.list("customTemplates"), post_type)
     }
 
-    /// The list `name` of the theme's `theme.json`, such as
-    /// `customTemplates` or `templateParts`.
+    /// The list `name` of the theme's `theme.json` (a child's merged over
+    /// its parent's), such as `customTemplates` or `templateParts`.
     pub fn theme_json_list(&self, name: &str) -> Vec<Value> {
-        let root = json_decode(self.theme_json()).unwrap_or(Value::Null);
-        let list = root.get_str(name).and_then(Value::as_array);
-        list.unwrap_or_default()
-            .iter()
-            .map(|(_, item)| item.clone())
-            .collect()
+        let list = self.global.list(name);
+        list.iter().map(|(_, item)| item.clone()).collect()
     }
 
     /// The theme's `Theme Name` header.
@@ -396,25 +475,55 @@ impl Theme {
         header(self.style_css(), "Theme Name")
     }
 
-    /// The theme's `theme.json`.
-    fn theme_json(&self) -> &'static [u8] {
-        self.data
-            .file("theme.json")
-            .map_or(&[][..], |(_, bytes)| bytes)
-    }
-
     /// The text of the theme's `style.css`.
     fn style_css(&self) -> &'static str {
-        let css = self
-            .data
-            .file("style.css")
-            .map_or(&[][..], |(_, bytes)| bytes);
-        std::str::from_utf8(css).unwrap_or_default()
+        self.data.style_css()
     }
 
     /// The theme's slug, its `stylesheet`.
     pub fn slug(&self) -> &str {
         self.slug
+    }
+
+    /// The theme's `template`, `get_template()`: its parent's slug when it
+    /// is a child theme, else its own.
+    pub fn template_slug(&self) -> &str {
+        self.template
+    }
+
+    /// The URL of a file of the theme under the site at `siteurl`,
+    /// `get_theme_file_uri()`: the child's file if it has one, else the
+    /// template's.
+    pub fn file_uri(&self, siteurl: &str, path: &str) -> String {
+        let folder = match self.data.file(path) {
+            Some(_) => self.slug,
+            None => self.template,
+        };
+        format!("{siteurl}/wp-content/themes/{folder}/{path}")
+    }
+
+    /// The theme's `template_files` or `part_files`: the slugs of the
+    /// child's own files in the order PHP lists them, then its parent's
+    /// that the child has no file of the same name for.
+    pub fn file_slugs(&self, list: &str) -> Vec<String> {
+        let names = |registered: &Value| {
+            let files = registered.get_str(list).and_then(Value::as_array);
+            let files = files.unwrap_or_default().iter();
+            let text = |(_, name): &(Key, Value)| {
+                String::from_utf8_lossy(&name.to_php_string()).into_owned()
+            };
+            files.map(text).collect::<Vec<String>>()
+        };
+        let mut slugs = names(&self.registered);
+        if let Some(parent) = self.parent {
+            let inherited = names(&json_decode(parent.registered).unwrap_or_default());
+            let new: Vec<String> = inherited
+                .into_iter()
+                .filter(|slug| !slugs.contains(slug))
+                .collect();
+            slugs.extend(new);
+        }
+        slugs
     }
 
     /// The first of `candidates` (template slugs in hierarchy order) the
@@ -519,13 +628,9 @@ fn string<'v>(value: &'v Value, key: &str) -> Option<&'v [u8]> {
     value.get_str(key).and_then(Value::as_bytes)
 }
 
-/// The custom templates of `theme_json` for `post_type`, by title.
-fn custom_templates(theme_json: &[u8], post_type: &str) -> Vec<(String, String)> {
-    let root = json_decode(theme_json).unwrap_or(Value::Null);
-    let custom = root
-        .get_str("customTemplates")
-        .and_then(Value::as_array)
-        .unwrap_or_default();
+/// The custom templates of `theme.json`'s `customTemplates` list for
+/// `post_type`, by title.
+fn custom_templates(custom: &[(Key, Value)], post_type: &str) -> Vec<(String, String)> {
     let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let mut templates: Vec<(String, String)> = custom
         .iter()
@@ -560,12 +665,7 @@ fn custom_templates(theme_json: &[u8], post_type: &str) -> Vec<(String, String)>
 }
 
 /// `templateParts` in `theme.json`: part name to area.
-fn part_areas(theme_json: &[u8]) -> HashMap<Vec<u8>, Vec<u8>> {
-    let root = json_decode(theme_json).unwrap_or(Value::Null);
-    let parts = root
-        .get_str("templateParts")
-        .and_then(Value::as_array)
-        .unwrap_or_default();
+fn part_areas(parts: &[(Key, Value)]) -> HashMap<Vec<u8>, Vec<u8>> {
     parts
         .iter()
         .filter_map(|(_, part)| {

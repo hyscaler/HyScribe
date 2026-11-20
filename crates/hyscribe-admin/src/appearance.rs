@@ -74,6 +74,8 @@ struct Listed {
     author: String,
     author_and_uri: String,
     tags: String,
+    /// The name of the theme this one is a child of.
+    parent: Option<String>,
 }
 
 impl Listed {
@@ -91,6 +93,7 @@ impl Listed {
             author: field("author"),
             author_and_uri: field("authorAndUri"),
             tags: field("tags"),
+            parent: theme::parent_name(slug),
         }
     }
 
@@ -216,8 +219,21 @@ pub fn themes(site: &dyn PostsSite, request: &Request, asked: Notice) -> Answer 
                 ("author_and_uri", text(&theme.author_and_uri)),
                 ("tags", text(&theme.tags)),
                 ("version", text(&theme.version)),
+                (
+                    "parent",
+                    theme.parent.as_deref().map_or("false".into(), text),
+                ),
                 ("activate", string(activate)),
                 ("customize", string(customize)),
+                // The parent of the active theme cannot be deleted.
+                (
+                    "delete",
+                    if active && stylesheet != template && slug.as_bytes() == template {
+                        String::new()
+                    } else {
+                        "\"delete\":null,".into()
+                    },
+                ),
                 ("enabled", auto_update.to_string()),
                 ("active", is_active.to_string()),
             ],

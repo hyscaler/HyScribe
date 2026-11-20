@@ -47,14 +47,14 @@ const TAXONOMIES: [&str; 8] = [
 ];
 
 /// The slugs of the theme's templates or parts in the order PHP's
-/// directory iterator lists them in the oracle's theme folder.
-pub(super) fn file_slugs(theme: &Theme, kind: Kind) -> impl Iterator<Item = String> + '_ {
+/// directory iterator lists them in the oracle's theme folders, a child's
+/// own first.
+pub(super) fn file_slugs(theme: &Theme, kind: Kind) -> impl Iterator<Item = String> {
     let list = match kind {
         Kind::Template => "template_files",
         Kind::Part => "part_files",
     };
-    let names = theme.registered(list).iter();
-    names.map(|(_, name)| String::from_utf8_lossy(&name.to_php_string()).into_owned())
+    theme.file_slugs(list).into_iter()
 }
 
 /// The template post types.

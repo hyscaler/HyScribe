@@ -19,6 +19,7 @@ hyscribe-render.workspace = true
 hyscribe-theme-json.workspace = true
 
 [dev-dependencies]
+hyscribe-render = { workspace = true, features = ["fixture-themes"] }
 hyscribe-testkit.workspace = true
 sha2.workspace = true
 

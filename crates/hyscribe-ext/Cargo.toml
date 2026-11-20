@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [package]
 name = "hyscribe-ext"
-description = "The extension host: WebAssembly components under wasmtime, behind their manifest's grants (ADR 0022); a spike, not yet in the binary"
+description = "The extension host: WebAssembly components under wasmtime, behind their manifest's grants (ADR 0022)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,9 +10,13 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+hyscribe-phpser.workspace = true
 # Cranelift only (no Winch), components, no WASI, no cache on disk, no async,
 # no GC proposals, no profiling or debugging support (ADR 0022).
 wasmtime = { version = "=50.0.2", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

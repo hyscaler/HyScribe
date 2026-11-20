@@ -1008,6 +1008,7 @@ dependencies = [
 name = "hyscribe-ext"
 version = "0.1.0"
 dependencies = [
+ "hyscribe-phpser",
  "wasmtime",
 ]
 

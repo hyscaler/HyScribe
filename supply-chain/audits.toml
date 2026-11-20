@@ -223,6 +223,12 @@ user-id = 55123 # rust-lang-owner
 start = "2022-10-29"
 end = "2027-11-16"
 
+[[trusted.dlmalloc]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2020-05-19"
+end = "2027-11-18"
+
 [[trusted.find-msvc-tools]]
 criteria = "safe-to-deploy"
 user-id = 539 # Josh Stone (cuviper)
@@ -264,6 +270,12 @@ criteria = "safe-to-deploy"
 user-id = 4556 # Dirkjan Ochtman (djc)
 start = "2025-12-29"
 end = "2027-11-16"
+
+[[trusted.prettyplease]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2022-01-04"
+end = "2027-11-18"
 
 [[trusted.ring]]
 criteria = "safe-to-deploy"

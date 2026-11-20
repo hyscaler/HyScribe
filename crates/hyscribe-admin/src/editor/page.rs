@@ -10,11 +10,12 @@ use hyscribe_render::post::admin_title;
 use hyscribe_render::theme::Theme;
 
 use super::form::{self, Editing};
-use super::{EditorSite, settings};
+use super::settings;
 use crate::admin_bar::BarSite;
 use crate::assets::{Assets, Urls};
 use crate::menu::Screen;
 use crate::page::{Extras, Page, Request, admin_page_with};
+use crate::posts::PostsSite;
 
 /// The fields of the REST index the editor's site entity reads, in its order.
 pub(crate) const INDEX_FIELDS: &str = "description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front";
@@ -167,20 +168,23 @@ fn block_styles_script(theme: &Theme) -> String {
 /// What both editors' pages add to `assets`: the global stylesheet's
 /// variables, the theme's block styles, and `preloads`, the memo
 /// [`preloaded`] gives.
-pub(crate) fn editor_assets(site: &dyn EditorSite, assets: &mut Assets, preloads: &Value) {
+pub(crate) fn editor_assets(site: &dyn PostsSite, assets: &mut Assets, preloads: &Value) {
     // `enqueue_block_assets`' own styles of the theme, queued after the color scheme's.
-    for (handle, src, ver) in site.theme().editor_styles().iter().rev() {
+    for (handle, src, ver) in site.active_theme().editor_styles().iter().rev() {
         assets.register_style(handle, src, ver);
         assets.enqueue_style_after("colors", handle);
     }
-    let variables = site.theme().global_styles().stylesheet_of("variables");
+    let variables = site
+        .active_theme()
+        .global_styles()
+        .stylesheet_of("variables");
     assets.set_style_data(
         "global-styles-css-custom-properties",
         "after",
         Value::Array(vec![(Key::Int(0), crate::page::text(&variables))]),
     );
     // Added again as the editor's canvas collects its assets.
-    let css = super::assets::block_style_css(site.theme());
+    let css = super::assets::block_style_css(site.active_theme());
     let css = css.iter().map(|(_, css)| css.clone());
     let css = css
         .clone()
@@ -196,7 +200,7 @@ pub(crate) fn editor_assets(site: &dyn EditorSite, assets: &mut Assets, preloads
         String::from_utf8_lossy(&json_hex_tag(preloads))
     );
     assets.add_inline_script("wp-api-fetch", "after", &preload);
-    let script = block_styles_script(site.theme());
+    let script = block_styles_script(site.active_theme());
     assets.add_inline_script("wp-block-styles", "after", &script);
 }
 
@@ -213,7 +217,7 @@ const RICH_EDITOR: &str = include_str!("rich-editor.html");
 /// The block editor's page of `editing`, with `preloads`, the memo
 /// [`preloaded`] gives; `None` for a user the menu turns away.
 pub fn editor_page(
-    site: &dyn EditorSite,
+    site: &dyn PostsSite,
     editing: &Editing,
     preloads: &Value,
     request: &Request,
@@ -222,7 +226,7 @@ pub fn editor_page(
     let custom = form::custom_settings(site, editing);
     let settings = settings::get_block_editor_settings(site, custom, settings::Editor::Post(post));
     let edits = form::initial_edits(post);
-    let after = form::scripts_after(site.theme(), &settings, &edits, post);
+    let after = form::scripts_after(site.active_theme(), &settings, &edits, post);
     let (templates, media) =
         crate::media::enqueue_media(site, request.browser, Some((post.id, Value::Int(-1))));
     // `wp_heartbeat_set_suspension()`: the editors keep the heartbeat.

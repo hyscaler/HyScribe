@@ -1361,12 +1361,6 @@ fn site_editor_with(
     Some(Answer::from_page(page))
 }
 
-impl hyscribe_admin::editor::EditorSite for Admin<'_> {
-    fn theme(&self) -> &hyscribe_render::theme::Theme {
-        &self.site.theme
-    }
-}
-
 fn screen(
     admin: &Admin,
     path: &str,

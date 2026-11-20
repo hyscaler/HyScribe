@@ -5,22 +5,14 @@
 use hyscribe_model::Post;
 use hyscribe_phpser::{Value, bin2hex};
 use hyscribe_render::head::json_hex_tag;
-use hyscribe_render::theme::Theme;
 use sha2::{Digest, Sha256};
 
 use super::*;
 use crate::admin_bar::Browser;
 use hyscribe_testkit::{hs_admin_page, unhex};
 
-use crate::page::text;
+use crate::page::{PageSite, text};
 use crate::tests::{BROWSER, Role, first_difference};
-
-/// The active theme, as the editor reads it.
-impl EditorSite for Role {
-    fn theme(&self) -> &Theme {
-        crate::page::PageSite::active_theme(self)
-    }
-}
 
 /// The browser the golden records Chrome with.
 const CHROME: Browser = Browser {
@@ -89,8 +81,8 @@ fn editor_parts(case: &str, post: &Post) -> Vec<(String, String)> {
     let pieces: [(&str, Value); 4] = [
         ("edits", form::initial_edits(post)),
         ("categories", blocks::block_categories()),
-        ("bindings", blocks::bindings_sources(site.theme())),
-        ("blocks", blocks::server_block_settings(site.theme())),
+        ("bindings", blocks::bindings_sources(site.active_theme())),
+        ("blocks", blocks::server_block_settings(site.active_theme())),
     ];
     for (part, value) in pieces {
         parts.push((part.into(), kept(&json_hex_tag(&value))));

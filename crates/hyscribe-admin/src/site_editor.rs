@@ -10,7 +10,6 @@ use hyscribe_render::post::POST_FORMATS;
 use hyscribe_render::template_types::{DEFAULT_TYPES, default_type};
 
 use crate::assets::{Assets, Urls};
-use crate::editor::EditorSite;
 use crate::editor::form::block_scripts;
 use crate::editor::page::{INDEX_FIELDS, editor_assets};
 use crate::editor::settings::{Editor, Settings, get_block_editor_settings};
@@ -257,7 +256,7 @@ const CONTENT: &str = "\n<div class=\"edit-site\" id=\"site-editor\">\n\t\t<div 
 /// `preloads`, the memo `preloaded()` gives; `None` for a user the menu
 /// turns away.
 pub fn site_editor_page(
-    site: &dyn EditorSite,
+    site: &dyn PostsSite,
     post: Option<&Post>,
     preloads: &Value,
     request: &Request,
@@ -269,7 +268,7 @@ pub fn site_editor_page(
         custom.set(key, value);
     }
     let settings = get_block_editor_settings(site, custom, Editor::Site(post));
-    let [categories, definitions, bindings] = block_scripts(site.theme());
+    let [categories, definitions, bindings] = block_scripts(site.active_theme());
     let edit_site = format!(
         "wp.domReady( function() {{\n\t\t\twp.editSite.initializeEditor( \"site-editor\", {} );\n\t\t}} );",
         page_json(&settings)

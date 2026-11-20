@@ -6,9 +6,9 @@
 use hyscribe_phpser::{Key, Value};
 use hyscribe_render::theme::Theme;
 
-use super::EditorSite;
 use crate::assets::Assets;
 use crate::page::object;
+use crate::posts::PostsSite;
 
 /// The inline styles of the block styles the theme registers, which
 /// `enqueue_block_styles_assets()` adds to `wp-block-library`.
@@ -27,17 +27,17 @@ pub(crate) fn block_style_css(theme: &Theme) -> Vec<(Key, Value)> {
 
 /// `__unstableResolvedAssets`: `wp-edit-blocks` and what it needs, the
 /// theme's fonts, and `wp-polyfill`.
-pub(crate) fn resolved_assets(site: &dyn EditorSite) -> Value {
+pub(crate) fn resolved_assets(site: &dyn PostsSite) -> Value {
     let mut styles = Assets::new(false);
     // A theme with `theme.json` has its own reset.
     styles.style_done("wp-reset-editor-styles");
     styles.enqueue_style("wp-edit-blocks");
-    for (handle, src, ver) in site.theme().editor_styles() {
+    for (handle, src, ver) in site.active_theme().editor_styles() {
         styles.register_style(handle, &src, ver);
         styles.enqueue_style(handle);
     }
     // Nothing is added to the stylesheet for a theme without inline block styles.
-    let inline = block_style_css(site.theme());
+    let inline = block_style_css(site.active_theme());
     if !inline.is_empty() {
         styles.set_style_data("wp-block-library", "after", Value::Array(inline));
     }

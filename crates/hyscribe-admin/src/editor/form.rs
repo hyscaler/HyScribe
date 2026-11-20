@@ -8,11 +8,11 @@ use hyscribe_phpser::{Key, Value};
 use hyscribe_render::template_types::PART_AREAS;
 use hyscribe_render::theme::Theme;
 
-use super::EditorSite;
 use super::settings::Settings;
 use crate::admin_bar::{BarSite, Browser};
 use crate::list_table::wp_referer_field;
 use crate::page::{json, object, text};
+use crate::posts::PostsSite;
 
 /// The post being edited, as the view found it.
 pub struct Editing<'a> {
@@ -69,14 +69,14 @@ fn user_can_richedit(rich_editing: Option<Vec<u8>>, browser: &Browser) -> bool {
 }
 
 /// `user_can_richedit()` for the user of `site`.
-pub(crate) fn rich_editing(site: &dyn EditorSite, browser: &Browser) -> bool {
+pub(crate) fn rich_editing(site: &dyn PostsSite, browser: &Browser) -> bool {
     user_can_richedit(site.user_option("rich_editing"), browser)
 }
 
 /// The settings `edit-form-blocks.php` gives `get_block_editor_settings()`.
-pub fn custom_settings(site: &dyn EditorSite, editing: &Editing) -> Settings {
+pub fn custom_settings(site: &dyn PostsSite, editing: &Editing) -> Settings {
     let post = editing.post;
-    let templates = site.theme().page_templates(&post.post_type);
+    let templates = site.active_theme().page_templates(&post.post_type);
     let templates = match templates.is_empty() {
         true => Value::Array(Vec::new()),
         false => {
@@ -107,7 +107,7 @@ pub fn custom_settings(site: &dyn EditorSite, editing: &Editing) -> Settings {
         ("availableTemplates", templates),
         (
             "disablePostFormats",
-            Value::Bool(site.theme().post_formats().is_empty()),
+            Value::Bool(site.active_theme().post_formats().is_empty()),
         ),
         ("titlePlaceholder", text("Add title")),
         ("bodyPlaceholder", text("Type / to choose a block")),
@@ -237,7 +237,7 @@ pub fn initial_edits(post: &Post) -> Value {
 
 /// The page's `block-editor` markup, with the meta boxes area of a post
 /// with no meta boxes, for a request without a referer.
-pub fn body(site: &dyn EditorSite, editing: &Editing) -> String {
+pub fn body(site: &dyn PostsSite, editing: &Editing) -> String {
     let post = editing.post;
     let new = post.status == "auto-draft";
     let kind = if post.post_type == "page" {

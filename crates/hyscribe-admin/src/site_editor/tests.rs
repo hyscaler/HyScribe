@@ -5,6 +5,7 @@ use hyscribe_testkit::{hs_admin_page, unhex};
 
 use super::*;
 use crate::editor::blocks::{bindings_sources, block_categories, server_block_settings};
+use crate::page::PageSite;
 use crate::tests::first_difference;
 
 /// The administrator's redirects and refusals of
@@ -186,12 +187,12 @@ fn the_pages_are_php_s() {
             (
                 "bindings",
                 "for ( const source of ",
-                bindings_sources(site.theme()),
+                bindings_sources(site.active_theme()),
             ),
             (
                 "blocks",
                 "wp.blocks.unstable__bootstrapServerSideBlockDefinitions(",
-                server_block_settings(site.theme()),
+                server_block_settings(site.active_theme()),
             ),
         ];
         for (part, marker, value) in pieces {

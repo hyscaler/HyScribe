@@ -10,9 +10,9 @@ use hyscribe_phpser::{Key, Value, float_to_string, json_decode};
 use hyscribe_render::blocks::{Block, parse_blocks};
 use hyscribe_render::theme::Theme;
 
-use super::EditorSite;
 use super::blocks::{bindings_supported_attributes, block_categories};
 use crate::page::{object, text};
+use crate::posts::PostsSite;
 
 const MIME_TYPES: &[u8] = include_bytes!("../../../../wordpress/wp-includes/mime-types.json");
 const DEFAULT_EDITOR_STYLES: &str = "css/dist/block-editor/default-editor-styles.css";
@@ -65,7 +65,7 @@ fn allowed_mime_types(unfiltered: bool) -> Value {
 }
 
 /// `get_default_block_editor_settings()` with the bundled theme's supports.
-fn defaults(site: &dyn EditorSite) -> Settings {
+fn defaults(site: &dyn PostsSite) -> Settings {
     let option = |name: &str| site.option(name).unwrap_or_default();
     let names = [
         ("thumbnail", "Thumbnail"),
@@ -148,8 +148,8 @@ fn style(css: Value, kind: &str, global: bool) -> Value {
 
 /// `$settings['styles']`: the global stylesheet's parts, the theme's editor
 /// style, then `WP_Duotone::add_editor_settings()`'s.
-fn styles(site: &dyn EditorSite) -> Value {
-    let global = site.theme().global_styles();
+fn styles(site: &dyn PostsSite) -> Value {
+    let global = site.active_theme().global_styles();
     let mut styles = Vec::new();
     let parts = [
         ("variables", "presets"),
@@ -169,12 +169,15 @@ fn styles(site: &dyn EditorSite) -> Value {
         true,
     ));
     // `get_block_editor_theme_styles()`: the stylesheet `add_editor_style()` names.
-    if !site.theme().has_editor_style() {
+    if !site.active_theme().has_editor_style() {
         styles.extend(duotone_styles(global.settings()));
         return list(styles);
     }
-    let file = format!("wp-content/themes/{}/{EDITOR_STYLE}", site.theme().slug());
-    let css = hyscribe_render::theme::theme_file(site.theme().slug(), EDITOR_STYLE)
+    let file = format!(
+        "wp-content/themes/{}/{EDITOR_STYLE}",
+        site.active_theme().slug()
+    );
+    let css = hyscribe_render::theme::theme_file(site.active_theme().slug(), EDITOR_STYLE)
         .unwrap_or_default()
         .1;
     styles.push(object(vec![
@@ -347,9 +350,12 @@ fn template_slug(stored: &[u8], post_type: &str) -> String {
 
 /// `wp_get_post_content_block_attributes()`: the attributes of the first
 /// post content block of the template the post would show with.
-fn post_content_attributes(site: &dyn EditorSite, post: &Post) -> Option<Value> {
+fn post_content_attributes(site: &dyn PostsSite, post: &Post) -> Option<Value> {
     let template = site.meta(post, "_wp_page_template").unwrap_or_default();
-    content_attributes(site.theme(), &template_slug(&template, &post.post_type))
+    content_attributes(
+        site.active_theme(),
+        &template_slug(&template, &post.post_type),
+    )
 }
 
 /// The attributes of the first post content block of the theme's template
@@ -387,7 +393,7 @@ pub enum Editor<'p> {
 /// `get_block_editor_settings( $custom, $context )` for `editor`: the
 /// defaults, then `custom`, then what the theme's data and the site's
 /// options give.
-pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, editor: Editor) -> Value {
+pub fn get_block_editor_settings(site: &dyn PostsSite, custom: Settings, editor: Editor) -> Value {
     let mut settings = defaults(site);
     for (key, value) in custom.0 {
         settings.set(&String::from_utf8_lossy(&key.to_php_string()), value);
@@ -397,7 +403,7 @@ pub fn get_block_editor_settings(site: &dyn EditorSite, custom: Settings, editor
         bindings_supported_attributes(),
     );
     settings.set("styles", styles(site));
-    let mut features = site.theme().global_styles().settings().clone();
+    let mut features = site.active_theme().global_styles().settings().clone();
     // Set now, as what follows is taken out of it.
     settings.set("__experimentalFeatures", Value::Null);
     let presets = [

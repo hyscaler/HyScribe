@@ -13,7 +13,6 @@ pub mod settings;
 
 use hyscribe_auth::caps::post_type_exists;
 use hyscribe_phpser::Value;
-use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::BarSite;
 use crate::media::attachment::{AttachmentArgs, AttachmentSite};
@@ -58,12 +57,6 @@ pub fn target(site: &dyn AttachmentSite, screen: &str, query: &str) -> Option<Ta
         && post.status != "trash"
         && lock_holder(site, &post).is_none();
     editable.then(|| Target::Edit(Box::new(post)))
-}
-
-/// What the block editor reads beyond the posts screens.
-pub trait EditorSite: PostsSite {
-    /// The active theme.
-    fn theme(&self) -> &Theme;
 }
 
 /// `post-new.php` with the query `query`: the redirect of attachments to Add

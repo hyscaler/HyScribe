@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Records how the PHP oracle's web server sends each file of the active
-# theme but its PHP, as crates/hyscribe-http/tests/golden/theme-files.tsv:
+# theme but its PHP, as crates/hyscribe-http/tests/golden/theme-files.tsv
+# (theme-files-<slug>.tsv for a slug but the default's):
 #   path<TAB>status<TAB>content type<TAB>sha256 of the body<TAB>Last-Modified
 #   reference/themes/files-golden.sh [slug]   (default twentytwentyfive)
 # Needs the default install oracle running (db.sh up, then php.sh up). Only
@@ -15,6 +16,7 @@ BASE="${HYSCRIBE_PHP_URL:-http://127.0.0.1:8081}"
 SLUG="${1:-twentytwentyfive}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-http/tests/golden/theme-files.tsv"
+[ "$SLUG" = twentytwentyfive ] || OUT="${OUT%.tsv}-$SLUG.tsv"
 TMP=$(mktemp)
 HEADERS=$(mktemp)
 trap 'rm -f "$TMP" "$HEADERS"' EXIT

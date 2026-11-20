@@ -1203,9 +1203,12 @@ fn post_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     )
 }
 
-/// The post, if public and without a password, as a visitor may read it.
-pub(crate) fn public(post: Option<Post>) -> Option<Post> {
-    post.filter(|post| post.status == "publish" && post.password.is_empty())
+/// The post, if public and without a password, as a visitor may read it:
+/// an attachment is as public as its parent (`get_post_status()`).
+pub(crate) fn public(site: &dyn Site, post: Option<Post>) -> Option<Post> {
+    post.filter(|post| {
+        post.password.is_empty() && crate::attachment::post_status(site, post) == "publish"
+    })
 }
 
 /// `_block_bindings_post_data_get_value()` for `post`: `None` unless it is
@@ -1215,7 +1218,7 @@ pub(crate) fn post_data(
     post: Option<Post>,
     field: &[u8],
 ) -> Option<Vec<u8>> {
-    let post = public(post)?;
+    let post = public(context.site, post)?;
     let zone = context.zone();
     let iso = |stored: &str| esc_attr(date::format("c", stored, zone).as_bytes()).into_bytes();
     match field {

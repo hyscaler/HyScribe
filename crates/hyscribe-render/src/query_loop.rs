@@ -44,6 +44,7 @@ impl Renderer<'_> {
         self.context.query = outer;
         match id.filter(|_| enhanced_pagination) {
             Some(id) => {
+                self.assets.enqueue_style("wp-block-query");
                 let id = id.to_php_string();
                 let mut tags = TagProcessor::new(&content);
                 // Off a tag, as when there is none, set_attribute() does nothing.

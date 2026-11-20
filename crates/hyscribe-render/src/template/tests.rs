@@ -18,11 +18,9 @@ fn theme(parts: &[(&'static str, &'static [u8])], patterns: &[(&str, &str)]) -> 
             .iter()
             .map(|(slug, content)| (slug.as_bytes().to_vec(), content.as_bytes().to_vec()))
             .collect(),
-        global: twentytwentyfive().global,
         style_handles: HashMap::new(),
         inline_block_styles: Vec::new(),
-        stylesheet: "",
-        version: String::new(),
+        ..twentytwentyfive()
     }
 }
 

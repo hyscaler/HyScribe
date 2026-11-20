@@ -176,7 +176,7 @@ fn post_data_value(
 /// for the REST API, which on a public post is `footnotes`.
 fn post_meta(context: &Context<'_>, args: &Value) -> Option<Value> {
     let key = field(args, &["key"])?;
-    let post = public(context.post())?;
+    let post = public(context.site, context.post())?;
     let registered = key == b"footnotes" && matches!(post.post_type.as_str(), "post" | "page");
     if !registered {
         return None;

@@ -644,7 +644,7 @@ impl PostsSite for Admin<'_> {
         let key = format!("{prefix}capabilities");
         self.reads.reads.wait(self.site.db.users_with(&key, &names))
     }
-    fn post_formats(&self) -> &'static [&'static str] {
+    fn post_formats(&self) -> &[&'static str] {
         self.site.theme.post_formats()
     }
     fn list_posts(&self, query: &PostQuery) -> (Vec<Post>, u64) {

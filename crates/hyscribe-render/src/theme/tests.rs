@@ -65,7 +65,7 @@ fn malformed_theme_data_is_empty() {
 #[test]
 fn every_part_has_a_known_area() {
     let theme = twentytwentyfive();
-    for (slug, _) in PARTS {
+    for slug in theme.parts.keys() {
         let (_, area) = theme.part(slug.as_bytes()).unwrap();
         assert!(
             [&b"header"[..], b"footer", b"uncategorized"].contains(&area),
@@ -117,7 +117,8 @@ fn style_variations_are_read() {
 /// and after comment markers.
 #[test]
 fn reads_the_style_header() {
-    assert_eq!(twentytwentyfive().version, "1.5");
+    let theme = twentytwentyfive();
+    assert_eq!(header(theme.style_css(), "Version"), "1.5");
     assert_eq!(
         header("/*\n * version:  2.0 \nText: x\n*/", "Version"),
         "2.0"
@@ -129,15 +130,18 @@ fn reads_the_style_header() {
 #[test]
 fn twentytwentyfive_files_are_built_in() {
     assert_eq!(
-        twentytwentyfive_file("style.css"),
+        theme_file("twentytwentyfive", "style.css"),
         Some((
             "text/css",
             &include_bytes!("../../../../themes/twentytwentyfive/style.css")[..]
         ))
     );
     assert_eq!(
-        twentytwentyfive_file("assets/fonts/manrope/Manrope-VariableFont_wght.woff2")
-            .map(|(content_type, bytes)| (content_type, bytes.len())),
+        theme_file(
+            "twentytwentyfive",
+            "assets/fonts/manrope/Manrope-VariableFont_wght.woff2",
+        )
+        .map(|(content_type, bytes)| (content_type, bytes.len())),
         Some(("font/woff2", 53600))
     );
     for path in [
@@ -147,7 +151,7 @@ fn twentytwentyfive_files_are_built_in() {
         "functions.php",
         "nope.css",
     ] {
-        assert_eq!(twentytwentyfive_file(path), None, "{path}");
+        assert_eq!(theme_file("twentytwentyfive", path), None, "{path}");
     }
 }
 
@@ -159,7 +163,8 @@ fn the_theme_is_named_by_its_header() {
 /// `functions.php`'s post formats.
 #[test]
 fn post_formats_are_the_theme_s() {
-    let formats = twentytwentyfive().post_formats();
+    let theme = twentytwentyfive();
+    let formats = theme.post_formats();
     assert_eq!(formats.first(), Some(&"aside"));
     assert_eq!(formats.len(), 9);
 }
@@ -202,4 +207,110 @@ fn page_templates_are_the_custom_ones_for_the_type() {
     );
     assert_eq!(custom_templates(json, "post"), pairs(&[("a", "Ay")]));
     assert!(custom_templates(b"[]", "page").is_empty());
+}
+
+/// Every embedded theme is a theme of the folders of `themes/`, and an
+/// unknown stylesheet falls back to the default as WordPress does.
+#[test]
+fn themes_are_chosen_by_slug() {
+    let slugs: Vec<&str> = slugs().collect();
+    assert_eq!(
+        slugs,
+        ["twentytwentyfive", "twentytwentyfour", "twentytwentythree"]
+    );
+    for slug in &slugs {
+        assert_eq!(resolve(slug), *slug);
+        let theme = load(slug, None);
+        assert_eq!(theme.slug(), *slug);
+        assert!(theme.template(&["index".to_string()]).is_some(), "{slug}");
+        assert!(theme.part(b"header").is_some(), "{slug}");
+    }
+    assert_eq!(resolve("nope"), DEFAULT);
+    assert_eq!(load("nope", None).slug(), DEFAULT);
+    assert_eq!(load("twentytwentyfour", None).name(), "Twenty Twenty-Four");
+    assert_eq!(
+        load("twentytwentythree", None).name(),
+        "Twenty Twenty-Three"
+    );
+    assert_eq!(theme_file("nope", "style.css"), None);
+    assert!(theme_file("twentytwentyfour", "style.css").is_some());
+    assert_eq!(theme_file("twentytwentyfour", "patterns.json"), None);
+}
+
+/// The stylesheets a theme enqueues come from its export: Twenty
+/// Twenty-Five's own on every page, Twenty Twenty-Four's for the button
+/// block, Twenty Twenty-Three's none.
+#[test]
+fn the_themes_enqueued_stylesheets_are_read() {
+    let five = twentytwentyfive();
+    assert_eq!(five.styles.len(), 1);
+    assert_eq!(five.styles[0].block, None);
+    assert_eq!(five.styles[0].handle, "twentytwentyfive-style");
+    assert_eq!(five.styles[0].src, "style.min.css");
+    assert_eq!(five.styles[0].version.as_deref(), Some("1.5"));
+    assert_eq!(
+        five.styles[0].css.len(),
+        include_str!("../../../../themes/twentytwentyfive/style.min.css").len()
+    );
+
+    let four = load("twentytwentyfour", None);
+    assert_eq!(four.styles.len(), 1);
+    assert_eq!(four.styles[0].block.as_deref(), Some("core/button"));
+    assert_eq!(four.styles[0].src, "assets/css/button-outline.css");
+    assert!(four.styles[0].css.contains(".is-style-outline"));
+    assert_eq!(
+        four.style_handles["core/button"],
+        ["wp-block-button", "twentytwentyfour-button-style-outline"]
+    );
+    assert_eq!(five.style_handles["core/button"], ["wp-block-button"]);
+    // The query block's handle is enqueued by an interactive query only.
+    assert!(five.style_handles["core/query"].is_empty());
+    assert!(load("twentytwentythree", None).styles.is_empty());
+}
+
+/// Post formats come from the export, only the known ones, in WordPress's
+/// order.
+#[test]
+fn post_formats_are_exported() {
+    assert!(load("twentytwentyfour", None).post_formats().is_empty());
+    let listed = br#"{"post_formats":["video","bogus","aside",7]}"#;
+    assert_eq!(post_formats(listed), ["aside", "video"]);
+    assert!(post_formats(b"{}").is_empty());
+}
+
+/// An export with a style missing its handle or source skips it, and one
+/// whose file is not in the theme has no CSS.
+#[test]
+fn malformed_enqueued_styles_are_skipped() {
+    let data = Data {
+        slug: "t",
+        files: &[],
+        patterns: b"",
+        styles: b"",
+        registered: br#"{"styles":[{"src":"a.css"},{"handle":"h"},{"handle":"x","src":"gone.css","block":null,"ver":false}]}"#,
+    };
+    let styles = own_styles(&data);
+    assert_eq!(styles.len(), 1);
+    assert_eq!((styles[0].handle.as_str(), styles[0].css), ("x", ""));
+    assert_eq!((&styles[0].block, &styles[0].version), (&None, &None));
+}
+
+/// A theme folder lists the files of its folder with the extension, and
+/// nothing named alike.
+#[test]
+fn a_folder_lists_its_own_files() {
+    let data = Data {
+        slug: "t",
+        files: &[
+            ("templates/a.html", "text/html", b"a"),
+            ("templates/b.txt", "text/plain", b"b"),
+            ("templatesx/c.html", "text/html", b"c"),
+            ("templates", "", b"d"),
+        ],
+        patterns: b"",
+        registered: b"",
+        styles: b"",
+    };
+    let found: Vec<_> = data.folder("templates", ".html").collect();
+    assert_eq!(found, [("a", &b"a"[..])]);
 }

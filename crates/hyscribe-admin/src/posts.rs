@@ -67,7 +67,7 @@ pub trait PostsSite: PageSite {
     /// The users who have `cap`, by display name.
     fn authors(&self, cap: &str) -> Vec<User>;
     /// The post formats the theme supports.
-    fn post_formats(&self) -> &'static [&'static str];
+    fn post_formats(&self) -> &[&'static str];
     /// The posts `query` selects and how many it matches on every page.
     fn list_posts(&self, query: &PostQuery) -> (Vec<Post>, u64);
     /// `wp_count_posts( $post_type, 'readable' )`: the posts of each status,

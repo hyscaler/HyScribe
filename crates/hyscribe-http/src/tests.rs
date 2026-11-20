@@ -253,6 +253,7 @@ async fn database_errors_show_no_details() {
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
         styled: Arc::new(tokio::sync::Mutex::new((
+            "twentytwentyfive".to_owned(),
             None,
             Arc::new(hyscribe_render::theme::twentytwentyfive()),
         ))),
@@ -1002,6 +1003,7 @@ async fn the_front_page_links_to_home() {
         home: base.home.clone(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
         styled: Arc::new(tokio::sync::Mutex::new((
+            "twentytwentyfive".to_owned(),
             None,
             Arc::new(hyscribe_render::theme::twentytwentyfive()),
         ))),
@@ -1188,6 +1190,7 @@ async fn failed_reads_answer_defaults() {
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
         styled: Arc::new(tokio::sync::Mutex::new((
+            "twentytwentyfive".to_owned(),
             None,
             Arc::new(hyscribe_render::theme::twentytwentyfive()),
         ))),
@@ -1211,7 +1214,7 @@ async fn failed_reads_answer_defaults() {
         hooks: Arc::new(()),
     });
     // The site's global styles, read on each reload.
-    assert!(site.styled_theme().await.is_err());
+    assert!(site.styled_theme("twentytwentyfive").await.is_err());
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
         let reads = Reads::new(&site, handle);
@@ -1600,21 +1603,33 @@ async fn served(site: &Arc<Site>, path: &str) -> [String; 5] {
     [status, content_type, sha, modified, etag]
 }
 
-/// Every file of `reference/themes/files-golden.sh`: the default theme's
-/// files as the web server sends them.
+/// Every file of `reference/themes/files-golden.sh`: each embedded theme's
+/// files as the web server sends them, whichever theme is active.
 #[tokio::test]
 async fn theme_files_match_php() {
     let site = fixture_site(None).await;
-    let golden = include_str!("../tests/golden/theme-files.tsv");
-    for line in golden.lines() {
-        let fields: Vec<&str> = line.split('\t').collect();
-        // The ETag is the SHA-256 of what PHP serves: the files are the
-        // release's own.
-        let etag = format!("\"{}\"", fields[3]);
-        let expected = [fields[1], fields[2], fields[3], fields[4], &etag];
-        assert_eq!(served(&site, fields[0]).await, expected, "{}", fields[0]);
+    let goldens = [
+        (include_str!("../tests/golden/theme-files.tsv"), 136),
+        (
+            include_str!("../tests/golden/theme-files-twentytwentyfour.tsv"),
+            49,
+        ),
+        (
+            include_str!("../tests/golden/theme-files-twentytwentythree.tsv"),
+            44,
+        ),
+    ];
+    for (golden, count) in goldens {
+        for line in golden.lines() {
+            let fields: Vec<&str> = line.split('\t').collect();
+            // The ETag is the SHA-256 of what PHP serves: the files are the
+            // release's own.
+            let etag = format!("\"{}\"", fields[3]);
+            let expected = [fields[1], fields[2], fields[3], fields[4], &etag];
+            assert_eq!(served(&site, fields[0]).await, expected, "{}", fields[0]);
+        }
+        assert_eq!(golden.lines().count(), count);
     }
-    assert_eq!(golden.lines().count(), 136);
     // No PHP, no data files of the port's own, and only GET and HEAD.
     for (method, path) in [
         ("GET", "/wp-content/themes/twentytwentyfive/functions.php"),
@@ -1624,7 +1639,10 @@ async fn theme_files_match_php() {
         ),
         ("GET", "/wp-content/themes/twentytwentyfive/patterns.json"),
         ("GET", "/wp-content/themes/twentytwentyfive/nope.css"),
-        ("GET", "/wp-content/themes/twentytwentyfour/style.css"),
+        ("GET", "/wp-content/themes/twentytwentyfour/functions.php"),
+        ("GET", "/wp-content/themes/twentytwentyfour/registered.json"),
+        ("GET", "/wp-content/themes/nope/style.css"),
+        ("GET", "/wp-content/themes/twentytwentyfour"),
     ] {
         assert_eq!(
             request(&site, method, path).await.status,
@@ -3023,12 +3041,15 @@ tokio::task_local! {
     pub(crate) static PINNED_NOW: i64;
 }
 
-/// Noon UTC of the day `reference/pages/golden.sh ttd` recorded its hashes.
+/// Noon UTC of the day `reference/pages/golden.sh` recorded the hashes of
+/// a list, from its `.clock` file's text.
+fn recorded_at(clock: &str) -> i64 {
+    clock.trim().parse().unwrap()
+}
+
+/// The clock of `pages-ttd.tsv`.
 fn ttd_recorded_at() -> i64 {
-    include_str!("../tests/golden/pages-ttd.clock")
-        .trim()
-        .parse()
-        .unwrap()
+    recorded_at(include_str!("../tests/golden/pages-ttd.clock"))
 }
 
 /// A pinned time is what a request reads inside its scope, the clock's
@@ -3039,15 +3060,27 @@ async fn a_pinned_time_is_read_only_inside_its_scope() {
     assert!(now() > ttd_recorded_at());
 }
 
-/// The pages `reference/pages/golden.sh ttd` keeps for reading differences.
-const TTD_PAGES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/pages/ttd.tsv");
+/// The pages `reference/pages/golden.sh` keeps for reading the differences
+/// of a hashed list.
+fn kept_pages(list: &str) -> String {
+    format!(
+        "{}/../../target/pages/{list}.tsv",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
 
 /// Each request of a `reference/pages/golden.sh` list over `database`,
 /// served with the options it names, against PHP's status, location and
-/// page, or with `hashed` the page's hash, the page itself in `TTD_PAGES`.
+/// page, or with `hashed` (a list's name and the time it was recorded at)
+/// the page's hash, the page itself in `kept_pages`.
 /// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ.
 /// Author archives are off (docs/SECURITY_MODEL.md): their count is returned.
-async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: &str) -> usize {
+async fn assert_listed_pages(
+    database: &str,
+    golden: &str,
+    hashed: Option<(&str, i64)>,
+    known: &str,
+) -> usize {
     let known: Vec<(&str, &str)> = known
         .lines()
         .map(|line| {
@@ -3086,6 +3119,11 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
                 let value = hyscribe_phpser::urldecode(value.as_bytes());
                 site.options.insert(name.into(), value);
             }
+            // The theme a `stylesheet` option names, as every request's reload picks it.
+            if let Some(stylesheet) = site.options.get("stylesheet") {
+                let slug = hyscribe_render::theme::resolve(&String::from_utf8_lossy(stylesheet));
+                site.theme = site.styled_theme(slug).await.unwrap();
+            }
             // `options.php` declines the fallback post unless `_fallback` is set.
             if !named
                 .split('&')
@@ -3110,10 +3148,9 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
         let app = router(sites[&named].clone());
         // Hashes were recorded on one day: the calendar's today, among others.
         let request = answer_with(app, "GET", &path, &cookie);
-        let reply = if hashed {
-            PINNED_NOW.scope(ttd_recorded_at(), request).await
-        } else {
-            request.await
+        let reply = match hashed {
+            Some((_, clock)) => PINNED_NOW.scope(clock, request).await,
+            None => request.await,
         };
         if path.contains("author=") {
             assert_eq!(reply.status, StatusCode::NOT_FOUND, "{path}");
@@ -3125,7 +3162,7 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
             .get("location")
             .map_or("", |v| v.to_str().unwrap());
         let php = |hex: &str| as_hyscribe(String::from_utf8(hyscribe_testkit::unhex(hex)).unwrap());
-        let same = if hashed {
+        let same = if hashed.is_some() {
             // A page with the gallery of `orderby="rand"` is compared by its
             // items in any order, nothing else loosened.
             let (hash, page) = match fields[4].strip_prefix("unshuffled:") {
@@ -3149,9 +3186,10 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
                 failures.push(format!("{} {path} matches: no longer known", fields[0]));
             }
         } else if !same {
-            let page = if hashed {
-                let kept: &String = kept
-                    .get_or_insert_with(|| std::fs::read_to_string(TTD_PAGES).unwrap_or_default());
+            let page = if let Some((list, _)) = hashed {
+                let kept: &String = kept.get_or_insert_with(|| {
+                    std::fs::read_to_string(kept_pages(list)).unwrap_or_default()
+                });
                 let key = format!("{}\t{}\t", fields[0], fields[1]);
                 let line = kept.lines().find_map(|l| l.strip_prefix(&key));
                 line.and_then(|l| l.rsplit('\t').next())
@@ -3187,7 +3225,7 @@ async fn listed_pages_match_php() {
     let golden = include_str!("../tests/golden/pages-default.tsv");
     let known = include_str!("../tests/golden/pages-default-known.tsv");
     assert_eq!(
-        assert_listed_pages("wordpress", golden, false, known).await,
+        assert_listed_pages("wordpress", golden, None, known).await,
         0
     );
     assert_eq!(golden.lines().count(), 101);
@@ -3207,6 +3245,14 @@ async fn listed_pages_match_php() {
 /// any order.
 #[tokio::test(flavor = "multi_thread")]
 async fn theme_test_data_pages_match_php() {
+    let golden = include_str!("../tests/golden/pages-ttd.tsv");
+    let known = include_str!("../tests/golden/pages-ttd-known.tsv");
+    assert_ttd_pages("ttd", golden, ttd_recorded_at(), known).await;
+}
+
+/// The requests of a Theme Test Data list `list` recorded at `clock`, by
+/// hash: ten author archives are off and 747 requests are listed.
+async fn assert_ttd_pages(list: &str, golden: &str, clock: i64, known: &str) {
     let _saves = admin::tests::SAVES.lock().await;
     let db = hyscribe_config::Database {
         name: "wordpress_saves".into(),
@@ -3219,14 +3265,66 @@ async fn theme_test_data_pages_match_php() {
     hyscribe_testkit::writes::point_feeds_at_test_site(&db)
         .await
         .unwrap();
-    let golden = include_str!("../tests/golden/pages-ttd.tsv");
-    let known = include_str!("../tests/golden/pages-ttd-known.tsv");
+    let hashed = Some((list, clock));
     assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, true, known).await,
+        assert_listed_pages("wordpress_saves", golden, hashed, known).await,
         10
     );
     assert_eq!(golden.lines().count(), 747);
 }
+
+/// The lists of a bundled theme, which `reference/pages/theme-list.sh`
+/// builds from the default theme's: the default install's pages and the
+/// Theme Test Data's, both by hash, with the theme's own known differences
+/// (`pages-default-<short>-known.tsv`), none left.
+macro_rules! theme_pages {
+    ($default:ident, $ttd:ident, $short:literal) => {
+        #[tokio::test]
+        async fn $default() {
+            let list = concat!("default-", $short);
+            let golden = include_str!(concat!("../tests/golden/pages-default-", $short, ".tsv"));
+            let known = include_str!(concat!(
+                "../tests/golden/pages-default-",
+                $short,
+                "-known.tsv"
+            ));
+            let clock = recorded_at(include_str!(concat!(
+                "../tests/golden/pages-default-",
+                $short,
+                ".clock"
+            )));
+            let hashed = Some((list, clock));
+            assert_eq!(
+                assert_listed_pages("wordpress", golden, hashed, known).await,
+                0
+            );
+            assert_eq!(golden.lines().count(), 101);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn $ttd() {
+            let golden = include_str!(concat!("../tests/golden/pages-ttd-", $short, ".tsv"));
+            let known = include_str!(concat!("../tests/golden/pages-ttd-", $short, "-known.tsv"));
+            let clock = recorded_at(include_str!(concat!(
+                "../tests/golden/pages-ttd-",
+                $short,
+                ".clock"
+            )));
+            assert_ttd_pages(concat!("ttd-", $short), golden, clock, known).await;
+        }
+    };
+}
+
+theme_pages!(
+    twenty_twenty_four_default_pages_match_php,
+    twenty_twenty_four_theme_test_data_pages_match_php,
+    "tt4"
+);
+theme_pages!(
+    twenty_twenty_three_default_pages_match_php,
+    twenty_twenty_three_theme_test_data_pages_match_php,
+    "tt3"
+);
 
 /// A visitor's page view over the Theme Test Data, which has classic menus
 /// and no `wp_navigation` post, in primary mode: the navigation block's
@@ -3278,6 +3376,51 @@ async fn a_page_view_writes_the_classic_menu_fallback() {
         assert!(written[0].starts_with(&format!("0|publish|Social menu|social-menu|{content}")));
         assert!(written[0].contains(label), "{}", written[0]);
     }
+}
+
+/// The theme a request is served with is the one the `stylesheet` option
+/// names as the database has it now, an unknown one falling back to the
+/// default theme, whose bundled files are all served.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_stylesheet_option_picks_the_theme() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let mut site = Site::load(Db::connect(&db).await.unwrap(), None, None)
+        .await
+        .unwrap();
+    assert_eq!(site.theme.slug(), "twentytwentyfive");
+    let update = "UPDATE wp_options SET option_value = ? WHERE option_name = 'stylesheet'";
+    for (stylesheet, served) in [
+        ("twentytwentyfour", "twentytwentyfour"),
+        ("twentytwentythree", "twentytwentythree"),
+        ("missing", "twentytwentyfive"),
+        ("twentytwentyfour", "twentytwentyfour"),
+    ] {
+        sqlx::query(update)
+            .bind(stylesheet)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        site = site.reloaded().await.unwrap();
+        assert_eq!(site.theme.slug(), served);
+    }
+    let site = Arc::new(site);
+    let page = request(&site, "GET", "/").await;
+    assert!(page.body.contains("wp-theme-twentytwentyfour"));
 }
 
 /// A visitor's page view over the default install, which has no classic
@@ -3366,7 +3509,7 @@ async fn edited_site_pages_match_php() {
         .unwrap();
     let golden = include_str!("../tests/golden/pages-site-edits.tsv");
     assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        assert_listed_pages("wordpress_saves", golden, None, "").await,
         0
     );
     assert_eq!(golden.lines().count(), 12);
@@ -3412,7 +3555,7 @@ async fn commenter_pages_match_php() {
         .unwrap();
     let golden = include_str!("../tests/golden/pages-comments.tsv");
     assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        assert_listed_pages("wordpress_saves", golden, None, "").await,
         0
     );
     assert_eq!(golden.lines().count(), 95);
@@ -3624,7 +3767,7 @@ async fn attachment_pages_match_php() {
         .map(|id| format!("wp_attachment_pages_enabled=1\t/?attachment_id={id}\tmediaelement\n"))
         .concat();
     assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, false, &known).await,
+        assert_listed_pages("wordpress_saves", golden, None, &known).await,
         0
     );
     assert_eq!(golden.lines().count(), 110);
@@ -3699,7 +3842,7 @@ async fn duotone_pages_match_php() {
         .unwrap();
     let golden = include_str!("../tests/golden/duotone-pages.tsv");
     assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, false, "").await,
+        assert_listed_pages("wordpress_saves", golden, None, "").await,
         0
     );
     assert_eq!(golden.lines().count(), 2);

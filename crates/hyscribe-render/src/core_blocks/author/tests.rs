@@ -171,3 +171,30 @@ fn post_types_and_no_post() {
         [true, true, false, false]
     );
 }
+
+/// A post author block that hides its avatar still gets it, as PHP does,
+/// which counts as one of the three page images that are not lazy loaded:
+/// after three such blocks the next avatar loads lazily.
+#[test]
+fn a_hidden_avatar_counts_as_a_page_image() {
+    let theme = twentytwentyfive();
+    let site = DefaultInstall {
+        home: b"http://127.0.0.1:8081".to_vec(),
+    };
+    let request = Request {
+        post: Some(1),
+        singular: true,
+        ..Request::default()
+    };
+    let hidden = r#"<!-- wp:post-author {"showAvatar":false} /-->"#;
+    let shown = r#"<!-- wp:post-author {"avatarSize":24} /-->"#;
+    let page = |hidden_authors: usize| {
+        let markup = format!("{}{shown}", hidden.repeat(hidden_authors));
+        let ours = Renderer::new(&theme, &site, &request).render(markup.as_bytes());
+        String::from_utf8(ours).unwrap()
+    };
+    assert!(page(0).contains("<img"));
+    assert!(!page(0).contains("loading='lazy'"));
+    assert!(!page(2).contains("loading='lazy'"));
+    assert!(page(3).contains("loading='lazy'"));
+}

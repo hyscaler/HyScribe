@@ -9,109 +9,100 @@ use std::collections::HashMap;
 use hyscribe_phpser::{Key, Value, json_decode};
 use hyscribe_theme_json::{BlockType as Metadata, GlobalStyles, Sources};
 
-const TEMPLATES: [(&str, &[u8]); 8] = [
-    (
-        "404",
-        include_bytes!("../../../themes/twentytwentyfive/templates/404.html"),
-    ),
-    (
-        "archive",
-        include_bytes!("../../../themes/twentytwentyfive/templates/archive.html"),
-    ),
-    (
-        "home",
-        include_bytes!("../../../themes/twentytwentyfive/templates/home.html"),
-    ),
-    (
-        "index",
-        include_bytes!("../../../themes/twentytwentyfive/templates/index.html"),
-    ),
-    (
-        "page",
-        include_bytes!("../../../themes/twentytwentyfive/templates/page.html"),
-    ),
-    (
-        "page-no-title",
-        include_bytes!("../../../themes/twentytwentyfive/templates/page-no-title.html"),
-    ),
-    (
-        "search",
-        include_bytes!("../../../themes/twentytwentyfive/templates/search.html"),
-    ),
-    (
-        "single",
-        include_bytes!("../../../themes/twentytwentyfive/templates/single.html"),
-    ),
-];
+/// A theme port's data, embedded at build time from its folder in
+/// `themes/` (build.rs).
+#[derive(Debug)]
+pub(crate) struct Data {
+    slug: &'static str,
+    /// Every file of the theme but its PHP, by path, with its content type.
+    files: &'static [(&'static str, &'static str, &'static [u8])],
+    /// The export's own files, which are not served.
+    patterns: &'static [u8],
+    registered: &'static [u8],
+    styles: &'static [u8],
+}
 
-const PARTS: [(&str, &[u8]); 7] = [
-    (
-        "footer",
-        include_bytes!("../../../themes/twentytwentyfive/parts/footer.html"),
-    ),
-    (
-        "footer-columns",
-        include_bytes!("../../../themes/twentytwentyfive/parts/footer-columns.html"),
-    ),
-    (
-        "footer-newsletter",
-        include_bytes!("../../../themes/twentytwentyfive/parts/footer-newsletter.html"),
-    ),
-    (
-        "header",
-        include_bytes!("../../../themes/twentytwentyfive/parts/header.html"),
-    ),
-    (
-        "header-large-title",
-        include_bytes!("../../../themes/twentytwentyfive/parts/header-large-title.html"),
-    ),
-    (
-        "sidebar",
-        include_bytes!("../../../themes/twentytwentyfive/parts/sidebar.html"),
-    ),
-    (
-        "vertical-header",
-        include_bytes!("../../../themes/twentytwentyfive/parts/vertical-header.html"),
-    ),
-];
+impl Data {
+    /// One of the theme's files as the web server sends it from the
+    /// theme's folder: its content type and bytes.
+    fn file(&self, path: &str) -> Option<(&'static str, &'static [u8])> {
+        self.files
+            .iter()
+            .find(|(name, _, _)| *name == path)
+            .map(|(_, content_type, bytes)| (*content_type, *bytes))
+    }
 
-/// Twenty Twenty-Five's own files, every one but its PHP, by path, with
-/// their content types.
-const FILES: &[(&str, &str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/theme_files.rs"));
+    /// The names (without folder and extension) and contents of the theme's
+    /// files in `folder` ending in `extension`.
+    fn folder(
+        &self,
+        folder: &'static str,
+        extension: &'static str,
+    ) -> impl Iterator<Item = (&'static str, &'static [u8])> {
+        self.files.iter().filter_map(move |(name, _, bytes)| {
+            let rest = name.strip_prefix(folder)?.strip_prefix('/')?;
+            Some((rest.strip_suffix(extension)?, *bytes))
+        })
+    }
+}
 
-/// One of Twenty Twenty-Five's files, as the web server sends it from the
+include!(concat!(env!("OUT_DIR"), "/themes.rs"));
+
+/// The theme the site falls back to, `WP_DEFAULT_THEME`.
+pub const DEFAULT: &str = "twentytwentyfive";
+
+/// The slugs of the embedded themes, in order.
+pub fn slugs() -> impl Iterator<Item = &'static str> {
+    THEMES.iter().map(|data| data.slug)
+}
+
+/// The embedded theme `slug` names, or else the default, as WordPress
+/// falls back to its default theme.
+pub fn resolve(slug: &str) -> &'static str {
+    slugs().find(|known| *known == slug).unwrap_or(DEFAULT)
+}
+
+/// One of an embedded theme's files, as the web server sends it from the
 /// theme's folder: its content type and bytes.
-pub fn twentytwentyfive_file(path: &str) -> Option<(&'static str, &'static [u8])> {
-    FILES
+pub fn theme_file(slug: &str, path: &str) -> Option<(&'static str, &'static [u8])> {
+    THEMES
         .iter()
-        .find(|(name, _, _)| *name == path)
-        .map(|(_, content_type, bytes)| (*content_type, *bytes))
+        .find(|data| data.slug == slug)
+        .and_then(|data| data.file(path))
 }
 
 /// The theme's style variations, `WP_Theme_JSON_Resolver::get_style_variations()`
 /// in path order: its `styles/` files that are not for a block type.
-pub(crate) fn style_variations() -> impl Iterator<Item = Value> {
-    FILES
+pub(crate) fn style_variations(data: &Data) -> impl Iterator<Item = Value> {
+    data.files
         .iter()
         .filter(|(name, _, _)| name.starts_with("styles/") && name.ends_with(".json"))
         .filter_map(|(_, _, bytes)| json_decode(bytes))
         .filter(|variation| variation.get_str("blockTypes").is_none())
 }
 
-const PATTERNS: &[u8] = include_bytes!("../../../themes/twentytwentyfive/patterns.json");
-const THEME_JSON: &[u8] = include_bytes!("../../../themes/twentytwentyfive/theme.json");
 const CORE_THEME_JSON: &[u8] = include_bytes!("../../../wordpress/wp-includes/theme.json");
 const REGISTERED_BLOCKS: &[u8] =
     include_bytes!("../../../wordpress/wp-includes/blocks/registered.json");
-const REGISTERED: &[u8] = include_bytes!("../../../themes/twentytwentyfive/registered.json");
-const STYLE_PARTIALS: &[u8] = include_bytes!("../../../themes/twentytwentyfive/styles.json");
-const STYLE_CSS: &str = include_str!("../../../themes/twentytwentyfive/style.css");
-const STYLE_MIN_CSS: &str = include_str!("../../../themes/twentytwentyfive/style.min.css");
+
+/// A stylesheet of the theme's own files that it enqueues.
+#[derive(Debug)]
+pub(crate) struct OwnStyle {
+    /// The block whose rendering enqueues it, `None` for `wp_enqueue_scripts`.
+    pub(crate) block: Option<String>,
+    pub(crate) handle: String,
+    /// Its path in the theme's folder.
+    pub(crate) src: String,
+    pub(crate) css: &'static str,
+    /// `ver`; `None` for the WordPress version.
+    pub(crate) version: Option<String>,
+}
 
 /// A block theme.
 #[derive(Debug)]
 pub struct Theme {
     pub(crate) slug: &'static str,
+    pub(crate) data: &'static Data,
     pub(crate) templates: HashMap<&'static str, &'static [u8]>,
     pub(crate) parts: HashMap<&'static str, &'static [u8]>,
     /// The area of each template part, from `theme.json`.
@@ -121,38 +112,56 @@ pub struct Theme {
     /// and `wp_get_global_styles()` read them.
     pub(crate) global: GlobalStyles,
     /// The style handles each core block's `block.json` names, which
-    /// rendering the block enqueues.
+    /// rendering the block enqueues, then the theme's own for the block.
     pub(crate) style_handles: HashMap<String, Vec<String>>,
     /// The `inline_style` of each block style the theme registers, by
     /// block, which `enqueue_block_styles_assets()` adds to its stylesheet.
     pub(crate) inline_block_styles: Vec<(String, String)>,
-    /// `style.min.css`, which the theme enqueues.
-    pub(crate) stylesheet: &'static str,
-    /// The `Version` header of `style.css`.
-    pub(crate) version: String,
+    /// The stylesheets of its own files the theme enqueues.
+    pub(crate) styles: Vec<OwnStyle>,
+    pub(crate) post_formats: Vec<&'static str>,
 }
 
-/// Twenty Twenty-Five, as bundled with WordPress 7.1.3.
+/// The post formats WordPress knows, which `add_theme_support( 'post-formats' )`
+/// can list.
+const POST_FORMATS: [&str; 10] = [
+    "standard", "aside", "audio", "chat", "gallery", "image", "link", "quote", "status", "video",
+];
+
+/// The default theme, Twenty Twenty-Five, as bundled with WordPress 7.1.3.
 pub fn twentytwentyfive() -> Theme {
     twentytwentyfive_for(None)
 }
 
-/// Twenty Twenty-Five with the site's global styles, `user` the content
-/// of its `wp_global_styles` post if it has one.
+/// The default theme with the site's global styles, `user` the content of
+/// its `wp_global_styles` post if it has one.
 pub fn twentytwentyfive_for(user: Option<&[u8]>) -> Theme {
-    with_user_styles(user, &[])
+    with_user_styles(DEFAULT, user, &[])
 }
 
-/// Twenty Twenty-Five with `user` as the site's global styles and `styles`
+/// The theme `slug`, an embedded one or else the default as WordPress
+/// falls back to it, with the site's global styles, `user` the content of
+/// its `wp_global_styles` post if it has one.
+pub fn load(slug: &str, user: Option<&[u8]>) -> Theme {
+    with_user_styles(slug, user, &[])
+}
+
+/// The default theme with `user` as the site's global styles and `styles`
 /// registered after its own block styles.
 #[cfg(test)]
 pub(crate) fn twentytwentyfive_with(user: &[u8], styles: &[(String, String)]) -> Theme {
-    with_user_styles(Some(user), styles)
+    with_user_styles(DEFAULT, Some(user), styles)
 }
 
-fn with_user_styles(user: Option<&[u8]>, styles: &[(String, String)]) -> Theme {
+fn with_user_styles(slug: &str, user: Option<&[u8]>, styles: &[(String, String)]) -> Theme {
+    let slug = resolve(slug);
+    let data = THEMES
+        .iter()
+        .find(|data| data.slug == slug)
+        .unwrap_or(&THEMES[0]);
+    let theme_json = data.file("theme.json").map_or(&[][..], |(_, bytes)| bytes);
     let blocks = registered_blocks(REGISTERED_BLOCKS);
-    let registered = block_styles(REGISTERED);
+    let registered = block_styles(data.registered);
     let mut block_styles: Vec<(String, String)> = registered
         .iter()
         .map(|(block, name, _)| (block.clone(), name.clone()))
@@ -163,33 +172,88 @@ fn with_user_styles(user: Option<&[u8]>, styles: &[(String, String)]) -> Theme {
         .filter(|(_, _, css)| !css.is_empty())
         .map(|(block, _, css)| (block, css))
         .collect();
+    let own = own_styles(data);
+    let mut style_handles: HashMap<String, Vec<String>> = blocks
+        .iter()
+        .map(|block| {
+            (
+                block.name.clone(),
+                style_handles(&block.name, &block.metadata),
+            )
+        })
+        .collect();
+    for style in &own {
+        if let Some(block) = &style.block {
+            style_handles
+                .entry(block.clone())
+                .or_default()
+                .push(style.handle.clone());
+        }
+    }
     Theme {
-        slug: "twentytwentyfive",
-        templates: TEMPLATES.into_iter().collect(),
-        parts: PARTS.into_iter().collect(),
-        areas: part_areas(THEME_JSON),
-        patterns: patterns(PATTERNS),
+        slug: data.slug,
+        data,
+        templates: data.folder("templates", ".html").collect(),
+        parts: data.folder("parts", ".html").collect(),
+        areas: part_areas(theme_json),
+        patterns: patterns(data.patterns),
         global: GlobalStyles::resolve(&Sources {
             core: CORE_THEME_JSON,
             blocks: &blocks,
             block_styles: &block_styles,
-            theme: Some(THEME_JSON),
-            theme_styles: &style_partials(STYLE_PARTIALS),
+            theme: Some(theme_json),
+            theme_styles: &style_partials(data.styles),
             user,
         }),
-        style_handles: blocks
-            .iter()
-            .map(|block| {
-                (
-                    block.name.clone(),
-                    style_handles(&block.name, &block.metadata),
-                )
-            })
-            .collect(),
+        style_handles,
         inline_block_styles,
-        stylesheet: STYLE_MIN_CSS,
-        version: header(STYLE_CSS, "Version"),
+        styles: own,
+        post_formats: post_formats(data.registered),
     }
+}
+
+/// `registered.json`'s `styles`: the stylesheets of the theme's files it
+/// enqueues, with their contents.
+fn own_styles(data: &Data) -> Vec<OwnStyle> {
+    let root = json_decode(data.registered).unwrap_or_default();
+    let text = |value: Option<&Value>| {
+        let bytes = value.and_then(Value::as_bytes)?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    };
+    root.get_str("styles")
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|(_, style)| {
+            let src = text(style.get_str("src"))?;
+            let css = data.file(&src).map_or(&[][..], |(_, bytes)| bytes);
+            Some(OwnStyle {
+                block: text(style.get_str("block")),
+                handle: text(style.get_str("handle"))?,
+                css: std::str::from_utf8(css).unwrap_or_default(),
+                version: text(style.get_str("ver")),
+                src,
+            })
+        })
+        .collect()
+}
+
+/// `registered.json`'s `post_formats`, the formats `functions.php` adds
+/// theme support for.
+fn post_formats(registered: &[u8]) -> Vec<&'static str> {
+    let root = json_decode(registered).unwrap_or_default();
+    let listed = root
+        .get_str("post_formats")
+        .and_then(Value::as_array)
+        .unwrap_or_default();
+    POST_FORMATS
+        .into_iter()
+        .filter(|format| {
+            listed
+                .iter()
+                .any(|(_, listed)| listed.as_bytes() == Some(format.as_bytes()))
+        })
+        .collect()
 }
 
 /// A `style.css` header field, as `get_file_data()` reads it.
@@ -206,10 +270,15 @@ fn header(css: &str, name: &str) -> String {
 
 /// The style handles a core block registers, as
 /// `register_block_type_from_metadata()` does: `wp-block-<name>` first,
-/// whatever `block.json` names there, then the other handles it lists.
+/// whatever `block.json` names there, then the other handles it lists. The
+/// query block's own is left out: `render_block_core_query()` removes it
+/// unless the query is interactive, which `Renderer::query` enqueues.
 fn style_handles(name: &str, metadata: &Value) -> Vec<String> {
     let text = |handle: &Value| String::from_utf8_lossy(&handle.to_php_string()).into_owned();
-    let mut handles = vec![format!("wp-block-{}", name.trim_start_matches("core/"))];
+    let mut handles = Vec::new();
+    if name != "core/query" {
+        handles.push(format!("wp-block-{}", name.trim_start_matches("core/")));
+    }
     if let Some(Value::Array(listed)) = metadata.get_str("style") {
         handles.extend(listed.iter().skip(1).map(|(_, handle)| text(handle)));
     }
@@ -224,30 +293,28 @@ impl Theme {
     }
 
     /// `WP_Theme_JSON_Resolver::get_style_variations()`: the theme's style
-    /// variations as raw data, each of Twenty Twenty-Five's titled.
+    /// variations as raw data, each titled.
     pub fn style_variations(&self) -> Vec<Value> {
-        style_variations()
+        style_variations(self.data)
             .map(|variation| self.global.theme_json(variation))
             .collect()
     }
 
     /// The post formats `functions.php` adds theme support for.
-    pub fn post_formats(&self) -> &'static [&'static str] {
-        &[
-            "aside", "audio", "chat", "gallery", "image", "link", "quote", "status", "video",
-        ]
+    pub fn post_formats(&self) -> &[&'static str] {
+        &self.post_formats
     }
 
     /// `get_page_templates( null, $post_type )`: the slug and title of each
     /// of `theme.json`'s custom templates for `post_type`, by title.
     pub fn page_templates(&self, post_type: &str) -> Vec<(String, String)> {
-        custom_templates(THEME_JSON, post_type)
+        custom_templates(self.theme_json(), post_type)
     }
 
     /// The list `name` of the theme's `theme.json`, such as
     /// `customTemplates` or `templateParts`.
     pub fn theme_json_list(&self, name: &str) -> Vec<Value> {
-        let root = json_decode(THEME_JSON).unwrap_or(Value::Null);
+        let root = json_decode(self.theme_json()).unwrap_or(Value::Null);
         let list = root.get_str(name).and_then(Value::as_array);
         list.unwrap_or_default()
             .iter()
@@ -257,7 +324,23 @@ impl Theme {
 
     /// The theme's `Theme Name` header.
     pub fn name(&self) -> String {
-        header(STYLE_CSS, "Theme Name")
+        header(self.style_css(), "Theme Name")
+    }
+
+    /// The theme's `theme.json`.
+    fn theme_json(&self) -> &'static [u8] {
+        self.data
+            .file("theme.json")
+            .map_or(&[][..], |(_, bytes)| bytes)
+    }
+
+    /// The text of the theme's `style.css`.
+    fn style_css(&self) -> &'static str {
+        let css = self
+            .data
+            .file("style.css")
+            .map_or(&[][..], |(_, bytes)| bytes);
+        std::str::from_utf8(css).unwrap_or_default()
     }
 
     /// The theme's slug, its `stylesheet`.

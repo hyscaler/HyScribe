@@ -2062,7 +2062,7 @@ impl crate::posts::PostsSite for Role {
     fn uses_trash(&self) -> bool {
         !self.variant().starts_with("e0")
     }
-    fn post_formats(&self) -> &'static [&'static str] {
+    fn post_formats(&self) -> &[&'static str] {
         static THEME: OnceLock<hyscribe_render::theme::Theme> = OnceLock::new();
         THEME
             .get_or_init(hyscribe_render::theme::twentytwentyfive)

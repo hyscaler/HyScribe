@@ -486,6 +486,7 @@ async fn a_failed_read_is_the_database_error_page() {
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
         styled: Arc::new(tokio::sync::Mutex::new((
+            "twentytwentyfive".to_owned(),
             None,
             Arc::new(hyscribe_render::theme::twentytwentyfive()),
         ))),

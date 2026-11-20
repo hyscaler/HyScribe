@@ -18,6 +18,7 @@ hyscribe-admin = { path = "../crates/hyscribe-admin" }
 hyscribe-auth = { path = "../crates/hyscribe-auth" }
 hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
 hyscribe-config = { path = "../crates/hyscribe-config" }
+hyscribe-ext = { path = "../crates/hyscribe-ext" }
 hyscribe-render = { path = "../crates/hyscribe-render" }
 hyscribe-rest = { path = "../crates/hyscribe-rest" }
 hyscribe-model = { path = "../crates/hyscribe-model" }
@@ -412,6 +413,13 @@ bench = false
 [[bin]]
 name = "install_answers"
 path = "fuzz_targets/install_answers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ext_load"
+path = "fuzz_targets/ext_load.rs"
 test = false
 doc = false
 bench = false

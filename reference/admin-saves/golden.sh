@@ -56,7 +56,7 @@ sed '/^-- cleanup$/,$d' "$CONTENT" | sql
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-clock.php" < "$HERE/clock.php"
 echo "<?php add_filter( 'pre_wp_mail', '__return_true' );" | "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-mail.php"
 # The nonces masked: the cases', the screens' and those of terms 801 to 809.
-masked="log-out heartbeat-nonce wp_rest update_can_compress_scripts bulk-tags add-tag taxinlineeditnonce screen-options-nonce"
+masked="log-out heartbeat-nonce wp_rest update_can_compress_scripts switch-theme_twentytwentytwo bulk-tags add-tag taxinlineeditnonce screen-options-nonce"
 masked="$masked trash-post_1 trash-post_2 trash-post_3 reset-password-for-0 general-options writing-options reading-options discussion-options media-options"
 masked="$masked update-permalink create-privacy-page set-privacy-page dismiss-1-new_admin_email media-form media-send-to-editor set-attachment-thumbnail"
 masked="$masked $(grep -v '^#' "$HERE/cases.list" | cut -f5 | sort -u | tr '\n' ' ')"

@@ -81,6 +81,73 @@ fn answers_match_php() {
     }
 }
 
+/// A site whose active theme is `slug`, with the global styles post PHP
+/// creates for it (`reference/rest/theme-<slug>.sql`).
+fn themed(slug: &str) -> &'static Content {
+    static CONTENT: OnceLock<Vec<(&str, Content)>> = OnceLock::new();
+    let themes = CONTENT.get_or_init(|| {
+        let state = |slug: &str, sql: &str| {
+            let options = format!(
+                "INSERT INTO `wp_options` VALUES (9901,'template','{slug}','yes'),(9902,'stylesheet','{slug}','yes');\n"
+            );
+            default_install_with(&format!("{options}{sql}"))
+        };
+        vec![
+            (
+                "twentytwentyfour",
+                state(
+                    "twentytwentyfour",
+                    include_str!("../../../../reference/rest/theme-twentytwentyfour.sql"),
+                ),
+            ),
+            (
+                "twentytwentythree",
+                state(
+                    "twentytwentythree",
+                    include_str!("../../../../reference/rest/theme-twentytwentythree.sql"),
+                ),
+            ),
+        ]
+    });
+    &themes.iter().find(|(known, _)| *known == slug).unwrap().1
+}
+
+/// Every answer of `reference/rest/theme.list` over a site with `slug`
+/// active is PHP's, as each identity: the larger bodies by hash, the
+/// footer's credit naming HyScribe.
+fn themed_answers(slug: &str, golden: &str, count: usize) {
+    let cases = rest_cases(golden);
+    assert_eq!(cases.len(), count);
+    let content = themed(slug);
+    for case in &cases {
+        let served = serve_over(content, case);
+        let what = format!("{} {} {}", case.who, case.method, case.target);
+        assert_eq!(served.status, case.status, "{what}");
+        let mut php = case.headers.clone();
+        php.sort();
+        assert_eq!(rest_headers(&served.headers), php, "{what}");
+        let body = if case.flag("hash") {
+            sha256_hex(&served.body)
+        } else {
+            served.body
+        };
+        let php = String::from_utf8_lossy(&case.body).replace(CREDIT[0], CREDIT[1]);
+        assert_eq!(String::from_utf8_lossy(&body), php, "{what}");
+    }
+}
+
+#[test]
+fn twenty_twenty_four_answers_match_php() {
+    let golden = include_str!("../../tests/golden/theme-twentytwentyfour.tsv");
+    themed_answers("twentytwentyfour", golden, 360);
+}
+
+#[test]
+fn twenty_twenty_three_answers_match_php() {
+    let golden = include_str!("../../tests/golden/theme-twentytwentythree.tsv");
+    themed_answers("twentytwentythree", golden, 348);
+}
+
 fn preloads() -> &'static Content {
     static CONTENT: OnceLock<Content> = OnceLock::new();
     CONTENT.get_or_init(|| {
@@ -201,14 +268,15 @@ fn a_foreign_pattern_block_is_not_ported() {
         Value::String(content.as_bytes().to_vec()),
     )]);
     let wanted = vec![b"content".to_vec()];
-    let served = super::patterns::prepared(&[&pattern], &wanted, b"http://example.test");
+    let theme = hyscribe_render::theme::twentytwentyfive();
+    let served = super::patterns::prepared(&theme, &[&pattern], &wanted, b"http://example.test");
     assert!(served.is_err());
 }
 
-/// Another theme active, which HyScribe does not have, is not ported.
+/// A theme the site names that HyScribe does not have is not ported.
 #[test]
-fn another_theme_is_not_ported() {
-    let state = "INSERT INTO `wp_options` VALUES (9901,'stylesheet','twentytwentyfour','yes');\n";
+fn a_missing_theme_is_not_ported() {
+    let state = "INSERT INTO `wp_options` VALUES (9901,'stylesheet','gone','yes');\n";
     let content: &'static Content = Box::leak(Box::new(default_install_with(state)));
     for target in [
         "/?rest_route=/wp/v2/themes&status=active&_fields=stylesheet",

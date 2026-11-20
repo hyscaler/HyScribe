@@ -6,6 +6,7 @@
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value};
 use hyscribe_render::template_types::PART_AREAS;
+use hyscribe_render::theme::Theme;
 
 use super::EditorSite;
 use super::settings::Settings;
@@ -104,7 +105,10 @@ pub fn custom_settings(site: &dyn EditorSite, editing: &Editing) -> Settings {
     let mut settings = Settings::default();
     for (key, value) in [
         ("availableTemplates", templates),
-        ("disablePostFormats", Value::Bool(false)),
+        (
+            "disablePostFormats",
+            Value::Bool(site.theme().post_formats().is_empty()),
+        ),
         ("titlePlaceholder", text("Add title")),
         ("bodyPlaceholder", text("Type / to choose a block")),
         ("autosaveInterval", Value::Int(60)),
@@ -165,7 +169,7 @@ pub const SCRIPTS: [&str; 15] = [
 
 /// The editors' inline scripts of `wp-blocks`: the block categories, the
 /// server's block definitions and the bindings sources.
-pub(crate) fn block_scripts() -> [String; 3] {
+pub(crate) fn block_scripts(theme: &Theme) -> [String; 3] {
     [
         format!(
             "wp.blocks.setCategories( {} );",
@@ -173,19 +177,24 @@ pub(crate) fn block_scripts() -> [String; 3] {
         ),
         format!(
             "wp.blocks.unstable__bootstrapServerSideBlockDefinitions({});",
-            json(&super::blocks::server_block_settings())
+            json(&super::blocks::server_block_settings(theme))
         ),
         format!(
             "for ( const source of {} ) {{ wp.blocks.registerBlockBindingsSource( source ); }}",
-            json(&super::blocks::bindings_sources())
+            json(&super::blocks::bindings_sources(theme))
         ),
     ]
 }
 
 /// The inline scripts the page adds after registered scripts', by handle.
-pub fn scripts_after(settings: &Value, edits: &Value, post: &Post) -> Vec<(&'static str, String)> {
+pub fn scripts_after(
+    theme: &Theme,
+    settings: &Value,
+    edits: &Value,
+    post: &Post,
+) -> Vec<(&'static str, String)> {
     vec![
-        ("wp-blocks", block_scripts().join("\n")),
+        ("wp-blocks", block_scripts(theme).join("\n")),
         (
             "heartbeat",
             "jQuery( function() {\n\t\twp.heartbeat.interval( 10 );\n\t} );".into(),

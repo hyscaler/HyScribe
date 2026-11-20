@@ -11,6 +11,7 @@ use hyscribe_phpser::{
 use hyscribe_render::head::{admin_script_modules, emoji_detection_script, json_hex_tag};
 use hyscribe_render::kses::wp_kses_post;
 use hyscribe_render::post::sanitize_html_class;
+use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
 use crate::assets::{Assets, Urls, cookie_path, site_icon_tags};
@@ -83,9 +84,6 @@ pub(crate) fn wp_admin_notice(
 /// `$wp_version`.
 pub(crate) const VERSION: &str = include_str!("../../../wordpress/VERSION");
 
-/// The bundled theme, the only one a HyScribe installation has.
-pub(crate) const THEME: &str = "twentytwentyfive";
-
 const CUSTOMIZE: &str = include_str!("page/customize.html");
 const AUTH_CHECK: &str = include_str!("page/auth-check.html");
 const CANONICAL: &str = include_str!("page/canonical.html");
@@ -117,15 +115,24 @@ pub trait PageSite: BarSite + Urls {
     fn template(&self) -> String;
     /// `get_stylesheet()`.
     fn stylesheet(&self) -> String;
+    /// The embedded theme the site's stylesheet names, or the default
+    /// one where it names a theme the site does not have.
+    fn active_theme(&self) -> &Theme;
     /// The bundled theme's font faces as the admin prints them, those of
     /// its `theme.json` only `with_theme`, as its style variations' always.
     fn font_faces(&self, with_theme: bool) -> Vec<u8>;
 }
 
+/// Whether the site's active theme is one of the embedded block themes, and
+/// not one it does not have, which is classic.
+pub(crate) fn has_block_theme(site: &dyn PageSite) -> bool {
+    site.stylesheet() == site.active_theme().slug()
+}
+
 /// The Customize link of the Appearance menu, `None` while the active theme
-/// is the bundled block theme: any other is one the site does not have.
+/// is an embedded block theme: any other is one the site does not have.
 fn customize_link(site: &dyn PageSite, page: &Page) -> Option<String> {
-    if site.stylesheet() == THEME {
+    if has_block_theme(site) {
         return None;
     }
     // `$_SERVER['REQUEST_URI']` without `wp_removable_query_args()`.
@@ -411,8 +418,8 @@ pub fn admin_page_with(
     extras: &Extras,
 ) -> Option<String> {
     let customize = customize_link(site, page);
-    // A missing child of the bundled theme has its parent's `theme.json`.
-    let parent = site.template() == THEME;
+    // A missing child of an embedded theme has its parent's `theme.json`.
+    let parent = site.template() == site.active_theme().slug();
     let look = customize
         .as_deref()
         .map_or(Look::Block, |url| Look::Classic(url, parent));

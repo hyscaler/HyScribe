@@ -102,8 +102,6 @@ pub trait DashboardSite: PostsSite {
     /// The five latest comments the user may see; `global` is the post a
     /// comment on no post reads, the last the Activity widget lists.
     fn recent_comments(&self, global: Option<&Post>) -> Vec<RecentComment>;
-    /// The theme's `Name` header.
-    fn theme_name(&self) -> String;
     /// The latest five posts of `status`, `future` ones the user may edit
     /// soonest first, others newest first.
     fn recent_posts(&self, status: &str) -> Vec<Post>;
@@ -127,7 +125,7 @@ fn welcome_panel(site: &dyn DashboardSite) -> String {
     };
     let version = VERSION.trim();
     // `customize` maps to `edit_theme_options`, so the Customizer link shows.
-    let (site_column, look) = if site.stylesheet() == "twentytwentyfive" {
+    let (site_column, look) = if crate::page::has_block_theme(site) {
         (
             format!(
                 "<h3>Customize your entire site with block themes</h3>\n\t\t\t\t<p>Design everything on your site &#8212; from the header down to the footer, all using blocks and patterns.</p>\n\t\t\t\t<a href=\"{}\">Open site editor</a>\n\t\t\t\t\t\t",
@@ -305,8 +303,8 @@ fn right_now(site: &dyn DashboardSite) -> String {
     // update_right_now_message(): nobody here may `update_core`.
     // A theme that is not found is named after its folder.
     let stylesheet = site.stylesheet();
-    let name = if stylesheet == "twentytwentyfive" {
-        site.theme_name()
+    let name = if crate::page::has_block_theme(site) {
+        site.active_theme().name()
     } else {
         stylesheet
     };

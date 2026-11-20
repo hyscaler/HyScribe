@@ -3,12 +3,11 @@
 //! The block editor's page, `edit-form-blocks.php` with the admin around
 //! it: its REST preload paths, and the page once their answers are known.
 
-use std::sync::OnceLock;
-
 use hyscribe_model::Post;
-use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, json_decode, json_encode};
+use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, json_encode};
 use hyscribe_render::head::json_hex_tag;
 use hyscribe_render::post::admin_title;
+use hyscribe_render::theme::Theme;
 
 use super::form::{self, Editing};
 use super::{EditorSite, settings};
@@ -16,9 +15,6 @@ use crate::admin_bar::BarSite;
 use crate::assets::{Assets, Urls};
 use crate::menu::Screen;
 use crate::page::{Extras, Page, Request, admin_page_with};
-
-const THEME_REGISTERED: &[u8] =
-    include_bytes!("../../../../themes/twentytwentyfive/registered.json");
 
 /// The fields of the REST index the editor's site entity reads, in its order.
 pub(crate) const INDEX_FIELDS: &str = "description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front";
@@ -142,44 +138,41 @@ pub fn preloaded(
 
 /// `enqueue_editor_block_styles_assets()`'s script: the block styles the
 /// theme registers, its own and its style partials'.
-fn block_styles_script() -> &'static str {
-    static SCRIPT: OnceLock<String> = OnceLock::new();
-    SCRIPT.get_or_init(|| {
-        let registered = json_decode(THEME_REGISTERED).unwrap_or_default();
-        let lists = ["block_styles", "partial_styles"].map(|name| {
-            let list = registered.get_str(name).and_then(Value::as_array);
-            list.unwrap_or_default().to_vec()
-        });
-        let lines: String = lists
-            .concat()
-            .iter()
-            .map(|(_, entry)| {
-                let block = entry
-                    .get(&Key::Int(0))
-                    .map(Value::to_php_string)
-                    .unwrap_or_default();
-                let style = entry.get(&Key::Int(1)).cloned().unwrap_or_default();
-                let field = |name: &str| style.get_str(name).cloned().unwrap_or_default();
-                let style = Value::Array(vec![
-                    (Key::String(b"name".to_vec()), field("name")),
-                    (Key::String(b"label".to_vec()), field("label")),
-                ]);
-                let json = json_encode(&style).unwrap_or_default();
-                format!(
-                    "\twp.blocks.registerBlockStyle( '{}', {} );\n",
-                    String::from_utf8_lossy(&block),
-                    String::from_utf8_lossy(&json)
-                )
-            })
-            .collect();
-        format!("( function() {{\n{lines}}} )();")
-    })
+fn block_styles_script(theme: &Theme) -> String {
+    let lines: String = ["block_styles", "partial_styles"]
+        .into_iter()
+        .flat_map(|name| theme.registered(name))
+        .map(|(_, entry)| {
+            let block = entry
+                .get(&Key::Int(0))
+                .map(Value::to_php_string)
+                .unwrap_or_default();
+            let style = entry.get(&Key::Int(1)).cloned().unwrap_or_default();
+            let field = |name: &str| style.get_str(name).cloned().unwrap_or_default();
+            let style = Value::Array(vec![
+                (Key::String(b"name".to_vec()), field("name")),
+                (Key::String(b"label".to_vec()), field("label")),
+            ]);
+            let json = json_encode(&style).unwrap_or_default();
+            format!(
+                "\twp.blocks.registerBlockStyle( '{}', {} );\n",
+                String::from_utf8_lossy(&block),
+                String::from_utf8_lossy(&json)
+            )
+        })
+        .collect();
+    format!("( function() {{\n{lines}}} )();")
 }
 
 /// What both editors' pages add to `assets`: the global stylesheet's
 /// variables, the theme's block styles, and `preloads`, the memo
 /// [`preloaded`] gives.
 pub(crate) fn editor_assets(site: &dyn EditorSite, assets: &mut Assets, preloads: &Value) {
+    // `enqueue_block_assets`' own styles of the theme, queued after the color scheme's.
+    for (handle, src, ver) in site.theme().editor_styles().iter().rev() {
+        assets.register_style(handle, src, ver);
+        assets.enqueue_style_after("colors", handle);
+    }
     let variables = site.theme().global_styles().stylesheet_of("variables");
     assets.set_style_data(
         "global-styles-css-custom-properties",
@@ -187,21 +180,24 @@ pub(crate) fn editor_assets(site: &dyn EditorSite, assets: &mut Assets, preloads
         Value::Array(vec![(Key::Int(0), crate::page::text(&variables))]),
     );
     // Added again as the editor's canvas collects its assets.
-    let css = super::assets::block_style_css()
-        .iter()
-        .map(|(_, css)| css.clone());
+    let css = super::assets::block_style_css(site.theme());
+    let css = css.iter().map(|(_, css)| css.clone());
     let css = css
         .clone()
         .chain(css)
         .zip(0..)
         .map(|(css, i)| (Key::Int(i), css));
-    assets.set_style_data("wp-block-library", "after", Value::Array(css.collect()));
+    let css: Vec<(Key, Value)> = css.collect();
+    if !css.is_empty() {
+        assets.set_style_data("wp-block-library", "after", Value::Array(css));
+    }
     let preload = format!(
         "wp.apiFetch.use( wp.apiFetch.createPreloadingMiddleware( {} ) );",
         String::from_utf8_lossy(&json_hex_tag(preloads))
     );
     assets.add_inline_script("wp-api-fetch", "after", &preload);
-    assets.add_inline_script("wp-block-styles", "after", block_styles_script());
+    let script = block_styles_script(site.theme());
+    assets.add_inline_script("wp-block-styles", "after", &script);
 }
 
 /// `wp_tinymce_inline_scripts()`'s settings for the classic block.
@@ -226,7 +222,7 @@ pub fn editor_page(
     let custom = form::custom_settings(site, editing);
     let settings = settings::get_block_editor_settings(site, custom, settings::Editor::Post(post));
     let edits = form::initial_edits(post);
-    let after = form::scripts_after(&settings, &edits, post);
+    let after = form::scripts_after(site.theme(), &settings, &edits, post);
     let (templates, media) =
         crate::media::enqueue_media(site, request.browser, Some((post.id, Value::Int(-1))));
     // `wp_heartbeat_set_suspension()`: the editors keep the heartbeat.

@@ -165,8 +165,17 @@ impl Site for Oracle {
         self.trash
     }
     fn theme(&self) -> &Theme {
-        static THEME: std::sync::OnceLock<Theme> = std::sync::OnceLock::new();
-        THEME.get_or_init(hyscribe_render::theme::twentytwentyfive)
+        // The embedded theme the site's stylesheet names, else the default.
+        static THEMES: std::sync::OnceLock<Vec<Theme>> = std::sync::OnceLock::new();
+        let themes = THEMES.get_or_init(|| {
+            hyscribe_render::theme::slugs()
+                .map(|slug| hyscribe_render::theme::load(slug, None))
+                .collect()
+        });
+        let stylesheet = self.content.options.get("stylesheet").cloned();
+        let stylesheet = String::from_utf8_lossy(&stylesheet.unwrap_or_default()).into_owned();
+        let slug = hyscribe_render::theme::resolve(&stylesheet);
+        themes.iter().find(|theme| theme.slug() == slug).unwrap()
     }
     fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
         let mut posts: Vec<Post> = self

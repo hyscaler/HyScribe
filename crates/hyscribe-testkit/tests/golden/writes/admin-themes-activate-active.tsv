@@ -1,0 +1,15 @@
+# The rows PHP WordPress writes for the action admin-themes-activate-active (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-20 09:17:13 to 2026-11-20 09:17:13 UTC.
+# %wp_options:1% is 138.
+# %wp_options:2% is 139.
+# %wp_options:3% is 140.
+wp_options	current_theme	+	autoload	auto
+wp_options	current_theme	+	option_id	%wp_options:2%
+wp_options	current_theme	+	option_name	current_theme
+wp_options	current_theme	+	option_value	Twenty Twenty-Five
+wp_options	theme_mods_twentytwentyfive	~	autoload	auto	off
+wp_options	theme_mods_twentytwentyfive	~	option_value	a:1:{s:18:"custom_css_post_id";i:-1;}	a:3:{s:18:"custom_css_post_id";i:-1;s:16:"sidebars_widgets";a:2:{s:4:"time";i:%unix%;s:4:"data";a:3:{s:19:"wp_inactive_widgets";a:0:{}s:9:"sidebar-1";a:3:{i:0;s:7:"block-2";i:1;s:7:"block-3";i:2;s:7:"block-4";}s:9:"sidebar-2";a:2:{i:0;s:7:"block-5";i:1;s:7:"block-6";}}}s:19:"wp_classic_sidebars";a:0:{}}
+wp_options	theme_switched	+	autoload	auto
+wp_options	theme_switched	+	option_id	%wp_options:3%
+wp_options	theme_switched	+	option_name	theme_switched
+wp_options	theme_switched	+	option_value	twentytwentyfive

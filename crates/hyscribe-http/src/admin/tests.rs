@@ -1153,6 +1153,23 @@ async fn refusals() {
         ("/hs-admin/user-new", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/user-new?update[]=add", false, None),
         ("/hs-admin/themes?broken[]=1", false, None),
+        ("/hs-admin/themes?x=1", false, None),
+        ("/hs-admin/themes?activated=1&x=1", false, None),
+        (
+            "/hs-admin/themes?previewed=1",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
+        (
+            "/hs-admin/themes?activated=1&previewed=1",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
+        (
+            "/hs-admin/themes?broken=1&activated=1",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
         ("/hs-admin/themes", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/import", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/export", false, Some(StatusCode::FORBIDDEN)),
@@ -1721,7 +1738,7 @@ async fn dashboard_data() {
             assert!(postless.post.is_none() && postless.can_edit);
             assert_eq!(postless.user.as_ref().unwrap().id, 1);
             assert!(postless.link.ends_with("#comment-2"));
-            assert_eq!(admin.theme_name(), "Twenty Twenty-Five");
+            assert_eq!(admin.active_theme().name(), "Twenty Twenty-Five");
             assert_eq!(admin.user_email(), b"admin@default-install.test");
             assert_eq!(admin.show_welcome_panel().as_deref(), Some(&b"1"[..]));
             assert_eq!(admin.published("page"), 1);

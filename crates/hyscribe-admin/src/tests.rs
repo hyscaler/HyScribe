@@ -276,6 +276,17 @@ impl Role {
         self.0.split_once(':').map_or("", |(variant, _)| variant)
     }
 
+    /// The active theme: Twenty Twenty-Four in the `tt4` variant (`e5tt4`
+    /// of the block editor), Twenty Twenty-Three in `tt3` (`e5tt3`), and
+    /// else Twenty Twenty-Five.
+    pub fn theme_slug(&self) -> &'static str {
+        match self.variant() {
+            "tt4" | "e5tt4" => "twentytwentyfour",
+            "tt3" | "e5tt3" => "twentytwentythree",
+            _ => "twentytwentyfive",
+        }
+    }
+
     /// The home URL, HTTPS in the `h9home` variant.
     pub fn home(&self) -> String {
         if self.variant() == "h9home" {
@@ -437,6 +448,9 @@ impl Role {
             ("o36drive", "active_plugins") => b"a:1:{i:0;s:8:\"c:/x.php\";}",
             ("o36escape", "active_plugins") => b"a:1:{i:0;s:12:\"a b/<i>&.php\";}",
             ("o36dup", "active_plugins") => b"a:2:{i:0;s:7:\"x/x.php\";i:1;s:7:\"x/x.php\";}",
+            ("tt4" | "tt3" | "e5tt4" | "e5tt3", "stylesheet" | "template") => {
+                self.theme_slug().as_bytes()
+            }
             ("a5auto", "auto_update_themes") => b"a:1:{i:0;s:16:\"twentytwentyfive\";}",
             ("j9parent", "template") => b"gone",
             ("g9gone" | "g9noswitch" | "g9nooptions", "stylesheet" | "template")
@@ -921,7 +935,7 @@ impl PageSite for Role {
             }
             ("a8locknorich", "rich_editing") => b"false",
             (variant, "rich_editing")
-                if variant.starts_with("a8") || variant == "e5" || self.j9_media() =>
+                if variant.starts_with("a8") || variant.starts_with("e5") || self.j9_media() =>
             {
                 b"true"
             }
@@ -1063,21 +1077,33 @@ impl PageSite for Role {
         let stylesheet = CapabilityData::option(self, "stylesheet").unwrap_or_default();
         String::from_utf8(stylesheet).unwrap()
     }
+    fn active_theme(&self) -> &hyscribe_render::theme::Theme {
+        static THEMES: [OnceLock<hyscribe_render::theme::Theme>; 3] =
+            [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+        let slug = self.theme_slug();
+        let at = ["twentytwentyfive", "twentytwentyfour", "twentytwentythree"]
+            .iter()
+            .position(|known| *known == slug)
+            .unwrap();
+        THEMES[at].get_or_init(|| hyscribe_render::theme::load(slug, None))
+    }
     fn font_faces(&self, with_theme: bool) -> Vec<u8> {
-        // By scheme, then with the theme's fonts or not.
-        static FACES: OnceLock<[[Vec<u8>; 2]; 2]> = OnceLock::new();
-        let faces = FACES.get_or_init(|| {
-            let theme = hyscribe_render::theme::twentytwentyfive();
-            [false, true].map(|tls| {
-                let site = if tls {
+        // By theme, scheme, then with the theme's fonts or not.
+        type Key = (&'static str, bool, bool);
+        static FACES: OnceLock<std::sync::Mutex<HashMap<Key, Vec<u8>>>> = OnceLock::new();
+        let key = (self.theme_slug(), self.tls(), with_theme);
+        let mut faces = FACES.get_or_init(Default::default).lock().unwrap();
+        faces
+            .entry(key)
+            .or_insert_with(|| {
+                let site = if key.1 {
                     SITE.replace("http:", "https:")
                 } else {
                     SITE.into()
                 };
-                [false, true].map(|with_theme| theme.admin_font_faces(&site, with_theme))
+                self.active_theme().admin_font_faces(&site, with_theme)
             })
-        });
-        faces[usize::from(self.tls())][usize::from(with_theme)].clone()
+            .clone()
     }
 }
 
@@ -1670,9 +1696,6 @@ impl crate::dashboard::DashboardSite for Role {
         }
         rows.push(hello);
         rows
-    }
-    fn theme_name(&self) -> String {
-        "Twenty Twenty-Five".into()
     }
     fn recent_posts(&self, status: &str) -> Vec<hyscribe_model::Post> {
         match (status, self.variant()) {

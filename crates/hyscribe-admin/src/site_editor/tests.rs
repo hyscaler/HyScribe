@@ -100,17 +100,33 @@ fn golden_cases() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
     cases
 }
 
+/// The site of a case: another embedded theme active for a case ending in
+/// `-tt4` or `-tt3`.
+fn site_of(case: &str) -> crate::tests::Role {
+    let variant = match case.rsplit_once('-') {
+        Some((_, variant @ ("tt4" | "tt3"))) => variant,
+        _ => "default",
+    };
+    crate::tests::Role(Box::leak(
+        format!("{variant}:administrator").into_boxed_str(),
+    ))
+}
+
 /// The query of each case of `reference/site-editor/page-golden.sh`.
-fn query_of(case: &str) -> &'static str {
+fn query_of(case: &str, theme: &str) -> String {
+    let case = case
+        .strip_suffix("-tt4")
+        .or(case.strip_suffix("-tt3"))
+        .unwrap_or(case);
     match case {
-        "se-page" => "p=%2Fpage",
-        "se-page-2" => "p=/page/2&canvas=edit",
-        "se-page-gone" => "p=/page/99",
-        "se-draft" => "p=/&postId=3",
-        "se-post" => "p=/&postId=1&postType=post",
-        "se-styles" => "p=/styles&postType=wp_global_styles",
-        "se-template" => "p=/wp_template/twentytwentyfive//index&canvas=edit",
-        _ => "",
+        "se-page" => "p=%2Fpage".into(),
+        "se-page-2" => "p=/page/2&canvas=edit".into(),
+        "se-page-gone" => "p=/page/99".into(),
+        "se-draft" => "p=/&postId=3".into(),
+        "se-post" => "p=/&postId=1&postType=post".into(),
+        "se-styles" => "p=/styles&postType=wp_global_styles".into(),
+        "se-template" => format!("p=/wp_template/{theme}//index&canvas=edit"),
+        _ => String::new(),
     }
 }
 
@@ -127,12 +143,13 @@ fn kept(value: &str) -> String {
 /// Each case's page, settings, block scripts and preloaded paths are PHP's.
 #[test]
 fn the_pages_are_php_s() {
-    let site = crate::tests::Role("default:administrator");
     let browser = &crate::tests::BROWSER;
     let mut failures = Vec::new();
     let cases = golden_cases();
     for (case, php) in &cases {
-        let query = query_of(case);
+        let site = site_of(case);
+        let query = query_of(case, site.theme_slug());
+        let query = query.as_str();
         let post = context_post(&site, query).unwrap();
         let uri = format!("/hs-admin/site-editor?{query}");
         let uri = uri.strip_suffix('?').unwrap_or(&uri);
@@ -166,11 +183,15 @@ fn the_pages_are_php_s() {
                 "wp.blocks.setCategories( ",
                 block_categories(),
             ),
-            ("bindings", "for ( const source of ", bindings_sources()),
+            (
+                "bindings",
+                "for ( const source of ",
+                bindings_sources(site.theme()),
+            ),
             (
                 "blocks",
                 "wp.blocks.unstable__bootstrapServerSideBlockDefinitions(",
-                server_block_settings(),
+                server_block_settings(site.theme()),
             ),
         ];
         for (part, marker, value) in pieces {
@@ -178,7 +199,13 @@ fn the_pages_are_php_s() {
             ours.push((part.into(), kept(&json)));
             masked = masked.replace(&format!("{marker}{json}"), &format!("{marker}%{part}%"));
         }
-        let paths = preload_paths(post.as_ref(), 4, "twentytwentyfive");
+        // The theme's global styles post, which PHP made on the first view.
+        let preloaded = php.iter().find(|(part, _)| *part == "preloads").unwrap().1;
+        let styles = preloaded
+            .split("/wp/v2/global-styles/")
+            .nth(1)
+            .and_then(|rest| rest.split(['?', ' ']).next()?.parse().ok());
+        let paths = preload_paths(post.as_ref(), styles.unwrap(), site.theme_slug());
         let paths: Vec<String> = paths.iter().map(|(m, p)| format!("{m} {p}")).collect();
         let mut sorted: Vec<String> = paths.clone();
         // PHP's memo lists the `OPTIONS` paths first, at the first's place.
@@ -218,7 +245,7 @@ fn the_pages_are_php_s() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(cases.len(), 9);
+    assert_eq!(cases.len(), 15);
 }
 
 /// The settings `site-editor.php` adds are PHP's, in its order.

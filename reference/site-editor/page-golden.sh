@@ -15,7 +15,10 @@
 # also masked. The navigation menu and theme mods php.sh's first page view
 # wrote are taken out first, so the first view writes the theme's
 # global styles post as on the fixture: start from a fresh db.sh up and
-# php.sh up, and take both down after.
+# php.sh up, and take both down after. A case ending in -tt4 or -tt3 is
+# recorded with Twenty Twenty-Four or Twenty Twenty-Three active
+# (reference/admin-menu/as-role.php); its first view writes that theme's
+# global styles post.
 set -euo pipefail
 DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
@@ -44,8 +47,8 @@ SQL
   screen-options-nonce internal-linking > "$TMP/nonces"
 : > "$OUT"
 record() {
-  local case=$1 query=$2
-  status=$(curl -s -o "$TMP/page" -w '%{http_code}' -b hyscribe_role=administrator "$BASE/wp-admin/site-editor.php$query")
+  local case=$1 query=$2 variant=${3:-}
+  status=$(curl -s -o "$TMP/page" -w '%{http_code}' -b "hyscribe_role=administrator; hyscribe_variant=$variant" "$BASE/wp-admin/site-editor.php$query")
   [ "$status" = 200 ] || { echo "PHP answered $status for $query" >&2; exit 1; }
   [ -z "${RAW:-}" ] || cp "$TMP/page" "$RAW/$case.html"
   php "$ROOT/reference/post-edit/editor-parts.php" "$TMP/page" "$TMP/nonces" "$case" ${RAW:+"$RAW"} >> "$OUT"
@@ -59,4 +62,10 @@ record se-draft '?p=/&postId=3'
 record se-post '?p=/&postId=1&postType=post'
 record se-styles '?p=/styles&postType=wp_global_styles'
 record se-template '?p=/wp_template/twentytwentyfive//index&canvas=edit'
+for variant in tt4 tt3; do
+  theme=twentytwentyfour; [ "$variant" != tt3 ] || theme=twentytwentythree
+  record "se-first-$variant" '' "$variant"
+  record "se-page-2-$variant" '?p=/page/2&canvas=edit' "$variant"
+  record "se-template-$variant" "?p=/wp_template/$theme//index&canvas=edit" "$variant"
+done
 wc -l "$OUT"

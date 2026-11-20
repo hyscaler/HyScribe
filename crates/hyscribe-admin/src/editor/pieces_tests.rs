@@ -15,11 +15,10 @@ use hyscribe_testkit::{hs_admin_page, unhex};
 use crate::page::text;
 use crate::tests::{BROWSER, Role, first_difference};
 
-/// The bundled theme, as the editor reads it.
+/// The active theme, as the editor reads it.
 impl EditorSite for Role {
     fn theme(&self) -> &Theme {
-        static THEME: std::sync::OnceLock<Theme> = std::sync::OnceLock::new();
-        THEME.get_or_init(hyscribe_render::theme::twentytwentyfive)
+        crate::page::PageSite::active_theme(self)
     }
 }
 
@@ -41,14 +40,19 @@ fn kept(value: &[u8]) -> String {
     String::from_utf8_lossy(value).into_owned()
 }
 
-/// The site and browser of a case, named after its role or browser.
+/// The site and browser of a case, named after its role or browser, and
+/// `-tt4` or `-tt3` for another embedded theme active.
 fn site_of(case: &str) -> (Role, &'static Browser<'static>) {
+    let (case, theme) = match case.rsplit_once('-') {
+        Some((case, theme @ ("tt4" | "tt3"))) => (case, theme),
+        _ => (case, ""),
+    };
     let (role, browser) = match case.rsplit('-').next().unwrap_or_default() {
         "chrome" => ("administrator", &CHROME),
         role => (role, &BROWSER),
     };
     (
-        Role(Box::leak(format!("e5:{role}").into_boxed_str())),
+        Role(Box::leak(format!("e5{theme}:{role}").into_boxed_str())),
         browser,
     )
 }
@@ -85,8 +89,8 @@ fn editor_parts(case: &str, post: &Post) -> Vec<(String, String)> {
     let pieces: [(&str, Value); 4] = [
         ("edits", form::initial_edits(post)),
         ("categories", blocks::block_categories()),
-        ("bindings", blocks::bindings_sources()),
-        ("blocks", blocks::server_block_settings()),
+        ("bindings", blocks::bindings_sources(site.theme())),
+        ("blocks", blocks::server_block_settings(site.theme())),
     ];
     for (part, value) in pieces {
         parts.push((part.into(), kept(&json_hex_tag(&value))));
@@ -167,6 +171,9 @@ fn editor_pieces_are_php_s() {
                     );
                     failures.push(format!("{case} body: {}", first_difference(&php, &ours)));
                 }
+                Some((p, v)) if p == part && !value.starts_with("sha256:") => {
+                    failures.push(format!("{case} {part}: {}", first_difference(&value, v)));
+                }
                 Some((p, v)) => failures.push(format!(
                     "{case} {part}: PHP {}\n  ours {p} {}",
                     short(&value),
@@ -180,7 +187,7 @@ fn editor_pieces_are_php_s() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(cases.len(), 12);
+    assert_eq!(cases.len(), 16);
 }
 
 /// The page of each case of `post-editor.tsv`, its preloads' data left
@@ -210,8 +217,13 @@ fn editor_pages_are_php_s() {
         if ours != php_page {
             failures.push(format!("{case}: {}", first_difference(&php_page, &ours)));
         }
-        let edit_theme = case.ends_with("administrator") || case.ends_with("chrome");
-        let paths = page::preload_paths(&post, 6, edit_theme, "twentytwentyfive");
+        let edit_theme = case.contains("administrator") || case.contains("chrome");
+        // The theme's global styles post, which PHP made on the first view.
+        let styles = part("preloads")
+            .split("/wp/v2/global-styles/")
+            .nth(1)
+            .and_then(|rest| rest.split(['?', ' ']).next()?.parse().ok());
+        let paths = page::preload_paths(&post, styles.unwrap(), edit_theme, site.theme_slug());
         let paths: Vec<String> = paths.iter().map(|(m, p)| format!("{m} {p}")).collect();
         // PHP leaves out what it refuses: the settings for all but administrators.
         let kept: Vec<&String> = paths

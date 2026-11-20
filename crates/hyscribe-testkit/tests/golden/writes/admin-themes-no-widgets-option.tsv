@@ -1,0 +1,22 @@
+# The rows PHP WordPress writes for the action admin-themes-no-widgets-option (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-20 10:30:32 to 2026-11-20 10:30:32 UTC.
+# %wp_options:1% is 135.
+# %wp_options:2% is 136.
+# %wp_options:3% is 137.
+# %wp_options:4% is 138.
+wp_options	current_theme	+	autoload	auto
+wp_options	current_theme	+	option_id	%wp_options:2%
+wp_options	current_theme	+	option_name	current_theme
+wp_options	current_theme	+	option_value	Twenty Twenty-Four
+wp_options	stylesheet	~	option_value	twentytwentyfive	twentytwentyfour
+wp_options	template	~	option_value	twentytwentyfive	twentytwentyfour
+wp_options	theme_mods_twentytwentyfive	~	autoload	auto	off
+wp_options	theme_mods_twentytwentyfive	~	option_value	a:1:{s:18:"custom_css_post_id";i:-1;}	a:2:{s:18:"custom_css_post_id";i:-1;s:16:"sidebars_widgets";a:2:{s:4:"time";i:%unix%;s:4:"data";a:0:{}}}
+wp_options	theme_mods_twentytwentyfour	+	autoload	on
+wp_options	theme_mods_twentytwentyfour	+	option_id	%wp_options:3%
+wp_options	theme_mods_twentytwentyfour	+	option_name	theme_mods_twentytwentyfour
+wp_options	theme_mods_twentytwentyfour	+	option_value	a:3:{i:0;b:0;s:19:"wp_classic_sidebars";a:0:{}s:18:"nav_menu_locations";a:0:{}}
+wp_options	theme_switched	+	autoload	auto
+wp_options	theme_switched	+	option_id	%wp_options:4%
+wp_options	theme_switched	+	option_name	theme_switched
+wp_options	theme_switched	+	option_value	

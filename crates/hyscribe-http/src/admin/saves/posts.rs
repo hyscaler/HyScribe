@@ -1309,4 +1309,4 @@ async fn bulk_edit_posts(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

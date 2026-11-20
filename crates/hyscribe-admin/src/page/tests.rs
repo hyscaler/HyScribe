@@ -73,6 +73,11 @@ impl PageSite for Fake {
     fn user_id(&self) -> u64 {
         7
     }
+    fn active_theme(&self) -> &hyscribe_render::theme::Theme {
+        static THEME: std::sync::OnceLock<hyscribe_render::theme::Theme> =
+            std::sync::OnceLock::new();
+        THEME.get_or_init(hyscribe_render::theme::twentytwentyfive)
+    }
     fn nonce(&self, action: &str) -> String {
         format!("<{action}>")
     }

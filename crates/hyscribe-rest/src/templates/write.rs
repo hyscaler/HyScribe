@@ -231,7 +231,7 @@ fn answerable(
         &title.unwrap_or_default(),
     );
     let siteurl = context.option("siteurl").unwrap_or_default();
-    resolve_patterns(&content, &siteurl)?;
+    resolve_patterns(context.site.theme(), &content, &siteurl)?;
     let slug = save.slug.clone().unwrap_or_default();
     let untitled = is_empty_string(&title) || title == slug;
     let described = description.is_some_and(|description| !is_empty_string(&description));

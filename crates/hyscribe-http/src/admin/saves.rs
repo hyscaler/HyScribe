@@ -34,6 +34,7 @@ pub(super) mod options;
 mod posts;
 pub(super) mod screen;
 mod terms;
+pub(crate) mod themes;
 mod user_edit;
 
 pub(super) use user_edit::destroy_sessions;
@@ -190,6 +191,7 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("options", b"dismiss") => Some(options::dismiss),
         ("options-permalink", b"") => Some(options::permalinks),
         ("options-privacy", b"create-privacy-page") => Some(options::create_privacy_page),
+        ("themes", b"activate") => Some(themes::activate),
         ("edit-tags", b"add-tag") => Some(terms::add_tag),
         ("edit-tags", b"delete") => Some(terms::delete),
         ("edit-tags", b"bulk-delete") => Some(terms::bulk_delete),

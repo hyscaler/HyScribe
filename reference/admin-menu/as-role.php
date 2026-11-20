@@ -18,6 +18,18 @@ if ( 0 === strpos( $_COOKIE['hyscribe_variant'] ?? '', 'e0' ) ) {
 	define( 'EMPTY_TRASH_DAYS', 0 );
 }
 
+// The variants tt4 and tt3 are a site whose active theme is Twenty Twenty-Four
+// or Twenty Twenty-Three, as an option filter has it (nothing is written).
+$hyscribe_themes = array(
+	'tt4' => 'twentytwentyfour',
+	'tt3' => 'twentytwentythree',
+);
+$hyscribe_theme  = $hyscribe_themes[ $_COOKIE['hyscribe_variant'] ?? '' ] ?? '';
+if ( $hyscribe_theme ) {
+	add_filter( 'pre_option_template', fn() => $hyscribe_theme );
+	add_filter( 'pre_option_stylesheet', fn() => $hyscribe_theme );
+}
+
 function auth_redirect() {}
 
 add_filter( 'determine_current_user', function () {

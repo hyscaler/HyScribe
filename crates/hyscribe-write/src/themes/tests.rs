@@ -323,6 +323,25 @@ async fn widgets_the_site_changed_are_php_s() {
     .await;
 }
 
+/// Inactive and orphaned widgets come before the others, whatever the order.
+#[tokio::test(flavor = "multi_thread")]
+async fn widgets_are_ordered_as_php_orders_them() {
+    let mixed = async |write: &mut Write<'_>| {
+        let all: [(&str, &[&str]); 4] = [
+            ("sidebar-1", &["block-2"]),
+            ("wp_inactive_widgets", &["block-3"]),
+            ("sidebar-2", &["block-4"]),
+            ("orphaned_widgets_2", &["block-5"]),
+        ];
+        sidebars(write, &all).await;
+    };
+    check_case("admin-themes-widgets-order", mixed, async |write, ()| {
+        switch_theme(write, FOUR, FIVE).await.unwrap();
+        next_load(write, FOUR).await;
+    })
+    .await;
+}
+
 /// A theme without mods, whether the site kept the theme's name or not.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_theme_without_mods_is_php_s() {
@@ -542,6 +561,7 @@ fn templates_are_widgets_without_instances() {
         ("-1", false),
         ("text", false),
         ("text-x", false),
+        ("text-+1", false),
     ] {
         assert_eq!(is_template(id.as_bytes()), template, "{id}");
     }

@@ -237,6 +237,25 @@ return array(
 			$themes_next_load();
 		}
 	),
+	// Inactive and orphaned widgets listed after a sidebar.
+	'admin-themes-widgets-order'              => $themes_case(
+		function () {
+			update_option(
+				'sidebars_widgets',
+				array(
+					'sidebar-1'           => array( 'block-2' ),
+					'wp_inactive_widgets' => array( 'block-3' ),
+					'sidebar-2'           => array( 'block-4' ),
+					'orphaned_widgets_2'  => array( 'block-5' ),
+					'array_version'       => 3,
+				)
+			);
+		},
+		function () use ( $themes_activate, $themes_next_load ) {
+			$themes_activate( 'twentytwentyfour' );
+			$themes_next_load();
+		}
+	),
 	// A switch the Customizer carried the menus and widgets over for.
 	'admin-themes-via-customizer'             => $themes_case(
 		function () use ( $themes_activate ) {

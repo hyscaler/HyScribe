@@ -1,0 +1,8 @@
+GET	/?rest_route=/wp/v2/templates/twentytwentyfour//page-wide&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfour//page-with-sidebar&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfour//single-with-sidebar&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfour//page-no-title&_fields=id,title,is_custom,post_types
+GET	/?rest_route=/wp/v2/templates&post_type=page&_fields=id,is_custom
+GET	/?rest_route=/wp/v2/template-parts/twentytwentyfour//sidebar&context=edit
+GET	/?rest_route=/wp/v2/template-parts/twentytwentyfour//post-meta&context=edit
+GET	/?rest_route=/wp/v2/template-parts&area=uncategorized&context=edit

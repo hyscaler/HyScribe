@@ -1540,5 +1540,24 @@
             "src": "style.min.css",
             "ver": "1.5"
         }
+    ],
+    "template_files": [
+        "archive",
+        "404",
+        "search",
+        "index",
+        "single",
+        "page-no-title",
+        "page",
+        "home"
+    ],
+    "part_files": [
+        "sidebar",
+        "header",
+        "footer-newsletter",
+        "footer-columns",
+        "vertical-header",
+        "footer",
+        "header-large-title"
     ]
 }

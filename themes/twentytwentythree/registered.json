@@ -326,5 +326,22 @@
         ]
     },
     "post_formats": [],
-    "styles": []
+    "styles": [],
+    "template_files": [
+        "archive",
+        "404",
+        "blog-alternative",
+        "search",
+        "index",
+        "single",
+        "blank",
+        "page",
+        "home"
+    ],
+    "part_files": [
+        "header",
+        "comments",
+        "footer",
+        "post-meta"
+    ]
 }

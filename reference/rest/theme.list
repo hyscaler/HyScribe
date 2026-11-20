@@ -1,0 +1,54 @@
+# The editors' read routes with another theme active, for reference/rest/golden.sh (method, target, flags): run with HYSCRIBE_THEME set, %theme% is its stylesheet; theme-<stylesheet>.list adds that theme's own templates, and theme-<stylesheet>.sql its global styles post, which PHP creates on the first request of an administrator (as preloads.sql).
+GET	/?rest_route=/wp/v2/themes&status=active&_fields=stylesheet,template,name,version,description,author,author_uri,theme_uri,tags,screenshot,requires_wp,requires_php,textdomain,status,theme_supports,is_block_theme,default_template_part_areas,stylesheet_uri,template_uri
+GET	/?rest_route=/wp/v2/themes/%theme%&_fields=stylesheet,template,name,version,description,author,author_uri,theme_uri,tags,screenshot,requires_wp,requires_php,textdomain,status,theme_supports,is_block_theme,default_template_part_areas,stylesheet_uri,template_uri
+GET	/?rest_route=/wp/v2/themes/%theme%&context=embed&_fields=stylesheet,name,theme_supports.formats
+GET	/?rest_route=/wp/v2/global-styles/themes/%theme%	hash
+GET	/?rest_route=/wp/v2/global-styles/themes/%theme%&_fields=settings.color.palette,_links
+GET	/?rest_route=/wp/v2/global-styles/themes/%theme%&context=embed
+GET	/?rest_route=/wp/v2/global-styles/themes/%theme%/variations	hash
+GET	/?rest_route=/wp/v2/global-styles/themes/%theme%/variations&_fields=title
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive
+GET	/?rest_route=/wp/v2/block-types&context=edit&_fields=name,styles	hash
+GET	/?rest_route=/wp/v2/block-types/core/button&context=edit&_fields=name,styles
+GET	/?rest_route=/wp/v2/block-types/core/image&_fields=name,styles
+GET	/?rest_route=/wp/v2/block-types/core/quote&_fields=name,styles
+GET	/?rest_route=/wp/v2/block-patterns/categories
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=name,title,categories,source
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=content	skip=editor+author+contributor
+GET	/?rest_route=/wp/v2/block-patterns/patterns	skip=editor+author+contributor
+GET	/?rest_route=/wp/v2/templates	skip=editor+author+contributor
+GET	/?rest_route=/wp/v2/templates&context=edit	skip=editor+author+contributor
+GET	/?rest_route=/wp/v2/templates&post_type=page&_fields=id,slug,title,is_custom,post_types
+GET	/?rest_route=/wp/v2/templates&post_type=post&_fields=id
+GET	/?rest_route=/wp/v2/templates&area=header&_fields=id
+GET	/?rest_route=/wp/v2/templates&_fields=id,title.rendered,source,origin,type,theme,author_text,has_theme_file,_links
+GET	/?rest_route=/wp/v2/templates/%theme%//index&context=edit
+GET	/?rest_route=/wp/v2/templates/%theme%//single&context=edit
+GET	/?rest_route=/wp/v2/templates/%theme%//page&context=edit
+GET	/?rest_route=/wp/v2/templates/%theme%//home&context=edit
+GET	/?rest_route=/wp/v2/templates/%theme%//404&context=embed
+GET	/?rest_route=/wp/v2/templates/%theme%//search&_fields=content.raw,is_custom,post_types
+GET	/?rest_route=/wp/v2/templates/%theme%//archive&_fields=id,title,description
+GET	/?rest_route=/wp/v2/templates/%theme%//nope
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//index
+GET	/?rest_route=/wp/v2/templates/lookup&slug=single-post-hello-world&_fields=id,slug
+GET	/?rest_route=/wp/v2/templates/lookup&slug=page-sample-page&_fields=id,slug
+GET	/?rest_route=/wp/v2/templates/lookup&slug=front-page&_fields=id,slug
+GET	/?rest_route=/wp/v2/templates/lookup&slug=category-news&_fields=id,slug
+GET	/?rest_route=/wp/v2/templates/lookup&slug=author-admin&_fields=id,slug
+GET	/?rest_route=/wp/v2/template-parts	skip=editor+author+contributor
+GET	/?rest_route=/wp/v2/template-parts&context=edit	skip=editor+author+contributor
+GET	/?rest_route=/wp/v2/template-parts&area=header&_fields=id,area
+GET	/?rest_route=/wp/v2/template-parts&area=footer&context=embed
+GET	/?rest_route=/wp/v2/template-parts&area=uncategorized&_fields=id
+GET	/?rest_route=/wp/v2/template-parts/%theme%//header&context=edit
+GET	/?rest_route=/wp/v2/template-parts/%theme%//footer&context=edit
+GET	/?rest_route=/wp/v2/template-parts/%theme%//index
+GET	/?rest_route=/wp/v2/template-parts/lookup&slug=header&_fields=id,type,is_custom,area,_links
+GET	/?rest_route=/wp/v2/types/wp_template&context=edit	hash
+GET	/?rest_route=/wp/v2/templates&context=edit&per_page=-1	skip=editor+author+contributor
+GET	/?rest_route=/wp/v2/template-parts&context=edit&per_page=-1	skip=editor+author+contributor
+GET	/?rest_route=/wp/v2/block-patterns/categories&_fields=name&context=edit
+GET	/wp-json/wp/v2/templates/%theme%//index	pretty
+HEAD	/?rest_route=/wp/v2/templates
+HEAD	/?rest_route=/wp/v2/themes/%theme%

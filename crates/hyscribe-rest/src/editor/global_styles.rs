@@ -6,13 +6,10 @@
 //! `/wp/v2/global-styles/<id>`. Twenty Twenty-Five's styles name no theme
 //! file, so they link to none.
 
-use std::sync::OnceLock;
-
 use hyscribe_kses::esc_html;
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, json_decode, json_encode_hex_amp};
 use hyscribe_render::post::admin_title;
-use hyscribe_render::theme::{Theme, twentytwentyfive};
 
 use crate::fields::{Properties, fields_for_response, is_field_included, links_wanted};
 use crate::posts::write::{Outcome, Plan, Save, Write, Writing};
@@ -34,11 +31,6 @@ const POST_PROPERTIES: &Properties = &[
     ("settings", &["view", "edit"]),
     ("title", &["embed", "view", "edit"]),
 ];
-
-fn theme() -> &'static Theme {
-    static THEME: OnceLock<Theme> = OnceLock::new();
-    THEME.get_or_init(twentytwentyfive)
-}
 
 fn stylesheet_arg(sanitize: Sanitize) -> Vec<Arg> {
     vec![Arg {
@@ -160,7 +152,7 @@ fn post_item(context: &Context, params: &Params) -> Result<Response, RestError> 
 fn post_response(context: &Context, params: &Params, post: &Post) -> Result<Response, RestError> {
     let raw = json_decode(&post.content).unwrap_or_default();
     let user = raw.get_str("isGlobalStylesUserThemeJSON") == Some(&Value::Bool(true));
-    let config = user.then(|| theme().global_styles().user_theme_json(raw));
+    let config = user.then(|| context.site.theme().global_styles().user_theme_json(raw));
     if config.as_ref().is_some_and(names_files) {
         return Err(RestError::not_ported());
     }
@@ -245,7 +237,7 @@ fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
     let stylesheet = active(context, params)?;
     let wanted = fields_for_response(params, PROPERTIES);
     // The theme has both settings and styles.
-    let global = theme().global_styles();
+    let global = context.site.theme().global_styles();
     let data = [("settings", global.settings()), ("styles", global.styles())]
         .into_iter()
         .filter(|(name, _)| is_field_included(name, &wanted))
@@ -262,7 +254,10 @@ fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
 /// `get_theme_items()`.
 fn variations(context: &Context, params: &Params) -> Result<Response, RestError> {
     active(context, params)?;
-    Ok(Response::new(list(theme().style_variations()), 200))
+    Ok(Response::new(
+        list(context.site.theme().style_variations()),
+        200,
+    ))
 }
 
 /// The route of a global styles post.

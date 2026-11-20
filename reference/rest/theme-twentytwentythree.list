@@ -1,0 +1,6 @@
+GET	/?rest_route=/wp/v2/templates/twentytwentythree//blank&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentythree//blog-alternative&context=edit
+GET	/?rest_route=/wp/v2/templates&post_type=page&_fields=id,is_custom
+GET	/?rest_route=/wp/v2/template-parts/twentytwentythree//comments&context=edit
+GET	/?rest_route=/wp/v2/template-parts/twentytwentythree//post-meta&context=edit
+GET	/?rest_route=/wp/v2/template-parts&area=uncategorized&context=edit

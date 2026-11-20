@@ -11,8 +11,7 @@ use hyscribe_phpser::json_encode;
 use hyscribe_testkit::{RestCase, rest_cases, rest_headers, unhex};
 
 use super::content::hooked;
-use super::query::{PART_FILES, hierarchy};
-use super::theme;
+use super::query::{Kind, file_slugs, hierarchy};
 use crate::response::{list, text};
 use crate::tests::content::{Content, default_install, default_install_with};
 use crate::tests::serve_over;
@@ -56,12 +55,13 @@ fn hierarchies_are_php_s() {
 /// block, as PHP hooks it, or not.
 #[test]
 fn theme_parts_need_no_wrapper() {
-    for slug in PART_FILES {
-        let (content, _) = theme().part(slug.as_bytes()).unwrap();
-        let theme = b"twentytwentyfive";
+    let theme = hyscribe_render::theme::twentytwentyfive();
+    for slug in file_slugs(&theme, Kind::Part) {
+        let (content, _) = theme.part(slug.as_bytes()).unwrap();
+        let stylesheet = b"twentytwentyfive";
         assert_eq!(
-            hooked(content, true, theme),
-            hooked(content, false, theme),
+            hooked(content, true, stylesheet),
+            hooked(content, false, stylesheet),
             "{slug}"
         );
     }

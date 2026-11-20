@@ -5,40 +5,16 @@
 //! `get_block_templates()`, `get_block_template()` and
 //! `resolve_block_template()` find them.
 
-use std::sync::OnceLock;
-
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, absint, is_empty_string};
 use hyscribe_render::formatting::sanitize_title_for_query;
 use hyscribe_render::site_templates::names_term;
 use hyscribe_render::template_types::{PART_AREAS, default_type};
-use hyscribe_render::theme::{Theme, twentytwentyfive};
+use hyscribe_render::theme::Theme;
 
 use super::content::hooked;
 use crate::Context;
 use crate::response::RestError;
-
-/// The theme's templates and parts in the order PHP's directory iterator
-/// lists them in the oracle's theme folders.
-const TEMPLATE_FILES: [&str; 8] = [
-    "archive",
-    "404",
-    "search",
-    "index",
-    "single",
-    "page-no-title",
-    "page",
-    "home",
-];
-pub(super) const PART_FILES: [&str; 7] = [
-    "sidebar",
-    "header",
-    "footer-newsletter",
-    "footer-columns",
-    "vertical-header",
-    "footer",
-    "header-large-title",
-];
 
 /// The post types and taxonomies a default install registers, in order.
 const POST_TYPES: [&str; 16] = [
@@ -70,9 +46,15 @@ const TAXONOMIES: [&str; 8] = [
     "wp_pattern_category",
 ];
 
-pub(crate) fn theme() -> &'static Theme {
-    static THEME: OnceLock<Theme> = OnceLock::new();
-    THEME.get_or_init(twentytwentyfive)
+/// The slugs of the theme's templates or parts in the order PHP's
+/// directory iterator lists them in the oracle's theme folder.
+pub(super) fn file_slugs(theme: &Theme, kind: Kind) -> impl Iterator<Item = String> + '_ {
+    let list = match kind {
+        Kind::Template => "template_files",
+        Kind::Part => "part_files",
+    };
+    let names = theme.registered(list).iter();
+    names.map(|(_, name)| String::from_utf8_lossy(&name.to_php_string()).into_owned())
 }
 
 /// The template post types.
@@ -140,7 +122,7 @@ pub(crate) struct Query {
 /// A theme file: its slug, its title and post types from `theme.json`'s
 /// custom templates, or its part's area.
 struct File {
-    slug: &'static str,
+    slug: String,
     title: Vec<u8>,
     post_types: Option<Vec<Value>>,
     area: Option<Vec<u8>>,
@@ -151,27 +133,24 @@ fn string(value: Option<&Value>) -> Vec<u8> {
 }
 
 /// The theme's `theme.json` entry named `slug` in its list `list`.
-fn theme_entry(list: &str, slug: &str) -> Option<Value> {
-    let entries = theme().theme_json_list(list);
+fn theme_entry(theme: &Theme, list: &str, slug: &str) -> Option<Value> {
+    let entries = theme.theme_json_list(list);
     entries
         .into_iter()
         .rfind(|entry| entry.get_str("name").map(Value::to_php_string) == Some(slug.into()))
 }
 
 /// The theme file of `slug`, as `_get_block_template_file()` finds it.
-fn file(kind: Kind, slug: &[u8]) -> Option<File> {
-    let names: &[&'static str] = match kind {
-        Kind::Template => &TEMPLATE_FILES,
-        Kind::Part => &PART_FILES,
-    };
-    let slug = *names.iter().find(|name| name.as_bytes() == slug)?;
+fn file(context: &Context, kind: Kind, slug: &[u8]) -> Option<File> {
+    let theme = context.site.theme();
+    let slug = file_slugs(theme, kind).find(|name| name.as_bytes() == slug)?;
     let field =
         |entry: &Option<Value>, name| string(entry.as_ref().and_then(|entry| entry.get_str(name)));
     Some(match kind {
         // `_add_block_template_info()`: a custom template is for pages
         // unless it names its post types.
         Kind::Template => {
-            let custom = theme_entry("customTemplates", slug);
+            let custom = theme_entry(theme, "customTemplates", &slug);
             let pages = Value::Array(vec![(Key::Int(0), Value::String(b"page".to_vec()))]);
             let post_types = custom.as_ref().map(|custom| {
                 let types = custom.get_str("postTypes").unwrap_or(&pages);
@@ -192,7 +171,7 @@ fn file(kind: Kind, slug: &[u8]) -> Option<File> {
         // `_add_block_template_part_area_info()`: an area not allowed, or
         // none, is `uncategorized`.
         Kind::Part => {
-            let part = theme_entry("templateParts", slug);
+            let part = theme_entry(theme, "templateParts", &slug);
             let area = field(&part, "area");
             let area = PART_AREAS
                 .iter()
@@ -214,16 +193,15 @@ pub(super) fn stylesheet(context: &Context) -> Vec<u8> {
 
 /// `_build_block_template_result_from_file()`.
 fn from_file(context: &Context, file: File, kind: Kind) -> Template {
+    let theme = context.site.theme();
     let content = match kind {
-        Kind::Template => theme()
-            .template(&[file.slug.into()])
+        Kind::Template => theme
+            .template(std::slice::from_ref(&file.slug))
             .map(|(_, content)| content),
-        Kind::Part => theme()
-            .part(file.slug.as_bytes())
-            .map(|(content, _)| content),
+        Kind::Part => theme.part(file.slug.as_bytes()).map(|(content, _)| content),
     };
     let theme = stylesheet(context);
-    let slug = file.slug.as_bytes().to_vec();
+    let slug = file.slug.clone().into_bytes();
     let mut template = Template {
         id: [&theme[..], b"//", &slug].concat(),
         // Wrapping a part in a template part block, as PHP does, changes
@@ -298,7 +276,7 @@ fn from_post(context: &Context, post: &Post) -> Result<Template, RestError> {
         Kind::Part
     };
     let file = (theme.name == stylesheet(context))
-        .then(|| file(kind, &post.name))
+        .then(|| file(context, kind, &post.name))
         .flatten();
     let meta = |key| {
         site.post_meta(post.id, key)
@@ -428,18 +406,13 @@ fn files_after(
     if query.wp_id.is_some() {
         return found;
     }
-    let names: &[&'static str] = match kind {
-        Kind::Template => &TEMPLATE_FILES,
-        Kind::Part => &PART_FILES,
-    };
     let skipped: Vec<Vec<u8>> = found.iter().map(|template| template.slug.clone()).collect();
-    let files = names
-        .iter()
+    let files = file_slugs(context.site.theme(), kind)
         .filter(|name| {
             query.slug_in.is_empty() || query.slug_in.iter().any(|slug| slug == name.as_bytes())
         })
         .filter(|name| !skipped.iter().any(|slug| slug == name.as_bytes()))
-        .filter_map(|name| file(kind, name.as_bytes()))
+        .filter_map(|name| file(context, kind, name.as_bytes()))
         .filter(|file| query.area.is_none() || kind == Kind::Template || file.area == query.area);
     for file in files {
         let listed = match (&query.post_type, &file.post_types) {
@@ -498,7 +471,7 @@ pub(crate) fn file_template(
     if slug.iter().any(|b| matches!(b, b'/' | b'.' | b'\\' | 0)) {
         return Err(RestError::not_ported());
     }
-    Ok(file(kind, slug).map(|file| from_file(context, file, kind)))
+    Ok(file(context, kind, slug).map(|file| from_file(context, file, kind)))
 }
 
 /// `get_template_hierarchy( $slug, $is_custom, $template_prefix )`.

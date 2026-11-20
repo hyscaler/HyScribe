@@ -993,5 +993,24 @@
             "src": "assets/css/button-outline.css",
             "ver": "1.6"
         }
+    ],
+    "template_files": [
+        "archive",
+        "404",
+        "page-with-sidebar",
+        "search",
+        "index",
+        "single",
+        "page-no-title",
+        "single-with-sidebar",
+        "page-wide",
+        "page",
+        "home"
+    ],
+    "part_files": [
+        "sidebar",
+        "header",
+        "footer",
+        "post-meta"
     ]
 }

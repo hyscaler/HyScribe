@@ -120,6 +120,11 @@ pub struct Theme {
     /// The stylesheets of its own files the theme enqueues.
     pub(crate) styles: Vec<OwnStyle>,
     pub(crate) post_formats: Vec<&'static str>,
+    /// `registered.json` as decoded: what the theme registers.
+    pub(crate) registered: Value,
+    /// `patterns.json` as decoded: each pattern's title, content, and its
+    /// description and categories where it has them.
+    pub(crate) pattern_data: Value,
 }
 
 /// The post formats WordPress knows, which `add_theme_support( 'post-formats' )`
@@ -209,6 +214,8 @@ fn with_user_styles(slug: &str, user: Option<&[u8]>, styles: &[(String, String)]
         inline_block_styles,
         styles: own,
         post_formats: post_formats(data.registered),
+        registered: json_decode(data.registered).unwrap_or_default(),
+        pattern_data: json_decode(data.patterns).unwrap_or_default(),
     }
 }
 
@@ -298,6 +305,21 @@ impl Theme {
         style_variations(self.data)
             .map(|variation| self.global.theme_json(variation))
             .collect()
+    }
+
+    /// The list `name` of what the theme registers, as
+    /// `reference/rest/registered.php` exports it: `block_styles`,
+    /// `partial_styles`, `pattern_categories`, `patterns`, `rest`,
+    /// `template_files` and `part_files`.
+    pub fn registered(&self, name: &str) -> &[(Key, Value)] {
+        let list = self.registered.get_str(name);
+        list.and_then(Value::as_array).unwrap_or_default()
+    }
+
+    /// A theme pattern as exported: its title, content, and its description
+    /// and categories where it has them.
+    pub fn pattern_entry(&self, slug: &[u8]) -> Option<&Value> {
+        self.pattern_data.get(&Key::String(slug.to_vec()))
     }
 
     /// The post formats `functions.php` adds theme support for.

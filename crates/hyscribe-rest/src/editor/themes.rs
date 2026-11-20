@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `WP_REST_Themes_Controller`: `/wp/v2/themes` and
-//! `/wp/v2/themes/<stylesheet>`, served for the active theme, the bundled
-//! Twenty Twenty-Five, as `reference/rest/registered.php` exports it. Its
+//! `/wp/v2/themes/<stylesheet>`, served for the active theme, one of the
+//! embedded ones, as `reference/rest/registered.php` exports it. Its
 //! links name its `wp_global_styles` post, which reading them creates when
 //! there is none, as a write plan the answer is made after; the
-//! other themes, which HyScribe does not have, are not ported.
+//! other themes are not ported.
 
 use hyscribe_phpser::{Key, Value};
 
@@ -15,9 +15,6 @@ use crate::request::{Arg, Params, Sanitize};
 use crate::response::{Response, RestError, list, object, text};
 use crate::types::can_edit_any;
 use crate::{Context, Endpoint, placed, self_link};
-
-/// The bundled theme's stylesheet.
-const STYLESHEET: &str = "twentytwentyfive";
 
 pub(super) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
     match regex {
@@ -69,14 +66,14 @@ pub(crate) fn writing(regex: &str, _: usize) -> Option<Writing> {
 fn plan(context: &Context, params: &Params) -> Result<Plan, RestError> {
     let active = [(Key::Int(0), text("active"))];
     let asked = match params.route == ITEM_ROUTE {
-        true => params.text("stylesheet") == STYLESHEET.as_bytes(),
+        true => params.text("stylesheet") == context.site.theme().slug().as_bytes(),
         false => params.get("status") == Some(&Value::Array(active.to_vec())),
     };
     let creates = asked
         && bundled(context)
         && links_wanted(&narrowed(params, Vec::new()))
         && styles_post(context).is_none();
-    let write = Write::StylesPost(creates.then(|| STYLESHEET.to_string()));
+    let write = Write::StylesPost(creates.then(|| context.site.theme().slug().to_string()));
     Ok(Plan::new(context, write, Value::Null))
 }
 
@@ -137,9 +134,9 @@ fn item_permission(context: &Context, params: &Params) -> Result<(), RestError> 
     Err(cannot_view(context))
 }
 
-/// Whether the bundled theme is the site's.
+/// Whether the site's theme is an embedded one.
 pub(super) fn bundled(context: &Context) -> bool {
-    context.option("stylesheet").as_deref() == Some(STYLESHEET.as_bytes())
+    context.option("stylesheet").as_deref() == Some(context.site.theme().slug().as_bytes())
 }
 
 /// `get_items()`: the active theme alone.
@@ -157,7 +154,7 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
 
 /// `get_item()`.
 fn item(context: &Context, params: &Params) -> Result<Response, RestError> {
-    if params.text("stylesheet") != STYLESHEET.as_bytes() {
+    if params.text("stylesheet") != context.site.theme().slug().as_bytes() {
         return Err(RestError::not_ported());
     }
     prepared(context, params)
@@ -181,7 +178,7 @@ fn prepared(context: &Context, params: &Params) -> Result<Response, RestError> {
     if !bundled(context) {
         return Err(RestError::not_ported());
     }
-    let theme = super::theme("rest");
+    let theme = context.site.theme().registered("rest");
     let fields = narrowed(
         params,
         theme.iter().map(|(key, _)| key.to_php_string()).collect(),
@@ -207,11 +204,8 @@ fn prepared(context: &Context, params: &Params) -> Result<Response, RestError> {
     if links_wanted(&fields) {
         // The plan made the post, if the site had none.
         let id = styles_post(context).unwrap_or_default();
-        self_link(
-            context,
-            &mut response,
-            &format!("/wp/v2/themes/{STYLESHEET}"),
-        );
+        let route = format!("/wp/v2/themes/{}", context.site.theme().slug());
+        self_link(context, &mut response, &route);
         response.add_link("collection", context.rest_url("/wp/v2/themes"));
         let styles = context.rest_url(&format!("/wp/v2/global-styles/{id}"));
         response.add_link("https://api.w.org/user-global-styles", styles);
@@ -236,7 +230,7 @@ fn styles_post(context: &Context) -> Option<u64> {
     let mut published = posts.filter(|post| post.status == "publish");
     let found = published.find(|post| {
         let terms = context.site.post_terms(post.id, "wp_theme");
-        hyscribe_render::site_templates::names_term(&terms, STYLESHEET.as_bytes())
+        hyscribe_render::site_templates::names_term(&terms, context.site.theme().slug().as_bytes())
     });
     found.map(|post| post.id)
 }

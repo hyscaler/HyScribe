@@ -9,14 +9,14 @@ use hyscribe_phpser::{Key, Value};
 use crate::fields::{Properties, fields_for_response, is_field_included};
 use crate::request::Params;
 use crate::response::{Response, RestError, list, text};
-use hyscribe_render::theme::under_site;
+use hyscribe_render::theme::{Theme, under_site};
 
-use crate::templates::content::{pattern as theme_pattern, resolve_patterns};
+use crate::templates::content::resolve_patterns;
 use crate::types::can_edit_any;
 use crate::{Context, Endpoint};
 
+use super::core;
 use super::themes::bundled;
-use super::{core, theme};
 
 /// A pattern's keys as registered, in the order `prepare_item_for_response()`
 /// adds them, and as the route names them below (every one in every context).
@@ -99,7 +99,7 @@ fn categories(context: &Context, params: &Params) -> Result<Response, RestError>
     let wanted = fields_for_response(params, PROPERTIES);
     let data = core("pattern_categories")
         .iter()
-        .chain(theme("pattern_categories"))
+        .chain(context.site.theme().registered("pattern_categories"))
         .map(|(_, category)| {
             let kept: Vec<(Key, Value)> = PROPERTIES
                 .iter()
@@ -145,16 +145,20 @@ fn patterns(context: &Context, params: &Params) -> Result<Response, RestError> {
         return Ok(Response::new(Value::Array(Vec::new()), 200));
     }
     let wanted = fields_for_response(params, PATTERN_PROPERTIES);
-    let registered: Vec<&Value> = (core("patterns").iter().chain(theme("patterns")))
-        .map(|(_, item)| item)
-        .collect();
+    let registered: Vec<&Value> = (core("patterns")
+        .iter()
+        .chain(context.site.theme().registered("patterns")))
+    .map(|(_, item)| item)
+    .collect();
     let siteurl = context.option("siteurl").unwrap_or_default();
-    prepared(&registered, &wanted, &siteurl).map(|data| Response::new(list(data), 200))
+    prepared(context.site.theme(), &registered, &wanted, &siteurl)
+        .map(|data| Response::new(list(data), 200))
 }
 
 /// `prepare_item_for_response()` of each registered pattern, with its pattern
 /// blocks resolved.
 pub(super) fn prepared(
+    theme: &Theme,
     registered: &[&Value],
     wanted: &[Vec<u8>],
     siteurl: &[u8],
@@ -163,10 +167,12 @@ pub(super) fn prepared(
     for item in registered.iter().copied() {
         // A theme's patterns keep their content in the export of its files.
         let name = item.get_str("name").and_then(Value::as_bytes);
-        let source = name.and_then(theme_pattern).unwrap_or(item);
+        let source = name
+            .and_then(|name| theme.pattern_entry(name))
+            .unwrap_or(item);
         let content = source.get_str("content").map(Value::to_php_string);
         let content = under_site(&content.unwrap_or_default(), siteurl);
-        let content = text(resolve_patterns(&content, siteurl)?);
+        let content = text(resolve_patterns(theme, &content, siteurl)?);
         let kept: Vec<(Key, Value)> = ITEM_KEYS
             .iter()
             .zip(PATTERN_PROPERTIES)

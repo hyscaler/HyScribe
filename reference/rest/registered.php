@@ -22,7 +22,11 @@
 //           files it enqueues as {block, handle, src, ver}: block is null for
 //           those of wp_enqueue_scripts, else the block whose rendering
 //           enqueues it (wp_enqueue_block_style()), src is relative to the
-//           theme's folder}
+//           theme's folder, "template_files" and "part_files": the slugs of
+//           its templates and parts in the order PHP's directory iterator
+//           lists them, which the templates routes list them in,
+//           "theme_features": the names of its theme support, which Site
+//           Health lists}
 
 require '/var/www/html/wp-load.php';
 
@@ -76,6 +80,7 @@ if ( 'theme' === $argv[1] ) {
 		}
 	}
 	$formats = get_theme_support( 'post-formats' );
+	$files   = fn( $folder ) => array_map( fn( $path ) => basename( $path, '.html' ), _get_block_templates_paths( get_stylesheet_directory() . '/' . $folder ) );
 	$own     = function ( $src ) {
 		foreach ( array( get_stylesheet_directory_uri(), get_template_directory_uri() ) as $dir ) {
 			if ( is_string( $src ) && str_starts_with( $src, $dir . '/' ) ) {
@@ -109,7 +114,7 @@ if ( 'theme' === $argv[1] ) {
 		}
 	}
 	$enqueued = array_map( fn( $s ) => array_diff_key( $s, array( 'deps' => 0 ) ), $enqueued );
-	$out  = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme, 'patterns' => $patterns, 'rest' => $rest, 'post_formats' => $formats ? $formats[0] : array(), 'styles' => $enqueued );
+	$out  = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme, 'patterns' => $patterns, 'rest' => $rest, 'post_formats' => $formats ? $formats[0] : array(), 'styles' => $enqueued, 'template_files' => $files( 'templates' ), 'part_files' => $files( 'parts' ), 'theme_features' => array_keys( $GLOBALS['_wp_theme_features'] ) );
 } else {
 	$controller = new WP_REST_Block_Types_Controller();
 	$request    = new WP_REST_Request( 'GET', '/wp/v2/block-types' );

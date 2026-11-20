@@ -8,6 +8,9 @@
 use std::process::Command;
 use std::sync::OnceLock;
 
+use hyscribe_ext::{Asset, AssetKind, Found, Grants, Message, ObjectKind, Post, Site};
+use hyscribe_phpser::Value;
+
 /// The test extension's component bytes.
 pub fn component() -> &'static [u8] {
     static WASM: OnceLock<Vec<u8>> = OnceLock::new();
@@ -25,4 +28,142 @@ pub fn component() -> &'static [u8] {
         let path = String::from_utf8_lossy(&built.stdout);
         std::fs::read(path.trim()).expect("read the guest component")
     })
+}
+
+/// A site that does nothing and holds nothing, for a test that never
+/// reaches it.
+#[allow(dead_code, reason = "only the cost harness builds one")]
+pub struct Quiet;
+
+impl Site for Quiet {
+    fn now(&self) -> u64 {
+        0
+    }
+    fn get_option(&self, _: &str) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
+    fn update_option(&self, _: &str, _: Value, _: Option<bool>) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn add_option(&self, _: &str, _: Value, _: Option<bool>) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn delete_option(&self, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn get_meta(&self, _: ObjectKind, _: u64, _: &str) -> Result<Vec<Value>, String> {
+        Ok(Vec::new())
+    }
+    fn add_meta(
+        &self,
+        _: ObjectKind,
+        _: u64,
+        _: &str,
+        _: Value,
+        _: bool,
+    ) -> Result<Option<u64>, String> {
+        Ok(None)
+    }
+    fn update_meta(
+        &self,
+        _: ObjectKind,
+        _: u64,
+        _: &str,
+        _: Value,
+        _: Option<Value>,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn delete_meta(
+        &self,
+        _: ObjectKind,
+        _: u64,
+        _: &str,
+        _: Option<Value>,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn public_post_type(&self, _: &str) -> bool {
+        false
+    }
+    fn query(&self, _: &Value) -> Result<Found, String> {
+        Ok(Found::default())
+    }
+    fn post(&self, _: u64) -> Result<Option<Post>, String> {
+        Ok(None)
+    }
+    fn schedule(&self, _: i64, _: Option<&str>, _: &str, _: &[Value]) -> Result<(), String> {
+        Ok(())
+    }
+    fn unschedule(&self, _: &str, _: &[Value]) -> Result<u32, String> {
+        Ok(0)
+    }
+    fn next_scheduled(&self, _: &str, _: &[Value]) -> Option<i64> {
+        None
+    }
+    fn mail(&self, _: &Message) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn current_user(&self) -> u64 {
+        0
+    }
+    fn user_can(&self, _: &str, _: &[Value]) -> bool {
+        false
+    }
+    fn create_nonce(&self, _: &str) -> String {
+        String::new()
+    }
+    fn verify_nonce(&self, _: &str, _: &str) -> u8 {
+        0
+    }
+    fn translate(&self, _: &str, text: &str, _: Option<&str>) -> String {
+        text.into()
+    }
+    fn translate_plural(
+        &self,
+        _: &str,
+        (single, _): (&str, &str),
+        _: u64,
+        _: Option<&str>,
+    ) -> String {
+        single.into()
+    }
+    fn register_asset(&self, _: &str, _: &Asset) -> Result<(), String> {
+        Ok(())
+    }
+    fn enqueue(&self, _: AssetKind, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn add_inline(&self, _: AssetKind, _: &str, _: &str, _: bool) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+fn names(names: &str) -> std::collections::BTreeSet<String> {
+    names
+        .split(' ')
+        .filter(|name| !name.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// Everything the test extension asks for.
+pub fn grants() -> Grants {
+    Grants {
+        filters: names(
+            "the_content ext_trap ext_loop ext_grow ext_late ext_order ext_options ext_cron ext_echo \
+             ext_meta ext_query ext_mail ext_auth ext_assets ext_fire ext_chain ext_remove ext_current \
+             ext_bad_json ext_error ext_stack ext_count ext_gone ext_nest",
+        ),
+        actions: names("ext_action ext_event"),
+        sensitive: names("map_meta_cap"),
+        shortcodes: names("ext ext_gone"),
+        options: names("ext ext_fail ext_bytes ext_active"),
+        meta: names("_ext _ext_*"),
+        post_types: names("ext_item ext_item_named_too_long"),
+        taxonomies: names("ext_kind ext_kind_named_far_too_long_for_wp"),
+        rest: names("ext/v1"),
+        mail: true,
+        filesystem: names("uploads/ext"),
+    }
 }

@@ -57,3 +57,26 @@ cff87dafc7acf6c5b7b4a26e861176c026d14d01:reference/lost-password/cases.list:gene
 cff87dafc7acf6c5b7b4a26e861176c026d14d01:reference/lost-password/cases.list:generic-api-key:30
 cff87dafc7acf6c5b7b4a26e861176c026d14d01:reference/lost-password/cases.list:generic-api-key:46
 cff87dafc7acf6c5b7b4a26e861176c026d14d01:reference/lost-password/cases.list:generic-api-key:47
+# Reviewed 2026-11-21: the same made-up keys, re-recorded with hs-admin's own look (7746e9ca).
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:10
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:11
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:12
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:13
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:15
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:16
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:17
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:18
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:19
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:20
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:21
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:6
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:7
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:8
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/confirm-action.tsv:generic-api-key:9
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/lost-password.tsv:generic-api-key:17
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/lost-password.tsv:generic-api-key:18
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/lost-password.tsv:generic-api-key:19
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/lost-password.tsv:generic-api-key:20
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/lost-password.tsv:generic-api-key:21
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/lost-password.tsv:generic-api-key:41
+7746e9cabf937ea116b7abdb813ca9eaa741215e:crates/hyscribe-admin/tests/golden/lost-password.tsv:generic-api-key:42

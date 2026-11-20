@@ -322,6 +322,8 @@ jobs:
       - name: Release binary (musl, so it runs in the browser image)
         run: |
           CC_x86_64_unknown_linux_musl=clang cargo build --release --locked -p hyscribe --target x86_64-unknown-linux-musl
+      - name: The pinned themes, which php.sh mounts into the PHP oracle
+        run: reference/themes/pin.sh
       - name: Fixture network and the PHP container's port forward (php.sh waits for it)
         run: scripts/ci-net.sh up "$HYSCRIBE_REF_NETWORK" "28996=hs-shots-php-$HYSCRIBE_DB_PORT:80"
       - name: Screenshots of every screen, PHP against HyScribe

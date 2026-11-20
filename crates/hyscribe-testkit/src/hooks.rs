@@ -55,3 +55,29 @@ pub fn recorded<R>(answers: &[(&str, Value)], run: impl FnOnce() -> R) -> (R, Ve
         .clone();
     (ran, fired)
 }
+
+#[cfg(test)]
+mod tests {
+    use hyscribe_model::hooks::{apply_filters, do_action};
+
+    use super::*;
+
+    #[test]
+    fn records_and_answers_every_hook() {
+        let answers = [("answered", Value::Int(2))];
+        let (got, fired) = recorded(&answers, || {
+            do_action("act", &[&1_i64]);
+            (
+                apply_filters("answered", 1_i64, &[]),
+                apply_filters("kept", 3_i64, &[]),
+            )
+        });
+        assert_eq!(got, (2, 3));
+        let expected = [
+            ("act".to_string(), Value::Null, vec![Value::Int(1)]),
+            ("answered".to_string(), Value::Int(1), vec![]),
+            ("kept".to_string(), Value::Int(3), vec![]),
+        ];
+        assert_eq!(fired, expected);
+    }
+}

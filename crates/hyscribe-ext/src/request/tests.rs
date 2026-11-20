@@ -64,6 +64,8 @@ fn the_subsystems_hook_points_reach_the_extensions() -> Result<(), Fault> {
     let loaded = load(&["ext"], Limits::default())?;
     let site = TestSite::new();
     let dispatch: Arc<dyn Dispatch> = Arc::new(loaded.request(&site));
+    assert!(dispatch.attached("the_content"));
+    assert!(!dispatch.attached("the_title"));
     let (content, order, title) = scoped(&dispatch, || {
         do_action("ext_action", &[&"w".to_string(), &2_i64]);
         (

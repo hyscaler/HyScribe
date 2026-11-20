@@ -7,11 +7,16 @@
 use std::sync::Arc;
 
 use hyscribe_config::Mode;
-use hyscribe_db::Writer;
+use hyscribe_db::{Connection, Writer};
+use hyscribe_phpser::{Key, Value};
+use hyscribe_testkit::writes::check_writes;
 use hyscribe_testkit::{fixture_database, hs_admin_page, unhex};
+use hyscribe_write::options::{delete_option, update_option};
 
 use crate::admin::saves::posts::tests::unnonced;
-use crate::admin::saves::tests::{AFTER, ANSWERS, CASES, case_row, hs};
+use crate::admin::saves::tests::{
+    AFTER, ANSWERS, CASES, Request, SITE, answered, case_row, hs, redirected, turn, writer,
+};
 use crate::admin::tests::{SAVES, location, logged_in, page_of, send, session_nonce, unwritable};
 
 /// The database the answers are compared on: `wordpress_saves` loaded with
@@ -98,7 +103,7 @@ async fn the_activations_answer_as_php() {
         let response = send(
             &Arc::new(now),
             "GET",
-            to.trim_start_matches(crate::admin::saves::tests::SITE),
+            to.trim_start_matches(SITE),
             &cookies,
             None,
         )
@@ -177,4 +182,100 @@ async fn the_next_load_leaves_other_sites_alone() {
         stuck.options.get("theme_switched").unwrap(),
         b"twentytwentyfour"
     );
+}
+
+/// The activation writes PHP's rows, as one action, and every statement of
+/// it can fail: nothing is kept then.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_activation_writes_php_s_rows() {
+    let _turn = turn().await;
+    let writer = writer().await;
+    let request = Request {
+        screen: "themes",
+        action: b"activate",
+        get: "action=activate&stylesheet=twentytwentyfour",
+        post: "",
+        user: 1,
+    };
+    // The site every oracle case starts from (`$themes_base`).
+    let setup = async |conn: &mut Connection| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        for prefix in [
+            "_site_transient_wp_theme_files_patterns-",
+            "_site_transient_timeout_wp_theme_files_patterns-",
+        ] {
+            for (name, _) in write.options_starting(prefix).await.unwrap() {
+                delete_option(&mut write, &name).await.unwrap();
+            }
+        }
+        delete_option(&mut write, "theme_mods_twentytwentyfive")
+            .await
+            .unwrap();
+        let css = (Key::String(b"custom_css_post_id".to_vec()), Value::Int(-1));
+        let mods = Value::Array(vec![css]);
+        update_option(&mut write, "theme_mods_twentytwentyfive", &mods, None)
+            .await
+            .unwrap();
+        write.commit().await.unwrap();
+        Ok::<(), String>(())
+    };
+    let action = async |conn: &mut Connection, ()| {
+        let to = redirected(&writer, conn, &request).await;
+        assert_eq!(to, format!("{SITE}/hs-admin/themes?activated=true"));
+        Ok(())
+    };
+    let report = check_writes(
+        &fixture_database(),
+        "admin-themes-activate-twentytwentyfour",
+        setup,
+        action,
+    )
+    .await;
+    report.unwrap();
+}
+
+/// A theme the site does not have is refused as PHP refuses it, a switch
+/// from one is not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn themes_that_do_not_exist_are_refused() {
+    use hyscribe_admin::posts::Answer;
+    let _turn = turn().await;
+    let writer = writer().await;
+    let _ = check_writes(
+        &fixture_database(),
+        "admin-themes-activate-twentytwentyfour",
+        async |_: &mut Connection| Ok::<(), String>(()),
+        async |conn: &mut Connection, ()| {
+            let missing = Request {
+                screen: "themes",
+                action: b"activate",
+                get: "action=activate&stylesheet=nope",
+                post: "",
+                user: 1,
+            };
+            let died = answered(&writer, conn, &missing).await;
+            assert!(
+                matches!(died, Ok(Answer::Denied(message)) if message.contains("does not exist"))
+            );
+            // The site's own theme is not one it has.
+            let mut write = writer.begin_on(conn).await.unwrap();
+            update_option(
+                &mut write,
+                "stylesheet",
+                &Value::String(b"gone".to_vec()),
+                None,
+            )
+            .await
+            .unwrap();
+            write.commit().await.unwrap();
+            let request = Request {
+                get: "action=activate&stylesheet=twentytwentyfour",
+                ..missing
+            };
+            let refused = answered(&writer, conn, &request).await;
+            assert!(matches!(refused, Err(hyscribe_write::Error::Unported(_))));
+            Ok(())
+        },
+    )
+    .await;
 }

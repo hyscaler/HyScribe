@@ -166,6 +166,27 @@ return array(
 		},
 		$themes_next_load
 	),
+	// Menu locations the theme had, which a block theme has none to keep.
+	'admin-themes-menu-locations'             => $themes_case(
+		fn() => set_theme_mod( 'nav_menu_locations', array( 'primary' => 7 ) ),
+		function () use ( $themes_activate, $themes_next_load ) {
+			$themes_activate( 'twentytwentyfour' );
+			$themes_next_load();
+		}
+	),
+	// A site with no `sidebars_widgets` option at all.
+	'admin-themes-no-widgets-option'          => $themes_case(
+		fn() => delete_option( 'sidebars_widgets' ),
+		function () use ( $themes_activate, $themes_next_load ) {
+			$themes_activate( 'twentytwentyfour' );
+			$themes_next_load();
+		}
+	),
+	// Theme mods that are not an array.
+	'admin-themes-broken-mods'                => $themes_case(
+		fn() => update_option( 'theme_mods_twentytwentyfive', 'broken' ),
+		fn() => $themes_activate( 'twentytwentyfour' )
+	),
 	// A switch the Customizer carried the menus and widgets over for.
 	'admin-themes-via-customizer'             => $themes_case(
 		function () use ( $themes_activate ) {

@@ -262,6 +262,55 @@ async fn a_site_without_sidebars_is_php_s() {
     .await;
 }
 
+/// Menu locations, no widgets option, and mods that are not an array.
+#[tokio::test(flavor = "multi_thread")]
+async fn odd_sites_are_php_s() {
+    let mods = |locations: bool| {
+        let css = (Key::String(b"custom_css_post_id".to_vec()), Value::Int(-1));
+        let primary = Value::Array(vec![(Key::String(b"primary".to_vec()), Value::Int(7))]);
+        let menus = (Key::String(b"nav_menu_locations".to_vec()), primary);
+        Value::Array(if locations {
+            vec![css, menus]
+        } else {
+            vec![css]
+        })
+    };
+    check_case(
+        "admin-themes-menu-locations",
+        async |write| {
+            update_option(write, "theme_mods_twentytwentyfive", &mods(true), None)
+                .await
+                .unwrap();
+        },
+        async |write, ()| {
+            switch_theme(write, FOUR, FIVE).await.unwrap();
+            next_load(write, FOUR).await;
+        },
+    )
+    .await;
+    check_case(
+        "admin-themes-no-widgets-option",
+        async |write| {
+            delete_option(write, "sidebars_widgets").await.unwrap();
+        },
+        async |write, ()| {
+            switch_theme(write, FOUR, FIVE).await.unwrap();
+            next_load(write, FOUR).await;
+        },
+    )
+    .await;
+    check_case(
+        "admin-themes-broken-mods",
+        async |write| {
+            update_option(write, "theme_mods_twentytwentyfive", &text("broken"), None)
+                .await
+                .unwrap();
+        },
+        async |write, ()| switch_theme(write, FOUR, FIVE).await.unwrap(),
+    )
+    .await;
+}
+
 /// Without a switch nothing is done on the next load.
 #[tokio::test(flavor = "multi_thread")]
 async fn no_switch_leaves_the_next_load_alone() {
@@ -271,16 +320,36 @@ async fn no_switch_leaves_the_next_load_alone() {
     .await;
 }
 
-/// Every statement of a switch and of the next load can fail.
+/// Every statement of a switch and of the next load can fail, with widgets
+/// to carry over, with them to bring back, and with menu locations.
 #[tokio::test(flavor = "multi_thread")]
 async fn each_statement_can_fail() {
-    fails_at_each_step(widgets, async |write, ()| {
-        switch_theme(write, FOUR, FIVE).await?;
-        if after_switch_theme(write, FOUR.0, FOUR.1).await? {
+    let load = async |write: &mut Write<'_>, theme: (&str, &str)| -> Result<(), crate::Error> {
+        if after_switch_theme(write, theme.0, theme.1).await? {
             theme_switch_done(write).await?;
         }
         Ok(())
+    };
+    fails_at_each_step(widgets, async |write, ()| {
+        switch_theme(write, FOUR, FIVE).await?;
+        load(write, FOUR).await
     })
+    .await;
+    fails_at_each_step(
+        async |write: &mut Write<'_>| {
+            let menus = Value::Array(vec![(Key::String(b"primary".to_vec()), Value::Int(7))]);
+            let mods = Value::Array(vec![(Key::String(b"nav_menu_locations".to_vec()), menus)]);
+            update_option(write, "theme_mods_twentytwentyfive", &mods, None)
+                .await
+                .unwrap();
+        },
+        async |write, ()| {
+            switch_theme(write, FOUR, FIVE).await?;
+            load(write, FOUR).await?;
+            switch_theme(write, FIVE, FOUR).await?;
+            load(write, FIVE).await
+        },
+    )
     .await;
 }
 
@@ -327,6 +396,17 @@ async fn what_is_not_ported_is_refused() {
             .await
             .unwrap();
         let refused = switch_theme(write, FOUR, FIVE).await;
+        assert!(matches!(refused, Err(Error::Unported(_))));
+    })
+    .await;
+    // A sidebar that is not a list, as a site that was edited by hand has.
+    rolled_back(async |write| {
+        let odd = Value::Array(vec![(Key::String(b"sidebar-1".to_vec()), text("x"))]);
+        update_option(write, "sidebars_widgets", &odd, None)
+            .await
+            .unwrap();
+        switch_theme(write, FOUR, FIVE).await.unwrap();
+        let refused = after_switch_theme(write, FOUR.0, FOUR.1).await;
         assert!(matches!(refused, Err(Error::Unported(_))));
     })
     .await;

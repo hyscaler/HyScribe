@@ -530,3 +530,35 @@ fn an_empty_cpage_names_no_page() {
         assert_eq!(page, Some(2), "{vars}");
     }
 }
+
+/// Only a singular request with no `cpage` of its own gets the one the
+/// legacy template sets.
+#[test]
+fn only_a_singular_request_without_a_cpage_has_one_set() {
+    let comments = (1..=4)
+        .map(|id| Comment {
+            id,
+            post_id: 1,
+            date_gmt: format!("2026-11-12 00:00:0{id}"),
+            ..Comment::default()
+        })
+        .collect();
+    let site = linked_site(b"page_comments=1&comments_per_page=2", comments);
+    let theme = twentytwentyfive();
+    let post = site.post(1).unwrap();
+    for (singular, vars, expected) in [
+        (true, "", Some(2)),
+        (false, "", None),
+        (true, "cpage=1", None),
+        (false, "cpage=1", None),
+    ] {
+        let request = Request {
+            singular,
+            vars: parse_str(vars.as_bytes()),
+            ..Request::default()
+        };
+        let renderer = Renderer::new(&theme, &site, &request);
+        let page = crate::core_blocks::legacy_cpage(&renderer.context, &post);
+        assert_eq!(page, expected, "{singular} {vars}");
+    }
+}

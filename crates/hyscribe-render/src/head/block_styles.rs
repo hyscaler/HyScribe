@@ -357,3 +357,61 @@ pub(super) const BLOCK_STYLES: [(&str, &str); 87] = [
         include_str!("../../../../wordpress/wp-includes/blocks/video/style.min.css"),
     ),
 ];
+
+/// Each block's folder and its `theme.min.css`, the stylesheet of the
+/// `wp-block-<name>-theme` handle that themes supporting `wp-block-styles`
+/// enqueue.
+pub(super) const THEME_STYLES: [(&str, &str); 13] = [
+    (
+        "audio",
+        include_str!("../../../../wordpress/wp-includes/blocks/audio/theme.min.css"),
+    ),
+    (
+        "code",
+        include_str!("../../../../wordpress/wp-includes/blocks/code/theme.min.css"),
+    ),
+    (
+        "embed",
+        include_str!("../../../../wordpress/wp-includes/blocks/embed/theme.min.css"),
+    ),
+    (
+        "gallery",
+        include_str!("../../../../wordpress/wp-includes/blocks/gallery/theme.min.css"),
+    ),
+    (
+        "group",
+        include_str!("../../../../wordpress/wp-includes/blocks/group/theme.min.css"),
+    ),
+    (
+        "image",
+        include_str!("../../../../wordpress/wp-includes/blocks/image/theme.min.css"),
+    ),
+    (
+        "pullquote",
+        include_str!("../../../../wordpress/wp-includes/blocks/pullquote/theme.min.css"),
+    ),
+    (
+        "quote",
+        include_str!("../../../../wordpress/wp-includes/blocks/quote/theme.min.css"),
+    ),
+    (
+        "search",
+        include_str!("../../../../wordpress/wp-includes/blocks/search/theme.min.css"),
+    ),
+    (
+        "separator",
+        include_str!("../../../../wordpress/wp-includes/blocks/separator/theme.min.css"),
+    ),
+    (
+        "table",
+        include_str!("../../../../wordpress/wp-includes/blocks/table/theme.min.css"),
+    ),
+    (
+        "template-part",
+        include_str!("../../../../wordpress/wp-includes/blocks/template-part/theme.min.css"),
+    ),
+    (
+        "video",
+        include_str!("../../../../wordpress/wp-includes/blocks/video/theme.min.css"),
+    ),
+];

@@ -475,6 +475,13 @@ impl Renderer<'_> {
                 if name == "core/post-comments-form" {
                     self.assets.enqueue_script("comment-reply");
                 }
+                // The legacy template too, and it sets the `cpage` that
+                // `wp_head()` reads.
+                if let Some(post) = core_blocks::legacy_comments_ran(&self.context, name, parsed) {
+                    self.assets.enqueue_script("comment-reply");
+                    let cpage = core_blocks::legacy_cpage(&self.context, &post);
+                    self.assets.cpage = self.assets.cpage.or(cpage);
+                }
                 core_blocks::render_bound(&self.context, name, parsed, &computed, &content)
                     .unwrap_or(content)
             }
@@ -603,7 +610,9 @@ impl Renderer<'_> {
         self.open_parts.pop();
         // `_wp_apply_block_content_filters()` after `do_blocks()`.
         let html = site_smilies(site, &wptexturize(&html, &CORE_SHORTCODE_TAGS));
-        let html = filter_content_tags(site, &self.context.loading, &html, Filter::None);
+        // The context `template_part_<area>`.
+        let loading = self.context.loading.in_area(&area);
+        let html = filter_content_tags(site, &loading, &html, Filter::None);
         let html = replace(&self.autoembed(&html), b"]]>", b"]]&gt;");
         // A valid `tagName` wins; otherwise the area's tag.
         let tag = match attr(block, "tagName").filter(|t| is_tag_name(t)) {

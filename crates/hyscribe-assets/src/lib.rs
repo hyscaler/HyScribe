@@ -73,6 +73,8 @@ mod tests {
                 .is_some()
         );
         assert!(release_file("wp-content/themes/twentytwentythree/theme.json").is_some());
+        // From the pinned archive, not the release.
+        assert!(release_file("wp-content/themes/twentytwentytwo/theme.json").is_some());
         assert!(release_file("wp-includes/version.php").is_none());
     }
 

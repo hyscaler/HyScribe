@@ -569,10 +569,10 @@ fn comments_match_php() {
     assert_eq!(count, 56);
 }
 
-/// The legacy comments block runs `comments_template()`, which is not
-/// ported; it renders nothing.
+/// The legacy comments block runs `comments_template()`, which leaves a
+/// request that is not a single post or page without comments.
 #[test]
-fn legacy_comments_are_not_ported() {
+fn legacy_comments_need_a_single_post() {
     let theme = twentytwentyfive();
     let site = Fixture {
         post: Some(Post {
@@ -595,12 +595,63 @@ fn legacy_comments_are_not_ported() {
         terms: Default::default(),
         loading: Default::default(),
     };
-    for markup in [
-        &b"<!-- wp:comments {\"legacy\":true} /-->"[..],
-        b"<!-- wp:post-comments --><div>saved</div><!-- /wp:post-comments -->",
+    for (markup, class) in [
+        (
+            &b"<!-- wp:comments {\"legacy\":true} /-->"[..],
+            "wp-block-post-comments wp-block-comments",
+        ),
+        (
+            b"<!-- wp:post-comments --><div>saved</div><!-- /wp:post-comments -->",
+            "wp-block-post-comments",
+        ),
     ] {
-        assert_eq!(render_markup(&context, markup), b"");
+        let html = format!("<div class=\"{class}\"></div>");
+        assert_eq!(render_markup(&context, markup), html.as_bytes());
     }
+}
+
+/// A legacy comments block goes on to its template, and enqueues
+/// `comment-reply.js`, for a post that takes comments or has some.
+#[test]
+fn legacy_comments_run_for_posts_with_comments() {
+    let theme = twentytwentyfive();
+    let request = Request::default();
+    let case = |status: &str, count: i64, name: &str, markup: &[u8]| {
+        let site = Fixture {
+            post: Some(Post {
+                id: 1,
+                comment_status: status.into(),
+                comment_count: count,
+                ..Post::default()
+            }),
+            ..Fixture::default()
+        };
+        let context = Context {
+            theme: &theme,
+            site: &site,
+            request: &request,
+            post_id: Some(1),
+            query: None,
+            comment: None,
+            comment_depth: 0,
+            comment_held: false,
+            terms: Default::default(),
+            loading: Default::default(),
+        };
+        let block = &parse_blocks(markup)[0];
+        let attrs = block.attrs.as_deref().unwrap();
+        legacy_comments_ran(&context, name, attrs).map(|post| post.id)
+    };
+    let legacy = b"<!-- wp:comments {\"legacy\":true} /-->";
+    let plain = b"<!-- wp:comments /-->";
+    let old = b"<!-- wp:post-comments /-->";
+    assert_eq!(case("open", 0, "core/comments", legacy), Some(1));
+    assert_eq!(case("open", 0, "core/post-comments", old), Some(1));
+    assert_eq!(case("closed", 3, "core/comments", legacy), Some(1));
+    assert_eq!(case("closed", 1, "core/comments", legacy), Some(1));
+    assert_eq!(case("closed", 0, "core/comments", legacy), None);
+    assert_eq!(case("open", 0, "core/comments", plain), None);
+    assert_eq!(case("open", 0, "core/group", legacy), None);
 }
 
 /// Without an `avatar_default` option `get_option()` falls back to

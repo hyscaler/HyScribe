@@ -57,6 +57,7 @@ $markups = array(
 	'<!-- wp:comment-template --><!-- wp:comment-author-name /--><!-- wp:comment-date {"isLink":true} /--><!-- wp:comment-content /--><!-- /wp:comment-template -->',
 	'<!-- wp:post-comments-form /-->',
 	'<!-- wp:comments --><div class="wp-block-comments"><!-- wp:comment-template --><!-- wp:comment-author-name /--><!-- /wp:comment-template --><!-- wp:comments-pagination --><!-- wp:comments-pagination-previous /--><!-- wp:comments-pagination-numbers /--><!-- wp:comments-pagination-next /--><!-- /wp:comments-pagination --></div><!-- /wp:comments -->',
+	'<!-- wp:post-comments /-->',
 );
 $uris = array(
 	"/?p=1&unapproved=$held&moderation-hash=" . $hash( $held ),
@@ -94,6 +95,7 @@ $cookie_uris = array( 0, 1, 4, 5, 6 );
 $cookie_names = array( 'author' => 'comment_author_', 'email' => 'comment_author_email_', 'url' => 'comment_author_url_' );
 $elements = static fn() => (int) substr( wp_unique_prefixed_id( 'wp-elements-' ), 12 );
 $GLOBALS['wp_query']->is_singular = true;
+$GLOBALS['wp_query']->is_single   = true;
 $GLOBALS['post']                  = get_post( 1 );
 foreach ( $option_sets as $set => $options ) {
 	foreach ( array_keys( $options + array( 'thread_comments' => 1, 'comment_order' => 1, 'page_comments' => 1, 'comments_per_page' => 1, 'default_comments_page' => 1 ) ) as $name ) {
@@ -117,6 +119,12 @@ foreach ( $option_sets as $set => $options ) {
 		sanitize_comment_cookies();
 		$commenter = wp_get_current_commenter();
 		foreach ( $markups as $markup ) {
+			// The legacy comments template, over the links that carry a held comment on.
+			if ( '<!-- wp:post-comments /-->' === $markup && ( ! in_array( $set, array( 0, 3 ), true ) || ! in_array( $at, array( 0, 10 ), true ) ) ) {
+				continue;
+			}
+			// comments_template() sets cpage on the first of several pages.
+			$GLOBALS['wp_query']->set( 'cpage', '' );
 			$_SERVER['REQUEST_URI'] = $uri;
 			$_GET                   = array();
 			parse_str( (string) parse_url( $uri, PHP_URL_QUERY ), $_GET );
@@ -129,9 +137,14 @@ foreach ( $option_sets as $set => $options ) {
 			$counter = $elements();
 			$parsed  = parse_blocks( $markup )[0];
 			$parsed  = apply_filters( 'render_block_data', $parsed, $parsed, null );
+			// A single template runs in the main loop, where the first images are not lazy.
+			$GLOBALS['wp_query']->in_the_loop = '<!-- wp:post-comments /-->' === $markup;
+			wp_increase_content_media_count( -wp_increase_content_media_count( 0 ) );
+			wp_high_priority_element_flag( true );
 			// Twice in one request, as the counters carry on.
 			$html  = ( new WP_Block( $parsed, array( 'postId' => 1 ) ) )->render();
 			$html .= ( new WP_Block( $parsed, array( 'postId' => 1 ) ) )->render();
+			$GLOBALS['wp_query']->in_the_loop = false;
 			$state   = array( 'options' => $options, 'elements' => $counter, 'post' => 1, 'now' => time(), 'uri' => $uri, 'global' => 1, 'singular' => true, 'hashes' => $hashes, 'cookies' => $cookies, 'commenter' => $commenter );
 			echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
 		}

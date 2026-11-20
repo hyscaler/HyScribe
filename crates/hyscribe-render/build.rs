@@ -10,11 +10,13 @@ use std::path::Path;
 
 const THEMES: &str = "../../themes";
 const EXPORTED: [&str; 3] = ["patterns.json", "registered.json", "styles.json"];
-const CONTENT_TYPES: [(&str, &str); 9] = [
+const CONTENT_TYPES: [(&str, &str); 11] = [
     ("css", "text/css"),
     ("html", "text/html"),
+    ("jpg", "image/jpeg"),
     ("json", "application/json"),
     ("md", "text/markdown"),
+    ("mp4", "video/mp4"),
     ("png", "image/png"),
     ("ttf", "font/ttf"),
     ("txt", "text/plain"),

@@ -108,7 +108,7 @@ pub fn embed_page(
     ]
     .concat();
     out.extend(head.robots());
-    out.extend(head.canonical(false));
+    out.extend(head.canonical(false, None));
     out.extend(Style::inline("wp-emoji-styles", EMOJI_CSS).print(siteurl));
     out.extend(Style::inline("wp-embed-template", TEMPLATE_CSS).print(siteurl));
     out.extend_from_slice(b"</head>\n<body class=\"");

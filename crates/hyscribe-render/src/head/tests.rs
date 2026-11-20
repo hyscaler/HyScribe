@@ -716,6 +716,21 @@ fn mediaelement_styles_are_linked_as_wordpress_registers_them() {
     assert_eq!(shortcode.version, None);
 }
 
+/// A block's `-theme` handle, enqueued by themes supporting
+/// `wp-block-styles`, is its `theme.min.css`; a block without one prints
+/// nothing.
+#[test]
+fn block_theme_styles_are_linked_as_wordpress_registers_them() {
+    let group = block_style("wp-block-group-theme", "http://x.test");
+    assert_eq!(
+        group.src.as_deref(),
+        Some("http://x.test/wp-includes/blocks/group/theme.min.css")
+    );
+    assert!(group.css.is_some_and(|css| css.contains("has-background")));
+    let none = block_style("wp-block-paragraph-theme", "http://x.test");
+    assert!(none.src.is_none() && none.css.is_none() && none.after.is_empty());
+}
+
 /// The embed code of the oEmbed golden of `?p=1`, at its size and secret.
 #[test]
 fn embed_code_matches_php() {

@@ -68,3 +68,52 @@ fn unknown_priorities_count() {
         Some("lazy")
     );
 }
+
+/// In the header context an element is in the viewport whatever the loop
+/// says, and counts only when it reaches the priority size.
+#[test]
+fn the_header_is_in_the_viewport() {
+    let header = Loading::default().in_area(b"header");
+    assert!(!header.in_area(b"footer").in_header);
+    let small = header.img(50, 50);
+    assert_eq!((small.loading, small.fetchpriority), (None, None));
+    let large = header.img(250, 200);
+    assert_eq!((large.loading, large.fetchpriority), (None, Some("high")));
+    // Only one high priority image, and the header does not use the loop's
+    // count: the loop's first images are still in the viewport after it.
+    assert_eq!(header.img(250, 200).fetchpriority, None);
+    let looped = Loading {
+        in_the_loop: true,
+        in_header: false,
+        ..header.clone()
+    };
+    assert_eq!(looped.img(50, 50).loading, None);
+    // An element given fetchpriority auto is not counted.
+    let auto = Given {
+        width: Some(500),
+        height: Some(500),
+        fetchpriority: Some(b"auto"),
+        ..Given::default()
+    };
+    let fresh = Loading::default().in_area(b"header");
+    assert_eq!(fresh.optimization(true, &auto, Filter::None).loading, None);
+}
+
+/// Header images count toward the loop's first three only when they reach
+/// the size of a priority image.
+#[test]
+fn only_large_header_images_are_counted() {
+    for (size, counted) in [(100, false), (250, true)] {
+        let header = Loading::default().in_area(b"header");
+        for _ in 0..3 {
+            header.img(size, 200);
+        }
+        let looped = Loading {
+            in_the_loop: true,
+            in_header: false,
+            ..header.clone()
+        };
+        let loading = looped.img(50, 50).loading;
+        assert_eq!(loading, counted.then_some("lazy"), "{size}");
+    }
+}

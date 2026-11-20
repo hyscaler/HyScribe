@@ -28,15 +28,26 @@ pub(super) fn post_comments_form(context: &Context<'_>, block: &Block<'_>) -> Ve
         return Vec::new();
     };
     replace(
-        &comment_form(context, &post),
+        &comment_form(context, &post, ""),
         b"class=\"comment-respond\"",
         wrapper.as_bytes(),
     )
 }
 
+/// `comment_form()` of the legacy comments template: the form of a post
+/// that takes comments, whose submit button also has the class `submit`.
+pub(super) fn legacy_comment_form(context: &Context<'_>, post: &Post) -> Vec<u8> {
+    if comments_open(context, post) {
+        comment_form(context, post, "submit ")
+    } else {
+        Vec::new()
+    }
+}
+
 /// `comment_form( array(), $post )` with the block's submit button, in
-/// HTML5 as block themes have it.
-fn comment_form(context: &Context<'_>, post: &Post) -> Vec<u8> {
+/// HTML5 as block themes have it; `submit` is the class before the
+/// button's own.
+fn comment_form(context: &Context<'_>, post: &Post, submit: &str) -> Vec<u8> {
     let truthy = |name| {
         context
             .site
@@ -87,6 +98,7 @@ fn comment_form(context: &Context<'_>, post: &Post) -> Vec<u8> {
             reply.as_ref(),
             truthy("require_name_email"),
             truthy("show_comments_cookies_opt_in"),
+            submit,
         ));
     }
     form.push_str("\t</div><!-- #respond -->\n\t");
@@ -100,6 +112,7 @@ fn fields(
     reply: Option<&Comment>,
     required: bool,
     cookies: bool,
+    submit: &str,
 ) -> String {
     let (indicator, attribute) = if required {
         (REQUIRED, " required")
@@ -135,7 +148,7 @@ fn fields(
     }
     // The submit field, with get_comment_id_fields().
     form.push_str(&format!(
-        "<p class=\"form-submit wp-block-button\"><input name=\"submit\" type=\"submit\" id=\"submit\" class=\"wp-block-button__link wp-element-button\" value=\"Post Comment\" /> <input type='hidden' name='comment_post_ID' value='{}' id='comment_post_ID' />\n<input type='hidden' name='comment_parent' id='comment_parent' value='{}' />\n</p></form>",
+        "<p class=\"form-submit wp-block-button\"><input name=\"submit\" type=\"submit\" id=\"submit\" class=\"{submit}wp-block-button__link wp-element-button\" value=\"Post Comment\" /> <input type='hidden' name='comment_post_ID' value='{}' id='comment_post_ID' />\n<input type='hidden' name='comment_parent' id='comment_parent' value='{}' />\n</p></form>",
         post.id,
         reply.map_or(0, |comment| comment.id)
     ));

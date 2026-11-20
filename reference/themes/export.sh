@@ -8,7 +8,9 @@
 # the block styles and pattern categories registered with the theme active
 # (registered.json, from reference/rest/registered.php).
 #   reference/themes/export.sh [slug]   (default twentytwentyfive)
-# Writes themes/<slug>/. Needs reference/default-install/php.sh up. The PHP
+# Writes themes/<slug>/. Needs reference/default-install/php.sh up (for a theme
+# WordPress 7.1.3 does not bundle, themes/pinned.tsv, run
+# reference/themes/pin.sh first, which php.sh then mounts). The PHP
 # runs with that theme active through a must-use plugin (theme.php), which
 # is removed after, whatever theme the database has.
 set -euo pipefail

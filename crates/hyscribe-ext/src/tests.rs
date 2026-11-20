@@ -606,11 +606,13 @@ fn mail_assets_users_and_translations() -> Result<(), Fault> {
         logged.first().map(String::as_str),
         Some(r#"mail ["a@example.com"] ["uploads/ext/a.pdf"]"#)
     );
-    assert!(
-        logged
-            .iter()
-            .any(|line| line.starts_with("asset ext Asset { kind: Script, handle: \"ext-app\""))
-    );
+    let assets = [
+        r#"asset ext Asset { kind: Script, handle: "ext-app", src: "js/app.js", deps: ["jquery"], version: Some("1.0"), placement: "true" }"#,
+        r#"asset ext Asset { kind: Style, handle: "ext-inline", src: "", deps: ["jquery"], version: None, placement: "true" }"#,
+    ];
+    for asset in assets {
+        assert!(logged.contains(&asset.to_string()), "{logged:?}");
+    }
     assert!(logged.contains(&"enqueue Script ext-app".to_string()));
     assert!(logged.contains(&"inline Script ext-app var x = 1; true".to_string()));
     Ok(())
@@ -630,7 +632,8 @@ fn chains_interleave_extensions_by_priority() -> Result<(), Fault> {
         text("seen:seen:v")
     );
     request.action("ext_action", &[text("w"), Value::Int(2)]);
-    assert_eq!(round(&request, "ext_current"), r#"Some("ext_current") 1"#);
+    request.action("ext_action", &[text("w"), Value::Int(2)]);
+    assert_eq!(round(&request, "ext_current"), r#"Some("ext_current") 2"#);
     let expected = [
         r#"Text("x1@ext1@ext-b2@ext2@ext-b")"#,
         r#"Text("seen:v")"#,
@@ -651,7 +654,7 @@ fn chains_interleave_extensions_by_priority() -> Result<(), Fault> {
         .into_iter()
         .filter(|line| line.ends_with(":seen"))
         .count();
-    assert_eq!(seen, 12);
+    assert_eq!(seen, 14);
     assert_eq!(request.reports(), Vec::new());
     Ok(())
 }

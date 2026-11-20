@@ -79,6 +79,7 @@ fn refuses_what_it_did_not_write() {
         "fault 2 trap a\nfault 1 trap a\n",
         "fault 1 trap a\nfault 2 trap a\nfault 3 trap a\n",
         "fault 1 trap a\nfault 2 trap a\nfault 3 trap a\nfault 4 trap a\ndisabled 4\n",
+        "fault 1 trap a\nfault 2 trap a\nfault 900 trap a\nfault 901 trap a\n",
         "fault 1 trap a\nfault 2 trap a\nfault 900 trap a\ndisabled 900\n",
         "fault 1 trap a\nfault 2 trap a\nfault 3 trap a\ndisabled 2\n",
         "fault 1 trap a\nfault 2 trap a\nfault 3 trap a\ndisabled 3\ndisabled 3\n",

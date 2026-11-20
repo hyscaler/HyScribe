@@ -1559,5 +1559,251 @@
         "vertical-header",
         "footer",
         "header-large-title"
+    ],
+    "theme_features": [
+        "core-block-patterns",
+        "post-thumbnails",
+        "responsive-embeds",
+        "editor-styles",
+        "html5",
+        "automatic-feed-links",
+        "widgets-block-editor",
+        "block-templates",
+        "post-formats",
+        "editor-style"
+    ],
+    "themes_screen": {
+        "id": "twentytwentyfive",
+        "name": "Twenty Twenty-Five",
+        "description": "Twenty Twenty-Five emphasizes simplicity and adaptability. It offers flexible design options, supported by a variety of patterns for different page types, such as services and landing pages, making it ideal for building personal blogs, professional portfolios, online magazines, or business websites. Its templates cater to various blog styles, from text-focused to image-heavy layouts. Additionally, it supports international typography and diverse color palettes, ensuring accessibility and customization for users worldwide.",
+        "author": "the WordPress team",
+        "authorAndUri": "<a href=\"https://wordpress.org\">the WordPress team</a>",
+        "tags": "One Column, Custom Colors, custom-menu, Custom Logo, Editor Style, Featured Images, Site Editor, Block Editor Patterns, rtl-language-support, Sticky Post, threaded-comments, translation-ready, Wide Blocks, Block Editor Styles, Style Variations, Accessibility Ready, Blog, Portfolio, News",
+        "version": "1.5"
+    },
+    "block_variations": {
+        "core/template-part": [
+            {
+                "name": "area_header",
+                "title": "Header",
+                "description": "The Header template defines a page area that typically contains a title, logo, and main navigation.",
+                "attributes": {
+                    "area": "header"
+                },
+                "scope": [],
+                "icon": "header"
+            },
+            {
+                "name": "area_footer",
+                "title": "Footer",
+                "description": "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
+                "attributes": {
+                    "area": "footer"
+                },
+                "scope": [],
+                "icon": "footer"
+            },
+            {
+                "name": "instance_sidebar",
+                "title": "Sidebar",
+                "description": "1",
+                "attributes": {
+                    "slug": "sidebar",
+                    "theme": "twentytwentyfive",
+                    "area": "uncategorized"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "layout",
+                "example": {
+                    "attributes": {
+                        "slug": "sidebar",
+                        "theme": "twentytwentyfive",
+                        "area": "uncategorized"
+                    }
+                }
+            },
+            {
+                "name": "instance_header",
+                "title": "Header",
+                "description": "1",
+                "attributes": {
+                    "slug": "header",
+                    "theme": "twentytwentyfive",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header",
+                        "theme": "twentytwentyfive",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_footer-newsletter",
+                "title": "Footer Newsletter",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer-newsletter",
+                    "theme": "twentytwentyfive",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer-newsletter",
+                        "theme": "twentytwentyfive",
+                        "area": "footer"
+                    }
+                }
+            },
+            {
+                "name": "instance_footer-columns",
+                "title": "Footer Columns",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer-columns",
+                    "theme": "twentytwentyfive",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer-columns",
+                        "theme": "twentytwentyfive",
+                        "area": "footer"
+                    }
+                }
+            },
+            {
+                "name": "instance_vertical-header",
+                "title": "Vertical site header",
+                "description": "1",
+                "attributes": {
+                    "slug": "vertical-header",
+                    "theme": "twentytwentyfive",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "vertical-header",
+                        "theme": "twentytwentyfive",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_footer",
+                "title": "Footer",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer",
+                    "theme": "twentytwentyfive",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer",
+                        "theme": "twentytwentyfive",
+                        "area": "footer"
+                    }
+                }
+            },
+            {
+                "name": "instance_header-large-title",
+                "title": "Header with large title",
+                "description": "1",
+                "attributes": {
+                    "slug": "header-large-title",
+                    "theme": "twentytwentyfive",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header-large-title",
+                        "theme": "twentytwentyfive",
+                        "area": "header"
+                    }
+                }
+            }
+        ],
+        "core/navigation-link": [
+            {
+                "name": "post",
+                "title": "Post link",
+                "description": " ",
+                "attributes": {
+                    "type": "post",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "page",
+                "title": "Page link",
+                "description": " ",
+                "attributes": {
+                    "type": "page",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "category",
+                "title": "Category link",
+                "description": " ",
+                "attributes": {
+                    "type": "category",
+                    "kind": "taxonomy"
+                }
+            },
+            {
+                "name": "tag",
+                "title": "Tag link",
+                "description": " ",
+                "attributes": {
+                    "type": "tag",
+                    "kind": "taxonomy"
+                }
+            },
+            {
+                "name": "post_format",
+                "title": "Post Format Link",
+                "description": "A link to a post format",
+                "attributes": {
+                    "type": "post_format",
+                    "kind": "taxonomy"
+                }
+            }
+        ]
+    },
+    "binding_sources": [
+        {
+            "name": "twentytwentyfive/format",
+            "label": "Post format name",
+            "uses_context": null
+        }
     ]
 }

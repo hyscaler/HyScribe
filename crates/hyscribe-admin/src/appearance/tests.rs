@@ -64,7 +64,7 @@ fn themes_are_php_s() {
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows.len(), 18);
+    assert_eq!(rows.len(), 20);
 }
 
 /// The dashboard with an active theme or parent the site does not have.
@@ -80,7 +80,7 @@ fn the_dashboard_of_a_missing_theme_is_php_s() {
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(rows.len(), 6);
+    assert_eq!(rows.len(), 10);
 }
 
 /// The Tools screen's frame with a missing child or parent of the bundled

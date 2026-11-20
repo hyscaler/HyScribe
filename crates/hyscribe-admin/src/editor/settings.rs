@@ -169,6 +169,10 @@ fn styles(site: &dyn EditorSite) -> Value {
         true,
     ));
     // `get_block_editor_theme_styles()`: the stylesheet `add_editor_style()` names.
+    if !site.theme().has_editor_style() {
+        styles.extend(duotone_styles(global.settings()));
+        return list(styles);
+    }
     let file = format!("wp-content/themes/{}/{EDITOR_STYLE}", site.theme().slug());
     let css = hyscribe_render::theme::theme_file(site.theme().slug(), EDITOR_STYLE)
         .unwrap_or_default()

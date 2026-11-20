@@ -1720,7 +1720,7 @@ async fn dashboard_data() {
             assert!(postless.post.is_none() && postless.can_edit);
             assert_eq!(postless.user.as_ref().unwrap().id, 1);
             assert!(postless.link.ends_with("#comment-2"));
-            assert_eq!(admin.theme_name(), "Twenty Twenty-Five");
+            assert_eq!(admin.active_theme().name(), "Twenty Twenty-Five");
             assert_eq!(admin.user_email(), b"admin@default-install.test");
             assert_eq!(admin.show_welcome_panel().as_deref(), Some(&b"1"[..]));
             assert_eq!(admin.published("page"), 1);

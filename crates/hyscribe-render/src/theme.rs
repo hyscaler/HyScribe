@@ -56,6 +56,16 @@ pub fn slugs() -> impl Iterator<Item = &'static str> {
     THEMES.iter().map(|data| data.slug)
 }
 
+/// What the Themes screen lists of the embedded theme `slug` that its files
+/// give, as `reference/rest/registered.php` exports it: `id`, `name`,
+/// `description`, `author`, `authorAndUri`, `tags` and `version`.
+pub fn screen_entry(slug: &str) -> Option<Value> {
+    let data = THEMES.iter().find(|data| data.slug == slug)?;
+    json_decode(data.registered)?
+        .get_str("themes_screen")
+        .cloned()
+}
+
 /// The embedded theme `slug` names, or else the default, as WordPress
 /// falls back to its default theme.
 pub fn resolve(slug: &str) -> &'static str {
@@ -320,6 +330,29 @@ impl Theme {
     /// and categories where it has them.
     pub fn pattern_entry(&self, slug: &[u8]) -> Option<&Value> {
         self.pattern_data.get(&Key::String(slug.to_vec()))
+    }
+
+    /// The stylesheets of the theme's own files that `wp_enqueue_block_style()`
+    /// enqueues in the block editor: each one's handle, its path under the
+    /// site's address, and its `ver` (empty for the WordPress version).
+    pub fn editor_styles(&self) -> Vec<(&str, String, &str)> {
+        let own = self.styles.iter().filter(|style| style.block.is_some());
+        own.map(|style| {
+            let src = format!("/wp-content/themes/{}/{}", self.slug, style.src);
+            (
+                style.handle.as_str(),
+                src,
+                style.version.as_deref().unwrap_or_default(),
+            )
+        })
+        .collect()
+    }
+
+    /// Whether the theme adds an editor stylesheet, `add_editor_style()`: its
+    /// theme support `editor-style`.
+    pub fn has_editor_style(&self) -> bool {
+        let mut features = self.registered("theme_features").iter();
+        features.any(|(_, feature)| feature.as_bytes() == Some(b"editor-style"))
     }
 
     /// The post formats `functions.php` adds theme support for.

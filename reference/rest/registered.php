@@ -26,7 +26,14 @@
 //           its templates and parts in the order PHP's directory iterator
 //           lists them, which the templates routes list them in,
 //           "theme_features": the names of its theme support, which Site
-//           Health lists}
+//           Health lists, "themes_screen": the parts of the theme's entry on the
+//           Themes screen that its files give: id, name, description, author,
+//           authorAndUri, tags, version, "block_variations": the variations of
+//           the blocks whose variations the theme changes (core/template-part
+//           lists its template parts, core/navigation-link its post format
+//           link), as the block types route gives them in the edit context,
+//           "binding_sources": the block bindings sources it registers (name,
+//           label and the context it uses)}
 
 require '/var/www/html/wp-load.php';
 
@@ -80,6 +87,9 @@ if ( 'theme' === $argv[1] ) {
 		}
 	}
 	$formats = get_theme_support( 'post-formats' );
+	require_once ABSPATH . 'wp-admin/includes/theme.php';
+	require_once ABSPATH . 'wp-admin/includes/update.php';
+	$screen = array_intersect_key( wp_prepare_themes_for_js( array( wp_get_theme() ) )[0], array_flip( array( 'id', 'name', 'description', 'author', 'authorAndUri', 'tags', 'version' ) ) );
 	$files   = fn( $folder ) => array_map( fn( $path ) => basename( $path, '.html' ), _get_block_templates_paths( get_stylesheet_directory() . '/' . $folder ) );
 	$own     = function ( $src ) {
 		foreach ( array( get_stylesheet_directory_uri(), get_template_directory_uri() ) as $dir ) {
@@ -114,7 +124,21 @@ if ( 'theme' === $argv[1] ) {
 		}
 	}
 	$enqueued = array_map( fn( $s ) => array_diff_key( $s, array( 'deps' => 0 ) ), $enqueued );
-	$out  = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme, 'patterns' => $patterns, 'rest' => $rest, 'post_formats' => $formats ? $formats[0] : array(), 'styles' => $enqueued, 'template_files' => $files( 'templates' ), 'part_files' => $files( 'parts' ), 'theme_features' => array_keys( $GLOBALS['_wp_theme_features'] ) );
+	$types_controller = new WP_REST_Block_Types_Controller();
+	$types_request    = new WP_REST_Request( 'GET', '/wp/v2/block-types' );
+	$types_request->set_param( 'context', 'edit' );
+	$variations = array();
+	foreach ( array( 'core/template-part', 'core/navigation-link' ) as $block_name ) {
+		$type = WP_Block_Type_Registry::get_instance()->get_registered( $block_name );
+		$variations[ $block_name ] = $types_controller->prepare_item_for_response( $type, $types_request )->get_data()['variations'];
+	}
+	$sources = array();
+	foreach ( WP_Block_Bindings_Registry::get_instance()->get_all_registered() as $source ) {
+		if ( ! str_starts_with( $source->name, 'core/' ) ) {
+			$sources[] = array( 'name' => $source->name, 'label' => $source->label, 'uses_context' => $source->uses_context );
+		}
+	}
+	$out  = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme, 'patterns' => $patterns, 'rest' => $rest, 'post_formats' => $formats ? $formats[0] : array(), 'styles' => $enqueued, 'template_files' => $files( 'templates' ), 'part_files' => $files( 'parts' ), 'theme_features' => array_keys( $GLOBALS['_wp_theme_features'] ), 'themes_screen' => $screen, 'block_variations' => $variations, 'binding_sources' => $sources );
 } else {
 	$controller = new WP_REST_Block_Types_Controller();
 	$request    = new WP_REST_Request( 'GET', '/wp/v2/block-types' );

@@ -12,6 +12,9 @@ GET	/?rest_route=/wp/v2/block-types&context=edit&_fields=name,styles	hash
 GET	/?rest_route=/wp/v2/block-types/core/button&context=edit&_fields=name,styles
 GET	/?rest_route=/wp/v2/block-types/core/image&_fields=name,styles
 GET	/?rest_route=/wp/v2/block-types/core/quote&_fields=name,styles
+GET	/?rest_route=/wp/v2/block-types/core/template-part&_fields=name,variations
+GET	/?rest_route=/wp/v2/block-types/core/navigation-link&_fields=name,variations
+GET	/?rest_route=/wp/v2/block-types&context=edit&_fields=name,variations	hash
 GET	/?rest_route=/wp/v2/block-patterns/categories
 GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=name,title,categories,source
 GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=content	skip=editor+author+contributor

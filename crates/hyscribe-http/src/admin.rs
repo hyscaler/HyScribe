@@ -484,6 +484,9 @@ impl PageSite for Admin<'_> {
     fn stylesheet(&self) -> String {
         self.site.option("stylesheet")
     }
+    fn active_theme(&self) -> &hyscribe_render::theme::Theme {
+        &self.site.theme
+    }
     fn font_faces(&self, with_theme: bool) -> Vec<u8> {
         let url = self.reads.site_url();
         self.site.theme.admin_font_faces(&url, with_theme)
@@ -550,9 +553,6 @@ impl DashboardSite for Admin<'_> {
             offset += number;
             number = 50;
         }
-    }
-    fn theme_name(&self) -> String {
-        self.site.theme.name()
     }
     fn recent_posts(&self, status: &str) -> Vec<hyscribe_model::Post> {
         if status == "future" {
@@ -1450,8 +1450,8 @@ fn screen(
         // HyScribe's own checks.
         "/hs-admin/site-health" => {
             let tab = only_argument(query, "tab")?;
-            let bundled =
-                |name| PostsSite::option(admin, name).as_deref() == Some(&b"twentytwentyfive"[..]);
+            let slug = admin.site.theme.slug().as_bytes();
+            let bundled = |name| PostsSite::option(admin, name).as_deref() == Some(slug);
             if !bundled("stylesheet") || !bundled("template") {
                 return None;
             }

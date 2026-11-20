@@ -170,6 +170,14 @@ fn prepare(context: &Context, params: &Params, block: &Value, partials: bool) ->
         .iter()
         .filter(|(key, _)| included(&key.to_php_string()))
         .map(|(key, value)| {
+            // The variations the theme changes are its own.
+            if key.to_php_string() == b"variations" {
+                let themed = context.site.theme().registered("block_variations");
+                let own = themed
+                    .iter()
+                    .find(|(block, _)| block.to_php_string() == name);
+                return (key.clone(), own.map_or(value, |(_, own)| own).clone());
+            }
             if key.to_php_string() != b"styles" {
                 return (key.clone(), value.clone());
             }

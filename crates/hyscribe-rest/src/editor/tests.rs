@@ -139,13 +139,13 @@ fn themed_answers(slug: &str, golden: &str, count: usize) {
 #[test]
 fn twenty_twenty_four_answers_match_php() {
     let golden = include_str!("../../tests/golden/theme-twentytwentyfour.tsv");
-    themed_answers("twentytwentyfour", golden, 342);
+    themed_answers("twentytwentyfour", golden, 360);
 }
 
 #[test]
 fn twenty_twenty_three_answers_match_php() {
     let golden = include_str!("../../tests/golden/theme-twentytwentythree.tsv");
-    themed_answers("twentytwentythree", golden, 330);
+    themed_answers("twentytwentythree", golden, 348);
 }
 
 fn preloads() -> &'static Content {

@@ -37,28 +37,28 @@ const WIDGET_BASES: [&str; 18] = [
 ];
 
 /// The option holding a theme's modifications.
-fn mods_option(stylesheet: &str) -> String {
+pub(crate) fn mods_option(stylesheet: &str) -> String {
     format!("theme_mods_{stylesheet}")
 }
 
-fn key(name: &str) -> Key {
+pub(crate) fn key(name: &str) -> Key {
     Key::String(name.as_bytes().to_vec())
 }
 
-fn text(value: &[u8]) -> String {
+pub(crate) fn text(value: &[u8]) -> String {
     String::from_utf8_lossy(value).into_owned()
 }
 
 /// `get_theme_mods()` of the active theme `stylesheet` (named `name`): the
 /// theme's option, which moves from its deprecated place only in an old
-/// site, not ported.
-async fn theme_mods(
+/// site, not ported. `None` when the option is not an array.
+pub(crate) async fn theme_mods_lookup(
     write: &mut Write<'_>,
     stylesheet: &str,
     name: &str,
-) -> Result<Vec<(Key, Value)>, Error> {
+) -> Result<Option<Vec<(Key, Value)>>, Error> {
     match get_option(write, &mods_option(stylesheet)).await? {
-        Value::Array(mods) => Ok(mods),
+        Value::Array(mods) => Ok(Some(mods)),
         Value::Bool(false) => {
             let current = get_option(write, "current_theme").await?;
             let current = match current {
@@ -69,10 +69,20 @@ async fn theme_mods(
             if write.option_value(&legacy).await?.is_some() {
                 return Err(Error::Unported("theme mods kept under the theme's name"));
             }
-            Ok(Vec::new())
+            Ok(Some(Vec::new()))
         }
-        _ => Ok(Vec::new()),
+        _ => Ok(None),
     }
+}
+
+async fn theme_mods(
+    write: &mut Write<'_>,
+    stylesheet: &str,
+    name: &str,
+) -> Result<Vec<(Key, Value)>, Error> {
+    Ok(theme_mods_lookup(write, stylesheet, name)
+        .await?
+        .unwrap_or_default())
 }
 
 /// The value of `name` in `entries`.

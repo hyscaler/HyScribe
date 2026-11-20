@@ -168,13 +168,14 @@ fn cpage_var(context: &Context<'_>, max_pages: i64) -> Cpage {
 }
 
 /// The `cpage` query var `comments_template()` sets for a request with
-/// several comment pages and none named, which `wp_head()` then reads.
-pub(super) fn legacy_cpage(context: &Context<'_>, post: &Post) -> Option<i64> {
+/// several comment pages and none named, which `wp_head()` then reads: only
+/// a singular request has one.
+pub(crate) fn legacy_cpage(context: &Context<'_>, post: &Post) -> Option<i64> {
     let site = context.site;
     let (all, _) = post_comments(site, context.request, post.id);
     let pages = paging(site, context.request, listed(site, &all).len());
     let page = cpage_var(context, pages.map_or(0, |paging| paging.max_pages));
-    page.set.then_some(page.page)
+    (page.set && context.request.singular).then_some(page.page)
 }
 
 /// The navigation `<div>` of the older and newer comments links.

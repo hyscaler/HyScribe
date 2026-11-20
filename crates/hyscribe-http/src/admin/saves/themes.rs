@@ -59,7 +59,7 @@ pub(crate) async fn checked(site: Site) -> Site {
     let Some(writer) = site
         .writer
         .as_ref()
-        .filter(|_| switched.is_some_and(is_set))
+        .filter(|_| switched.is_some_and(|value| is_set(value)))
     else {
         return site;
     };
@@ -90,7 +90,7 @@ async fn follow_up(write: &mut Write<'_>, slug: &str, name: &str) -> Result<(), 
 }
 
 /// Whether an option's stored value is set: not empty, and not `0`.
-fn is_set(value: &Vec<u8>) -> bool {
+fn is_set(value: &[u8]) -> bool {
     !value.is_empty() && value != b"0"
 }
 

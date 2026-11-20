@@ -27,14 +27,12 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
         .or_else(|| themes::endpoints(regex))
 }
 
-fn decoded(json: &'static [u8], cell: &'static OnceLock<Value>) -> &'static Value {
-    cell.get_or_init(|| json_decode(json).unwrap_or_default())
-}
-
 /// The list `name` of what core registers.
 fn core(name: &str) -> &'static [(Key, Value)] {
     static CORE_DATA: OnceLock<Value> = OnceLock::new();
-    let data = decoded(CORE, &CORE_DATA).get_str(name);
+    let data = CORE_DATA
+        .get_or_init(|| json_decode(CORE).unwrap_or_default())
+        .get_str(name);
     data.and_then(Value::as_array).unwrap_or_default()
 }
 

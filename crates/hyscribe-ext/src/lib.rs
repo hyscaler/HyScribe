@@ -56,4 +56,7 @@ pub enum Fault {
 }
 
 #[cfg(test)]
+extern crate self as hyscribe_ext;
+
+#[cfg(test)]
 mod tests;

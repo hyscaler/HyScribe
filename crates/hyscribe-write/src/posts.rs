@@ -9,7 +9,7 @@
 
 use hyscribe_config::Constants;
 use hyscribe_db::{PostFields, Write};
-use hyscribe_phpser::{Key, Value};
+use hyscribe_phpser::Value;
 use hyscribe_render::formatting::sanitize_title;
 
 use crate::options::{Meta, add_metadata, delete_metadata, get_metadata, update_metadata};
@@ -414,25 +414,10 @@ pub async fn custom_css_post_lookup(
     stylesheet: &str,
     name: &str,
 ) -> Result<()> {
-    let option = format!("theme_mods_{stylesheet}");
-    let mut mods = match crate::options::get_option(write, &option).await? {
-        Value::Array(mods) => mods,
-        Value::Bool(false) => {
-            // get_theme_mods() moves the mods kept under the theme's name.
-            let current = crate::options::get_option(write, "current_theme").await?;
-            let current = match current {
-                Value::Bool(false) => name.as_bytes().to_vec(),
-                current => current.to_php_string(),
-            };
-            let legacy = format!("mods_{}", String::from_utf8_lossy(&current));
-            if write.option_value(&legacy).await?.is_some() {
-                return Err(Error::Unported("theme mods kept under the theme's name"));
-            }
-            Vec::new()
-        }
-        _ => return Err(Error::Unported("theme mods that are not an array")),
-    };
-    let key = Key::String(b"custom_css_post_id".to_vec());
+    let mut mods = crate::themes::theme_mods_lookup(write, stylesheet, name)
+        .await?
+        .ok_or(Error::Unported("theme mods that are not an array"))?;
+    let key = crate::themes::key("custom_css_post_id");
     let found = mods.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
     let kept = match found {
         Some(Value::Int(-1)) => true,
@@ -456,7 +441,13 @@ pub async fn custom_css_post_lookup(
         Some((_, value)) => *value = Value::Int(-1),
         None => mods.push((key, Value::Int(-1))),
     }
-    crate::options::update_option(write, &option, &Value::Array(mods), None).await?;
+    crate::options::update_option(
+        write,
+        &crate::themes::mods_option(stylesheet),
+        &Value::Array(mods),
+        None,
+    )
+    .await?;
     Ok(())
 }
 

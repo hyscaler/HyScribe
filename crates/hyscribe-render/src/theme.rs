@@ -144,13 +144,7 @@ const POST_FORMATS: [&str; 10] = [
 
 /// The default theme, Twenty Twenty-Five, as bundled with WordPress 7.1.3.
 pub fn twentytwentyfive() -> Theme {
-    twentytwentyfive_for(None)
-}
-
-/// The default theme with the site's global styles, `user` the content of
-/// its `wp_global_styles` post if it has one.
-pub fn twentytwentyfive_for(user: Option<&[u8]>) -> Theme {
-    with_user_styles(DEFAULT, user, &[])
+    load(DEFAULT, None)
 }
 
 /// The theme `slug`, an embedded one or else the default as WordPress

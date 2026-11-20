@@ -732,10 +732,7 @@ pub(crate) fn legacy_comments_ran(
         .filter(|post| legacy && (comments_open(context, post) || post.comment_count > 0))
 }
 
-/// The `cpage` query var the legacy template sets, if any.
-pub(crate) fn legacy_cpage(context: &Context<'_>, post: &Post) -> Option<i64> {
-    legacy_comments::legacy_cpage(context, post).filter(|_| context.request.singular)
-}
+pub(crate) use legacy_comments::legacy_cpage;
 
 /// `render_block_core_comments_title()`: how many responses the post has,
 /// with its title.

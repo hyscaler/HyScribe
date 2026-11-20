@@ -13,6 +13,7 @@ use crate::host::State;
 
 #[path = "../tests/guest/mod.rs"]
 mod guest;
+pub(crate) use guest::grants;
 
 /// A site in memory, failing where a name asks it to, and logging what
 /// the extension did that leaves no other trace.
@@ -290,35 +291,6 @@ impl Site for TestSite {
         fails(handle)?;
         self.note(format!("inline {kind:?} {handle} {data} {before}"));
         Ok(())
-    }
-}
-
-fn names(names: &str) -> std::collections::BTreeSet<String> {
-    names
-        .split(' ')
-        .filter(|name| !name.is_empty())
-        .map(String::from)
-        .collect()
-}
-
-/// Everything the test extension asks for.
-pub(crate) fn grants() -> Grants {
-    Grants {
-        filters: names(
-            "the_content ext_trap ext_loop ext_grow ext_late ext_order ext_options ext_cron ext_echo \
-             ext_meta ext_query ext_mail ext_auth ext_assets ext_fire ext_chain ext_remove ext_current \
-             ext_bad_json ext_error ext_stack ext_count ext_gone ext_nest",
-        ),
-        actions: names("ext_action ext_event"),
-        sensitive: names("map_meta_cap"),
-        shortcodes: names("ext ext_gone"),
-        options: names("ext ext_fail ext_bytes ext_active"),
-        meta: names("_ext _ext_*"),
-        post_types: names("ext_item ext_item_named_too_long"),
-        taxonomies: names("ext_kind ext_kind_named_far_too_long_for_wp"),
-        rest: names("ext/v1"),
-        mail: true,
-        filesystem: names("uploads/ext"),
     }
 }
 

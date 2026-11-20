@@ -3,7 +3,7 @@
 //
 // Must-use plugin for reference/appearance/golden.sh, through filters only.
 // Every request sees the themes and plugins a HyScribe installation has:
-// the three embedded block themes, and no PHP plugin (the image's Akismet and
+// the embedded block themes, and no PHP plugin (the image's Akismet and
 // Hello Dolly, and these must-use plugins, are hidden). a5auto turns on the
 // theme's automatic updates; a5nooptions and a5noswitch (g9nooptions and
 // g9noswitch too) deny user 1 edit_theme_options and switch_themes, and
@@ -18,6 +18,7 @@ add_filter(
 			'twentytwentyfive'  => true,
 			'twentytwentyfour'  => true,
 			'twentytwentythree' => true,
+			'twentytwentytwo'   => true,
 		);
 		return array_intersect_key( $themes, $embedded );
 	}

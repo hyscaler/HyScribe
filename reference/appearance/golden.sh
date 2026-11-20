@@ -38,7 +38,7 @@ cleanup() {
 trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/appearance/variants.php"
-actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts updates switch-theme_twentytwentyfive switch-theme_twentytwentyfour switch-theme_twentytwentythree personal-data-request bulk-privacy_requests bulk-plugins screen-options-nonce health-check-site-status health-check-site-status-result welcome-panel-nonce replyto-comment add-post closedpostboxes meta-box-order internal-linking community_events approve-comment_1 delete-comment_1"
+actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts updates switch-theme_twentytwentyfive switch-theme_twentytwentyfour switch-theme_twentytwentythree switch-theme_twentytwentytwo personal-data-request bulk-privacy_requests bulk-plugins screen-options-nonce health-check-site-status health-check-site-status-result welcome-panel-nonce replyto-comment add-post closedpostboxes meta-box-order internal-linking community_events approve-comment_1 delete-comment_1"
 # shellcheck disable=SC2086
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \
   $actions > "$NONCES"

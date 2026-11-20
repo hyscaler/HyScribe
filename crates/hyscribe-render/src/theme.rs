@@ -61,9 +61,8 @@ pub fn slugs() -> impl Iterator<Item = &'static str> {
 /// `description`, `author`, `authorAndUri`, `tags` and `version`.
 pub fn screen_entry(slug: &str) -> Option<Value> {
     let data = THEMES.iter().find(|data| data.slug == slug)?;
-    json_decode(data.registered)?
-        .get_str("themes_screen")
-        .cloned()
+    let registered = json_decode(data.registered).unwrap_or_default();
+    registered.get_str("themes_screen").cloned()
 }
 
 /// The embedded theme `slug` names, or else the default, as WordPress

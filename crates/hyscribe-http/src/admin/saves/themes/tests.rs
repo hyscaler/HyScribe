@@ -7,15 +7,17 @@
 use std::sync::Arc;
 
 use hyscribe_config::Mode;
-use hyscribe_db::{Connection, Writer};
+use hyscribe_db::{Connection, Write, Writer};
 use hyscribe_phpser::{Key, Value};
 use hyscribe_testkit::writes::check_writes;
 use hyscribe_testkit::{fixture_database, hs_admin_page, unhex};
 use hyscribe_write::options::{delete_option, update_option};
 
+use super::follow_up;
+
 use crate::admin::saves::posts::tests::unnonced;
 use crate::admin::saves::tests::{
-    AFTER, ANSWERS, CASES, Request, SITE, answered, case_row, hs, redirected, turn, writer,
+    AFTER, ANSWERS, CASES, Request, SITE, answered, case_row, hs, redirected, settled, turn, writer,
 };
 use crate::admin::tests::{SAVES, location, logged_in, page_of, send, session_nonce, unwritable};
 
@@ -184,6 +186,66 @@ async fn the_next_load_leaves_other_sites_alone() {
     );
 }
 
+/// The site every oracle case starts from (`$themes_base`): no pattern
+/// cache, and the mods PHP's first page view writes.
+async fn base(write: &mut Write<'_>) {
+    for prefix in [
+        "_site_transient_wp_theme_files_patterns-",
+        "_site_transient_timeout_wp_theme_files_patterns-",
+    ] {
+        for (name, _) in write.options_starting(prefix).await.unwrap() {
+            delete_option(write, &name).await.unwrap();
+        }
+    }
+    delete_option(write, "theme_mods_twentytwentyfive")
+        .await
+        .unwrap();
+    let css = (Key::String(b"custom_css_post_id".to_vec()), Value::Int(-1));
+    let mods = Value::Array(vec![css]);
+    update_option(write, "theme_mods_twentytwentyfive", &mods, None)
+        .await
+        .unwrap();
+}
+
+/// The next load's follow-up writes PHP's rows, as one action, every
+/// statement of it can fail, and it does nothing once the switch is done.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_follow_up_writes_php_s_rows() {
+    let _turn = turn().await;
+    let writer = writer().await;
+    let (four, five) = (
+        ("twentytwentyfour", "Twenty Twenty-Four"),
+        ("twentytwentyfive", "Twenty Twenty-Five"),
+    );
+    let setup = async |conn: &mut Connection| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        base(&mut write).await;
+        hyscribe_write::themes::switch_theme(&mut write, four, five)
+            .await
+            .unwrap();
+        write.commit().await.unwrap();
+        Ok::<(), String>(())
+    };
+    let action = async |conn: &mut Connection, ()| {
+        let done = settled(async |budget| {
+            let mut write = writer.begin_on(conn).await?;
+            write.fail_after(budget);
+            follow_up(&mut write, four.0, four.1).await?;
+            write.commit().await.map_err(hyscribe_write::Error::from)
+        })
+        .await;
+        done.map_err(|err| format!("{err:?}"))?;
+        // The switch is done: the next load has nothing to do.
+        let mut write = writer.begin_on(conn).await.map_err(|err| err.to_string())?;
+        let again = follow_up(&mut write, four.0, four.1).await;
+        again.map_err(|err| format!("{err:?}"))
+    };
+    let golden = "admin-themes-next-load-twentytwentyfour";
+    check_writes(&fixture_database(), golden, setup, action)
+        .await
+        .unwrap();
+}
+
 /// The activation writes PHP's rows, as one action, and every statement of
 /// it can fail: nothing is kept then.
 #[tokio::test(flavor = "multi_thread")]
@@ -197,25 +259,9 @@ async fn the_activation_writes_php_s_rows() {
         post: "",
         user: 1,
     };
-    // The site every oracle case starts from (`$themes_base`).
     let setup = async |conn: &mut Connection| {
         let mut write = writer.begin_on(conn).await.unwrap();
-        for prefix in [
-            "_site_transient_wp_theme_files_patterns-",
-            "_site_transient_timeout_wp_theme_files_patterns-",
-        ] {
-            for (name, _) in write.options_starting(prefix).await.unwrap() {
-                delete_option(&mut write, &name).await.unwrap();
-            }
-        }
-        delete_option(&mut write, "theme_mods_twentytwentyfive")
-            .await
-            .unwrap();
-        let css = (Key::String(b"custom_css_post_id".to_vec()), Value::Int(-1));
-        let mods = Value::Array(vec![css]);
-        update_option(&mut write, "theme_mods_twentytwentyfive", &mods, None)
-            .await
-            .unwrap();
+        base(&mut write).await;
         write.commit().await.unwrap();
         Ok::<(), String>(())
     };

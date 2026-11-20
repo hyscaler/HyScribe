@@ -57,6 +57,22 @@ async fn next_load(write: &mut Write<'_>, theme: (&str, &str)) {
     }
 }
 
+/// The `sidebars_widgets` option with these sidebars and their widgets.
+async fn sidebars(write: &mut Write<'_>, entries: &[(&str, &[&str])]) {
+    let list = |ids: &[&str]| {
+        let ids = ids.iter().zip(0..);
+        Value::Array(ids.map(|(id, at)| (Key::Int(at), text(id))).collect())
+    };
+    let mut option: Vec<(Key, Value)> = entries
+        .iter()
+        .map(|(name, ids)| (Key::String(name.as_bytes().to_vec()), list(ids)))
+        .collect();
+    option.push((Key::String(b"array_version".to_vec()), Value::Int(3)));
+    update_option(write, "sidebars_widgets", &Value::Array(option), None)
+        .await
+        .unwrap();
+}
+
 /// The widgets in the states a site leaves them in
 /// (`$themes_widgets` of the oracle).
 async fn widgets(write: &mut Write<'_>) {
@@ -262,6 +278,79 @@ async fn a_site_without_sidebars_is_php_s() {
     .await;
 }
 
+/// A widget the theme had that is not inactive now, and every sidebar
+/// emptied, as the oracle's cases of those names.
+#[tokio::test(flavor = "multi_thread")]
+async fn widgets_the_site_changed_are_php_s() {
+    let kept = async |write: &mut Write<'_>| {
+        let all: [(&str, &[&str]); 3] = [
+            ("wp_inactive_widgets", &["block-6"]),
+            ("sidebar-1", &["block-2", "block-3"]),
+            ("sidebar-2", &["block-4", "block-5"]),
+        ];
+        sidebars(write, &all).await;
+        switch_theme(write, FOUR, FIVE).await.unwrap();
+        next_load(write, FOUR).await;
+    };
+    check_case(
+        "admin-themes-widgets-lost",
+        async |write| {
+            kept(write).await;
+            let inactive: [(&str, &[&str]); 1] = [(
+                "wp_inactive_widgets",
+                &["block-3", "block-4", "block-5", "block-6"],
+            )];
+            sidebars(write, &inactive).await;
+        },
+        async |write, ()| {
+            switch_theme(write, FIVE, FOUR).await.unwrap();
+            next_load(write, FIVE).await;
+        },
+    )
+    .await;
+    check_case(
+        "admin-themes-widgets-emptied",
+        async |write| {
+            kept(write).await;
+            let none: [(&str, &[&str]); 2] = [("wp_inactive_widgets", &[]), ("sidebar-1", &[])];
+            sidebars(write, &none).await;
+        },
+        async |write, ()| {
+            switch_theme(write, FIVE, FOUR).await.unwrap();
+            next_load(write, FIVE).await;
+        },
+    )
+    .await;
+}
+
+/// A theme without mods, whether the site kept the theme's name or not.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_theme_without_mods_is_php_s() {
+    check_case(
+        "admin-themes-no-mods",
+        async |write| {
+            delete_option(write, "theme_mods_twentytwentyfive")
+                .await
+                .unwrap();
+        },
+        async |write, ()| switch_theme(write, FOUR, FIVE).await.unwrap(),
+    )
+    .await;
+    check_case(
+        "admin-themes-no-mods-named",
+        async |write| {
+            delete_option(write, "theme_mods_twentytwentyfive")
+                .await
+                .unwrap();
+            update_option(write, "current_theme", &text(FIVE.1), None)
+                .await
+                .unwrap();
+        },
+        async |write, ()| switch_theme(write, FOUR, FIVE).await.unwrap(),
+    )
+    .await;
+}
+
 /// Menu locations, no widgets option, and mods that are not an array.
 #[tokio::test(flavor = "multi_thread")]
 async fn odd_sites_are_php_s() {
@@ -337,6 +426,19 @@ async fn each_statement_can_fail() {
     .await;
     fails_at_each_step(
         async |write: &mut Write<'_>| {
+            let on = Value::Bool(true);
+            update_option(write, "theme_switched_via_customizer", &on, None)
+                .await
+                .unwrap();
+        },
+        async |write, ()| {
+            switch_theme(write, FOUR, FIVE).await?;
+            load(write, FOUR).await
+        },
+    )
+    .await;
+    fails_at_each_step(
+        async |write: &mut Write<'_>| {
             let menus = Value::Array(vec![(Key::String(b"primary".to_vec()), Value::Int(7))]);
             let mods = Value::Array(vec![(Key::String(b"nav_menu_locations".to_vec()), menus)]);
             update_option(write, "theme_mods_twentytwentyfive", &mods, None)
@@ -396,6 +498,22 @@ async fn what_is_not_ported_is_refused() {
             .await
             .unwrap();
         let refused = switch_theme(write, FOUR, FIVE).await;
+        assert!(matches!(refused, Err(Error::Unported(_))));
+    })
+    .await;
+    // The sidebars a theme had that are not lists.
+    rolled_back(async |write| {
+        switch_theme(write, FOUR, FIVE).await.unwrap();
+        let odd = Value::Array(vec![(Key::String(b"sidebar-1".to_vec()), text("x"))]);
+        let data = (Key::String(b"data".to_vec()), odd);
+        let kept = Value::Array(vec![(
+            Key::String(b"sidebars_widgets".to_vec()),
+            Value::Array(vec![data]),
+        )]);
+        update_option(write, "theme_mods_twentytwentyfour", &kept, None)
+            .await
+            .unwrap();
+        let refused = after_switch_theme(write, FOUR.0, FOUR.1).await;
         assert!(matches!(refused, Err(Error::Unported(_))));
     })
     .await;

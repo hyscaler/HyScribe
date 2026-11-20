@@ -187,6 +187,56 @@ return array(
 		fn() => update_option( 'theme_mods_twentytwentyfive', 'broken' ),
 		fn() => $themes_activate( 'twentytwentyfour' )
 	),
+	// A site whose theme has no mods yet, with and without the theme's name kept.
+	'admin-themes-no-mods'                    => $themes_case(
+		fn() => delete_option( 'theme_mods_twentytwentyfive' ),
+		fn() => $themes_activate( 'twentytwentyfour' )
+	),
+	'admin-themes-no-mods-named'              => $themes_case(
+		function () {
+			delete_option( 'theme_mods_twentytwentyfive' );
+			update_option( 'current_theme', 'Twenty Twenty-Five' );
+		},
+		fn() => $themes_activate( 'twentytwentyfour' )
+	),
+	// A widget the theme had that is not inactive now, and a site that emptied every sidebar.
+	'admin-themes-widgets-lost'               => $themes_case(
+		function () use ( $themes_kept, $themes_activate, $themes_next_load ) {
+			$themes_kept();
+			$themes_activate( 'twentytwentyfour' );
+			$themes_next_load();
+			update_option(
+				'sidebars_widgets',
+				array(
+					'wp_inactive_widgets' => array( 'block-3', 'block-4', 'block-5', 'block-6' ),
+					'array_version'       => 3,
+				)
+			);
+		},
+		function () use ( $themes_activate, $themes_next_load ) {
+			$themes_activate( 'twentytwentyfive' );
+			$themes_next_load();
+		}
+	),
+	'admin-themes-widgets-emptied'            => $themes_case(
+		function () use ( $themes_kept, $themes_activate, $themes_next_load ) {
+			$themes_kept();
+			$themes_activate( 'twentytwentyfour' );
+			$themes_next_load();
+			update_option(
+				'sidebars_widgets',
+				array(
+					'wp_inactive_widgets' => array(),
+					'sidebar-1'           => array(),
+					'array_version'       => 3,
+				)
+			);
+		},
+		function () use ( $themes_activate, $themes_next_load ) {
+			$themes_activate( 'twentytwentyfive' );
+			$themes_next_load();
+		}
+	),
 	// A switch the Customizer carried the menus and widgets over for.
 	'admin-themes-via-customizer'             => $themes_case(
 		function () use ( $themes_activate ) {

@@ -129,20 +129,10 @@ async fn sidebars_widgets(write: &mut Write<'_>) -> Result<Vec<(Key, Value)>, Er
 /// or `off` when it is not already, a missing option left alone.
 async fn set_autoload(write: &mut Write<'_>, name: &str, on: bool) -> Result<(), Error> {
     let wanted = if on { "on" } else { "off" };
-    let Some(current) = write.option_autoload(name).await? else {
-        return Ok(());
-    };
+    let current = write.option_autoload(name).await?.unwrap_or_default();
     if current != wanted {
         let value = write.option_value(name).await?.unwrap_or_default();
         write.update_option_autoload(name, &value, wanted).await?;
-    }
-    Ok(())
-}
-
-/// `delete_site_transient()`.
-async fn delete_site_transient(write: &mut Write<'_>, name: &str) -> Result<(), Error> {
-    if delete_option(write, &format!("_site_transient_{name}")).await? {
-        delete_option(write, &format!("_site_transient_timeout_{name}")).await?;
     }
     Ok(())
 }
@@ -164,8 +154,10 @@ async fn delete_pattern_caches(write: &mut Write<'_>, stylesheets: &[&str]) -> R
                 .any(|stylesheet| slug.starts_with(&format!("{stylesheet}/")))
         });
         if named {
+            // `delete_site_transient()`: the option, and its timeout.
             let name = option.strip_prefix("_site_transient_").unwrap_or_default();
-            delete_site_transient(write, name).await?;
+            delete_option(write, &option).await?;
+            delete_option(write, &format!("_site_transient_timeout_{name}")).await?;
         }
     }
     Ok(())
@@ -268,29 +260,33 @@ async fn registered_widgets(write: &mut Write<'_>) -> Result<Vec<Vec<u8>>, Error
 /// A sidebar's widgets: their keys kept, as `array_intersect()` keeps them.
 type Widgets = Vec<(Key, Value)>;
 
-/// `_wp_remove_unregistered_widgets()`.
-fn remove_unregistered(sidebars: Vec<(Key, Value)>, allowed: &[Vec<u8>]) -> Vec<(Key, Value)> {
-    sidebars
-        .into_iter()
+/// Sidebars and their widgets, in order.
+type Sidebars = Vec<(Key, Widgets)>;
+
+/// The sidebars of an option's array, each a list of widgets, else not
+/// ported.
+fn lists(entries: &[(Key, Value)]) -> Result<Sidebars, Error> {
+    entries
+        .iter()
         .map(|(sidebar, widgets)| match widgets {
-            Value::Array(widgets) => {
-                let kept = widgets
-                    .into_iter()
-                    .filter(|(_, widget)| allowed.contains(&widget.to_php_string()))
-                    .collect();
-                (sidebar, Value::Array(kept))
-            }
-            other => (sidebar, other),
+            Value::Array(widgets) => Ok((sidebar.clone(), widgets.clone())),
+            _ => Err(Error::Unported("a sidebar that is not a list of widgets")),
         })
         .collect()
 }
 
-/// A sidebar's widgets as the array they are, else not ported.
-fn widgets_of(value: &Value) -> Result<&Widgets, Error> {
-    match value {
-        Value::Array(widgets) => Ok(widgets),
-        _ => Err(Error::Unported("a sidebar that is not a list of widgets")),
-    }
+/// `_wp_remove_unregistered_widgets()`.
+fn remove_unregistered(sidebars: Sidebars, allowed: &[Vec<u8>]) -> Sidebars {
+    let registered = |widgets: Widgets| -> Widgets {
+        let kept = widgets
+            .into_iter()
+            .filter(|(_, widget)| allowed.contains(&widget.to_php_string()));
+        kept.collect()
+    };
+    let kept = sidebars
+        .into_iter()
+        .map(|(sidebar, widgets)| (sidebar, registered(widgets)));
+    kept.collect()
 }
 
 /// `array_merge()` of numeric lists: values in order, renumbered.
@@ -309,14 +305,14 @@ fn merged(lists: &[&Widgets]) -> Widgets {
 /// its inactive widgets, and the sidebars it had when it was last active.
 struct Mapped {
     inactive: Widgets,
-    restored: Vec<(Key, Value)>,
+    restored: Sidebars,
 }
 
 /// `wp_map_sidebars_widgets()` of a theme that registers no sidebar, with
 /// `previous` the `sidebars_widgets` theme mod's data from when the theme
 /// was last active.
 fn map_sidebars_widgets(
-    existing: Vec<(Key, Value)>,
+    existing: &Sidebars,
     previous: Option<&Value>,
     allowed: &[Vec<u8>],
 ) -> Result<Mapped, Error> {
@@ -324,24 +320,17 @@ fn map_sidebars_widgets(
     let orphaned = |sidebar: &Key| matches!(sidebar, Key::String(name) if name.starts_with(b"orphaned_widgets"));
     let mut mapped = Mapped {
         inactive: Widgets::new(),
-        restored: Vec::new(),
+        restored: Sidebars::new(),
     };
     if existing.is_empty() {
         return Ok(mapped);
     }
     // The inactive and orphaned widgets first, then those left over.
-    let mut left = Vec::new();
-    for (sidebar, widgets) in &existing {
-        if *sidebar == inactive_key || orphaned(sidebar) {
-            mapped.inactive = merged(&[&mapped.inactive, widgets_of(widgets)?]);
-        } else {
-            left.push(widgets_of(widgets)?);
-        }
-    }
-    for widgets in left {
-        if !widgets.is_empty() {
-            mapped.inactive = merged(&[&mapped.inactive, widgets]);
-        }
+    let (first, left): (Vec<_>, Vec<_>) = existing
+        .iter()
+        .partition(|(sidebar, _)| *sidebar == inactive_key || orphaned(sidebar));
+    for (_, widgets) in first.into_iter().chain(left) {
+        mapped.inactive = merged(&[&mapped.inactive, widgets]);
     }
     let Some(Value::Array(previous)) = previous else {
         return Ok(mapped);
@@ -355,11 +344,11 @@ fn map_sidebars_widgets(
         .filter(|(sidebar, _)| !orphaned(sidebar))
         .cloned()
         .collect();
-    let old = remove_unregistered(old, allowed);
+    let old = remove_unregistered(lists(&old)?, allowed);
     // The widgets revived leave the inactive ones.
     for (_, widgets) in &old {
         let snapshot = mapped.inactive.clone();
-        for (_, widget) in widgets_of(widgets)? {
+        for (_, widget) in widgets {
             if let Some((found, _)) = snapshot.iter().find(|(_, listed)| listed == widget) {
                 mapped.inactive.retain(|(at, _)| at != found);
             }
@@ -368,7 +357,7 @@ fn map_sidebars_widgets(
     // What the theme had comes back, over the inactive widgets if it had any.
     for (sidebar, widgets) in old {
         if sidebar == inactive_key {
-            mapped.inactive = widgets_of(&widgets)?.clone();
+            mapped.inactive = widgets;
         } else {
             mapped.restored.push((sidebar, widgets));
         }
@@ -376,14 +365,13 @@ fn map_sidebars_widgets(
     Ok(mapped)
 }
 
-/// `wp_set_sidebars_widgets()`: the option, versioned.
+/// `wp_set_sidebars_widgets()` of sidebars that have no version yet: the
+/// option, versioned.
 async fn set_sidebars_widgets(
     write: &mut Write<'_>,
     mut sidebars: Vec<(Key, Value)>,
 ) -> Result<(), Error> {
-    if entry(&sidebars, "array_version").is_none() {
-        sidebars.push((key("array_version"), Value::Int(3)));
-    }
+    sidebars.push((key("array_version"), Value::Int(3)));
     update_option(write, "sidebars_widgets", &Value::Array(sidebars), None).await?;
     Ok(())
 }
@@ -401,14 +389,10 @@ async fn retrieve_widgets(
     if !matches!(previous, Value::Array(_)) && sidebars.is_empty() {
         return Ok(());
     }
-    let sidebars = remove_unregistered(sidebars, &allowed);
-    let mapped = map_sidebars_widgets(sidebars, previous.get_str("data"), &allowed)?;
-    let mut shown: Vec<Vec<u8>> = Vec::new();
-    let restored = mapped.restored.iter().map(|(_, widgets)| widgets);
-    for widgets in restored {
-        let widgets = widgets_of(widgets)?;
-        shown.extend(widgets.iter().map(|(_, widget)| widget.to_php_string()));
-    }
+    let sidebars = remove_unregistered(lists(&sidebars)?, &allowed);
+    let mapped = map_sidebars_widgets(&sidebars, previous.get_str("data"), &allowed)?;
+    let restored = mapped.restored.iter().flat_map(|(_, widgets)| widgets);
+    let mut shown: Vec<Vec<u8>> = restored.map(|(_, widget)| widget.to_php_string()).collect();
     shown.extend(
         mapped
             .inactive
@@ -426,7 +410,8 @@ async fn retrieve_widgets(
         .collect();
     let inactive = Value::Array(merged(&[&lost, &mapped.inactive]));
     let mut sidebars = vec![(key("wp_inactive_widgets"), inactive)];
-    sidebars.extend(mapped.restored);
+    let restored = mapped.restored.into_iter();
+    sidebars.extend(restored.map(|(sidebar, widgets)| (sidebar, Value::Array(widgets))));
     set_sidebars_widgets(write, sidebars).await
 }
 

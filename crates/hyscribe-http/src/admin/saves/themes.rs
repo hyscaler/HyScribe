@@ -22,7 +22,7 @@ const MISSING: &str = "<h1>An error occurred.</h1><p>The requested theme does no
 /// An embedded theme's stylesheet and its `Name` header.
 fn embedded(stylesheet: &[u8]) -> Option<(&'static str, String)> {
     let slug = theme::slugs().find(|slug| slug.as_bytes() == stylesheet)?;
-    let entry = theme::screen_entry(slug)?;
+    let entry = theme::screen_entry(slug).unwrap_or_default();
     let name = entry.get_str("name").map(Value::to_php_string);
     Some((slug, text(&name.unwrap_or_default())))
 }
@@ -68,18 +68,25 @@ pub(crate) async fn checked(site: Site) -> Site {
         return site;
     };
     let ran = async {
-        let mut write = writer.begin().await?;
-        if after_switch_theme(&mut write, slug, &name).await? {
-            flush_rewrite_rules(&mut write).await?;
-            theme_switch_done(&mut write).await?;
-        }
-        write.commit().await?;
-        Ok::<(), Error>(())
+        let Ok(mut write) = writer.begin().await else {
+            return false;
+        };
+        follow_up(&mut write, slug, &name).await.is_ok() && write.commit().await.is_ok()
     };
     match ran.await {
-        Ok(()) => site.reloaded().await.unwrap_or(site),
-        Err(_) => site,
+        true => site.reloaded().await.unwrap_or(site),
+        false => site,
     }
+}
+
+/// `check_theme_switched()` in one action: the menus and widgets carried
+/// over, the rewrite rules flushed, the switch done.
+async fn follow_up(write: &mut Write<'_>, slug: &str, name: &str) -> Result<(), Error> {
+    if after_switch_theme(write, slug, name).await? {
+        flush_rewrite_rules(write).await?;
+        theme_switch_done(write).await?;
+    }
+    Ok(())
 }
 
 /// Whether an option's stored value is set: not empty, and not `0`.

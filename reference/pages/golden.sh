@@ -21,6 +21,9 @@
 #   comments: reference/default-install/php.sh up, over the comments of
 #   reference/pages/comments.sql, which it adds, with the commenter cookies
 #   an option named _cookie sends (urlencoded, `name=value; name=value`)
+# The ttd run also writes the day it ran as pages-ttd.clock (noon UTC, Unix
+# seconds): the hashes hold the calendar's today, so the Rust test answers
+# them at that time.
 # Page views write: the wp_navigation post php.sh up wrote is
 # deleted first (site-edits: replaced), so start from a fresh db.sh up and
 # reset it after.
@@ -66,6 +69,9 @@ fi
 # The first page view writes caches the later ones read.
 curl -s -o /dev/null "$BASE/"
 mkdir -p "$(dirname "$RAW")"
+if [ "$LIST" = ttd ]; then
+  date -u -d "$(date -u +%F) 12:00:00" +%s > "${OUT%.tsv}.clock"
+fi
 : > "$OUT"
 : > "$RAW"
 while IFS= read -r line; do

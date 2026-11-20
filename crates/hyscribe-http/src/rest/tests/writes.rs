@@ -197,7 +197,7 @@ async fn the_navigation_fallback_route_finds_the_newest_menu_as_php() {
     let golden =
         include_str!("../../../../hyscribe-rest/tests/golden/navigation-fallback-existing.tsv");
     let state = include_str!("../../../../../reference/rest/navigation-fallback-existing.sql");
-    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 15, 0));
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 17, 0));
 }
 
 /// A navigation fallback read makes the `wp_navigation` post row for row as

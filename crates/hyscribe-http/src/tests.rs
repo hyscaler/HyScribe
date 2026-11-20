@@ -3018,6 +3018,27 @@ async fn pretty_pages_match_php() {
     assert_eq!(golden.lines().count(), 727);
 }
 
+tokio::task_local! {
+    /// The time `now()` gives a request answered inside its scope.
+    pub(crate) static PINNED_NOW: i64;
+}
+
+/// Noon UTC of the day `reference/pages/golden.sh ttd` recorded its hashes.
+fn ttd_recorded_at() -> i64 {
+    include_str!("../tests/golden/pages-ttd.clock")
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+/// A pinned time is what a request reads inside its scope, the clock's
+/// outside it: the Theme Test Data hashes hold the day they were recorded.
+#[tokio::test]
+async fn a_pinned_time_is_read_only_inside_its_scope() {
+    assert_eq!(PINNED_NOW.scope(7, async { now() }).await, 7);
+    assert!(now() > ttd_recorded_at());
+}
+
 /// The pages `reference/pages/golden.sh ttd` keeps for reading differences.
 const TTD_PAGES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/pages/ttd.tsv");
 
@@ -3087,7 +3108,13 @@ async fn assert_listed_pages(database: &str, golden: &str, hashed: bool, known: 
         }
         let path = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
         let app = router(sites[&named].clone());
-        let reply = answer_with(app, "GET", &path, &cookie).await;
+        // Hashes were recorded on one day: the calendar's today, among others.
+        let request = answer_with(app, "GET", &path, &cookie);
+        let reply = if hashed {
+            PINNED_NOW.scope(ttd_recorded_at(), request).await
+        } else {
+            request.await
+        };
         if path.contains("author=") {
             assert_eq!(reply.status, StatusCode::NOT_FOUND, "{path}");
             authors += 1;

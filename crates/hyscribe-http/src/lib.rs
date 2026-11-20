@@ -1587,8 +1587,13 @@ fn share() -> Share {
     }
 }
 
-/// The time relative dates are measured from.
+/// The time relative dates are measured from, or in a test the time it pins
+/// for the request it is answering.
 fn now() -> i64 {
+    #[cfg(test)]
+    if let Ok(pinned) = tests::PINNED_NOW.try_with(|now| *now) {
+        return pinned;
+    }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)

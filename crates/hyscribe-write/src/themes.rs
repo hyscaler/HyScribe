@@ -313,64 +313,52 @@ fn map_sidebars_widgets(
     previous: Option<&Value>,
     allowed: &[Vec<u8>],
 ) -> Result<Vec<(Key, Value)>, Error> {
-    let inactive = key("wp_inactive_widgets");
-    let mut new: Vec<(Key, Value)> = vec![(inactive.clone(), Value::Array(Vec::new()))];
+    let inactive_key = key("wp_inactive_widgets");
+    let with = |inactive: Widgets| vec![(inactive_key.clone(), Value::Array(inactive))];
+    let orphaned = |sidebar: &Key| matches!(sidebar, Key::String(name) if name.starts_with(b"orphaned_widgets"));
+    let mut inactive = Widgets::new();
     if existing.is_empty() {
-        return Ok(new);
+        return Ok(with(inactive));
     }
-    let mut left = Widgets::new();
+    // The inactive and orphaned widgets first, then those left over.
+    let mut left = Vec::new();
     for (sidebar, widgets) in &existing {
-        let orphaned =
-            matches!(sidebar, Key::String(name) if name.starts_with(b"orphaned_widgets"));
-        if *sidebar == inactive || orphaned {
-            let (_, now) = &new[0];
-            let kept = merged(&[widgets_of(now)?, widgets_of(widgets)?]);
-            new[0].1 = Value::Array(kept);
+        if *sidebar == inactive_key || orphaned(sidebar) {
+            inactive = merged(&[&inactive, widgets_of(widgets)?]);
         } else {
-            left.push((sidebar.clone(), widgets.clone()));
+            left.push(widgets_of(widgets)?);
         }
     }
-    // Widgets left over go to the inactive ones.
-    for (_, widgets) in &left {
-        let widgets = widgets_of(widgets)?;
+    for widgets in left {
         if !widgets.is_empty() {
-            let kept = merged(&[widgets_of(&new[0].1)?, widgets]);
-            new[0].1 = Value::Array(kept);
+            inactive = merged(&[&inactive, widgets]);
         }
     }
     let Some(Value::Array(previous)) = previous else {
-        return Ok(new);
+        return Ok(with(inactive));
     };
-    // Sidebars from when the theme was last active, but the empty ones.
+    // Sidebars from when the theme was last active, but the empty ones, the
+    // inactive ones if some are inactive now, and the orphaned ones.
     let mut old: Vec<(Key, Value)> = previous
         .iter()
         .filter(|(_, widgets)| !widgets.is_empty())
+        .filter(|(sidebar, _)| inactive.is_empty() || *sidebar != inactive_key)
+        .filter(|(sidebar, _)| !orphaned(sidebar))
         .cloned()
         .collect();
-    let new_inactive = widgets_of(&new[0].1)?;
-    if !new_inactive.is_empty() {
-        old.retain(|(sidebar, _)| *sidebar != inactive);
-    }
-    old.retain(|(sidebar, _)| !matches!(sidebar, Key::String(name) if name.starts_with(b"orphaned_widgets")));
-    let mut old = remove_unregistered(old, allowed);
-    let to_revive: Vec<(Key, Vec<(Key, Value)>)> = old
-        .iter()
-        .map(|(sidebar, widgets)| Ok((sidebar.clone(), widgets_of(widgets)?.clone())))
-        .collect::<Result<_, Error>>()?;
-    for (_, widgets) in &to_revive {
-        // The widgets of the new theme's one sidebar, inactive ones.
-        let snapshot = widgets_of(&new[0].1)?.clone();
-        for (_, widget) in widgets {
-            let found = snapshot.iter().find(|(_, listed)| listed == widget);
-            if let Some((found, _)) = found {
-                if let Value::Array(inactive_widgets) = &mut new[0].1 {
-                    inactive_widgets.retain(|(at, _)| at != found);
-                }
+    old = remove_unregistered(old, allowed);
+    // The widgets revived leave the inactive ones.
+    for (_, widgets) in &old {
+        let snapshot = inactive.clone();
+        for (_, widget) in widgets_of(widgets)? {
+            if let Some((found, _)) = snapshot.iter().find(|(_, listed)| listed == widget) {
+                inactive.retain(|(at, _)| at != found);
             }
         }
     }
-    // Restore what the theme had: its sidebars override the new ones.
-    for (sidebar, widgets) in old.drain(..) {
+    // What the theme had comes back, over the sidebars of the same name.
+    let mut new = with(inactive);
+    for (sidebar, widgets) in old {
         match new.iter_mut().find(|(known, _)| *known == sidebar) {
             Some((_, current)) => *current = widgets,
             None => new.push((sidebar, widgets)),

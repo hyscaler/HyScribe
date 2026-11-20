@@ -154,7 +154,7 @@ pub fn themes(site: &dyn PostsSite, request: &Request, asked: Notice) -> Answer 
     let mut entries = Vec::new();
     for theme in &shown {
         let slug = theme.slug;
-        let is_active = active && themes[0].slug == slug;
+        let is_active = active && slug.as_bytes() == stylesheet;
         let screenshot = format!(
             "{}/wp-content/themes/{slug}/screenshot.png",
             crate::assets::Urls::site_url(site)

@@ -214,7 +214,8 @@ impl Assets {
         type Known = HashMap<(String, String, String), &'static Item>;
         static KNOWN: OnceLock<std::sync::Mutex<Known>> = OnceLock::new();
         let key = (handle.to_string(), src.to_string(), ver.to_string());
-        let mut known = KNOWN.get_or_init(Default::default).lock().unwrap();
+        let known = KNOWN.get_or_init(Default::default).lock();
+        let mut known = known.unwrap_or_else(std::sync::PoisonError::into_inner);
         let item = *known.entry(key).or_insert_with(|| {
             Box::leak(Box::new(Item {
                 src: Some(src.to_string()),

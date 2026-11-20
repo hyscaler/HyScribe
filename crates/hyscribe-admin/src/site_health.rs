@@ -25,7 +25,7 @@ pub use status::{EnvFile, Environment};
 const INFO: &str = include_str!("site_health/info.html");
 const STATUS: &str = include_str!("site_health/status.html");
 
-const OVERVIEW: &str = "<p>This screen allows you to obtain a health diagnosis of your site, and displays an overall rating of the status of your installation.</p><p>In the Status tab, you can see critical information about your WordPress configuration, along with anything else that requires your attention.</p><p>In the Info tab, you will find all the details about the configuration of your WordPress site, server, and database. There is also an export feature that allows you to copy all of the information about your site to the clipboard, to help solve problems on your site when obtaining support.</p>";
+const OVERVIEW: &str = "<p>This screen allows you to obtain a health diagnosis of your site, and displays an overall rating of the status of your installation.</p><p>In the Status tab, you can see critical information about your HyScribe configuration, along with anything else that requires your attention.</p><p>In the Info tab, you will find all the details about the configuration of your HyScribe site, server, and database. There is also an export feature that allows you to copy all of the information about your site to the clipboard, to help solve problems on your site when obtaining support.</p>";
 
 const SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/site-health-screen/\">Documentation on Site Health tool</a></p>";
 
@@ -229,7 +229,7 @@ fn core(site: &dyn HealthSite) -> Section {
             Value::String(users).to_int().to_string(),
         ),
     ];
-    Section::new("wp-core", "WordPress", fields)
+    Section::new("wp-core", "HyScribe", fields)
 }
 
 /// `get_wp_active_theme()` for an embedded theme, which is built into the

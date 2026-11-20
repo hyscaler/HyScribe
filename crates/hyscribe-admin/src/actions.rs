@@ -152,7 +152,7 @@ pub struct Refusal {
 }
 
 /// `wp_die()`'s default title.
-const ERROR: &str = "WordPress &rsaquo; Error";
+const ERROR: &str = "HyScribe &rsaquo; Error";
 
 /// A request whose checks are not ported: answered 501, and no handler runs.
 fn not_ported() -> Refusal {

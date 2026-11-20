@@ -25,8 +25,10 @@ cleanup() {
   echo "DELETE FROM wp_users WHERE ID IN (2, 3); DELETE FROM wp_usermeta WHERE umeta_id BETWEEN 801 AND 806;
     DELETE FROM wp_posts WHERE ID BETWEEN 801 AND 831; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 801 AND 854;
     DELETE FROM wp_comments WHERE comment_ID = 801;" | sql
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 sql < "$ROOT/reference/attachment-edit/content.sql"
 record() {

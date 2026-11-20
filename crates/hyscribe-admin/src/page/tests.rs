@@ -158,21 +158,22 @@ fn a_scheme_without_a_stylesheet() {
     assert!(html.contains(" admin-color-fresh "));
 }
 
+/// No scheme, WordPress's `modern` or an unknown one shows Coffee (ADR 0008).
 #[test]
-fn an_unknown_scheme_is_the_default() {
-    let site = Fake {
-        color: Some(b"teal"),
-        ..site()
-    };
-    let html = render(&site, &page(&[], "", ""));
-    assert!(html.contains("/wp/hs-admin/css/colors/modern/colors.min.css?ver="));
-    assert!(html.contains(" admin-color-teal "));
+fn coffee_is_the_default() {
+    for color in [None, Some(&b"modern"[..]), Some(b"teal")] {
+        let site = Fake { color, ..site() };
+        let html = render(&site, &page(&[], "", ""));
+        assert!(html.contains("/wp/hs-admin/css/colors/coffee/colors.min.css?ver="));
+        assert!(html.contains("\"base\":\"#f3f2f1\""));
+        assert!(html.contains(" admin-color-coffee "), "{color:?}");
+    }
 }
 
 #[test]
 fn the_title_the_head_script_and_the_body() {
     let html = render(&site(), &page(&[], "", "page"));
-    assert!(html.contains("<title>Tools &#8212; WordPress</title>"));
+    assert!(html.contains("<title>Tools &#8212; HyScribe</title>"));
     assert!(html.contains("var ajaxurl = '/wp/hs-admin/admin-ajax',"));
     assert!(html.contains("pagenow = 'x\\'y',\n\ttypenow = 'page',"));
     assert!(html.contains("tools-php auto-fold admin-bar post-type-page branch-"));

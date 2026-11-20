@@ -31,8 +31,10 @@ TMP=$(mktemp -d)
 cleanup() {
   rm -rf "$TMP"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress <<'SQL'
 DELETE FROM wp_posts WHERE ID = 4 AND post_type = 'wp_navigation';
 DELETE FROM wp_options WHERE option_name = 'theme_mods_twentytwentyfive';

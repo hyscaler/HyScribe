@@ -104,6 +104,7 @@ if [ -z "$KEEP_PHP" ]; then
     "$ROOT/reference/default-install/php.sh" up >/dev/null
   MU=/var/www/html/wp-content/mu-plugins
   "$DOCKER" exec -i "$PHP_NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-screenshots.php" < "$HERE/mu-plugin.php"
+  HYSCRIBE_PHP_CONTAINER="$PHP_NAME" "$ROOT/reference/admin-look/look.sh" add
   wait_for PHP
   browser /shots/capture.py php "$URL" /shots/screens.list /out/php
   posts php

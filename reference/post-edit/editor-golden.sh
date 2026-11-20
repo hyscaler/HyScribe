@@ -28,8 +28,10 @@ TMP=$(mktemp -d)
 cleanup() {
   rm -rf "$TMP"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 DESKTOP='Mozilla/5.0 (X11; Linux x86_64)'
 CHROME='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'

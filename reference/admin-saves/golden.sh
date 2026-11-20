@@ -44,10 +44,12 @@ cleanup() {
   sed -n '/^-- cleanup$/,$p' "$CONTENT" | sql
   echo "DROP TABLE hyscribe_user, hyscribe_usermeta;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-mail.php" "$MU/hyscribe-clock.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 echo "CREATE TABLE hyscribe_user AS SELECT * FROM wp_users WHERE ID = 1;
   CREATE TABLE hyscribe_usermeta AS SELECT * FROM wp_usermeta WHERE user_id = 1;" | sql
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 sed '/^-- cleanup$/,$d' "$CONTENT" | sql
 "$DOCKER" exec "$DB" sh -c 'mariadb-dump -uroot -preference-only wordpress > /tmp/admin-saves.sql'
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"

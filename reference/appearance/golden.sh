@@ -34,8 +34,10 @@ cleanup() {
   sql < "$OPTIONS"
   rm -f "$TMP" "$TMP.403" "$NONCES" "$OPTIONS"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/appearance/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts updates switch-theme_twentytwentyfive switch-theme_twentytwentyfour switch-theme_twentytwentythree switch-theme_twentytwentytwo personal-data-request bulk-privacy_requests bulk-plugins screen-options-nonce health-check-site-status health-check-site-status-result welcome-panel-nonce replyto-comment add-post closedpostboxes meta-box-order internal-linking community_events approve-comment_1 delete-comment_1"

@@ -31,8 +31,10 @@ sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress "$@"; 
 cleanup() {
   rm -rf "$TMP"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 echo "DELETE FROM wp_posts WHERE post_type = 'wp_navigation'; ALTER TABLE wp_posts AUTO_INCREMENT = 4;" | sql
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 # User 1's nonces, without a session as the requests have none.

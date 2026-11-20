@@ -25,8 +25,10 @@ cleanup() {
   rm -f "$TMP" "$HEADERS"
   echo "DELETE FROM wp_posts WHERE ID BETWEEN 951 AND 960; DELETE FROM wp_postmeta WHERE post_id BETWEEN 951 AND 960;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-confirm-action.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-confirm-action.php" < "$ROOT/reference/confirm-action/variants.php"
 sql < "$ROOT/reference/confirm-action/content.sql"
 : > "$OUT"

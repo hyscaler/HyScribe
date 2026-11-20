@@ -22,7 +22,7 @@ fn answer(variant: &str, role: &str, screen: &str) -> Option<String> {
         }
     };
     let die = |status: u16, message: &str| {
-        let page = crate::die::page(true, "WordPress &rsaquo; Error", message);
+        let page = crate::die::page(true, "HyScribe &rsaquo; Error", message);
         format!("{status}\t{}", String::from_utf8(page).unwrap())
     };
     Some(match answer {

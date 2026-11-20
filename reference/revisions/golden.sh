@@ -28,8 +28,10 @@ cleanup() {
     DELETE FROM wp_posts WHERE post_parent BETWEEN 1301 AND 1335;
     DELETE FROM wp_users WHERE ID = 2; DELETE FROM wp_usermeta WHERE umeta_id BETWEEN 1301 AND 1303;
     DELETE FROM wp_posts WHERE ID BETWEEN 1301 AND 1335;" | sql
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 sql < "$ROOT/reference/revisions/content.sql"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts revisions-ajax-nonce"

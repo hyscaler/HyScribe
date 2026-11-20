@@ -14,7 +14,7 @@ use crate::admin_bar::BarSite;
 use crate::assets::Urls;
 use crate::list_table::{checked, fill, selected, wp_nonce_field};
 use crate::menu::Screen;
-use crate::page::{HelpTab, Page, Request, SCHEMES, admin_page, wp_admin_notice};
+use crate::page::{HelpTab, Page, Request, SCHEMES, admin_page, scheme, wp_admin_notice};
 use crate::posts::Answer;
 use crate::text;
 use crate::users::{UsersSite, dropdown_roles, role_names};
@@ -55,29 +55,19 @@ mod apps;
 
 const PAGE: &str = include_str!("profile/page.html");
 
-const HELP_OVERVIEW: &str = "<p>Your profile contains information about you (your &#8220;account&#8221;) as well as some personal options related to using WordPress.</p><p>You can change your password, turn on keyboard shortcuts, change the color scheme of your WordPress administration screens, and turn off the WYSIWYG (Visual) editor, among other things. You can hide the Toolbar (formerly called the Admin Bar) from the front end of your site, however it cannot be disabled on the admin screens.</p><p>You can select the language you wish to use while using the WordPress administration screen without affecting the language site visitors see.</p><p>Your username cannot be changed, but you can use other fields to enter your real name or a nickname, and change which name to display on your posts.</p><p>You can log out of other devices, such as your phone or a public computer, by clicking the Log Out Everywhere Else button.</p><p>Required fields are indicated; the rest are optional. Profile information will only be displayed if your theme is set up to do so.</p><p>Remember to click the Update Profile button when you are finished.</p>";
+const HELP_OVERVIEW: &str = "<p>Your profile contains information about you (your &#8220;account&#8221;) as well as some personal options related to using HyScribe.</p><p>You can change your password, turn on keyboard shortcuts, change the color scheme of your HyScribe administration screens, and turn off the WYSIWYG (Visual) editor, among other things. You can hide the Toolbar (formerly called the Admin Bar) from the front end of your site, however it cannot be disabled on the admin screens.</p><p>You can select the language you wish to use while using the HyScribe administration screen without affecting the language site visitors see.</p><p>Your username cannot be changed, but you can use other fields to enter your real name or a nickname, and change which name to display on your posts.</p><p>You can log out of other devices, such as your phone or a public computer, by clicking the Log Out Everywhere Else button.</p><p>Required fields are indicated; the rest are optional. Profile information will only be displayed if your theme is set up to do so.</p><p>Remember to click the Update Profile button when you are finished.</p>";
 
 const HELP_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/users-your-profile-screen/\">Documentation on User Profiles</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
 
-/// `admin_color_scheme_picker()`: the default, fresh and light schemes
-/// first, then the others by name, `current` chosen.
-fn color_picker(site: &dyn ProfileSite, current: &str) -> String {
-    let mut schemes: Vec<_> = SCHEMES.iter().collect();
-    let first = ["modern", "fresh", "light"];
-    schemes.sort_by_key(|scheme| {
-        let place = first.iter().position(|name| *name == scheme.name);
-        (place.unwrap_or(first.len()), scheme.name)
-    });
-    let current = if schemes.iter().any(|scheme| scheme.name == current) {
-        current
-    } else {
-        "modern"
-    };
+/// `admin_color_scheme_picker()` without `modern`, so by name (ADR 0008),
+/// the scheme shown for the stored `current` chosen.
+fn color_picker(site: &dyn ProfileSite, current: &[u8]) -> String {
+    let current = scheme(current).name;
     let mut out = format!(
         "<input type=\"hidden\" id=\"color-nonce\" name=\"color-nonce\" value=\"{}\" />",
         site.nonce("save-color-scheme")
     );
-    for (i, scheme) in schemes.into_iter().enumerate() {
+    for (i, scheme) in SCHEMES.iter().enumerate() {
         let name = scheme.name;
         let chosen = name == current;
         let url = if scheme.stylesheet {
@@ -611,7 +601,7 @@ fn form(
             ("me", me.to_string()),
             ("rich", rich),
             ("syntax", syntax),
-            ("colors", color_picker(site, &text(&option("admin_color")))),
+            ("colors", color_picker(site, &option("admin_color"))),
             ("shortcuts", shortcuts),
             (
                 "front",

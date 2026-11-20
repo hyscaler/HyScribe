@@ -15,7 +15,7 @@ const MOBILE: Browser = Browser {
 /// `answer` as `reference/term-edit/golden.sh` keeps it.
 fn kept(answer: Answer) -> String {
     let died = |status, message| {
-        let page = crate::die::page(true, "WordPress &rsaquo; Error", message);
+        let page = crate::die::page(true, "HyScribe &rsaquo; Error", message);
         format!("{status}\t{}", String::from_utf8(page).unwrap())
     };
     match answer {

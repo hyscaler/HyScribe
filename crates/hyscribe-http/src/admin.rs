@@ -1576,7 +1576,7 @@ fn denied(admin: &Admin, message: &str) -> Response {
 
 /// `wp_die( $message )` with `status` on an admin screen.
 fn died(admin: &Admin, status: StatusCode, message: &str) -> Response {
-    let body = hyscribe_admin::die::page(admin.reads.public(), "WordPress &rsaquo; Error", message);
+    let body = hyscribe_admin::die::page(admin.reads.public(), "HyScribe &rsaquo; Error", message);
     response(status, screen_headers(), body)
 }
 

@@ -25,8 +25,10 @@ cleanup() {
     DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id BETWEEN 401 AND 416;
     DELETE FROM wp_options WHERE option_name = 'category_children';" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts"
 for id in 1 402 405 406 407 412 416; do

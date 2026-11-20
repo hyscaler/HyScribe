@@ -19,8 +19,10 @@ TMP=$(mktemp -d)
 cleanup() {
   rm -rf "$TMP"
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 : > "$OUT"
 record() {

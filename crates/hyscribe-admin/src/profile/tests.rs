@@ -93,7 +93,7 @@ fn edit_and_add_pages_are_php_s() {
         };
         let recorded = String::from_utf8(unhex(f[3])).unwrap();
         let die = |status: u16, message: &str| {
-            let page = crate::die::page(true, "WordPress &rsaquo; Error", message);
+            let page = crate::die::page(true, "HyScribe &rsaquo; Error", message);
             format!("{status}\t{}", String::from_utf8(page).unwrap())
         };
         let (php, ours) = match ours {

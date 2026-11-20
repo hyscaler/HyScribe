@@ -24,12 +24,12 @@ const HELP: [HelpTab; 3] = [
     HelpTab {
         id: "options-postemail",
         title: "Post Via Email",
-        content: "<p>Post via email settings allow you to send your WordPress installation an email with the content of your post. You must set up a secret email account with POP3 access to use this, and any mail received at this address will be posted, so it&#8217;s a good idea to keep this address very secret.</p>",
+        content: "<p>Post via email settings allow you to send your HyScribe installation an email with the content of your post. You must set up a secret email account with POP3 access to use this, and any mail received at this address will be posted, so it&#8217;s a good idea to keep this address very secret.</p>",
     },
     HelpTab {
         id: "options-services",
         title: "Update Services",
-        content: "<p>If desired, WordPress will automatically alert various services of your new posts.</p>",
+        content: "<p>If desired, HyScribe will automatically alert various services of your new posts.</p>",
     },
 ];
 
@@ -54,7 +54,7 @@ pub(super) fn formatting(site: &dyn SettingsSite) -> String {
         return String::new();
     }
     format!(
-        "\t<tr>\n<th scope=\"row\">Formatting</th>\n<td><fieldset><legend class=\"screen-reader-text\"><span>Formatting</span></legend>\n<label for=\"use_smilies\">\n<input name=\"use_smilies\" type=\"checkbox\" id=\"use_smilies\" value=\"1\" {} />\n\tConvert emoticons like <code>:-)</code> and <code>:-P</code> to graphics on display</label><br />\n<label for=\"use_balanceTags\"><input name=\"use_balanceTags\" type=\"checkbox\" id=\"use_balanceTags\" value=\"1\" {} /> WordPress should correct invalidly nested XHTML automatically</label>\n</fieldset></td>\n</tr>\n",
+        "\t<tr>\n<th scope=\"row\">Formatting</th>\n<td><fieldset><legend class=\"screen-reader-text\"><span>Formatting</span></legend>\n<label for=\"use_smilies\">\n<input name=\"use_smilies\" type=\"checkbox\" id=\"use_smilies\" value=\"1\" {} />\n\tConvert emoticons like <code>:-)</code> and <code>:-P</code> to graphics on display</label><br />\n<label for=\"use_balanceTags\"><input name=\"use_balanceTags\" type=\"checkbox\" id=\"use_balanceTags\" value=\"1\" {} /> HyScribe should correct invalidly nested XHTML automatically</label>\n</fieldset></td>\n</tr>\n",
         checks(site, "use_smilies", "1"),
         checks(site, "use_balanceTags", "1")
     )
@@ -84,12 +84,12 @@ pub fn writing(site: &dyn SettingsSite, request: &Request) -> Answer {
     };
     let services = if option(site, "blog_public") == "1" {
         format!(
-            "\n\t<p><label for=\"ping_sites\">\n\t\tWhen you publish a new post, WordPress automatically notifies the following site update services. For more about this, see the <a href=\"{SERVICES_DOC}\">Update Services</a> documentation article. Separate multiple service URLs with line breaks.\t</label></p>\n\n\t<textarea name=\"ping_sites\" id=\"ping_sites\" class=\"large-text code\" rows=\"3\">{}</textarea>\n\n\t",
+            "\n\t<p><label for=\"ping_sites\">\n\t\tWhen you publish a new post, HyScribe automatically notifies the following site update services. For more about this, see the <a href=\"{SERVICES_DOC}\">Update Services</a> documentation article. Separate multiple service URLs with line breaks.\t</label></p>\n\n\t<textarea name=\"ping_sites\" id=\"ping_sites\" class=\"large-text code\" rows=\"3\">{}</textarea>\n\n\t",
             text(&esc_textarea(option(site, "ping_sites").as_bytes()))
         )
     } else {
         format!(
-            "\n\t<p>\n\t\tWordPress is not notifying any <a href=\"{SERVICES_DOC}\">Update Services</a> because of your site&#8217;s <a href=\"options-reading\">visibility settings</a>.\t</p>\n\n\t"
+            "\n\t<p>\n\t\tHyScribe is not notifying any <a href=\"{SERVICES_DOC}\">Update Services</a> because of your site&#8217;s <a href=\"options-reading\">visibility settings</a>.\t</p>\n\n\t"
         )
     };
     let content = fill(

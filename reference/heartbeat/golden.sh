@@ -29,8 +29,10 @@ cleanup() {
   echo "DELETE FROM wp_postmeta WHERE post_id BETWEEN 1301 AND 1335;
     DELETE FROM wp_users WHERE ID = 2; DELETE FROM wp_usermeta WHERE umeta_id BETWEEN 1301 AND 1303;
     DELETE FROM wp_posts WHERE ID BETWEEN 1301 AND 1335;" | sql
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 sql < "$ROOT/reference/revisions/content.sql"
 actions="heartbeat-nonce wp_rest getpermalink samplepermalink closedpostboxes internal-linking meta-box-loader
   update-post_1301 update-post_1319"

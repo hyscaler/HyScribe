@@ -29,8 +29,10 @@ cleanup() {
     DELETE FROM wp_posts WHERE ID BETWEEN 601 AND 604;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php" "$MU/hyscribe-notices.php" \
     "$MU/hyscribe-settings.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/user-edit/variants.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-notices.php" < "$ROOT/reference/notices/variants.php"

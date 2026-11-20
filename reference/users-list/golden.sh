@@ -25,8 +25,10 @@ cleanup() {
   echo "DELETE FROM wp_users WHERE ID BETWEEN 601 AND 607; DELETE FROM wp_usermeta WHERE umeta_id BETWEEN 601 AND 629;
     DELETE FROM wp_posts WHERE ID BETWEEN 601 AND 604;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/users-list/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce bulk-users delete-users"

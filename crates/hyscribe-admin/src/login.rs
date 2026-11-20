@@ -283,7 +283,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
     if !request.logged_in_cookie && request.posted("testcookie").is_some() && !request.test_cookie {
         user = Err(vec![error(
             "test_cookie",
-            "<strong>Error:</strong> Cookies are blocked or not supported by your browser. You must <a href=\"https://developer.wordpress.org/advanced-administration/wordpress/cookies/#enable-cookies-in-your-browser\">enable cookies</a> to use WordPress.".into(),
+            "<strong>Error:</strong> Cookies are blocked or not supported by your browser. You must <a href=\"https://developer.wordpress.org/advanced-administration/wordpress/cookies/#enable-cookies-in-your-browser\">enable cookies</a> to use HyScribe.".into(),
         )]);
     }
     let mut errors = match user {
@@ -325,7 +325,7 @@ pub fn login(site: &dyn Site, request: &Request) -> Login {
     } else if str_contains(&redirect_to, b"about.php?updated") {
         errors.push(message(
             "updated",
-            "<strong>You have successfully updated WordPress!</strong> Please log back in to see what&#8217;s new.".into(),
+            "<strong>You have successfully updated HyScribe!</strong> Please log back in to see what&#8217;s new.".into(),
         ));
     } else if action == "entered_recovery_mode" {
         errors.push(message(
@@ -449,6 +449,9 @@ struct Frame<'a> {
     input_id: &'a str,
 }
 
+/// The "HyScribe" text mark in place of the WordPress logo (ADR 0008).
+const MARK_STYLE: &str = "<style>.login h1 a{background-image:none;width:auto;height:auto;text-indent:0;font-size:32px;font-weight:600;color:#382e27;}</style>\n";
+
 impl Frame<'_> {
     fn render(&self, site: &dyn Site) -> Vec<u8> {
         let mut assets = Assets::new(true);
@@ -463,7 +466,7 @@ impl Frame<'_> {
         let mut out = String::new();
         out.push_str("<!DOCTYPE html>\n\t<html lang=\"en-US\">\n\t<head>\n\t<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" />\n");
         out.push_str(&format!(
-            "\t<title>{} &lsaquo; {blogname} &#8212; WordPress</title>\n\t",
+            "\t<title>{} &lsaquo; {blogname} &#8212; HyScribe</title>\n\t",
             self.title
         ));
         if self.loggedout {
@@ -478,13 +481,13 @@ impl Frame<'_> {
             assets.enqueue_script(script);
         }
         let mut out = format!(
-            "\t<meta name='referrer' content='strict-origin-when-cross-origin' />\n\t\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n\t{}\t",
+            "\t<meta name='referrer' content='strict-origin-when-cross-origin' />\n\t\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n\t{}{MARK_STYLE}\t",
             site_icon_tags(&|size| site.site_icon(size))
         );
         let mut classes = vec![
             format!("login-action-{}", self.action),
             "wp-core-ui".into(),
-            "admin-color-modern".into(),
+            "admin-color-coffee".into(),
         ];
         if self.interim {
             out.push_str("\t<style>html{background-color: transparent;}</style>\n\t\t\t");
@@ -498,7 +501,7 @@ impl Frame<'_> {
         out.push_str(&inline_script(
             "document.body.className = document.body.className.replace('no-js','js');",
         ));
-        out.push_str(&format!("\n\t\t\t\t<h1 class=\"screen-reader-text\">{}</h1>\n\t\t\t<div id=\"login\">\n\t\t<h1 role=\"presentation\" class=\"wp-login-logo\"><a href=\"https://wordpress.org/\">Powered by WordPress</a></h1>\n\t", self.title));
+        out.push_str(&format!("\n\t\t\t\t<h1 class=\"screen-reader-text\">{}</h1>\n\t\t\t<div id=\"login\">\n\t\t<h1 role=\"presentation\" class=\"wp-login-logo\"><a href=\"{}\">HyScribe</a></h1>\n\t", self.title, url(&site.home_url())));
         if !self.message.is_empty() {
             out.push_str(&format!("{}\n", self.message));
         }

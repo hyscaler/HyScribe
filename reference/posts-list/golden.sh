@@ -38,8 +38,10 @@ cleanup() {
     DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id BETWEEN 301 AND 307; UPDATE wp_term_taxonomy SET count = 1 WHERE term_taxonomy_id = 1;
     DELETE FROM wp_usermeta WHERE user_id = 2; DELETE FROM wp_users WHERE ID = 2;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 [ "$TTD" = wordpress_ttd ] || "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/posts-list/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce inlineeditnonce bulk-posts untrash-post_307 delete-post_307"

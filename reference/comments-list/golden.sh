@@ -32,8 +32,10 @@ cleanup() {
     UPDATE wp_posts SET comment_count = 1 WHERE ID = 1; UPDATE wp_posts SET comment_count = 0 WHERE ID = 2;
     UPDATE wp_comments SET comment_approved = '1' WHERE comment_ID = 1;" | sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php" "$MU/hyscribe-variants.php"
+  "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
+"$ROOT/reference/admin-look/look.sh" add
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$ROOT/reference/comments-list/variants.php"
 actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts screen-options-nonce bulk-comments replyto-comment fetch-list-WP_Comments_List_Table internal-linking bulk-destroy"

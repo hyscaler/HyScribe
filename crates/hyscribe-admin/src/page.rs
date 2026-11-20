@@ -238,13 +238,29 @@ pub(crate) struct Scheme {
     pub(crate) palette: &'static [&'static str],
 }
 
-pub(crate) const SCHEMES: [Scheme; 9] = [
+/// The schemes hs-admin offers, by name: `modern`, WordPress's near-black
+/// "Default", is left out for [`COFFEE`] (ADR 0008).
+pub(crate) const SCHEMES: [Scheme; 8] = [
     Scheme {
-        name: "modern",
-        label: "Default",
+        name: "blue",
+        label: "Blue",
         stylesheet: true,
-        icons: ["#f3f1f1", "#fff", "#fff"],
-        palette: &["#1e1e1e", "#3858e9", "#7b90ff"],
+        icons: ["#e5f8ff", "#fff", "#fff"],
+        palette: &["#183751", "#245278", "#437aa8", "#e1a948"],
+    },
+    Scheme {
+        name: "coffee",
+        label: "Coffee",
+        stylesheet: true,
+        icons: ["#f3f2f1", "#fff", "#fff"],
+        palette: &["#382e27", "#5c4c40", "#916745", "#9ea476"],
+    },
+    Scheme {
+        name: "ectoplasm",
+        label: "Ectoplasm",
+        stylesheet: true,
+        icons: ["#ece6f6", "#fff", "#fff"],
+        palette: &["#392751", "#4a3369", "#646c3e", "#d46f15"],
     },
     Scheme {
         name: "fresh",
@@ -261,32 +277,11 @@ pub(crate) const SCHEMES: [Scheme; 9] = [
         palette: &["#e5e5e5", "#6a6a6a", "#c64606", "#007cba"],
     },
     Scheme {
-        name: "blue",
-        label: "Blue",
-        stylesheet: true,
-        icons: ["#e5f8ff", "#fff", "#fff"],
-        palette: &["#183751", "#245278", "#437aa8", "#e1a948"],
-    },
-    Scheme {
         name: "midnight",
         label: "Midnight",
         stylesheet: true,
         icons: ["#f1f2f3", "#fff", "#fff"],
         palette: &["#232a2e", "#333c42", "#69a8bb", "#cf4339"],
-    },
-    Scheme {
-        name: "sunrise",
-        label: "Sunrise",
-        stylesheet: true,
-        icons: ["#f3f1f1", "#fff", "#fff"],
-        palette: &["#6f2724", "#8a312d", "#ad631e", "#ccaf0b"],
-    },
-    Scheme {
-        name: "ectoplasm",
-        label: "Ectoplasm",
-        stylesheet: true,
-        icons: ["#ece6f6", "#fff", "#fff"],
-        palette: &["#392751", "#4a3369", "#646c3e", "#d46f15"],
     },
     Scheme {
         name: "ocean",
@@ -296,13 +291,24 @@ pub(crate) const SCHEMES: [Scheme; 9] = [
         palette: &["#2b3f44", "#39535a", "#567958", "#aa9d88"],
     },
     Scheme {
-        name: "coffee",
-        label: "Coffee",
+        name: "sunrise",
+        label: "Sunrise",
         stylesheet: true,
-        icons: ["#f3f2f1", "#fff", "#fff"],
-        palette: &["#382e27", "#5c4c40", "#916745", "#9ea476"],
+        icons: ["#f3f1f1", "#fff", "#fff"],
+        palette: &["#6f2724", "#8a312d", "#ad631e", "#ccaf0b"],
     },
 ];
+
+/// The scheme of a user whose stored one is missing, `modern` or unknown.
+const COFFEE: usize = 1;
+
+/// The scheme hs-admin shows for the stored `admin_color`.
+pub(crate) fn scheme(color: &[u8]) -> &'static Scheme {
+    SCHEMES
+        .iter()
+        .find(|scheme| scheme.name.as_bytes() == color)
+        .unwrap_or(&SCHEMES[COFFEE])
+}
 
 /// `esc_js()`: special characters as entities, backslashes stripped, then
 /// quotes, backslashes and NULs slashed and line breaks as `\n`.
@@ -419,11 +425,7 @@ pub fn admin_page_with(
         .map_or(Look::Block, |url| Look::Classic(url, parent));
     let menu = admin_menu(site, &page.screen, look)?;
     let urls: &dyn Urls = site;
-    let color = site.admin_color().unwrap_or_default();
-    let scheme = SCHEMES
-        .iter()
-        .find(|scheme| scheme.name.as_bytes() == color)
-        .unwrap_or(&SCHEMES[0]);
+    let scheme = scheme(&site.admin_color().unwrap_or_default());
     let mut assets = Assets::new(true);
     enqueue(&mut assets, site, page, (scheme, browser), look);
     for (handle, data) in page.script_data {
@@ -467,13 +469,7 @@ pub fn admin_page_with(
     out.push(b'\t');
     out.extend(site_icon_tags(&|size| site.site_icon(size)).into_bytes());
     let mut html = String::from_utf8_lossy(&out).into_owned();
-    let color = sanitize_html_class(&color, b"modern");
-    html.push_str(&body(
-        site,
-        (page, extras),
-        &String::from_utf8_lossy(&color),
-        browser,
-    ));
+    html.push_str(&body(site, (page, extras), scheme.name, browser));
     html.push_str(&menu);
     html.push_str("<div id=\"wpcontent\">\n\n\t\t");
     html.push_str(&admin_bar(site, browser, page.view));
@@ -657,9 +653,9 @@ const EMOJI_STYLES: &str = "\n\timg.wp-smiley, img.emoji {\n\t\tdisplay: inline 
 fn head(site: &dyn PageSite, page: &Page) -> Vec<u8> {
     let blogname = site.blogname();
     let title = if blogname == page.title {
-        format!("{} &#8212; WordPress", page.title)
+        format!("{} &#8212; HyScribe", page.title)
     } else {
-        format!("{} &lsaquo; {blogname} &#8212; WordPress", page.title)
+        format!("{} &lsaquo; {blogname} &#8212; HyScribe", page.title)
     };
     // `admin_url( 'admin-ajax.php', 'relative' )`.
     let ajaxurl = cookie_path(&BarSite::admin_url(site, "admin-ajax.php"));
@@ -842,7 +838,7 @@ fn screen_meta(page: &Page) -> String {
 fn footer(site: &dyn PageSite, (page, extras): (&Page, &Extras), assets: &mut Assets) -> String {
     let urls: &dyn Urls = site;
     let mut out = format!(
-        "\n<div class=\"clear\"></div></div><!-- wpbody-content -->\n<div class=\"clear\"></div></div><!-- wpbody -->\n<div class=\"clear\"></div></div><!-- wpcontent -->\n\n<div id=\"wpfooter\" role=\"contentinfo\">\n\t\t<p id=\"footer-left\" class=\"alignleft\">\n\t\t<span id=\"footer-thankyou\">Thank you for creating with <a href=\"https://wordpress.org/\">WordPress</a>.</span>\t</p>\n\t<p id=\"footer-upgrade\" class=\"alignright\">\n\t\tVersion {}\t</p>\n\t<div class=\"clear\"></div>\n</div>\n",
+        "\n<div class=\"clear\"></div></div><!-- wpbody-content -->\n<div class=\"clear\"></div></div><!-- wpbody -->\n<div class=\"clear\"></div></div><!-- wpcontent -->\n\n<div id=\"wpfooter\" role=\"contentinfo\">\n\t\t<p id=\"footer-left\" class=\"alignleft\">\n\t\t<span id=\"footer-thankyou\">Thank you for creating with HyScribe.</span>\t</p>\n\t<p id=\"footer-upgrade\" class=\"alignright\">\n\t\tVersion {}\t</p>\n\t<div class=\"clear\"></div>\n</div>\n",
         VERSION.trim()
     );
     out.push_str(page.admin_footer);

@@ -1902,3 +1902,19 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+/// The Themes screen's arguments choose its notice: broken before the rest,
+/// a preview only with an activation, any other argument none.
+#[test]
+fn the_themes_notice_follows_the_arguments() {
+    for (query, notice) in [
+        ("", Some(ThemesNotice::None)),
+        ("previewed=1", Some(ThemesNotice::None)),
+        ("activated=1", Some(ThemesNotice::Activated)),
+        ("activated=1&previewed=1", Some(ThemesNotice::Previewed)),
+        ("broken=1&activated=1", Some(ThemesNotice::Broken)),
+        ("activated=1&x=1", None),
+    ] {
+        assert_eq!(themes_notice(query), notice, "{query}");
+    }
+}

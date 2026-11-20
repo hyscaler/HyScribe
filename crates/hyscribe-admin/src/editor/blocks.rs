@@ -61,10 +61,7 @@ pub fn bindings_sources(theme: &Theme) -> Value {
         ("core/term-data", "Term Data", &["termId", "taxonomy"]),
     ];
     let source = |name: &str, label: &str, context: Value| {
-        let context = match context.as_array() {
-            Some(listed) if !listed.is_empty() => context,
-            _ => Value::Null,
-        };
+        let context = uses_context(context);
         object(vec![
             ("name", text(name)),
             ("label", text(label)),
@@ -92,6 +89,23 @@ pub fn bindings_sources(theme: &Theme) -> Value {
         .zip(0..)
         .map(|(source, i)| (Key::Int(i), source));
     Value::Array(list.collect())
+}
+
+/// A source's `usesContext`: `null` for none.
+fn uses_context(context: Value) -> Value {
+    match context.as_array() {
+        Some(listed) if !listed.is_empty() => context,
+        _ => Value::Null,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn a_source_without_context_uses_null() {
+    assert_eq!(uses_context(Value::Array(Vec::new())), Value::Null);
+    assert_eq!(uses_context(Value::Null), Value::Null);
+    let one = Value::Array(vec![(Key::Int(0), text("postId"))]);
+    assert_eq!(uses_context(one.clone()), one);
 }
 
 /// `get_block_editor_server_block_settings()`: each block type's fields

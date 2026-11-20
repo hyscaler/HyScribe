@@ -336,6 +336,16 @@ fn a_folder_lists_its_own_files() {
     assert_eq!(found, [("a", &b"a"[..])]);
 }
 
+/// A theme's exported patterns: its own by slug, none for another's.
+#[test]
+fn patterns_are_looked_up_by_slug() {
+    let four = load("twentytwentyfour", None);
+    let entry = four.pattern_entry(b"twentytwentyfour/banner-hero").unwrap();
+    let title = entry.get_str("title").map(Value::to_php_string);
+    assert_eq!(title.unwrap(), b"Hero");
+    assert!(four.pattern_entry(b"twentytwentyfive/header").is_none());
+}
+
 /// The Themes screen's entry of an embedded theme, and none for another.
 #[test]
 fn the_themes_screen_lists_embedded_themes() {

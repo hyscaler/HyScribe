@@ -1005,6 +1005,22 @@ async fn writes_options() {
         Some("auto-off")
     );
     assert_eq!(write.option_autoload("hyscribe_none").await.unwrap(), None);
+    // The options whose names start with a prefix, by name, and no other.
+    write
+        .add_option("hyscribe_test2", b"e", "on")
+        .await
+        .unwrap();
+    let found = write.options_starting("hyscribe_test").await.unwrap();
+    let names: Vec<&str> = found.iter().map(|(name, _)| name.as_str()).collect();
+    assert_eq!(names, ["hyscribe_test", "hyscribe_test2"]);
+    assert_eq!(found[1].1, b"e");
+    assert!(
+        write
+            .options_starting("hyscribe_test2x")
+            .await
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(write.update_option("hyscribe_none", b"x").await.unwrap(), 0);
     assert_eq!(
         write

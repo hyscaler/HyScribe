@@ -142,6 +142,10 @@ impl Renderer<'_> {
             })
             .map_or(0, |p| p.max_pages);
         let current = paging.and_then(|p| p.paged).unwrap_or(0);
+        // paginate_links() prints nothing for fewer than two pages.
+        if total < 2 {
+            return Vec::new();
+        }
         let request = self.context.request;
         let links = Permalinks::of(self.context.site);
         // paginate_links() adds the current URL's arguments the base lacks:
@@ -176,9 +180,6 @@ impl Renderer<'_> {
                 link
             },
         );
-        if numbers.is_empty() {
-            return Vec::new();
-        }
         let parsed = block.attrs.as_deref().unwrap_or_default();
         let attributes =
             get_block_wrapper_attributes(name, parsed, &[], &self.context.theme.global);

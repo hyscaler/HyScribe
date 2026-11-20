@@ -105,13 +105,16 @@ pub(super) fn post_author(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let justify = text("itemsJustification").map(|j| [&b"items-justified-"[..], &j].concat());
     let classes = align_link_classes(block, justify.into_iter().collect());
     let mut out = format!("<div {}>", block.wrapper(context, &classes)).into_bytes();
+    // PHP gets the avatar whether it shows it or not, which counts as a
+    // page image for lazy loading.
+    let avatar = on("avatarSize").then(|| {
+        let size = block.attribute("avatarSize").map_or(0, Value::to_int);
+        let subject = Subject::User(user.clone());
+        get_avatar(context, &subject, size, b"", "", "")
+    });
     if on("showAvatar") {
         out.extend_from_slice(b"<div class=\"wp-block-post-author__avatar\">");
-        if on("avatarSize") {
-            let size = block.attribute("avatarSize").map_or(0, Value::to_int);
-            let subject = Subject::User(user.clone());
-            out.extend(get_avatar(context, &subject, size, b"", "", ""));
-        }
+        out.extend(avatar.unwrap_or_default());
         out.extend_from_slice(b"</div>");
     }
     out.extend_from_slice(b"<div class=\"wp-block-post-author__content\">");

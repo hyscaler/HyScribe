@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The default theme's and `wp-includes` files, with the
+//! The embedded themes' and `wp-includes` files, with the
 //! `Last-Modified` they have in the pinned release, an `ETag` from their
 //! SHA-256, and conditional requests answered as Apache answers them.
 
@@ -10,17 +10,18 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_assets::{release_file, wp_admin, wp_includes};
 use hyscribe_render::date::days_from_civil;
-use hyscribe_render::theme::twentytwentyfive_file;
+use hyscribe_render::theme::theme_file;
 
-const THEME: &str = "wp-content/themes/twentytwentyfive/";
+const THEMES: &str = "wp-content/themes/";
 
 /// The file at `path`, answering `headers`' preconditions at Unix time
 /// `now`.
 pub(crate) fn static_file(path: &str, headers: &HeaderMap, now: u64) -> Option<Response> {
     let path = path.strip_prefix('/').unwrap_or(path);
     let (content_type, bytes) = path
-        .strip_prefix(THEME)
-        .and_then(twentytwentyfive_file)
+        .strip_prefix(THEMES)
+        .and_then(|theme| theme.split_once('/'))
+        .and_then(|(slug, file)| theme_file(slug, file))
         .or_else(|| wp_includes(path.strip_prefix("wp-includes/")?))
         .or_else(|| wp_admin(path.strip_prefix("hs-admin/")?))?;
     // Every served file is in the release (`theme_files_match_php`), the

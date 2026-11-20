@@ -68,6 +68,11 @@ mod tests {
         assert_eq!(sha.len(), 64);
         assert!(release_file("wp-content/themes/twentytwentyfive/style.css").is_some());
         assert!(release_file("wp-content/themes/twentytwentyfive/functions.php").is_none());
+        assert!(
+            release_file("wp-content/themes/twentytwentyfour/assets/css/button-outline.css")
+                .is_some()
+        );
+        assert!(release_file("wp-content/themes/twentytwentythree/theme.json").is_some());
         assert!(release_file("wp-includes/version.php").is_none());
     }
 

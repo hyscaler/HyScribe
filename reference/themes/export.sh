@@ -8,7 +8,9 @@
 # the block styles and pattern categories registered with the theme active
 # (registered.json, from reference/rest/registered.php).
 #   reference/themes/export.sh [slug]   (default twentytwentyfive)
-# Writes themes/<slug>/. Needs reference/default-install/php.sh up.
+# Writes themes/<slug>/. Needs reference/default-install/php.sh up. The PHP
+# runs with that theme active through a must-use plugin (theme.php), which
+# is removed after, whatever theme the database has.
 set -euo pipefail
 
 DOCKER="${DOCKER:-docker}"
@@ -18,15 +20,21 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/themes/$SLUG"
 SRC="/var/www/html/wp-content/themes/$SLUG"
 
+MU=/var/www/html/wp-content/mu-plugins
+"$DOCKER" exec "$NAME" mkdir -p "$MU"
+"$DOCKER" cp "$ROOT/reference/themes/theme.php" "$NAME:$MU/hyscribe-theme.php"
+trap '"$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-theme.php"' EXIT
+php_in_theme() { "$DOCKER" exec -e HYSCRIBE_THEME="$SLUG" "$NAME" php "$@"; }
+
 rm -rf "$OUT"
 mkdir -p "$OUT"
 "$DOCKER" cp "$NAME:$SRC/." "$OUT/"
 find "$OUT" -name '*.php' -delete
 find "$OUT" -type d -empty -delete
 "$DOCKER" cp "$ROOT/reference/themes/export.php" "$NAME:/tmp/export.php"
-"$DOCKER" exec "$NAME" php /tmp/export.php > "$OUT/patterns.json"
+php_in_theme /tmp/export.php > "$OUT/patterns.json"
 # shellcheck disable=SC2016
-"$DOCKER" exec "$NAME" php -r '
+php_in_theme -r '
   $dir = "'"$SRC"'/styles";
   $partials = array();
   foreach ( array( "blocks", "sections" ) as $kind ) {
@@ -41,5 +49,5 @@ find "$OUT" -type d -empty -delete
   echo json_encode( $partials, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ), "\n";
 ' > "$OUT/styles.json"
 "$DOCKER" cp "$ROOT/reference/rest/registered.php" "$NAME:/tmp/registered.php"
-"$DOCKER" exec "$NAME" php /tmp/registered.php theme > "$OUT/registered.json"
+php_in_theme /tmp/registered.php theme > "$OUT/registered.json"
 echo "wrote $OUT ($(ls "$OUT/templates" | wc -l) templates, $(ls "$OUT/parts" | wc -l) parts)"

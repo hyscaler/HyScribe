@@ -13,6 +13,7 @@ use hyscribe_phpser::{Value, is_empty_string, lookup, php_trim};
 
 use crate::bindings::{computed_attributes, replace_html};
 use crate::blocks::{Block, parse_blocks};
+use crate::content_tags::filter_content_tags;
 use crate::core_blocks::{self, Context, prepared};
 use crate::elements::elements_class;
 use crate::excerpt::visible;
@@ -20,7 +21,7 @@ use crate::formatting::{CORE_SHORTCODE_TAGS, convert_smilies, wptexturize};
 use crate::head::Assets;
 use crate::interactivity::process_directives;
 use crate::layout::{LayoutBlock, render_layout};
-use crate::media::Loading;
+use crate::media::{Filter, Loading};
 use crate::registry::block_type;
 use crate::site::{Request, Site};
 use crate::site_templates::template_part;
@@ -600,6 +601,10 @@ impl Renderer<'_> {
         self.open_parts.push(slug.to_vec());
         let html = self.render_top_level(&content);
         self.open_parts.pop();
+        // `_wp_apply_block_content_filters()` after `do_blocks()`.
+        let html = site_smilies(site, &wptexturize(&html, &CORE_SHORTCODE_TAGS));
+        let html = filter_content_tags(site, &self.context.loading, &html, Filter::None);
+        let html = replace(&self.autoembed(&html), b"]]>", b"]]&gt;");
         // A valid `tagName` wins; otherwise the area's tag.
         let tag = match attr(block, "tagName").filter(|t| is_tag_name(t)) {
             Some(tag) => tag,

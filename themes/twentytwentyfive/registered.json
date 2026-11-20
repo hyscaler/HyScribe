@@ -1521,5 +1521,24 @@
                 "area_tag": "div"
             }
         ]
-    }
+    },
+    "post_formats": [
+        "aside",
+        "audio",
+        "chat",
+        "gallery",
+        "image",
+        "link",
+        "quote",
+        "status",
+        "video"
+    ],
+    "styles": [
+        {
+            "block": null,
+            "handle": "twentytwentyfive-style",
+            "src": "style.min.css",
+            "ver": "1.5"
+        }
+    ]
 }

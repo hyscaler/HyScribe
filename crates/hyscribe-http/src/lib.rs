@@ -40,7 +40,7 @@ use hyscribe_render::post::{body_class, is_privacy_policy};
 use hyscribe_render::site::{Archive, Request, Taxonomy};
 use hyscribe_render::site_templates::{block_template, with_page_template};
 use hyscribe_render::template::render_template;
-use hyscribe_render::theme::{Theme, twentytwentyfive, twentytwentyfive_for};
+use hyscribe_render::theme::{self, Theme};
 use hyscribe_render::{search_count, search_terms, sticky_posts};
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
@@ -156,8 +156,9 @@ fn mail_off() -> hyscribe_mail::Mailer {
     hyscribe_mail::Mailer::new(&off, b"", Arc::new(hyscribe_mail::NoHooks)).0
 }
 
-/// A global styles post's content, if any, and the theme built with it.
-type Styled = (Option<Vec<u8>>, Arc<Theme>);
+/// A theme's slug, its global styles post's content if any, and the theme
+/// built with them.
+type Styled = (String, Option<Vec<u8>>, Arc<Theme>);
 
 /// The address a connection comes from.
 #[derive(Clone, Copy, Debug)]
@@ -183,12 +184,16 @@ impl Site {
         home: Option<String>,
         siteurl: Option<String>,
     ) -> Result<Site, DbError> {
-        let theme = Arc::new(twentytwentyfive());
+        let theme = Arc::new(theme::twentytwentyfive());
         let mut site = Site {
             db,
             options: HashMap::new(),
             home: String::new(),
-            styled: Arc::new(tokio::sync::Mutex::new((None, Arc::clone(&theme)))),
+            styled: Arc::new(tokio::sync::Mutex::new((
+                theme.slug().to_owned(),
+                None,
+                Arc::clone(&theme),
+            ))),
             theme,
             rewriter: Arc::default(),
             compiled: Arc::default(),
@@ -233,7 +238,10 @@ impl Site {
         let home = String::from_utf8_lossy(options.get("home").map_or(&[][..], Vec::as_slice))
             .trim_end_matches('/')
             .to_string();
-        let theme = self.styled_theme().await?;
+        let stylesheet = options.get("stylesheet").map_or(&[][..], Vec::as_slice);
+        let theme = self
+            .styled_theme(theme::resolve(&String::from_utf8_lossy(stylesheet)))
+            .await?;
         let mut site = Site {
             db: self.db.clone(),
             options,
@@ -263,18 +271,17 @@ impl Site {
         Ok(site)
     }
 
-    /// The theme with its newest published `wp_global_styles` post, as
-    /// `WP_Theme_JSON_Resolver::get_user_data()` reads it.
-    async fn styled_theme(&self) -> Result<Arc<Theme>, DbError> {
-        let slug = self.theme.slug();
+    /// The theme `slug` with its newest published `wp_global_styles` post,
+    /// as `WP_Theme_JSON_Resolver::get_user_data()` reads it.
+    async fn styled_theme(&self, slug: &'static str) -> Result<Arc<Theme>, DbError> {
         let posts = self.db.theme_posts("wp_global_styles", slug).await?;
         let user = posts.into_iter().next().map(|post| post.content);
         let mut styled = self.styled.lock().await;
-        if styled.0 != user {
-            let theme = Arc::new(twentytwentyfive_for(user.as_deref()));
-            *styled = (user, theme);
+        if styled.0 != slug || styled.1 != user {
+            let theme = Arc::new(theme::load(slug, user.as_deref()));
+            *styled = (slug.to_owned(), user, theme);
         }
-        Ok(Arc::clone(&styled.1))
+        Ok(Arc::clone(&styled.2))
     }
 
     /// The site with the keys and salts `wp_hash()` signs with.

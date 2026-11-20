@@ -5,7 +5,7 @@
 //! offline builds, and checked against its SHA-256 before anything in it
 //! is used. PHP is left out, and so is a `.js` or `.css` that has a `.min`
 //! twin, which pages only request with `SCRIPT_DEBUG`. Each file served
-//! from the release, the default theme's too, keeps its modification time
+//! from the release, the embedded themes' too, keeps its modification time
 //! and SHA-256 for `Last-Modified` and `ETag`.
 
 use sha2::{Digest, Sha256};
@@ -17,7 +17,7 @@ use std::time::UNIX_EPOCH;
 const VERSION: &str = "7.1.3";
 const SHA256: &str = "d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e283b2a5";
 const TARBALL_ENV: &str = "HYSCRIBE_WORDPRESS_TARBALL";
-const THEME: &str = "wp-content/themes/twentytwentyfive";
+const THEMES: &str = "wp-content/themes";
 /// Files with a `.min` twin, so not served, that PHP reads as they are.
 const READ: [&str; 1] = ["css/dist/block-editor/default-editor-styles.css"];
 /// As the web server sends them; a file with no extension gets no type.
@@ -43,6 +43,7 @@ const CONTENT_TYPES: [(&str, &str); 15] = [
 fn main() -> io::Result<()> {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=../../wordpress/VERSION");
+    println!("cargo::rerun-if-changed=../../themes");
     println!("cargo::rerun-if-changed=../../wordpress/wp-includes/dependencies.json");
     println!("cargo::rerun-if-env-changed={TARBALL_ENV}");
     let pinned = std::fs::read_to_string("../../wordpress/VERSION")?;
@@ -60,6 +61,15 @@ fn main() -> io::Result<()> {
         std::fs::remove_dir_all(&tree)?;
     }
     std::fs::create_dir_all(&tree)?;
+    // The themes of `themes/`, each bundled with the release.
+    let mut themes = Vec::new();
+    for entry in std::fs::read_dir("../../themes")? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            themes.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    themes.sort();
     run(Command::new("tar")
         .arg("-xzf")
         .arg(&tarball)
@@ -67,7 +77,11 @@ fn main() -> io::Result<()> {
         .arg(&tree)
         .arg("wordpress/wp-includes")
         .arg("wordpress/wp-admin")
-        .arg(format!("wordpress/{THEME}")))?;
+        .args(
+            themes
+                .iter()
+                .map(|slug| format!("wordpress/{THEMES}/{slug}")),
+        ))?;
     // Files a registered style or script names are served even with a
     // `.min` twin: WordPress asks for them as they are.
     let dependencies = std::fs::read_to_string("../../wordpress/wp-includes/dependencies.json")?;
@@ -111,14 +125,17 @@ fn main() -> io::Result<()> {
         })
         .collect();
     std::fs::write(out.join("read.rs"), format!("&[\n{read}]\n"))?;
-    let mut theme = Vec::new();
-    collect(&tree.join("wordpress").join(THEME), "", &mut theme)?;
-    release.extend(
-        theme
-            .iter()
-            .filter(|f| !f.ends_with(".php"))
-            .map(|f| format!("{THEME}/{f}")),
-    );
+    for slug in &themes {
+        let theme = format!("{THEMES}/{slug}");
+        let mut files = Vec::new();
+        collect(&tree.join("wordpress").join(&theme), "", &mut files)?;
+        release.extend(
+            files
+                .iter()
+                .filter(|f| !f.ends_with(".php"))
+                .map(|f| format!("{theme}/{f}")),
+        );
+    }
     release.sort();
     let mut dates = String::new();
     for path in &release {

@@ -19,7 +19,7 @@ use crate::permalinks;
 use crate::post::the_title;
 use crate::site::{Archive, Request, Site, Taxonomy};
 use crate::template::Renderer;
-use crate::theme::Theme;
+use crate::theme::{OwnStyle, Theme};
 
 mod block_styles;
 mod embed;
@@ -317,7 +317,15 @@ impl Head<'_> {
             "img:is([sizes=auto i],[sizes^=\"auto,\" i]){contain-intrinsic-size:3000px 1500px}",
         )];
         for handle in &assets.styles {
-            let mut style = block_style(handle, &siteurl);
+            let own = self
+                .theme
+                .styles
+                .iter()
+                .find(|style| style.handle == *handle);
+            let mut style = match own {
+                Some(own) => self.own_style(own, &siteurl),
+                None => block_style(handle, &siteurl),
+            };
             // enqueue_block_styles_assets(): the theme's block styles' CSS
             // follows their block's stylesheet.
             for (block, css) in &self.theme.inline_block_styles {
@@ -366,17 +374,25 @@ impl Head<'_> {
                 None,
             ));
         }
-        queue.push(Style::file(
-            &format!("{}-style", self.theme.slug),
-            &format!(
-                "{siteurl}/wp-content/themes/{}/style.min.css",
-                self.theme.slug
-            ),
-            self.theme.stylesheet,
-            Some(&self.theme.version),
-        ));
+        for own in self.theme.styles.iter().filter(|own| own.block.is_none()) {
+            queue.push(self.own_style(own, &siteurl));
+        }
         inline_styles(&mut queue);
         queue
+    }
+
+    /// A stylesheet of the theme's own files, `wp_style_add_data( 'path' )`
+    /// named.
+    fn own_style(&self, own: &OwnStyle, siteurl: &str) -> Style {
+        Style::file(
+            &own.handle,
+            &format!(
+                "{siteurl}/wp-content/themes/{}/{}",
+                self.theme.slug, own.src
+            ),
+            own.css,
+            own.version.as_deref(),
+        )
     }
 
     /// `rel_canonical()`, and with `shortlink`, `wp_shortlink_wp_head()`.
@@ -497,7 +513,7 @@ impl Theme {
             Vec::new()
         };
         let mut fonts = Vec::new();
-        for variation in crate::theme::style_variations() {
+        for variation in crate::theme::style_variations(self.data) {
             let families = variation
                 .get_str("settings")
                 .and_then(|v| v.get_str("typography"))

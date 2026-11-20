@@ -308,3 +308,39 @@ fn rand_seeds_read_as_php_does() {
         );
     }
 }
+
+/// `render_block_core_query()` leaves the block's style handle out unless
+/// the query is interactive, so a plain query never queues `wp-block-query`
+/// (and the theme styles of the block are not on the page); an interactive
+/// one queues it after what its inner blocks queued.
+#[test]
+fn the_query_style_is_queued_by_an_interactive_query_only() {
+    let theme = twentytwentyfive();
+    let site = DefaultInstall {
+        home: b"http://example.test".to_vec(),
+    };
+    let request = Request::default();
+    for (attributes, queued) in [
+        (r#"{"queryId":1,"query":{"inherit":false}}"#, false),
+        (
+            r#"{"queryId":1,"enhancedPagination":true,"query":{"inherit":false}}"#,
+            true,
+        ),
+    ] {
+        let markup = format!(
+            "<!-- wp:query {attributes} --><div><!-- wp:post-template --><!-- wp:post-title /--><!-- /wp:post-template --></div><!-- /wp:query -->"
+        );
+        let mut renderer = Renderer::new(&theme, &site, &request);
+        renderer.render(markup.as_bytes());
+        let styles = &renderer.assets.styles;
+        assert_eq!(styles.iter().any(|style| style == "wp-block-query"), queued);
+        assert_eq!(
+            styles.last().map(String::as_str),
+            Some(if queued {
+                "wp-block-query"
+            } else {
+                "wp-block-post-template"
+            })
+        );
+    }
+}

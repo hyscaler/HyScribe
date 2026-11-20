@@ -17,7 +17,12 @@
 //           with the keys the patterns route gives but for their content,
 //           which patterns.json holds], "rest": the theme as the themes route
 //           gives it, without links (reading them creates its global styles
-//           post), with the site URL as %siteurl%}
+//           post), with the site URL as %siteurl%, "post_formats": the formats
+//           it adds theme support for, "styles": the stylesheets of its own
+//           files it enqueues as {block, handle, src, ver}: block is null for
+//           those of wp_enqueue_scripts, else the block whose rendering
+//           enqueues it (wp_enqueue_block_style()), src is relative to the
+//           theme's folder}
 
 require '/var/www/html/wp-load.php';
 
@@ -70,7 +75,41 @@ if ( 'theme' === $argv[1] ) {
 			$patterns[] = $pattern;
 		}
 	}
-	$out  = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme, 'patterns' => $patterns, 'rest' => $rest );
+	$formats = get_theme_support( 'post-formats' );
+	$own     = function ( $src ) {
+		foreach ( array( get_stylesheet_directory_uri(), get_template_directory_uri() ) as $dir ) {
+			if ( is_string( $src ) && str_starts_with( $src, $dir . '/' ) ) {
+				return substr( $src, strlen( $dir ) + 1 );
+			}
+		}
+		return null;
+	};
+	$enqueued = array();
+	do_action( 'wp_enqueue_scripts' );
+	foreach ( wp_styles()->queue as $handle ) {
+		$style = wp_styles()->registered[ $handle ];
+		if ( null !== $own( $style->src ) ) {
+			$enqueued[] = array( 'block' => null, 'handle' => $handle, 'src' => $own( $style->src ), 'ver' => $style->ver, 'deps' => $style->deps );
+		}
+	}
+	// wp_enqueue_block_style() hooks a closure holding the block and its arguments.
+	foreach ( $GLOBALS['wp_filter']['render_block']->callbacks[10] ?? array() as $hook ) {
+		$vars = $hook['function'] instanceof Closure ? ( new ReflectionFunction( $hook['function'] ) )->getStaticVariables() : array();
+		if ( isset( $vars['block_name'], $vars['callback'] ) ) {
+			$args = ( new ReflectionFunction( $vars['callback'] ) )->getStaticVariables()['args'];
+			if ( null !== $own( $args['src'] ) ) {
+				$enqueued[] = array( 'block' => $vars['block_name'], 'handle' => $args['handle'], 'src' => $own( $args['src'] ), 'ver' => $args['ver'], 'deps' => $args['deps'] );
+			}
+		}
+	}
+	foreach ( $enqueued as $style ) {
+		if ( $style['deps'] ) {
+			fwrite( STDERR, "{$style['handle']} has dependencies\n" );
+			exit( 1 );
+		}
+	}
+	$enqueued = array_map( fn( $s ) => array_diff_key( $s, array( 'deps' => 0 ) ), $enqueued );
+	$out  = array( 'block_styles' => $block_styles, 'partial_styles' => $partial_styles, 'pattern_categories' => $theme, 'patterns' => $patterns, 'rest' => $rest, 'post_formats' => $formats ? $formats[0] : array(), 'styles' => $enqueued );
 } else {
 	$controller = new WP_REST_Block_Types_Controller();
 	$request    = new WP_REST_Request( 'GET', '/wp/v2/block-types' );

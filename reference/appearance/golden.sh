@@ -84,6 +84,8 @@ for screen in plugins.php export-personal-data.php; do
   record a5hidden "$screen" administrator
 done
 record g9broken themes.php administrator '?broken=1'
+record a5activated themes.php administrator '?activated=true'
+record a5previewed themes.php administrator '?activated=true&previewed=true'
 record default update-core.php administrator '?action=upgrade-core'
 # Plugins the site names and HyScribe does not have: PHP deactivates them
 # as the screen opens, so the options table is put back after each view.

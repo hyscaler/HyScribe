@@ -100,10 +100,23 @@ impl Listed {
     }
 }
 
-/// `themes.php` for `request`, `broken` when it asks for the broken theme
-/// notice. An active theme or parent the site does not have is shown as PHP
+/// The notice `themes.php`'s arguments ask for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Notice {
+    /// None.
+    #[default]
+    None,
+    /// `broken`: the active theme is broken.
+    Broken,
+    /// `activated`: a theme was activated.
+    Activated,
+    /// `activated` and `previewed`: a theme was activated from its preview.
+    Previewed,
+}
+
+/// `themes.php` for `request` with the notice its arguments ask for. An active theme or parent the site does not have is shown as PHP
 /// shows it, without `switch_theme()`'s write.
-pub fn themes(site: &dyn PostsSite, request: &Request, broken: bool) -> Answer {
+pub fn themes(site: &dyn PostsSite, request: &Request, asked: Notice) -> Answer {
     let stylesheet = site.option("stylesheet").unwrap_or_default();
     let template = site.option("template").unwrap_or_default();
     let mut themes: Vec<Listed> = theme::slugs().map(Listed::of).collect();
@@ -125,7 +138,12 @@ pub fn themes(site: &dyn PostsSite, request: &Request, broken: bool) -> Answer {
         .filter(|t| switch || (active && t.slug.as_bytes() == stylesheet))
         .collect();
     let listed = !shown.is_empty();
-    let back = urlencode(&esc_url_raw(&stripslashes(request.uri.as_bytes())));
+    // `$_SERVER['REQUEST_URI']` without `wp_removable_query_args()`.
+    let uri = request
+        .canonical
+        .strip_prefix(request.origin)
+        .unwrap_or_default();
+    let back = urlencode(&esc_url_raw(&stripslashes(uri.as_bytes())));
     let escaped = |url: &[u8]| String::from_utf8_lossy(&esc_url(url)).into_owned();
     let enabled = match maybe_unserialize(&site.option("auto_update_themes").unwrap_or_default()) {
         Maybe::Value(Value::Array(items)) => items,
@@ -236,10 +254,25 @@ pub fn themes(site: &dyn PostsSite, request: &Request, broken: bool) -> Answer {
         ],
     );
     let block = blocks.join("\n");
-    let notice = if broken || !active || !parent {
-        "<div id=\"message1\" class=\"notice is-dismissible updated\"><p>The active theme is broken. Reverting to the default theme.</p></div>"
+    let visit = || {
+        let home = String::from_utf8_lossy(&site.option("home").unwrap_or_default()).into_owned();
+        let url = esc_url(format!("{}/", home.trim_end_matches('/')).as_bytes());
+        String::from_utf8_lossy(&url).into_owned()
+    };
+    let notice = if asked == Notice::Broken || !active || !parent {
+        "<div id=\"message1\" class=\"notice is-dismissible updated\"><p>The active theme is broken. Reverting to the default theme.</p></div>".to_string()
+    } else if asked == Notice::Previewed {
+        format!(
+            "<div id=\"message2\" class=\"notice is-dismissible updated\"><p>Settings saved and theme activated. <a href=\"{}\">Visit site</a></p></div>",
+            visit()
+        )
+    } else if asked == Notice::Activated {
+        format!(
+            "<div id=\"message2\" class=\"notice is-dismissible updated\"><p>New theme activated. <a href=\"{}\">Visit site</a></p></div>",
+            visit()
+        )
     } else {
-        ""
+        String::new()
     };
     // The Appearance submenu's items but the theme's own screens, of which
     // Design and Editor are.
@@ -260,7 +293,7 @@ pub fn themes(site: &dyn PostsSite, request: &Request, broken: bool) -> Answer {
         THEMES,
         &[
             ("count", shown.len().to_string()),
-            ("notice", notice.into()),
+            ("notice", notice),
             (
                 "theme",
                 if listed {

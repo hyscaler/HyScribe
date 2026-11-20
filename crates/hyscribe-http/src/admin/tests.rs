@@ -1152,6 +1152,23 @@ async fn refusals() {
         ("/hs-admin/user-new", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/user-new?update[]=add", false, None),
         ("/hs-admin/themes?broken[]=1", false, None),
+        ("/hs-admin/themes?x=1", false, None),
+        ("/hs-admin/themes?activated=1&x=1", false, None),
+        (
+            "/hs-admin/themes?previewed=1",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
+        (
+            "/hs-admin/themes?activated=1&previewed=1",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
+        (
+            "/hs-admin/themes?broken=1&activated=1",
+            false,
+            Some(StatusCode::FORBIDDEN),
+        ),
         ("/hs-admin/themes", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/import", false, Some(StatusCode::FORBIDDEN)),
         ("/hs-admin/export", false, Some(StatusCode::FORBIDDEN)),

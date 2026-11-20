@@ -11,7 +11,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::actions::{ActionSite, Asked, Body, Refusal, admin_ajax};
 use hyscribe_admin::admin_bar::{BarSite, Browser};
-use hyscribe_admin::appearance::{plugins, themes};
+use hyscribe_admin::appearance::{Notice as ThemesNotice, plugins, themes};
 use hyscribe_admin::assets::Urls;
 use hyscribe_admin::comments::{
     CommentArgs, CommentEditSite, CommentQuery, CommentsSite, MODERATED, comment_edit,
@@ -1113,6 +1113,26 @@ fn only_argument(query: &str, name: &str) -> Option<Option<String>> {
     Some(found)
 }
 
+/// The notice the Themes screen's arguments ask for, `None` for an argument
+/// the screen does not take here.
+fn themes_notice(query: &str) -> Option<ThemesNotice> {
+    let (mut broken, mut activated, mut previewed) = (false, false, false);
+    for (key, _) in query_strings(query)? {
+        match key.as_str() {
+            "broken" => broken = true,
+            "activated" => activated = true,
+            "previewed" => previewed = true,
+            _ => return None,
+        }
+    }
+    Some(match (broken, activated, previewed) {
+        (true, ..) => ThemesNotice::Broken,
+        (_, true, true) => ThemesNotice::Previewed,
+        (_, true, false) => ThemesNotice::Activated,
+        _ => ThemesNotice::None,
+    })
+}
+
 /// The headers of an admin screen: `nocache_headers()` and
 /// `send_frame_options_header()`; every response has `wp_admin_headers()`'s.
 fn screen_headers() -> Vec<(header::HeaderName, String)> {
@@ -1411,14 +1431,16 @@ fn screen(
             return answer.map(|answer| served(admin, answer));
         }
         // Their arguments and actions are not ported, but the Themes
-        // screen's broken theme notice.
+        // screen's notices.
         "/hs-admin/themes" | "/hs-admin/import" | "/hs-admin/export" => {
-            let broken = only_argument(query, "broken").filter(|_| path == "/hs-admin/themes");
-            if request_uri.contains('?') && broken.is_none() {
+            let notice = Some(path == "/hs-admin/themes")
+                .filter(|themes| *themes)
+                .and_then(|_| themes_notice(query));
+            if request_uri.contains('?') && notice.is_none() {
                 return None;
             }
             match path {
-                "/hs-admin/themes" => themes(admin, &request, broken.flatten().is_some()),
+                "/hs-admin/themes" => themes(admin, &request, notice.unwrap_or_default()),
                 "/hs-admin/import" => tools::import(admin, &request),
                 _ => tools::export(admin, &request),
             }

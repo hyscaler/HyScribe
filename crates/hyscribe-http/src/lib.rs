@@ -663,6 +663,7 @@ async fn current(
 ) -> Response {
     match site.reloaded().await {
         Ok(now) => {
+            let now = admin::saves::themes::checked(now).await;
             page(
                 State(Arc::new(now)),
                 method,

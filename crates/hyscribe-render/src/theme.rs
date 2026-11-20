@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Block themes as data (docs/EXTENSIONS.md): templates, template parts and
-//! patterns. Twenty Twenty-Five, the default install's theme, is built in;
-//! its port lives in `themes/twentytwentyfive/`.
+//! patterns. The embedded themes, Twenty Twenty-Five (the default install's)
+//! among them, are built in; each port lives in `themes/<slug>/`.
 
 use std::collections::HashMap;
 

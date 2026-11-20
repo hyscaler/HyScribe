@@ -1433,9 +1433,9 @@ fn screen(
         // Their arguments and actions are not ported, but the Themes
         // screen's notices.
         "/hs-admin/themes" | "/hs-admin/import" | "/hs-admin/export" => {
-            let notice = Some(path == "/hs-admin/themes")
-                .filter(|themes| *themes)
-                .and_then(|_| themes_notice(query));
+            let notice = (path == "/hs-admin/themes")
+                .then(|| themes_notice(query))
+                .flatten();
             if request_uri.contains('?') && notice.is_none() {
                 return None;
             }

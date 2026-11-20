@@ -3,8 +3,7 @@
 //! `WP_REST_Global_Styles_Controller`: the active theme's global settings
 //! and styles, `/wp/v2/global-styles/themes/<stylesheet>`, its style
 //! variations, `.../variations`, and a site's global styles post,
-//! `/wp/v2/global-styles/<id>`. Twenty Twenty-Five's styles name no theme
-//! file, so they link to none.
+//! `/wp/v2/global-styles/<id>`.
 
 use hyscribe_kses::esc_html;
 use hyscribe_model::Post;

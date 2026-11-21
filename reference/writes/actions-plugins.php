@@ -6,8 +6,10 @@
 // WordPress's own source and run over the request hs-admin's handlers get,
 // past their checks, on the plugin the test extension stands in for
 // (reference/plugins/hyscribe-test), which each case puts in the plugins
-// folder and takes out after. `active_plugins` and `recently_activated`
-// are set as each case starts from.
+// folder and takes out after, loaded as wp-settings.php loads it when it
+// is active. `active_plugins`, `recently_activated` and the plugin's own
+// `ext_hooks` are set as each case starts from; an activation whose hook
+// ends in a fatal error writes what it wrote before it.
 
 $plugins_file = 'hyscribe-test/hyscribe-test.php';
 
@@ -34,9 +36,9 @@ $plugins_run = function ( $action, $plugin ) use ( $admin_code, $admin_run ) {
 
 // A case: the plugin installed, the options as given, then the action; the
 // plugin's folder removed once the case has run.
-$plugins_case = function ( $active, $recent, $action ) use ( $plugins_file, $plugins_run ) {
+$plugins_case = function ( $active, $recent, $action, $hooks = null ) use ( $plugins_file, $plugins_run ) {
 	return array(
-		'setup'  => function () use ( $active, $recent ) {
+		'setup'  => function () use ( $active, $recent, $hooks ) {
 			$folder = WP_PLUGIN_DIR . '/hyscribe-test';
 			wp_mkdir_p( $folder );
 			copy( __DIR__ . '/plugins/hyscribe-test.php', "$folder/hyscribe-test.php" );
@@ -45,9 +47,19 @@ $plugins_case = function ( $active, $recent, $action ) use ( $plugins_file, $plu
 			if ( null !== $recent ) {
 				update_option( 'recently_activated', $recent, false );
 			}
+			if ( null !== $hooks ) {
+				update_option( 'ext_hooks', $hooks );
+			}
 		},
-		'action' => function () use ( $action, $plugins_file, $plugins_run ) {
-			$plugins_run( $action, $plugins_file );
+		'action' => function () use ( $action, $active, $plugins_file, $plugins_run ) {
+			if ( in_array( $plugins_file, $active, true ) ) {
+				include_once WP_PLUGIN_DIR . "/$plugins_file";
+			}
+			try {
+				$plugins_run( $action, $plugins_file );
+			} catch ( Error $fatal ) {
+				unset( $fatal );
+			}
 			unlink( WP_PLUGIN_DIR . '/hyscribe-test/hyscribe-test.php' );
 			rmdir( WP_PLUGIN_DIR . '/hyscribe-test' );
 		},

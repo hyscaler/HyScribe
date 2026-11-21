@@ -86,7 +86,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// The active extensions in one request.
-pub struct Request(Arc<Shared>);
+pub struct Request(pub(crate) Arc<Shared>);
 
 impl Request {
     /// A request on `site`; no instance is made until a hook reaches one.
@@ -102,6 +102,13 @@ impl Request {
             did: Mutex::default(),
             reports: Mutex::default(),
         }))
+    }
+
+    /// The place of the extension `slug` in the request's set.
+    pub fn index(&self, slug: &str) -> Option<usize> {
+        let list = self.0.extensions.list.iter();
+        list.into_iter()
+            .position(|extension| *extension.slug == *slug)
     }
 
     /// Whether any extension has a callback on `hook`: the host's own

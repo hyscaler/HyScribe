@@ -18,7 +18,7 @@ author_uri = "https://hyscribe.com/"
 plugin_uri = "https://hyscribe.com/plugins/hyscribe-test/"
 
 [capabilities]
-options = ["ext", "ext_fail", "ext_bytes", "ext_active"]
+options = ["ext", "ext_fail", "ext_bytes", "ext_active", "ext_hooks"]
 post_types = ["ext_item", "ext_item_named_too_long"]
 mail = true
 filesystem = ["uploads/ext"]
@@ -30,6 +30,7 @@ filters = [
   "ext_options", "ext_cron", "ext_echo", "ext_meta", "ext_query", "ext_mail",
   "ext_auth", "ext_assets", "ext_fire", "ext_chain", "ext_remove", "ext_current",
   "ext_bad_json", "ext_error", "ext_stack", "ext_count", "ext_gone", "ext_nest",
+  "body_class", "admin_footer_text",
 ]
 shortcodes = ["ext", "ext_gone"]
 sensitive = ["map_meta_cap"]

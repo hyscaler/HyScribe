@@ -19,7 +19,7 @@ const MAX_ENTRIES: usize = 10_000;
 pub const MAX_TOTAL: u64 = 256 << 20;
 
 /// The most one entry may hold uncompressed.
-const MAX_ENTRY: u64 = 64 << 20;
+pub const MAX_ENTRY: u64 = 64 << 20;
 
 /// How many times its compressed size an entry may grow to.
 const MAX_RATIO: u64 = 100;

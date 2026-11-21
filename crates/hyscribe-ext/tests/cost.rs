@@ -7,12 +7,14 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use hyscribe_ext::{Extensions, Fault, Host, Limits, Package, Request, Site};
+use hyscribe_ext::{Extensions, Fault, Host, Limits, Package, Request, Runtime, Site, installed};
 use hyscribe_phpser::Value;
 
 mod guest;
 
 const CALLS: u32 = 10_000;
+
+const MANIFEST: &[u8] = include_bytes!("../guest/hyscribe.ext.toml");
 
 fn each(total: Duration, n: u32) -> String {
     format!("{:.2} us", total.as_secs_f64() * 1e6 / f64::from(n))
@@ -30,7 +32,7 @@ fn the_content_10000_times() -> Result<(), Fault> {
         limits: Limits::default(),
         folder: folder.path(),
     })?;
-    let extensions = Arc::new(Extensions::new(vec![extension]));
+    let extensions = Arc::new(Extensions::new(vec![Arc::new(extension)]));
     let site: Arc<dyn Site> = Arc::new(guest::Quiet);
 
     let started = Instant::now();
@@ -40,6 +42,33 @@ fn the_content_10000_times() -> Result<(), Fault> {
     }
     println!(
         "instance per request: {} each (1,000 requests, one call each)",
+        each(started.elapsed(), 1_000)
+    );
+
+    // What the embedder does for each request: the active set looked up in
+    // the runtime's cache (its files checked, nothing compiled), and a request.
+    let plugins = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
+    let installed_in = plugins.path().join("hyscribe-test");
+    let written = std::fs::create_dir(&installed_in)
+        .and_then(|()| std::fs::write(installed_in.join("hyscribe.ext.toml"), MANIFEST))
+        .and_then(|()| std::fs::write(installed_in.join("extension.wasm"), guest::component()));
+    written.map_err(|e| Fault::Refused(e.to_string()))?;
+    let file = "hyscribe-test/hyscribe-test.php";
+    let found = installed::find(plugins.path(), file).ok_or(Fault::Disabled)?;
+    installed::approve(&found).map_err(|e| Fault::Refused(e.to_string()))?;
+    let runtime = Runtime::new(plugins.path());
+    let files = [file.to_string()];
+    let started = Instant::now();
+    let (first, _) = runtime.request(&files, site.clone());
+    let loaded = started.elapsed();
+    assert!(first.is_some());
+    let started = Instant::now();
+    for _ in 0..1_000 {
+        black_box(runtime.request(&files, site.clone()));
+    }
+    println!(
+        "the runtime's active set: loaded once in {:.1} ms, then {} a request (1,000 requests)",
+        loaded.as_secs_f64() * 1e3,
         each(started.elapsed(), 1_000)
     );
 

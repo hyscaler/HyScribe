@@ -157,12 +157,13 @@ pub fn grants() -> Grants {
         filters: names(
             "the_content ext_trap ext_loop ext_grow ext_late ext_order ext_options ext_cron ext_echo \
              ext_meta ext_query ext_mail ext_auth ext_assets ext_fire ext_chain ext_remove ext_current \
-             ext_bad_json ext_error ext_stack ext_count ext_gone ext_nest",
+             ext_bad_json ext_error ext_stack ext_count ext_gone ext_nest body_class \
+             admin_footer_text",
         ),
         actions: names("ext_action ext_event"),
         sensitive: names("map_meta_cap"),
         shortcodes: names("ext ext_gone"),
-        options: names("ext ext_fail ext_bytes ext_active"),
+        options: names("ext ext_fail ext_bytes ext_active ext_hooks"),
         meta: names("_ext _ext_*"),
         post_types: names("ext_item ext_item_named_too_long"),
         taxonomies: names("ext_kind ext_kind_named_far_too_long_for_wp"),

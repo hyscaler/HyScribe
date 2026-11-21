@@ -184,6 +184,25 @@ fn the_title_the_head_script_and_the_body() {
     assert!(html.contains("var serverData = \"\";\n\t\t\t\tvar userId = \"7\";"));
 }
 
+/// `admin_footer_text` gets the thanks as hs-admin's look words them.
+#[test]
+fn the_footer_text_goes_through_its_filter() {
+    let answers = [(
+        "admin_footer_text",
+        Value::String(b"<b>Thanks</b>".to_vec()),
+    )];
+    let (html, fired) =
+        hyscribe_testkit::hooks::recorded(&answers, || render(&site(), &page(&[], "", "")));
+    assert!(html.contains("\"alignleft\">\n\t\t<b>Thanks</b>\t</p>"));
+    let thanks = "<span id=\"footer-thankyou\">Thank you for creating with HyScribe.</span>";
+    let thanks = Value::String(thanks.as_bytes().to_vec());
+    let given = fired.iter().find(|(hook, ..)| hook == "admin_footer_text");
+    assert_eq!(
+        given.map(|(_, value, args)| (value, args.len())),
+        Some((&thanks, 0))
+    );
+}
+
 /// `get_user_setting()`'s `mfold` folds the menu and a truthy `unfold` stops
 /// it folding by itself; the cookie wins over the stored settings.
 #[test]

@@ -90,8 +90,8 @@ pub(super) trait Acting: ActionSite {
     fn delete_files(&self, files: Vec<(Vec<u8>, Vec<u8>)>) -> bool;
     /// Deletes the files kept, once the action is `committed`, or forgets them.
     fn settle_files(&self, _committed: bool) {}
-    /// The installed plugins' folder, `hyscribe/plugins/`, if the site has one.
-    fn plugins(&self) -> Option<&std::path::Path>;
+    /// The extensions installed in `hyscribe/plugins/`, if the site has them.
+    fn extensions(&self) -> Option<&hyscribe_ext::Runtime>;
 }
 
 /// An answer once the action's mails were sent: changed only by mails it
@@ -131,8 +131,8 @@ impl Acting for Admin<'_> {
         self.files.borrow_mut().extend(files);
         self.site.uploads.is_some()
     }
-    fn plugins(&self) -> Option<&std::path::Path> {
-        self.site.plugins.as_deref()
+    fn extensions(&self) -> Option<&hyscribe_ext::Runtime> {
+        self.site.extensions.as_deref()
     }
     fn settle_files(&self, committed: bool) {
         let files = std::mem::take(&mut *self.files.borrow_mut());

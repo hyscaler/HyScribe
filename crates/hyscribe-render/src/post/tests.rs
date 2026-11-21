@@ -287,6 +287,28 @@ fn body_classes_match_php() {
     assert!(count >= 14);
 }
 
+/// `body_class` gets the escaped classes and no `$css_class`; what it
+/// answers is made unique, then escaped again joined.
+#[test]
+fn body_classes_go_through_their_filter() {
+    let site = crate::fixture::DefaultInstall { home: Vec::new() };
+    let request = Request {
+        not_found: true,
+        ..Request::default()
+    };
+    let list = |all: &[&str]| {
+        let all = all.iter().zip(0..);
+        let all = all.map(|(s, n)| (Key::Int(n), Value::String(s.as_bytes().to_vec())));
+        Value::Array(all.collect())
+    };
+    let answers = [("body_class", list(&["a\"b", "x", "x", "&amp;"]))];
+    let (classes, fired) =
+        hyscribe_testkit::hooks::recorded(&answers, || body_class(&site, &request, ("t", "t")));
+    assert_eq!(String::from_utf8_lossy(&classes), "a&quot;b x &amp;");
+    let given = list(&["error404", "wp-embed-responsive", "wp-theme-t"]);
+    assert_eq!(fired, [("body_class".into(), given, vec![list(&[])])]);
+}
+
 /// An attachment asked for as one is `attachment`; one found by name is a
 /// single post that is not, as the page of `/?attachment_id=611` and of
 /// `/?name=...&post_type=attachment` have it in PHP.

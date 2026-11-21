@@ -54,7 +54,12 @@ pub(crate) struct Asked {
 pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
     let site = Arc::clone(site);
     let (now, handle) = (now(), Handle::current());
-    joined(tokio::task::spawn_blocking(move || answer(&site, &asked, now, handle)).await)
+    joined(
+        tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
+            answer(&site, &asked, now, handle)
+        }))
+        .await,
+    )
 }
 
 /// The site and user as the API reads them.

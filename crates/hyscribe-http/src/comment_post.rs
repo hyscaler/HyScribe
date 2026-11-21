@@ -103,7 +103,7 @@ pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
     let site = Arc::clone(site);
     let (now, handle) = (now(), Handle::current());
     joined(
-        tokio::task::spawn_blocking(move || match &site.writer {
+        tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || match &site.writer {
             Some(writer) => {
                 let begin: Begin<'_> = Box::pin(writer.begin());
                 answer(&site, &asked, &form, (now, handle), begin)
@@ -113,7 +113,7 @@ pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
                 let body = page(site.public(), "WordPress &rsaquo; Error", READ_ONLY);
                 response(StatusCode::FORBIDDEN, html_headers(), body)
             }
-        })
+        }))
         .await,
     )
 }

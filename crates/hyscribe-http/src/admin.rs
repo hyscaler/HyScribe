@@ -87,7 +87,7 @@ pub(crate) async fn respond(
     let site = Arc::clone(site);
     let (now, handle) = (now(), Handle::current());
     joined(
-        tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
             let ip = crate::comment_post::client_addr(&site, &headers, peer);
             let asked = Asking {
                 uri: &uri,
@@ -98,7 +98,7 @@ pub(crate) async fn respond(
                 ip,
             };
             answer(&site, &asked, now, handle)
-        })
+        }))
         .await,
     )
 }
@@ -1129,7 +1129,8 @@ impl crate::Site {
     /// The extensions installed in the plugins folder, as the Plugins
     /// screen lists them; none without the folder.
     pub(crate) fn installed_plugins(&self) -> Vec<Plugin> {
-        let found = self.plugins.as_deref().map(hyscribe_ext::installed::list);
+        let runtime = self.extensions.as_deref();
+        let found = runtime.map(|runtime| hyscribe_ext::installed::list(runtime.plugins()));
         found.unwrap_or_default().into_iter().map(listed).collect()
     }
 }

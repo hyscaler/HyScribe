@@ -18,15 +18,13 @@ use super::super::tests::unread::Unread;
 use super::super::tests::{SITE, acted, asked, fields, turn, writer};
 use super::*;
 
-const MANIFEST: &str = include_str!("../../../../../hyscribe-ext/guest/hyscribe.ext.toml");
-const FILE: &str = "hyscribe-test/hyscribe-test.php";
+use crate::admin::saves::posts::tests::unnonced;
+use crate::extensions::tests::{FILE, MANIFEST, install};
 
-/// A plugins folder with the test extension's manifest, and its own folder.
+/// A plugins folder with the test extension installed, and its own folder.
 fn plugins() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let folder = dir.path().join("hyscribe-test");
-    std::fs::create_dir(&folder).unwrap();
-    std::fs::write(folder.join("hyscribe.ext.toml"), MANIFEST).unwrap();
+    let folder = install(dir.path());
     (dir, folder)
 }
 
@@ -49,13 +47,14 @@ fn recent() -> Value {
 }
 
 /// `action` of the test extension from `active` and `recently`, as the
-/// golden `admin-plugins-<golden>`, answering a redirect to `done`.
+/// golden `admin-plugins-<golden>`, answering a redirect to `done`, on a
+/// site whose extensions are in `dir`, if it has any.
 async fn case(
     writer: &Writer,
     golden: &str,
     (active, recently): (&[&str], Option<Value>),
     (action, done): (&'static [u8], &str),
-    dir: &Path,
+    dir: Option<&Path>,
 ) {
     let setup = async |conn: &mut Connection| {
         let mut write = writer.begin_on(conn).await.unwrap();
@@ -92,7 +91,7 @@ async fn case(
             ..asked("/hs-admin/plugins", &get, &[])
         };
         let handler = handler("plugins", action).unwrap();
-        let site = Unread(Default::default(), false, Some(dir.to_path_buf()));
+        let site = Unread(Default::default(), false, dir.map(Runtime::new));
         let answer = acted(writer, conn, (handler, &site), &asked).await;
         let to = format!("{SITE}/hs-admin/plugins?{done}=true&plugin_status=all&paged=1&s=");
         assert_eq!(answer.map_err(|e| format!("{e:?}"))?, Answer::Redirect(to));
@@ -118,7 +117,7 @@ async fn the_actions_write_php_s_rows() {
         "activate",
         (&[], None),
         (b"activate", "activate"),
-        path,
+        Some(path),
     )
     .await;
     assert!(folder.join(APPROVED).is_file());
@@ -129,7 +128,7 @@ async fn the_actions_write_php_s_rows() {
         "activate-sorted",
         (&other, None),
         (b"activate", "activate"),
-        path,
+        Some(path),
     )
     .await;
     case(
@@ -137,7 +136,7 @@ async fn the_actions_write_php_s_rows() {
         "activate-recent",
         (&[], Some(recent())),
         (b"activate", "activate"),
-        path,
+        Some(path),
     )
     .await;
     case(
@@ -145,7 +144,7 @@ async fn the_actions_write_php_s_rows() {
         "deactivate",
         (&[FILE], None),
         (b"deactivate", "deactivate"),
-        path,
+        Some(path),
     )
     .await;
     assert!(!folder.join(APPROVED).exists());
@@ -155,7 +154,7 @@ async fn the_actions_write_php_s_rows() {
         "deactivate-kept",
         (&both, None),
         (b"deactivate", "deactivate"),
-        path,
+        Some(path),
     )
     .await;
     let inactive = (&[][..], Some(recent()));
@@ -164,9 +163,12 @@ async fn the_actions_write_php_s_rows() {
         "deactivate-inactive",
         inactive,
         (b"deactivate", "deactivate"),
-        path,
+        Some(path),
     )
     .await;
+    // A site without extensions runs none, and writes the same rows.
+    let deactivate = (b"deactivate".as_slice(), "deactivate");
+    case(&writer, "deactivate", (&[FILE], None), deactivate, None).await;
 }
 
 /// The answer of `action` on `get` on a site whose plugins are in `dir`.
@@ -178,7 +180,7 @@ async fn answer(
 ) -> Result<Answer, hyscribe_write::Error> {
     let get = fields(&format!("action={}&{get}", text(action)));
     let asked = asked("/hs-admin/plugins", &get, &[]);
-    let site = Unread(Default::default(), false, dir);
+    let site = Unread(Default::default(), false, dir.map(|dir| Runtime::new(&dir)));
     acted(
         writer,
         conn,
@@ -274,6 +276,12 @@ async fn refusals_write_nothing() {
         )
         .await;
         assert!(matches!(none, Ok(Answer::Redirect(_))));
+        // A fault record that cannot be cleared.
+        std::fs::create_dir(folder.join(hyscribe_ext::faults::FILE)).unwrap();
+        let get = format!("plugin={FILE}");
+        let uncleared = answer((&writer, &mut *conn), b"activate", &get, path.clone()).await;
+        assert!(matches!(uncleared, Err(hyscribe_write::Error::Refused(_))));
+        std::fs::remove_dir(folder.join(hyscribe_ext::faults::FILE)).unwrap();
         // The approval the activation above wrote, made a folder.
         std::fs::remove_file(folder.join(APPROVED)).unwrap();
         std::fs::create_dir(folder.join(APPROVED)).unwrap();
@@ -563,6 +571,196 @@ async fn activation_and_deactivation_answer_as_php() {
             same(&compared(&php), &compared(&page), "activated");
         }
     }
+}
+
+/// An activation whose export fails writes nothing of its own (PHP's
+/// writes nothing, as the write oracle says of it), and answers PHP's
+/// redirect to the screen's error.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_activation_writes_nothing() {
+    let _turn = turn().await;
+    let writer = writer().await;
+    let (dir, folder) = plugins();
+    let setup = async |conn: &mut Connection| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        let trap = Value::String(b"trap".to_vec());
+        update_option(&mut write, "ext_hooks", &trap, None)
+            .await
+            .unwrap();
+        write.commit().await.unwrap();
+        Ok::<(), String>(())
+    };
+    let action = async |conn: &mut Connection, ()| {
+        let get = format!("plugin={FILE}");
+        let path = Some(dir.path().to_path_buf());
+        let failed = answer((&writer, &mut *conn), b"activate", &get, path).await;
+        let to = format!(
+            "{SITE}/hs-admin/plugins?error=true&plugin=hyscribe-test%2Fhyscribe-test.php&_error_nonce=nonce-plugin-activation-error_{FILE}"
+        );
+        assert!(matches!(failed, Ok(Answer::Redirect(at)) if at == to));
+        // Its component refused: the same answer, nothing run.
+        std::fs::write(folder.join("extension.wasm"), b"not wasm").unwrap();
+        let get = format!("plugin={FILE}");
+        let path = Some(dir.path().to_path_buf());
+        let refused = answer((&writer, &mut *conn), b"activate", &get, path).await;
+        assert!(matches!(refused, Ok(Answer::Redirect(at)) if at == to));
+        Ok(())
+    };
+    let checked = check_writes(
+        &fixture_database(),
+        "admin-plugins-deactivate-inactive",
+        setup,
+        action,
+    )
+    .await;
+    let differences = checked.unwrap_err();
+    assert!(differences.contains("recently_activated"), "{differences}");
+    assert!(!differences.contains("ext_active"), "{differences}");
+    assert!(!differences.contains("active_plugins"), "{differences}");
+    assert!(!folder.join(APPROVED).exists());
+}
+
+/// A request through the router that reloads the site, as `serve` serves it.
+async fn live(
+    site: &std::sync::Arc<crate::Site>,
+    uri: &str,
+    cookies: &str,
+) -> axum::response::Response {
+    let request = axum::http::Request::builder()
+        .uri(uri)
+        .header(axum::http::header::HOST, "127.0.0.1:8081")
+        .header(axum::http::header::COOKIE, cookies)
+        .body(axum::body::Body::empty())
+        .unwrap();
+    tower::ServiceExt::oneshot(crate::live(site.clone()), request)
+        .await
+        .unwrap()
+}
+
+/// The body tag of `page`.
+fn body_tag(page: &str) -> String {
+    let start = page.find("<body class=\"").unwrap();
+    let tag = page.get(start..).unwrap();
+    tag.get(..=tag.find('>').unwrap()).unwrap().to_string()
+}
+
+/// `reference/plugins/golden.sh`'s body tag of the front end `path` in
+/// `variant`: the page hooks on (`x13hooks`), or set to trap (`x13fail`),
+/// which is the page they do not change.
+fn php_body(variant: &str, path: &str) -> String {
+    let golden = include_str!("../../../../tests/golden/extension-pages.tsv");
+    let start = format!("{variant}\t{path}\t");
+    let row = golden
+        .lines()
+        .find(|line| line.starts_with(&start))
+        .unwrap();
+    String::from_utf8(hyscribe_testkit::unhex(row.rsplit('\t').next().unwrap())).unwrap()
+}
+
+/// The test extension installed and activated changes the front end and
+/// hs-admin as its hooks say, as the plugin it stands in for changes PHP's,
+/// each request in an instance of its own, two at once too; three traps
+/// disable it until it is activated again; deactivated, it changes nothing,
+/// and an activation whose export traps leaves it inactive as PHP leaves a
+/// plugin whose activation ends in a fatal error.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_extension_runs_as_its_hooks_say() {
+    use crate::admin::tests::{SAVES, location, page_of, session_nonce};
+    let _saves = SAVES.lock().await;
+    let config = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&config)
+        .await
+        .unwrap();
+    let open = async || {
+        Writer::open(&config, hyscribe_config::Mode::Primary)
+            .await
+            .unwrap()
+    };
+    let writer = open().await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies, plugins) = served("wordpress_saves", open().await, dir.path()).await;
+    let folder = plugins.path().join("hyscribe-test");
+    let act = async |action: &str| {
+        let nonce = session_nonce(&site, &cookies, &format!("{action}-plugin_{FILE}")).await;
+        let uri = format!(
+            "/hs-admin/plugins?action={action}&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=&_wpnonce={nonce}"
+        );
+        location(&live(&site, &uri, &cookies).await).to_string()
+    };
+    let front = async |path: &str| body_tag(&page_of(live(&site, path, "").await).await);
+    let option = async |name: &str| {
+        let mut write = writer.begin().await.unwrap();
+        write.option_value(name).await.unwrap()
+    };
+    let hooks = async |value: &str| {
+        let mut write = writer.begin().await.unwrap();
+        let value = Value::String(value.as_bytes().to_vec());
+        update_option(&mut write, "ext_hooks", &value, None)
+            .await
+            .unwrap();
+        write.commit().await.unwrap();
+    };
+    let done =
+        |action| format!("{SITE}/hs-admin/plugins?{action}=true&plugin_status=all&paged=1&s=");
+    assert_eq!(act("activate").await, done("activate"));
+    assert_eq!(option("ext_active").await.as_deref(), Some(&b"1"[..]));
+    assert_eq!(front("/").await, php_body("x13fail", "/"));
+    hooks("on").await;
+    for path in ["/", "/?p=1"] {
+        assert_eq!(front(path).await, php_body("x13hooks", path), "{path}");
+    }
+    let page = page_of(live(&site, "/hs-admin/plugins", &cookies).await).await;
+    same(
+        &compared(&screen("x13hooks", "")),
+        &compared(&page),
+        "hooks",
+    );
+    let (home, single) = tokio::join!(front("/"), front("/?p=1"));
+    assert_eq!(
+        (home, single),
+        (php_body("x13hooks", "/"), php_body("x13hooks", "/?p=1"))
+    );
+    hooks("trap").await;
+    for _ in 0..3 {
+        assert_eq!(front("/").await, php_body("x13fail", "/"));
+    }
+    let record = hyscribe_ext::faults::read(&folder).unwrap();
+    assert!(record.disabled().is_some(), "{record:?}");
+    hooks("on").await;
+    assert_eq!(front("/").await, php_body("x13fail", "/"));
+    // Activating again enables it again; nothing else is run.
+    assert_eq!(act("activate").await, done("activate"));
+    assert!(!folder.join(hyscribe_ext::faults::FILE).exists());
+    assert_eq!(front("/").await, php_body("x13hooks", "/"));
+    assert_eq!(act("deactivate").await, done("deactivate"));
+    assert_eq!(option("ext_active").await, None);
+    assert_eq!(front("/").await, php_body("x13fail", "/"));
+    // As the screen PHP's activation sends to was recorded from.
+    let mut write = writer.begin().await.unwrap();
+    hyscribe_write::options::delete_option(&mut write, "recently_activated")
+        .await
+        .unwrap();
+    write.commit().await.unwrap();
+    hooks("trap").await;
+    let to = act("activate").await;
+    let [_, php_location, ..] = action_row("activate-fails")[..] else {
+        panic!("activate-fails");
+    };
+    let php_location = php_location.replace("/wp-admin/plugins.php", "/hs-admin/plugins");
+    assert_eq!(unnonced(&to), unnonced(&php_location));
+    let active = option("active_plugins").await.unwrap_or_default();
+    assert_eq!(text(&active), "a:0:{}");
+    assert!(!folder.join(APPROVED).exists());
+    let page = page_of(live(&site, to.trim_start_matches(SITE), &cookies).await).await;
+    let query = php_location.split_once("plugins").unwrap().1;
+    same(
+        &compared(&screen("x13inactive", query)),
+        &compared(&page),
+        "failed",
+    );
 }
 
 /// An extension asking for more than the defaults is listed with its limits.

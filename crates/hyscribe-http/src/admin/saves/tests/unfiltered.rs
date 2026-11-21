@@ -98,7 +98,7 @@ impl Acting for Unfiltered {
     fn delete_files(&self, _: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
         unreachable!()
     }
-    fn plugins(&self) -> Option<&std::path::Path> {
+    fn extensions(&self) -> Option<&hyscribe_ext::Runtime> {
         unreachable!()
     }
     fn outbox(&self) -> &crate::mail::Outbox {

@@ -265,6 +265,10 @@ if ( $default_install ) {
 	if ( $loaded !== $active ) {
 		$failures[] = 'PHP loads the plugins ' . implode( ', ', $loaded );
 	}
+	// What the extension's activate export wrote, as the plugin's activation hook writes it.
+	if ( '1' !== get_option( 'ext_active' ) ) {
+		$failures[] = 'ext_active is ' . var_export( get_option( 'ext_active' ), true ) . ', not the activation hook\'s 1';
+	}
 }
 
 // The cron events HyScribe scheduled, as wp-cron.php reads them.

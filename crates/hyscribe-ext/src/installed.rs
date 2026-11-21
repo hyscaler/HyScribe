@@ -74,6 +74,13 @@ fn read(plugins: &Path, id: &str) -> Option<Installed> {
     })
 }
 
+/// The manifest as approved at the plugin's activation, whose grants and
+/// limits it runs with; none while it needs approving.
+pub fn approval(installed: &Installed) -> Option<Manifest> {
+    let approved = installed.approved.then_some(&installed.folder);
+    approved.and_then(|folder| manifest_in(folder, APPROVED))
+}
+
 fn manifest_in(folder: &Path, name: &str) -> Option<Manifest> {
     let bytes = read_at_most(&folder.join(name), manifest::MAX_BYTES).ok()?;
     Manifest::parse(&bytes).ok()

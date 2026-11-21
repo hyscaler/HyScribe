@@ -49,6 +49,7 @@ mod admin;
 mod attachment_page;
 mod canonical;
 mod comment_post;
+mod extensions;
 mod feed;
 mod files;
 mod loaders;
@@ -135,8 +136,8 @@ pub struct Site {
     limiter: Arc<login::limits::Limiter>,
     /// The uploads folder, where uploads are written and served from.
     uploads: Option<Arc<Uploads>>,
-    /// The installed plugins' folder, `hyscribe/plugins/` (MVP 11.3).
-    plugins: Option<Arc<std::path::Path>>,
+    /// The extensions installed in `hyscribe/plugins/` (MVP 11.3).
+    extensions: Option<Arc<hyscribe_ext::Runtime>>,
     /// The installation as configured, which the admin shows.
     install: Arc<Install>,
     /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
@@ -209,7 +210,7 @@ impl Site {
             constants: hyscribe_config::Constants::default(),
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             uploads: None,
-            plugins: None,
+            extensions: None,
             install: unconfigured(),
             fetch: None,
             feed_hosts: Arc::default(),
@@ -263,7 +264,7 @@ impl Site {
             constants: self.constants,
             limiter: Arc::clone(&self.limiter),
             uploads: self.uploads.clone(),
-            plugins: self.plugins.clone(),
+            extensions: self.extensions.clone(),
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
             feed_hosts: Arc::clone(&self.feed_hosts),
@@ -322,10 +323,11 @@ impl Site {
         }
     }
 
-    /// The site whose installed plugins are in `folder`.
+    /// The site whose extensions are installed in `folder`.
     pub fn with_plugins(self, folder: &std::path::Path) -> Site {
+        let runtime = hyscribe_ext::Runtime::new(folder);
         Site {
-            plugins: Some(Arc::from(folder)),
+            extensions: Some(Arc::new(runtime)),
             ..self
         }
     }
@@ -557,11 +559,11 @@ impl Site {
         read: impl FnOnce(&Reads) -> T + Send + 'static,
     ) -> Result<T, DbError> {
         let site = Arc::clone(self);
-        tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
             let reads = Reads::new(&site, tokio::runtime::Handle::current());
             let value = read(&reads);
             reads.finish().map(|()| value)
-        })
+        }))
         .await
         .unwrap_or(Ok(lost))
     }
@@ -577,11 +579,11 @@ impl Site {
             return plain;
         }
         let (site, fallback) = (Arc::clone(self), plain.clone());
-        tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
             let reads = Reads::new(&site, tokio::runtime::Handle::current());
             let value = read(&reads);
             reads.finish().map_or(fallback, |()| value)
-        })
+        }))
         .await
         .unwrap_or(plain)
     }
@@ -676,16 +678,16 @@ async fn current(
     match site.reloaded().await {
         Ok(now) => {
             let now = admin::saves::themes::checked(now).await;
-            page(
-                State(Arc::new(now)),
-                method,
-                uri,
-                headers,
-                query,
-                peer,
-                body,
-            )
-            .await
+            // The extensions answer the hooks of the request's work (ADR 0022).
+            let request = extensions::request(&now);
+            let site = State(Arc::new(now));
+            let served = page(site, method, uri, headers, query, peer, body);
+            let response =
+                hyscribe_model::hooks::within(extensions::dispatch(&request), served).await;
+            if let Some(request) = request {
+                extensions::log(&request.reports(), &mut std::io::stderr());
+            }
+            response
         }
         Err(err) => html(database_error(&site, &err)),
     }
@@ -1495,9 +1497,10 @@ async fn render(site: &Arc<Site>, page: Page) -> Rendered {
         page.request.clone(),
         page.title.clone(),
     );
-    let body =
-        tokio::task::spawn_blocking(move || render_page(&rendering, &candidates, &request, &title))
-            .await;
+    let body = tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
+        render_page(&rendering, &candidates, &request, &title)
+    }))
+    .await;
     rendered(site, page, body)
 }
 

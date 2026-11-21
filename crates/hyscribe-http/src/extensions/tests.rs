@@ -1,0 +1,259 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use std::path::Path;
+
+use hyscribe_config::{Database, Mode};
+use hyscribe_ext::Site as _;
+use hyscribe_ext::installed;
+use hyscribe_testkit::fixture_database;
+
+use super::*;
+
+/// The test extension, built from source as `hyscribe-ext`'s tests build it.
+#[allow(dead_code, reason = "only its component is used here")]
+#[path = "../../../hyscribe-ext/tests/guest/mod.rs"]
+pub(crate) mod guest;
+
+/// The test extension's manifest.
+pub(crate) const MANIFEST: &str = include_str!("../../../hyscribe-ext/guest/hyscribe.ext.toml");
+
+/// The plugin file it stands in for.
+pub(crate) const FILE: &str = "hyscribe-test/hyscribe-test.php";
+
+/// Installs the test extension in the plugins folder `plugins`, not yet
+/// approved, and gives its folder.
+pub(crate) fn install(plugins: &Path) -> std::path::PathBuf {
+    let folder = plugins.join("hyscribe-test");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("hyscribe.ext.toml"), MANIFEST).unwrap();
+    std::fs::write(folder.join("extension.wasm"), guest::component()).unwrap();
+    folder
+}
+
+fn text(s: &str) -> Value {
+    Value::String(s.as_bytes().to_vec())
+}
+
+fn saves() -> Database {
+    Database {
+        name: "wordpress_saves".into(),
+        ..fixture_database()
+    }
+}
+
+/// The autoload `name` is stored with.
+async fn autoloaded(writer: &Writer, name: &str) -> Option<String> {
+    let mut write = writer.begin().await.unwrap();
+    write.option_autoload(name).await.unwrap()
+}
+
+/// A page view's calls each commit on their own; options are read and
+/// written as `get_option()` and its kin do, autoload as asked.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_view_s_calls_commit_each_on_its_own() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    hyscribe_testkit::writes::load_default_install(&saves())
+        .await
+        .unwrap();
+    let writer = Arc::new(
+        Writer::open(&saves(), Mode::Primary)
+            .await
+            .unwrap()
+            .unwrap(),
+    );
+    let run = |call: fn(&Live) -> Result<Value, String>| {
+        let live = Live(Through::Own(Some(writer.clone()), Handle::current()));
+        tokio::task::spawn_blocking(move || call(&live))
+    };
+    let missing = run(|live| {
+        live.get_option("ext_hooks")
+            .map(|v| Value::Bool(v.is_some()))
+    });
+    assert_eq!(missing.await.unwrap(), Ok(Value::Bool(false)));
+    let added = run(|live| {
+        live.add_option("ext_hooks", text("on"), Some(true))
+            .map(Value::Bool)
+    });
+    assert_eq!(added.await.unwrap(), Ok(Value::Bool(true)));
+    assert_eq!(
+        autoloaded(&writer, "ext_hooks").await.as_deref(),
+        Some("on")
+    );
+    let again = run(|live| {
+        live.add_option("ext_hooks", text("x"), None)
+            .map(Value::Bool)
+    });
+    assert_eq!(again.await.unwrap(), Ok(Value::Bool(false)));
+    let read = run(|live| live.get_option("ext_hooks").map(Option::unwrap_or_default));
+    assert_eq!(read.await.unwrap(), Ok(text("on")));
+    let off = run(|live| {
+        live.update_option("ext_hooks", text("off"), Some(false))
+            .map(Value::Bool)
+    });
+    assert_eq!(off.await.unwrap(), Ok(Value::Bool(true)));
+    assert_eq!(
+        autoloaded(&writer, "ext_hooks").await.as_deref(),
+        Some("off")
+    );
+    let kept = run(|live| {
+        live.update_option("ext_hooks", text("x"), None)
+            .map(Value::Bool)
+    });
+    assert_eq!(kept.await.unwrap(), Ok(Value::Bool(true)));
+    assert_eq!(
+        autoloaded(&writer, "ext_hooks").await.as_deref(),
+        Some("off")
+    );
+    let deleted = run(|live| live.delete_option("ext_hooks").map(Value::Bool));
+    assert_eq!(deleted.await.unwrap(), Ok(Value::Bool(true)));
+    let gone = run(|live| live.delete_option("ext_hooks").map(Value::Bool));
+    assert_eq!(gone.await.unwrap(), Ok(Value::Bool(false)));
+    let protected = run(|live| {
+        live.update_option("alloptions", text("x"), None)
+            .map(Value::Bool)
+    });
+    assert_eq!(
+        protected.await.unwrap(),
+        Err("Refused(\"protected option\")".into())
+    );
+}
+
+/// Without a writer, or over a database it cannot write, a call fails.
+#[tokio::test(flavor = "multi_thread")]
+async fn calls_fail_where_nothing_can_be_written() {
+    let read_only = Live(Through::Own(None, Handle::current()));
+    let answer = tokio::task::spawn_blocking(move || read_only.get_option("x"));
+    assert_eq!(answer.await.unwrap(), Err(READ_ONLY.into()));
+    let missing = Database {
+        prefix: hyscribe_config::Prefix::new("missing_").unwrap(),
+        ..fixture_database()
+    };
+    let writer = Writer::open(&missing, Mode::Primary).await.unwrap();
+    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()));
+    let answer = tokio::task::spawn_blocking(move || live.get_option("x"));
+    assert!(answer.await.unwrap().is_err());
+    let reader = Database {
+        user: "wordpress_read".into(),
+        password: hyscribe_config::Secret::new("reference-only"),
+        ..fixture_database()
+    };
+    let writer = Writer::open(&reader, Mode::Primary).await.unwrap();
+    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()));
+    let answer = tokio::task::spawn_blocking(move || live.add_option("x", Value::Null, None));
+    assert!(answer.await.unwrap().is_err());
+    let (sender, jobs) = mpsc::channel(1);
+    drop(jobs);
+    let live = Live(Through::Action(sender));
+    let answer = tokio::task::spawn_blocking(move || live.delete_option("x"));
+    assert_eq!(answer.await.unwrap(), Err(GONE.into()));
+}
+
+/// What is not served answers so, or as no one logged in; translations
+/// are the text as given.
+#[test]
+fn what_is_not_served_yet() {
+    let (sender, _) = mpsc::channel(1);
+    let live = Live(Through::Action(sender));
+    let post = ObjectKind::Post;
+    let unserved = Err(UNSERVED.to_string());
+    assert_eq!(
+        live.get_meta(post, 1, "k"),
+        unserved.clone().map(|()| Vec::new())
+    );
+    assert_eq!(
+        live.add_meta(post, 1, "k", Value::Null, false),
+        unserved.clone().map(|()| None)
+    );
+    assert_eq!(
+        live.update_meta(post, 1, "k", Value::Null, None),
+        unserved.clone().map(|()| true)
+    );
+    assert_eq!(
+        live.delete_meta(post, 1, "k", None),
+        unserved.clone().map(|()| true)
+    );
+    assert_eq!(
+        live.query(&Value::Null),
+        unserved.clone().map(|()| Found::default())
+    );
+    assert_eq!(live.post(1), unserved.clone().map(|()| None));
+    assert_eq!(live.schedule(1, None, "h", &[]), unserved.clone());
+    assert_eq!(live.unschedule("h", &[]), unserved.clone().map(|()| 0));
+    assert_eq!(live.next_scheduled("h", &[]), None);
+    let message = Message {
+        to: Vec::new(),
+        subject: String::new(),
+        body: String::new(),
+        headers: Vec::new(),
+        attachments: Vec::new(),
+    };
+    assert_eq!(live.mail(&message), unserved.clone().map(|()| true));
+    assert_eq!(live.current_user(), 0);
+    assert!(!live.user_can("read", &[]));
+    assert_eq!(live.create_nonce("a"), "");
+    assert_eq!(live.verify_nonce("n", "a"), 0);
+    let asset = Asset {
+        kind: AssetKind::Script,
+        handle: "h".into(),
+        src: String::new(),
+        deps: Vec::new(),
+        version: None,
+        placement: String::new(),
+    };
+    assert_eq!(live.register_asset("ext", &asset), unserved.clone());
+    assert_eq!(live.enqueue(AssetKind::Style, "h"), unserved.clone());
+    assert_eq!(live.add_inline(AssetKind::Script, "h", "", false), unserved);
+    assert!(live.public_post_type("attachment") && live.public_post_type("post"));
+    assert!(live.public_post_type("page") && !live.public_post_type("ext_item"));
+    assert_eq!(live.translate("ext", "Hello", Some("ctx")), "Hello");
+    let forms = ("item", "items");
+    let plural = [0, 1, 2].map(|n| live.translate_plural("ext", forms, n, None));
+    assert_eq!(plural, ["items", "item", "items"]);
+    assert!(live.now() > 1_700_000_000);
+}
+
+/// The plugin files of `active_plugins`: its strings, as text.
+#[test]
+fn active_plugins_files() {
+    let listed = [
+        (Key::Int(0), text("a/a.php")),
+        (Key::Int(1), Value::String(vec![0xff])),
+        (Key::Int(2), Value::Int(3)),
+        (Key::Int(3), text("b.php")),
+    ];
+    assert_eq!(files(&listed), ["a/a.php", "b.php"]);
+    assert!(dispatch(&None).is_none());
+}
+
+/// A fault is logged with its extension, hook, callback and fault.
+#[test]
+fn faults_are_logged() {
+    let report = Report {
+        extension: "ext".into(),
+        hook: "the_content".into(),
+        callback: Some(3),
+        fault: hyscribe_ext::Fault::Timeout,
+    };
+    let mut out = Vec::new();
+    log(&[report.clone(), report], &mut out);
+    let line = "extension ext: the_content Some(3): Timeout\n";
+    assert_eq!(String::from_utf8(out).unwrap(), line.repeat(2));
+}
+
+/// A panic in the extensions' thread is the action's.
+#[tokio::test(flavor = "multi_thread")]
+#[should_panic(expected = "in the extensions' thread")]
+async fn a_panic_on_the_extensions_thread_is_the_action_s() {
+    let dir = tempfile::tempdir().unwrap();
+    install(dir.path());
+    let runtime = hyscribe_ext::Runtime::new(dir.path());
+    let found = installed::find(dir.path(), FILE).unwrap();
+    let mut acted = Acted::new(|live| runtime.activating(&[], &found, live)).unwrap();
+    assert_eq!(acted.reports(), Vec::new());
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    let writer = writer.unwrap().unwrap();
+    let mut write = writer.begin().await.unwrap();
+    acted
+        .run(&mut write, |_| panic!("in the extensions' thread"))
+        .await;
+}

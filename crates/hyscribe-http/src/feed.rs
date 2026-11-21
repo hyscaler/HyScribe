@@ -217,7 +217,7 @@ pub(crate) async fn respond(
     }
     let rendering = Arc::clone(&site);
     let Page { request, title, .. } = page;
-    let body = tokio::task::spawn_blocking(move || {
+    let body = tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
         let reads = Reads::new(&rendering, tokio::runtime::Handle::current());
         let last = feed.last_post.as_deref();
         let (theme, title) = (&rendering.theme, title.as_bytes());
@@ -242,7 +242,7 @@ pub(crate) async fn respond(
             (Format::Rss092 | Format::Invalid, _) => rss092(theme, &reads, &request, title, last),
         };
         reads.finish().map(|()| made)
-    })
+    }))
     .await;
     let status = if feed.not_found {
         StatusCode::NOT_FOUND

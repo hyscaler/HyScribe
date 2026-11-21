@@ -557,7 +557,12 @@ pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
     let site = Arc::clone(site);
     let now = now();
     let handle = Handle::current();
-    joined(tokio::task::spawn_blocking(move || answer(&site, &asked, now, handle)).await)
+    joined(
+        tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
+            answer(&site, &asked, now, handle)
+        }))
+        .await,
+    )
 }
 
 /// The answer, or a server error if working it out panicked.

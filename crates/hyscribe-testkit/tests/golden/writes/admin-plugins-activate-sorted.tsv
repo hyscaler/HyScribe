@@ -1,8 +1,13 @@
 # The rows PHP WordPress writes for the action admin-plugins-activate-sorted (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-21 00:51:29 to 2026-11-21 00:51:29 UTC.
-# %wp_options:1% is 131.
+# %now% and %unix% stand for times from 2026-11-21 09:15:12 to 2026-11-21 09:15:12 UTC.
+# %wp_options:1% is 132.
+# %wp_options:2% is 133.
 wp_options	active_plugins	~	option_value	a:1:{i:0;s:23:"wordfence/wordfence.php";}	a:2:{i:0;s:31:"hyscribe-test/hyscribe-test.php";i:1;s:23:"wordfence/wordfence.php";}
+wp_options	ext_active	+	autoload	auto
+wp_options	ext_active	+	option_id	%wp_options:1%
+wp_options	ext_active	+	option_name	ext_active
+wp_options	ext_active	+	option_value	1
 wp_options	recently_activated	+	autoload	off
-wp_options	recently_activated	+	option_id	%wp_options:1%
+wp_options	recently_activated	+	option_id	%wp_options:2%
 wp_options	recently_activated	+	option_name	recently_activated
 wp_options	recently_activated	+	option_value	a:1:{i:0;b:0;}

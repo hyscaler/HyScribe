@@ -16,6 +16,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Debug;
 use core::hint::black_box;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use hyscribe_sdk::assets::{self, Asset, AssetKind};
 use hyscribe_sdk::bindings::hyscribe::sdk::hooks as raw_hooks;
@@ -60,6 +61,8 @@ hyscribe_sdk::callbacks! {
         Deep => deep,
         Count => count,
         Nest => nest,
+        BodyClass => body_class,
+        Footer => footer,
     }
 }
 
@@ -132,6 +135,47 @@ fn seen(args: Vec<Value>) -> Answer {
 /// the extension that fired the outer chain is running and is skipped.
 fn nest(args: Vec<Value>) -> Answer {
     Ok(hooks::filter::<Guest>("ext_chain", Value::Text(first(&args)), &[]))
+}
+
+/// The page hooks' calls in this instance: a fresh instance per request
+/// starts again at one, whatever other requests ran.
+static CALLS: AtomicU32 = AtomicU32::new(0);
+
+/// What the option `ext_hooks` holds: whether the page hooks change the
+/// page, and `trap` or `refuse` to misbehave, activation included.
+fn switched() -> Option<String> {
+    match options::get("ext_hooks") {
+        Ok(Some(Value::Text(on))) => Some(on),
+        _ => None,
+    }
+}
+
+/// `body_class`: two classes added to the list, which crosses as JSON.
+fn body_class(args: Vec<Value>) -> Answer {
+    let classes = args.into_iter().next().unwrap_or(Value::Null);
+    match (switched().as_deref(), classes) {
+        (Some("trap"), _) => trap(Vec::new()),
+        (Some(_), Value::Json(list)) => {
+            let calls = CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+            let open = list.strip_suffix(']').unwrap_or("[");
+            let comma = if open.ends_with('[') { "" } else { "," };
+            Ok(Value::Json(format!("{open}{comma}\"ext-body\",\"ext-n{calls}\"]")))
+        }
+        (_, classes) => Ok(classes),
+    }
+}
+
+/// `admin_footer_text`: a span added to the text.
+fn footer(args: Vec<Value>) -> Answer {
+    let footer = args.into_iter().next().unwrap_or(Value::Null);
+    match (switched().as_deref(), footer) {
+        (Some("trap"), _) => trap(Vec::new()),
+        (Some(_), Value::Text(footer)) => {
+            let calls = CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+            text(format!("{footer}<span id=\"ext-footer\">ext-n{calls}</span>"))
+        }
+        (_, footer) => Ok(footer),
+    }
 }
 
 fn bad_json(_: Vec<Value>) -> Answer {
@@ -516,7 +560,7 @@ Err(SdkError::Invalid("../x is not a folder inside the package"))
 Err(SdkError::Denied("user_has_cap is not in the manifest"))
 Err(SdkError::Denied("the_content is not in the manifest"))"#;
 
-const FILTERS: [(&str, Cb, i32, u32); 26] = [
+const FILTERS: [(&str, Cb, i32, u32); 28] = [
     ("the_content", Cb::Content, 10, 1),
     ("ext_trap", Cb::Trap, 10, 1),
     ("ext_loop", Cb::Spin, 10, 1),
@@ -543,6 +587,8 @@ const FILTERS: [(&str, Cb, i32, u32); 26] = [
     ("ext_count", Cb::Count, 10, 2),
     ("map_meta_cap", Cb::Echo, 10, 1),
     ("ext_nest", Cb::Nest, 10, 1),
+    ("body_class", Cb::BodyClass, 10, 1),
+    ("admin_footer_text", Cb::Footer, 10, 1),
 ];
 
 fn why(e: SdkError) -> String {
@@ -569,13 +615,20 @@ impl Plugin for Guest {
     }
 
     fn activate() -> Result<(), String> {
-        options::add("ext_active", &Value::Bool(true), None).map(|_| ()).map_err(why)
+        match switched().as_deref() {
+            Some("trap") => trap(Vec::new()).map(|_| ()),
+            Some("refuse") => Err("refused".into()),
+            _ => options::add("ext_active", &Value::Bool(true), None).map(|_| ()).map_err(why),
+        }
     }
 
     fn deactivate() -> Result<(), String> {
-        match options::get("ext_active").map_err(why)? {
-            Some(Value::Bool(true)) => trap(Vec::new()).map(|_| ()),
-            _ => Err("not active".into()),
+        if switched().as_deref() == Some("trap") {
+            return trap(Vec::new()).map(|_| ());
+        }
+        match options::delete("ext_active").map_err(why)? {
+            true => Ok(()),
+            false => Err("not active".into()),
         }
     }
 

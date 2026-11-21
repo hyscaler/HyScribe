@@ -123,7 +123,7 @@ fuzz_target!(|wasm: &[u8]| {
         };
         match host.load(package) {
             Ok(extension) => {
-                let extensions = Arc::new(Extensions::new(vec![extension]));
+                let extensions = Arc::new(Extensions::new(vec![Arc::new(extension)]));
                 let request = Request::new(host, &extensions, Arc::new(Empty));
                 request.filter("the_content", Value::String(b"<p>x</p>".to_vec()), &[]);
                 let _ = request.activate(0);

@@ -71,6 +71,10 @@ fn installed_plugins_are_listed_as_php_lists_them() {
         let [variant, query, role, page] = line.split('\t').collect::<Vec<_>>()[..] else {
             panic!("{line}");
         };
+        // The test extension's footer, which only the extension writes.
+        if variant == "x13hooks" {
+            continue;
+        }
         count += 1;
         let php = folder(&hs_admin_page(&String::from_utf8(unhex(page)).unwrap()));
         let site = Role(Box::leak(format!("{variant}:{role}").into_boxed_str()));
@@ -100,7 +104,7 @@ fn installed_plugins_are_listed_as_php_lists_them() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(count, 12);
+    assert_eq!(count, 14);
 }
 
 #[test]
@@ -113,15 +117,20 @@ fn args_are_those_the_port_takes() {
             notice: None
         })
     );
-    let notice = |query| parsed(query).unwrap().notice;
+    let notice = |query| parsed(query).unwrap().notice.map(|(notice, _)| notice);
     assert_eq!(notice("deactivate=true"), Some("Plugin deactivated."));
     assert_eq!(notice("deactivate=1&activate=1"), Some("Plugin activated."));
+    assert_eq!(
+        notice("activate=1&error=1&plugin=x&_error_nonce=y"),
+        Some(FATAL)
+    );
     assert_eq!(notice(""), None);
     for query in [
         "paged=2",
         "s=x",
         "orderby=name",
-        "error=true",
+        "error=resuming",
+        "charsout=3",
         "deleted=1",
         "a[]=1",
     ] {

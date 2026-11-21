@@ -308,13 +308,13 @@ impl Extension {
 /// The active extensions, in load order, and each hook's callbacks across
 /// them by priority, then in the order added, as WordPress runs them.
 pub struct Extensions {
-    pub(crate) list: Vec<Extension>,
+    pub(crate) list: Vec<Arc<Extension>>,
     pub(crate) chains: BTreeMap<String, Vec<(usize, usize)>>,
 }
 
 impl Extensions {
     /// The active set, in the order the extensions load.
-    pub fn new(list: Vec<Extension>) -> Extensions {
+    pub fn new(list: Vec<Arc<Extension>>) -> Extensions {
         let mut chains: BTreeMap<String, Vec<(i32, usize, usize)>> = BTreeMap::new();
         for (ext, extension) in list.iter().enumerate() {
             for (n, hook) in extension.registered.hooks.iter().enumerate() {
@@ -336,7 +336,7 @@ impl Extensions {
     }
 
     /// The extensions, in load order.
-    pub fn list(&self) -> &[Extension] {
+    pub fn list(&self) -> &[Arc<Extension>] {
         &self.list
     }
 

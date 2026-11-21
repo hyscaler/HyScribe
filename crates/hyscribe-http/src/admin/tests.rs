@@ -807,9 +807,10 @@ async fn the_block_editor_s_refusals() {
     }
 }
 
-/// `page` with its nonces, ten hexadecimal digits standing alone, and its
-/// time masked, as the hashed goldens hold them.
+/// `page` with its nonces, ten hexadecimal digits standing alone, its time
+/// and its footer's HyScribe version masked, as the hashed goldens hold them.
 pub(super) fn masked_nonces(page: &str) -> String {
+    let page = hyscribe_testkit::footer_version(page, "%version%");
     let mut out = String::new();
     let mut word = String::new();
     for c in page.chars().chain(['\0']) {

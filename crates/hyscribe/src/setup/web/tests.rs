@@ -817,6 +817,9 @@ fn a_new_site_is_installed_through_the_pages() {
             "{}",
             page.body
         );
+        // WordPress is named only as the install a site comes from (ADR 0008).
+        assert!(page.body.contains("<h1>Step 2 of 3: the site</h1>"));
+        assert_eq!(page.body.matches("WordPress").count(), 1, "{}", page.body);
         let answer = ask(&shared, "POST", STEP_2, SIGNED_IN, &[csrf, ("new", "1")]).await;
         assert_eq!(answer.location(), STEP_3);
         let page = ask(&shared, "GET", STEP_3, SIGNED_IN, &[]).await;

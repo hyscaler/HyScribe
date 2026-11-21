@@ -12,6 +12,7 @@ pub mod die;
 pub mod editor;
 pub mod list_table;
 pub mod login;
+mod look;
 pub mod media;
 pub mod menu;
 pub mod page;

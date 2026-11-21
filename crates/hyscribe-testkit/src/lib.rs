@@ -251,7 +251,21 @@ pub fn hs_admin_page(page: &str) -> String {
     for prefix in ["href='", "href=\"", "action='", "action=\"", "\"url\":\""] {
         page = admin_paths(&page, prefix, prefix);
     }
-    page
+    footer_version(&page, env!("CARGO_PKG_VERSION"))
+}
+
+/// `page` with the HyScribe version of its admin footer as `version`, so a
+/// page the oracle recorded under an earlier version still compares.
+pub fn footer_version(page: &str, version: &str) -> String {
+    const LINE: &str = "<p id=\"footer-upgrade\" class=\"alignright\">\n\t\tHyScribe ";
+    match page.split_once(LINE) {
+        Some((head, tail)) => {
+            let rest = tail.find('\t').and_then(|end| tail.get(end..));
+            let rest = rest.unwrap_or_default();
+            format!("{head}{LINE}{version}{rest}")
+        }
+        None => page.to_string(),
+    }
 }
 
 /// Path of a file or folder under the repository's `fixtures/` directory.
@@ -416,6 +430,15 @@ mod tests {
             ""
         );
         assert_eq!(hs_admin_page("plain"), "plain");
+        let footer = "<p id=\"footer-upgrade\" class=\"alignright\">\n\t\tHyScribe ";
+        assert_eq!(
+            hs_admin_page(&format!("{footer}0.0.9\t</p>")),
+            format!("{footer}{}\t</p>", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            footer_version(&format!("a{footer}1.2"), "%version%"),
+            format!("a{footer}%version%")
+        );
         let page = "x <a href=\"mailto:a&#064;b\">a&#64;b&#9999;&#x41;&#</a> value=\"pagegen_timestamp\" value=\"1\" y";
         assert_eq!(
             settled_page(&page.replace("value=\"pagegen", "name=\"pagegen")),

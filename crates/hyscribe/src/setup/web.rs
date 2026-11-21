@@ -531,7 +531,7 @@ fn locate_page(wizard: &Wizard, status: StatusCode, error: &str) -> Response {
          <textarea id=\"contents\" name=\"contents\" rows=\"12\"></textarea></p>\n\
          <p>Leave both empty to enter the database details by hand.</p>\n\
          <p><label><input type=\"checkbox\" name=\"new\" value=\"1\"> This is a new site: \
-         install WordPress in an empty database, as its own installer would</label></p>\n\
+         create its tables and first content in an empty database</label></p>\n\
          <p><button>Continue</button></p>\n</form>\n",
         notice(error),
         hidden(&wizard.tokens.csrf),
@@ -542,7 +542,7 @@ fn locate_page(wizard: &Wizard, status: StatusCode, error: &str) -> Response {
             false
         ),
     );
-    page(status, "Step 2 of 3: the WordPress site", &body)
+    page(status, "Step 2 of 3: the site", &body)
 }
 
 /// Step 3: what `wp-config.php` did not give, the mode, the network and the

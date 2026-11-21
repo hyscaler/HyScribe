@@ -104,3 +104,67 @@ add_filter(
 	10,
 	3
 );
+
+// The footer's version line names HyScribe's version; look.sh writes it in.
+add_filter(
+	'update_footer',
+	function () {
+		return 'HyScribe @HYSCRIBE_VERSION@';
+	},
+	11
+);
+
+// Block descriptions core translates with their context, as the editor's
+// server-side block definitions carry them.
+const HYSCRIBE_LOOK_BLOCK_TEXT = array(
+	'Use the classic WordPress editor.' => 'Use the classic editor.',
+	'Insert additional custom elements with a WordPress shortcode.' => 'Insert additional custom elements with a shortcode.',
+	'Displays a link to edit the comment in the WordPress Dashboard. This link is only visible to users with the edit comment capability.' => 'Displays a link to edit the comment in the Dashboard. This link is only visible to users with the edit comment capability.',
+);
+
+add_filter(
+	'gettext_with_context',
+	function ( $translation, $text, $context, $domain ) {
+		if ( 'default' !== $domain || 'block description' !== $context || ! is_admin() ) {
+			return $translation;
+		}
+		return HYSCRIBE_LOOK_BLOCK_TEXT[ $text ] ?? $translation;
+	},
+	10,
+	4
+);
+
+// Strings of WordPress's script bundles, given to wp.i18n as the locale data
+// WordPress prints for a script's translations, so the bundles stay as released.
+const HYSCRIBE_LOOK_SCRIPT_TEXT = array(
+	'wp-block-editor'  => array(
+		'Patterns are available from the <Link>WordPress.org Pattern Directory</Link>, bundled in the active theme, or created by users on this site. Only patterns created on this site can be synced.' => 'Patterns are available from the <Link>Pattern Directory</Link>, bundled in the active theme, or created by users on this site. Only patterns created on this site can be synced.',
+	),
+	'wp-block-library' => array(
+		'A WordPress Commenter'          => 'A Commenter',
+		'Reply to A WordPress Commenter' => 'Reply to A Commenter',
+		'Site Icons are what you see in browser tabs, bookmark bars, and within the WordPress mobile apps. To use a custom icon that is different from your site logo, use the <a>Site Icon settings</a>.' => 'Site Icons are what you see in browser tabs, bookmark bars, and within mobile apps. To use a custom icon that is different from your site logo, use the <a>Site Icon settings</a>.',
+	),
+	'wp-edit-post'     => array(
+		'In the WordPress editor, each paragraph, image, or video is presented as a distinct “block” of content.' => 'In the editor, each paragraph, image, or video is presented as a distinct “block” of content.',
+	),
+	'wp-edit-site'     => array(
+		'%1$s ‹ %2$s ‹ Editor — WordPress' => '%1$s ‹ %2$s ‹ Editor — HyScribe',
+	),
+);
+
+add_filter(
+	'pre_load_script_translations',
+	function ( $translations, $file, $handle, $domain ) {
+		if ( 'default' !== $domain || ! is_admin() || ! isset( HYSCRIBE_LOOK_SCRIPT_TEXT[ $handle ] ) ) {
+			return $translations;
+		}
+		$messages = array( '' => array( 'domain' => 'messages' ) );
+		foreach ( HYSCRIBE_LOOK_SCRIPT_TEXT[ $handle ] as $text => $translation ) {
+			$messages[ $text ] = array( $translation );
+		}
+		return wp_json_encode( array( 'locale_data' => array( 'messages' => $messages ) ) );
+	},
+	10,
+	4
+);

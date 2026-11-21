@@ -194,6 +194,10 @@ pub fn plugins(
     installed: &[Plugin],
     args: &Args,
 ) -> Option<Answer> {
+    // Refused as PHP refuses, before anything is read.
+    if !site.can("activate_plugins") {
+        return Some(Answer::from_page(None));
+    }
     let active = active_plugins(site.option("active_plugins"))?;
     let now = site.clock().1;
     let recent = recently_activated(site.option("recently_activated").as_deref(), now)?;
@@ -496,35 +500,24 @@ fn single_row(
             text(&urlencode(plugin.file.as_bytes()))
         )
     };
-    let mut actions = Vec::new();
-    // `activate_plugin` and `deactivate_plugin` both map to `activate_plugins`.
-    let may = site.can("activate_plugins");
-    if active && may {
-        let href = nonce_link(
-            site,
-            &url("deactivate"),
-            &format!("deactivate-plugin_{}", plugin.file),
-        );
-        let label = esc_attr(format!("Deactivate {name}").as_bytes());
-        actions.push((
-            "deactivate",
-            format!(
-                "<a href=\"{href}\" id=\"deactivate-{}\" aria-label=\"{label}\">Deactivate</a>",
-                esc_attr(id.as_bytes())
-            ),
-        ));
-    } else if may {
-        let href = nonce_link(
-            site,
-            &url("activate"),
-            &format!("activate-plugin_{}", plugin.file),
-        );
-        let label = esc_attr(format!("Activate {name}").as_bytes());
-        actions.push((
-            "activate",
-            format!("<a href=\"{href}\" id=\"activate-{}\" class=\"edit\" aria-label=\"{label}\">Activate</a>", esc_attr(id.as_bytes())),
-        ));
-    }
+    // `activate_plugin` and `deactivate_plugin` both map to `activate_plugins`,
+    // which the screen asked for already.
+    let (action, label, edit) = if active {
+        ("deactivate", "Deactivate", "")
+    } else {
+        ("activate", "Activate", " class=\"edit\"")
+    };
+    let href = nonce_link(
+        site,
+        &url(action),
+        &format!("{action}-plugin_{}", plugin.file),
+    );
+    let aria = esc_attr(format!("{label} {name}").as_bytes());
+    let link = format!(
+        "<a href=\"{href}\" id=\"{action}-{}\"{edit} aria-label=\"{aria}\">{label}</a>",
+        esc_attr(id.as_bytes())
+    );
+    let actions = [(action, link)];
     let class = if active { "active" } else { "inactive" };
     let checkbox = format!(
         "<label class=\"label-covers-full-cell\" for=\"checkbox_{0}\"><span class=\"screen-reader-text\">Select {name}</span></label><input type=\"checkbox\" name=\"checked[]\" value=\"{1}\" id=\"checkbox_{0}\" />",

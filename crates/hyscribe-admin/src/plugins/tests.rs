@@ -147,6 +147,9 @@ fn unusual_active_plugins_are_not_ported() {
     let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
     let site = Role("o36bad:administrator");
     assert_eq!(plugins(&site, &request, &[], &Args::default()), None);
+    let editor = Role("o36bad:editor");
+    let refused = plugins(&editor, &request, &[], &Args::default());
+    assert!(matches!(refused, Some(Answer::Denied(_))));
     let site = Role("x13badrecent:administrator");
     assert_eq!(plugins(&site, &request, &[], &Args::default()), None);
     // One who may not activate gets no Activate link, nor the screen.

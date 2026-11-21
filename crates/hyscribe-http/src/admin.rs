@@ -1491,8 +1491,7 @@ fn screen(
         // Nobody may update here (the updates are HyScribe's releases, an open question;
         // `update_core` is never granted): refused as PHP refuses the menu.
         "/hs-admin/update-core" => Answer::from_page(None),
-        // Refused as PHP refuses; the installed extensions listed.
-        "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
+        // The installed extensions listed.
         "/hs-admin/plugins" => {
             let installed = admin.site.installed_plugins();
             plugins(admin, &request, &installed, &PluginArgs::parse(query)?)?

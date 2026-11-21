@@ -1312,6 +1312,13 @@ fn plugin_install() {
         "{}",
         missing.err
     );
+    // One byte more than a package may hold is read, and refused.
+    std::fs::File::create(&file)
+        .unwrap()
+        .set_len(hyscribe_ext::hyx::MAX_TOTAL + 1)
+        .unwrap();
+    let large = run_with(&["plugin", "install", path], &[], home.path());
+    assert!(large.err.contains("a package is at most"), "{}", large.err);
     std::fs::write(&file, "not a package").unwrap();
     let refused = run_with(&["plugin", "install", path], &[], home.path());
     assert_eq!(

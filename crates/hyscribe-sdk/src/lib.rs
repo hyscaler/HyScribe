@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! HyScribe's extension SDK 0.1 (ADR 0022): a WordPress plugin ported to
+//! HyScribe's extension SDK 0.2 (ADR 0022): a WordPress plugin ported to
 //! Rust and built as a WebAssembly component for `wasm32-wasip2`.
 //!
 //! WordPress's functions keep their names and argument order

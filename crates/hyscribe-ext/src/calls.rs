@@ -1,23 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The SDK's host functions (`hyscribe:sdk@0.1.0`, ADR 0022). Each checks
+//! The SDK's host functions (`hyscribe:sdk@0.2.0`, ADR 0022). Each checks
 //! its grant in the store's state before it touches anything, and answers
 //! `sdk-error.denied` otherwise; registrations are taken in `init` only,
 //! and everything else in a request only.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use hyscribe_phpser::{Value, json_decode, lookup};
-use wasmtime::StoreContextMut;
 use wasmtime::component::types::ComponentFunc;
 use wasmtime::component::{ComponentType, Lift, Linker, Lower, Val};
+use wasmtime::{AsContextMut, StoreContextMut};
 
 use crate::extension::{Block, Hook, MetaKey, Registrations, Route, Taxonomy};
 use crate::grants::relative;
 use crate::host::{Chain, Phase, State};
 use crate::request::{Fired, Shared};
 use crate::value::{Lifted, lift, lift_all, lower};
-use crate::{Asset, AssetKind, Found, Message, ObjectKind, Post, Site};
+use crate::{Asset, AssetKind, Caps, Found, Incoming, Message, ObjectKind, Outgoing, Post, Site};
 
 /// Why the host refused or failed a call (`types.sdk-error`).
 #[derive(ComponentType, Lower, Debug, PartialEq, Eq)]
@@ -194,16 +195,31 @@ fn result_val(result: Result<Option<Val>, SdkError>) -> Val {
     Val::Result(result.map(|value| value.map(Box::new)).map_err(error))
 }
 
-/// A host function of `Val`s: its one result from the store and its params.
+/// A host function of `Val`s: its one result from the store and its
+/// params, its time counted as the host's.
 fn dynamic(
     answer: impl Fn(&mut State, &[Val]) -> Val + Send + Sync + 'static,
 ) -> impl Fn(Cx<'_>, ComponentFunc, &[Val], &mut [Val]) -> wasmtime::Result<()> + Send + Sync + 'static
 {
     move |mut cx, _, params, results| {
+        let started = Instant::now();
         let value = answer(cx.data_mut(), params);
         let slots = results.iter_mut().zip([value]);
         slots.for_each(|(result, value)| *result = value);
+        cx.data_mut().host += started.elapsed();
         Ok(())
+    }
+}
+
+/// A typed host function whose time counts as the host's, not the call's.
+fn timed<P, R>(
+    call: impl Fn(Cx<'_>, P) -> wasmtime::Result<R> + Send + Sync + 'static,
+) -> impl Fn(Cx<'_>, P) -> wasmtime::Result<R> + Send + Sync + 'static {
+    move |mut cx, params| {
+        let started = Instant::now();
+        let answer = call(cx.as_context_mut(), params);
+        cx.data_mut().host += started.elapsed();
+        answer
     }
 }
 
@@ -228,6 +244,21 @@ type Live<'a> = (&'a Arc<dyn Site>, Arc<Shared>, usize);
 const IN_INIT: &str = "registered in init only";
 const IN_REQUEST: &str = "runs in a request, not in init";
 const METHODS: [&str; 5] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+
+/// The headers the client sets itself, which an extension's request does not.
+const OWN_HEADERS: [&str; 11] = [
+    "accept-encoding",
+    "connection",
+    "content-length",
+    "expect",
+    "host",
+    "keep-alive",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
 
 impl State {
     /// The request this store runs in: its site, its shared state and the
@@ -382,6 +413,118 @@ fn set_option(
 fn delete_option(state: &State, name: &str) -> Result<bool, SdkError> {
     state.grants.option(name).map_err(denied)?;
     state.site()?.delete_option(name).map_err(failed)
+}
+
+/// The transient's grant, and a name whose timeout option fits the 191
+/// characters of `option_name` after `_transient_timeout_` or its site form.
+fn transient(state: &State, name: &str, site: bool) -> Result<(), SdkError> {
+    state.grants.transient(name, site).map_err(denied)?;
+    let most = if site { 167 } else { 172 };
+    if name.chars().count() > most {
+        return Err(SdkError::Invalid(format!(
+            "a transient name is at most {most} characters"
+        )));
+    }
+    Ok(())
+}
+
+fn get_transient(state: &State, (name, site): (String, bool)) -> Result<Option<Lifted>, SdkError> {
+    transient(state, &name, site)?;
+    let value = state.site()?.get_transient(&name, site).map_err(failed)?;
+    value.as_ref().map(crossed).transpose()
+}
+
+fn set_transient(
+    state: &State,
+    (name, value, expiration, site): (String, Lifted, i64, bool),
+) -> Result<bool, SdkError> {
+    transient(state, &name, site)?;
+    let host = state.site()?;
+    host.set_transient(&name, lifted(value)?, expiration, site)
+        .map_err(failed)
+}
+
+fn delete_transient(state: &State, (name, site): (String, bool)) -> Result<bool, SdkError> {
+    transient(state, &name, site)?;
+    state.site()?.delete_transient(&name, site).map_err(failed)
+}
+
+fn get_role(state: &State, role: &str) -> Result<Option<Caps>, SdkError> {
+    state.site()?.role(role).map_err(failed)
+}
+
+fn add_role(
+    state: &State,
+    (role, display_name, caps): (String, String, Caps),
+) -> Result<bool, SdkError> {
+    state.grants.role(&role).map_err(denied)?;
+    for (cap, _) in &caps {
+        state.grants.capability(cap).map_err(denied)?;
+    }
+    let site = state.site()?;
+    site.add_role(&role, &display_name, &caps).map_err(failed)
+}
+
+fn remove_role(state: &State, role: &str) -> Result<bool, SdkError> {
+    state.grants.role(role).map_err(denied)?;
+    state.site()?.remove_role(role).map_err(failed)
+}
+
+/// A role's capability given, denied, or taken away without a grant.
+fn role_cap(state: &State, role: &str, cap: &str, grant: Option<bool>) -> Result<bool, SdkError> {
+    state.grants.capability(cap).map_err(denied)?;
+    state.site()?.role_cap(role, cap, grant).map_err(failed)
+}
+
+/// The host of an HTTP or HTTPS URL.
+fn url_host(url: &str) -> Option<String> {
+    let parts = hyscribe_kses::parse_url(url.as_bytes())?;
+    let scheme = parts.scheme?;
+    let web = scheme.eq_ignore_ascii_case(b"http") || scheme.eq_ignore_ascii_case(b"https");
+    let host = parts.host.filter(|host| web && !host.is_empty())?;
+    String::from_utf8(host).ok()
+}
+
+/// A header an extension may send: a token for a name, not one of the
+/// client's own, and a value without line breaks or NUL.
+fn header((name, value): &(String, String)) -> bool {
+    let token = |b: u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b);
+    !name.is_empty()
+        && name.bytes().all(token)
+        && !OWN_HEADERS.contains(&name.to_ascii_lowercase().as_str())
+        && !value.contains(['\r', '\n', '\0'])
+}
+
+fn request(
+    state: &State,
+    (method, url, headers, body, timeout): (String, String, Vec<(String, String)>, Vec<u8>, u32),
+) -> Result<Incoming, SdkError> {
+    let host = url_host(&url).ok_or(SdkError::Invalid(format!("{url} is not an HTTP URL")))?;
+    if !state.grants.host(&host) {
+        return Err(denied(format!("host {host} is not in the manifest")));
+    }
+    if !["HEAD", "OPTIONS"]
+        .iter()
+        .chain(&METHODS)
+        .any(|known| *known == method)
+    {
+        return Err(SdkError::Invalid(format!("{method} is not a method")));
+    }
+    if let Some((name, _)) = headers.iter().find(|given| !header(given)) {
+        return Err(SdkError::Invalid(format!(
+            "{name} is not a header it sends"
+        )));
+    }
+    let request = Outgoing {
+        method,
+        url,
+        headers,
+        body,
+        timeout,
+    };
+    let grants = state.grants.clone();
+    let allowed = move |host: &str| grants.host(host);
+    state.site()?.fetch(&request, &allowed).map_err(failed)
 }
 
 fn get_meta(
@@ -656,23 +799,40 @@ fn translate_plural(
     }
 }
 
-/// Defines one interface's functions, each a closure of the store and its
-/// arguments, without an error path that defining them never takes.
+/// A host function timed as the host's: `dynamic` times its own.
+macro_rules! timed {
+    (func_wrap, $body:expr) => {
+        timed($body)
+    };
+    (func_new, $body:expr) => {
+        $body
+    };
+}
+
+/// The SDK versions linked: each minor version only adds interfaces, so
+/// an interface of 0.1 is linked under both names (ADR 0022).
+const VERSIONS: [&str; 2] = ["0.1.0", "0.2.0"];
+
+/// Defines one interface's functions under each version from `since` on,
+/// each a closure of the store and its arguments, without an error path
+/// that defining them never takes.
 macro_rules! interface {
-    ($linker:expr, $name:literal, { $($method:ident $func:literal => $body:expr),* $(,)? }) => {
-        $linker
-            .instance(concat!("hyscribe:sdk/", $name, "@0.1.0"))
-            .and_then(|mut instance| {
-                let defined = [$(instance.$method($func, $body)),*];
-                defined.into_iter().collect::<wasmtime::Result<()>>()
-            })
+    ($linker:expr, $name:literal, $since:literal, { $($method:ident $func:literal => $body:expr),* $(,)? }) => {
+        VERSIONS.iter().skip($since).try_for_each(|version| {
+            $linker
+                .instance(&format!("hyscribe:sdk/{}@{version}", $name))
+                .and_then(|mut instance| {
+                    let defined = [$(instance.$method($func, timed!($method, $body))),*];
+                    defined.into_iter().collect::<wasmtime::Result<()>>()
+                })
+        })
     };
 }
 
 /// Links the SDK's interfaces, and nothing else: no WASI.
 pub(crate) fn link(linker: &mut Linker<State>) -> wasmtime::Result<()> {
     let defined = [
-        interface!(linker, "hooks", {
+        interface!(linker, "hooks", 0, {
             func_wrap "add" => |mut cx: Cx<'_>, args| answer(add(cx.data_mut(), args)),
             func_wrap "remove" => |mut cx: Cx<'_>, args| Ok((remove(cx.data_mut(), args),)),
             func_wrap "chain" => |mut cx: Cx<'_>, (hook,): (String,)| answer(chain(cx.data_mut(), hook)),
@@ -684,24 +844,24 @@ pub(crate) fn link(linker: &mut Linker<State>) -> wasmtime::Result<()> {
                 Ok((cx.data().live().map_or(0, |(_, shared, _)| shared.did_action(&hook)),))
             },
         }),
-        interface!(linker, "options", {
+        interface!(linker, "options", 0, {
             func_wrap "get" => |cx: Cx<'_>, (name,): (String,)| answer(get_option(cx.data(), &name)),
             func_wrap "update" => |cx: Cx<'_>, args| answer(set_option(cx.data(), args, false)),
             func_wrap "add" => |cx: Cx<'_>, args| answer(set_option(cx.data(), args, true)),
             func_wrap "delete" => |cx: Cx<'_>, (name,): (String,)| answer(delete_option(cx.data(), &name)),
         }),
-        interface!(linker, "meta", {
+        interface!(linker, "meta", 0, {
             func_wrap "get" => |cx: Cx<'_>, args| answer(get_meta(cx.data(), args)),
             func_wrap "add" => |cx: Cx<'_>, args| answer(add_meta(cx.data(), args)),
             func_wrap "update" => |cx: Cx<'_>, args| answer(update_meta(cx.data(), args)),
             func_wrap "delete" => |cx: Cx<'_>, args| answer(delete_meta(cx.data(), args)),
             func_wrap "register" => |mut cx: Cx<'_>, args| answer(register_meta(cx.data_mut(), args)),
         }),
-        interface!(linker, "content", {
+        interface!(linker, "content", 0, {
             func_wrap "register-post-type" => |mut cx: Cx<'_>, args| answer(register_post_type(cx.data_mut(), args)),
             func_wrap "register-taxonomy" => |mut cx: Cx<'_>, args| answer(register_taxonomy(cx.data_mut(), args)),
         }),
-        interface!(linker, "query", {
+        interface!(linker, "query", 0, {
             func_new "posts" => dynamic(|state, params| {
                 result_val(query(state, &text(params.first())).map(|found| Some(found_val(found))))
             }),
@@ -710,19 +870,19 @@ pub(crate) fn link(linker: &mut Linker<State>) -> wasmtime::Result<()> {
                 result_val(post.map(|post| Some(Val::Option(post.map(|post| Box::new(post_val(post)))))))
             }),
         }),
-        interface!(linker, "rest", {
+        interface!(linker, "rest", 0, {
             func_new "register" => dynamic(|state, params| {
                 result_val(register_route(state, route_in(params)).map(|()| None))
             }),
         }),
-        interface!(linker, "shortcodes", {
+        interface!(linker, "shortcodes", 0, {
             func_wrap "add" => |mut cx: Cx<'_>, args| answer(add_shortcode(cx.data_mut(), args)),
             func_wrap "remove" => |mut cx: Cx<'_>, (tag,): (String,)| Ok((remove_shortcode(cx.data_mut(), tag),)),
         }),
-        interface!(linker, "blocks", {
+        interface!(linker, "blocks", 0, {
             func_wrap "register" => |mut cx: Cx<'_>, args| answer(register_block(cx.data_mut(), args)),
         }),
-        interface!(linker, "assets", {
+        interface!(linker, "assets", 0, {
             func_new "register" => dynamic(|state, params| {
                 result_val(register_asset(state, asset(params)).map(|()| None))
             }),
@@ -735,17 +895,17 @@ pub(crate) fn link(linker: &mut Linker<State>) -> wasmtime::Result<()> {
                 answer(site.and_then(|site| site.add_inline(kind, &handle, &data, before).map_err(failed)))
             },
         }),
-        interface!(linker, "cron", {
+        interface!(linker, "cron", 0, {
             func_wrap "schedule" => |cx: Cx<'_>, args| answer(schedule(cx.data(), args)),
             func_wrap "unschedule" => |cx: Cx<'_>, args| answer(unschedule(cx.data(), args)),
             func_wrap "next" => |cx: Cx<'_>, args| Ok((next_scheduled(cx.data(), args),)),
         }),
-        interface!(linker, "mail", {
+        interface!(linker, "mail", 0, {
             func_new "send" => dynamic(|state, params| {
                 result_val(send(state, &message(params)).map(|sent| Some(Val::Bool(sent))))
             }),
         }),
-        interface!(linker, "auth", {
+        interface!(linker, "auth", 0, {
             func_wrap "current-user" => |cx: Cx<'_>, (): ()| Ok((cx.data().site().map_or(0, |site| site.current_user()),)),
             func_wrap "user-can" => |cx: Cx<'_>, args| Ok((user_can(cx.data(), args),)),
             func_wrap "create-nonce" => |cx: Cx<'_>, (action,): (String,)| {
@@ -755,9 +915,28 @@ pub(crate) fn link(linker: &mut Linker<State>) -> wasmtime::Result<()> {
                 Ok((cx.data().site().map_or(0, |site| site.verify_nonce(&nonce, &action)),))
             },
         }),
-        interface!(linker, "i18n", {
+        interface!(linker, "i18n", 0, {
             func_wrap "translate" => |cx: Cx<'_>, args| Ok((translate(cx.data(), args),)),
             func_wrap "translate-plural" => |cx: Cx<'_>, args| Ok((translate_plural(cx.data(), args),)),
+        }),
+        interface!(linker, "transients", 1, {
+            func_wrap "get" => |cx: Cx<'_>, args| answer(get_transient(cx.data(), args)),
+            func_wrap "set" => |cx: Cx<'_>, args| answer(set_transient(cx.data(), args)),
+            func_wrap "delete" => |cx: Cx<'_>, args| answer(delete_transient(cx.data(), args)),
+        }),
+        interface!(linker, "http", 1, {
+            func_wrap "send" => |cx: Cx<'_>, args| answer(request(cx.data(), args)),
+        }),
+        interface!(linker, "roles", 1, {
+            func_wrap "get" => |cx: Cx<'_>, (role,): (String,)| answer(get_role(cx.data(), &role)),
+            func_wrap "add" => |cx: Cx<'_>, args| answer(add_role(cx.data(), args)),
+            func_wrap "remove" => |cx: Cx<'_>, (role,): (String,)| answer(remove_role(cx.data(), &role)),
+            func_wrap "add-cap" => |cx: Cx<'_>, (role, cap, grant): (String, String, bool)| {
+                answer(role_cap(cx.data(), &role, &cap, Some(grant)))
+            },
+            func_wrap "remove-cap" => |cx: Cx<'_>, (role, cap): (String, String)| {
+                answer(role_cap(cx.data(), &role, &cap, None))
+            },
         }),
     ];
     defined.into_iter().collect()

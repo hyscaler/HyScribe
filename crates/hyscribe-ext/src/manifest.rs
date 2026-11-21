@@ -25,7 +25,7 @@ const MAX_NAME: usize = 255;
 const MAX_TEXT: usize = 1_000;
 
 /// The SDK versions the host links (ADR 0022).
-const SDK: [&str; 1] = ["0.1"];
+const SDK: [&str; 2] = ["0.1", "0.2"];
 
 /// What a package is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,7 +66,7 @@ pub struct Manifest {
     /// `plugin_uri`, its `Plugin URI` header.
     pub plugin_uri: String,
     /// What it asks for: `[capabilities]`, `[hooks]`, `[meta]`,
-    /// `[taxonomies]` and `[rest]`.
+    /// `[taxonomies]`, `[rest]`, `[transients]`, `[roles]` and `[http]`.
     pub grants: Grants,
     /// `[limits]`.
     pub limits: Limits,
@@ -92,6 +92,9 @@ impl Manifest {
         let mut meta = taken("meta");
         let mut taxonomies = taken("taxonomies");
         let mut rest = taken("rest");
+        let mut transients = taken("transients");
+        let mut roles = taken("roles");
+        let mut http = taken("http");
         let limits = taken("limits");
         if let Some((table, _)) = tables.first() {
             return Err(format!("{FILE} has no table [{table}]"));
@@ -131,6 +134,11 @@ impl Manifest {
                 read_taxonomies: taxonomies.names("read"),
                 taxonomies: taxonomies.names("write"),
                 rest: rest.names("namespaces"),
+                transients: transients.names("names"),
+                site_transients: transients.names("site"),
+                roles: roles.names("names"),
+                capabilities: roles.names("capabilities"),
+                hosts: http.names("hosts"),
             },
             limits: limits.limits()?,
         };
@@ -145,7 +153,17 @@ impl Manifest {
                     .into(),
             );
         }
-        for keys in [extension, capabilities, hooks, meta, taxonomies, rest] {
+        for keys in [
+            extension,
+            capabilities,
+            hooks,
+            meta,
+            taxonomies,
+            rest,
+            transients,
+            roles,
+            http,
+        ] {
             keys.done()?;
         }
         manifest.check()?;

@@ -112,6 +112,28 @@ pub struct Asset {
     pub placement: String,
 }
 
+/// A role's capabilities, each granted or denied (`roles.capability`).
+pub type Caps = Vec<(String, bool)>;
+
+/// An extension's request (`http.send`), its host granted and its method
+/// and headers checked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Outgoing {
+    /// The method, upper case.
+    pub method: String,
+    /// The URL.
+    pub url: String,
+    /// The headers it adds.
+    pub headers: Vec<(String, String)>,
+    /// The body.
+    pub body: Vec<u8>,
+    /// The timeout, in seconds.
+    pub timeout: u32,
+}
+
+/// An answer: its status, its headers (names in lower case) and its body.
+pub type Incoming = (u16, Vec<(String, Vec<u8>)>, Vec<u8>);
+
 /// The site a request runs on. Each call's grant is checked before it is
 /// made; errors answer `sdk-error.failed`.
 pub trait Site: Send + Sync {
@@ -130,6 +152,40 @@ pub trait Site: Send + Sync {
     fn add_option(&self, name: &str, value: Value, autoload: Option<bool>) -> Result<bool, String>;
     /// `delete_option( $name )`.
     fn delete_option(&self, name: &str) -> Result<bool, String>;
+    /// `get_transient( $name )`, or `get_site_transient()`: none for a
+    /// missing or expired one, which it deletes.
+    fn get_transient(&self, name: &str, site: bool) -> Result<Option<Value>, String>;
+    /// `set_transient( $name, $value, $expiration )`, or `set_site_transient()`.
+    fn set_transient(
+        &self,
+        name: &str,
+        value: Value,
+        expiration: i64,
+        site: bool,
+    ) -> Result<bool, String>;
+    /// `delete_transient( $name )`, or `delete_site_transient()`.
+    fn delete_transient(&self, name: &str, site: bool) -> Result<bool, String>;
+    /// `get_role( $role )->capabilities`: none for no such role.
+    fn role(&self, role: &str) -> Result<Option<Caps>, String>;
+    /// `add_role( $role, $display_name, $capabilities )`: false when it exists.
+    fn add_role(
+        &self,
+        role: &str,
+        display_name: &str,
+        caps: &[(String, bool)],
+    ) -> Result<bool, String>;
+    /// `remove_role( $role )`: false for no such role.
+    fn remove_role(&self, role: &str) -> Result<bool, String>;
+    /// `WP_Role::add_cap( $cap, $grant )`, or `remove_cap( $cap )` without a
+    /// grant: false for no such role.
+    fn role_cap(&self, role: &str, cap: &str, grant: Option<bool>) -> Result<bool, String>;
+    /// `wp_safe_remote_request()` of `request`, every redirect only to a
+    /// host `allowed` accepts.
+    fn fetch(
+        &self,
+        request: &Outgoing,
+        allowed: &(dyn Fn(&str) -> bool + Sync),
+    ) -> Result<Incoming, String>;
     /// `get_metadata( $kind, $id, $key )`, every value.
     fn get_meta(&self, kind: ObjectKind, id: u64, key: &str) -> Result<Vec<Value>, String>;
     /// `add_metadata()`: the new row's id, none when `unique` found one.

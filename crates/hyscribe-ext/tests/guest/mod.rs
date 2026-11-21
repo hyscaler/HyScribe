@@ -8,7 +8,9 @@
 use std::process::Command;
 use std::sync::OnceLock;
 
-use hyscribe_ext::{Asset, AssetKind, Found, Grants, Message, ObjectKind, Post, Site};
+use hyscribe_ext::{
+    Asset, AssetKind, Caps, Found, Grants, Incoming, Message, ObjectKind, Outgoing, Post, Site,
+};
 use hyscribe_phpser::Value;
 
 /// The test extension's component bytes.
@@ -53,6 +55,30 @@ impl Site for Quiet {
         Ok(false)
     }
     fn delete_option(&self, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn get_transient(&self, _: &str, _: bool) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
+    fn set_transient(&self, _: &str, _: Value, _: i64, _: bool) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn delete_transient(&self, _: &str, _: bool) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn fetch(&self, _: &Outgoing, _: &(dyn Fn(&str) -> bool + Sync)) -> Result<Incoming, String> {
+        Err(String::new())
+    }
+    fn role(&self, _: &str) -> Result<Option<Caps>, String> {
+        Ok(None)
+    }
+    fn add_role(&self, _: &str, _: &str, _: &[(String, bool)]) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn remove_role(&self, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn role_cap(&self, _: &str, _: &str, _: Option<bool>) -> Result<bool, String> {
         Ok(false)
     }
     fn get_meta(&self, _: ObjectKind, _: u64, _: &str) -> Result<Vec<Value>, String> {
@@ -158,7 +184,7 @@ pub fn grants() -> Grants {
             "the_content ext_trap ext_loop ext_grow ext_late ext_order ext_options ext_cron ext_echo \
              ext_meta ext_query ext_mail ext_auth ext_assets ext_fire ext_chain ext_remove ext_current \
              ext_bad_json ext_error ext_stack ext_count ext_gone ext_nest body_class \
-             admin_footer_text",
+             admin_footer_text ext_transients ext_roles ext_http ext_slow",
         ),
         actions: names("ext_action ext_event"),
         sensitive: names("map_meta_cap"),
@@ -171,5 +197,10 @@ pub fn grants() -> Grants {
         rest: names("ext/v1"),
         mail: true,
         filesystem: names("uploads/ext"),
+        transients: names("ext_cache ext_tmp_*"),
+        site_transients: names("ext_site*"),
+        roles: names("ext_manager ext_fail"),
+        capabilities: names("ext_cap read"),
+        hosts: names("api.test redirect.test"),
     }
 }

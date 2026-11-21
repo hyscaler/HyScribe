@@ -5,7 +5,8 @@
 //! redirects included, passes `wp_http_validate_url()`, and every address
 //! its host resolves to must be public, checked before connecting to the
 //! address checked; time, size and redirects are bounded, and nothing but
-//! the user agent is sent. With `HTTP_OUTBOUND=off` no client is made.
+//! the user agent is sent, but for an extension's own request to a host it
+//! is granted (SDK 0.2). With `HTTP_OUTBOUND=off` no client is made.
 
 mod address;
 mod net;
@@ -16,7 +17,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::client::conn::http1::{Connection, SendRequest};
 use hyper_util::rt::TokioIo;
@@ -145,6 +146,27 @@ impl std::fmt::Debug for Client {
 /// Which hosts a redirect may lead to, as the caller judges them.
 pub type Allowed<'a> = dyn Fn(&str) -> bool + Sync + 'a;
 
+/// An extension's request (SDK 0.2): its method, the headers it adds and
+/// its body. A redirect is followed for `GET` and `HEAD` only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Outgoing<'a> {
+    /// The method, upper case.
+    pub method: &'a str,
+    /// Headers added after the client's own; a `User-Agent` among them
+    /// replaces the arguments' one. A redirect to another origin sends
+    /// none of them.
+    pub headers: &'a [(String, String)],
+    /// The body, sent with its length.
+    pub body: &'a [u8],
+}
+
+/// `wp_safe_remote_get()`'s request: a GET, no headers, no body.
+const GET: Outgoing<'static> = Outgoing {
+    method: "GET",
+    headers: &[],
+    body: &[],
+};
+
 /// A hop's outcome: the answer, or where it redirects.
 enum Hop {
     Done(Fetched),
@@ -189,18 +211,48 @@ impl Client {
         args: Args,
         allowed: &Allowed<'_>,
     ) -> Result<Fetched, Error> {
-        let args = self.filters.http_request_args(args, url);
+        self.send_within(url, home, (args, GET), allowed).await
+    }
+
+    /// `wp_safe_remote_request( $url, $args )` of an extension's request,
+    /// as [`Client::get_within`] makes a GET: every check holds, and a
+    /// method other than `GET` or `HEAD` follows no redirect.
+    pub async fn send_within(
+        &self,
+        url: &[u8],
+        home: &[u8],
+        (args, outgoing): (Args, Outgoing<'_>),
+        allowed: &Allowed<'_>,
+    ) -> Result<Fetched, Error> {
+        let mut args = self.filters.http_request_args(args, url);
         if let Some(answer) = self.filters.pre_http_request(&args, url) {
             return answer;
+        }
+        if !matches!(outgoing.method, "GET" | "HEAD") {
+            args.redirection = 0;
         }
         let fail = |kind, hop| Err(Error { kind, hop });
         let deadline = Instant::now() + args.timeout.min(MAX_TIME);
         let limit = args.limit_response_size.unwrap_or(MAX_BYTES).min(MAX_BYTES);
+        let origin =
+            |url: &[u8]| validate_url(url, home).map(|target| (target.https, target.authority));
+        let first = origin(url);
         let mut url = url.to_vec();
         for hop in 0..=args.redirection.min(MAX_REDIRECTS) {
             let check = (hop > 0).then_some(allowed);
-            let fetched = timeout_at(deadline, self.hop(&url, home, &args, (limit, check))).await;
-            match fetched {
+            // The extension's headers (its credentials among them) go to
+            // the origin it named only: not to another host, nor over
+            // plain HTTP after HTTPS, which a redirect may lead to.
+            let sent = if origin(&url) == first {
+                outgoing
+            } else {
+                Outgoing {
+                    headers: &[],
+                    ..outgoing
+                }
+            };
+            let hop_sent = self.hop(&url, home, (&args, sent), (limit, check));
+            match timeout_at(deadline, hop_sent).await {
                 Err(_) => return fail(Kind::Timeout, hop),
                 Ok(Err(kind)) => return fail(kind, hop),
                 Ok(Ok(Hop::Done(fetched))) => return Ok(fetched),
@@ -211,12 +263,12 @@ impl Client {
     }
 
     /// One request: the URL checked, its host resolved and every address
-    /// checked, then a GET to the first address that connects.
+    /// checked, then the request sent to the first address that connects.
     async fn hop(
         &self,
         url: &[u8],
         home: &[u8],
-        args: &Args,
+        (args, outgoing): (&Args, Outgoing<'_>),
         (limit, allowed): (usize, Option<&Allowed<'_>>),
     ) -> Result<Hop, Kind> {
         let target = validate_url(url, home).ok_or(Kind::Invalid)?;
@@ -242,8 +294,9 @@ impl Client {
             }
         }
         let stream = stream?;
+        let sent = (args, outgoing);
         if !target.https {
-            return request(TokioIo::new(stream), &target, args, limit).await;
+            return request(TokioIo::new(stream), &target, sent, limit).await;
         }
         let tls = self.tls.clone().ok_or(Kind::Tls)?;
         let name = ServerName::try_from(target.host.clone()).map_err(|_| Kind::Tls)?;
@@ -251,26 +304,41 @@ impl Client {
             .connect(name, stream)
             .await
             .map_err(|_| Kind::Tls)?;
-        request(TokioIo::new(stream), &target, args, limit).await
+        request(TokioIo::new(stream), &target, sent, limit).await
     }
 }
 
 /// A boxed exchange, as [`request`] awaits it.
 type Exchange = Pin<Box<dyn Future<Output = Result<Hop, Kind>> + Send>>;
 
-/// A GET for `target` over `io`: its answer read to `limit`, or the
+/// `outgoing` for `target` over `io`: its answer read to `limit`, or the
 /// redirect it gives, as WordPress's Requests follows them.
-async fn request<T>(io: T, target: &Target, args: &Args, limit: usize) -> Result<Hop, Kind>
+async fn request<T>(
+    io: T,
+    target: &Target,
+    (args, outgoing): (&Args, Outgoing<'_>),
+    limit: usize,
+) -> Result<Hop, Kind>
 where
     T: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
 {
-    let request = hyper::Request::get(target.path.as_str())
+    let agent = |(name, _): &&(String, String)| name.eq_ignore_ascii_case("user-agent");
+    let (agents, added): (Vec<_>, Vec<_>) = outgoing.headers.iter().partition(agent);
+    let user_agent = agents
+        .last()
+        .map_or(args.user_agent.as_str(), |(_, agent)| agent);
+    let mut request = hyper::Request::builder()
+        .method(outgoing.method)
+        .uri(target.path.as_str())
         .header("Host", target.authority.as_str())
-        .header("User-Agent", args.user_agent.as_str())
+        .header("User-Agent", user_agent)
         .header("Accept-Encoding", "identity")
-        .header("Connection", "close")
-        .body(Empty::<Bytes>::new())
-        .map_err(|_| Kind::Protocol)?;
+        .header("Connection", "close");
+    for (name, value) in added {
+        request = request.header(name.as_str(), value.as_str());
+    }
+    let body = Full::new(Bytes::copy_from_slice(outgoing.body));
+    let request = request.body(body).map_err(|_| Kind::Protocol)?;
     let follow = args.redirection > 0;
     // hyper's handshake makes no I/O and does not fail; a failure would
     // be the server's, as when sending fails.
@@ -287,9 +355,9 @@ where
 /// `request` sent on a connection: the redirect when `follow`, else the
 /// answer read to `limit`.
 async fn exchange<T>(
-    mut sender: SendRequest<Empty<Bytes>>,
-    connection: Connection<T, Empty<Bytes>>,
-    request: hyper::Request<Empty<Bytes>>,
+    mut sender: SendRequest<Full<Bytes>>,
+    connection: Connection<T, Full<Bytes>>,
+    request: hyper::Request<Full<Bytes>>,
     follow: bool,
     limit: usize,
 ) -> Result<Hop, Kind>

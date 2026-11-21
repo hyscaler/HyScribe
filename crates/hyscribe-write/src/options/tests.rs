@@ -267,6 +267,91 @@ async fn deletes_transients() {
 }
 
 #[tokio::test]
+async fn expires_transients() {
+    let setup = async |write: &mut Write<'_>| {
+        for name in ["oracle_old", "oracle_fresh"] {
+            let value = text(name.strip_prefix("oracle_").unwrap());
+            set_transient(write, name, &value, 3600).await.unwrap();
+        }
+        set_transient(write, "oracle_kept", &text("kept"), 0)
+            .await
+            .unwrap();
+        let past = Value::Int(now() - 10);
+        let off = Some(Autoload::Off);
+        update_option(write, "_transient_timeout_oracle_old", &past, None)
+            .await
+            .unwrap();
+        for name in ["oracle_lone", "oracle_kept"] {
+            let timeout = format!("_transient_timeout_{name}");
+            add_option(write, &timeout, &past, off).await.unwrap();
+        }
+    };
+    check("transient-expired", setup, async |write, ()| {
+        let mut get = async |name| get_transient(write, name).await.unwrap();
+        assert_eq!(get("oracle_old").await, Value::Bool(false));
+        assert_eq!(get("oracle_fresh").await, text("fresh"));
+        assert_eq!(get("oracle_lone").await, Value::Bool(false));
+        assert_eq!(get("oracle_kept").await, text("kept"));
+    })
+    .await;
+}
+
+/// A timeout of this very second has not passed yet, as `$timeout <
+/// time()` says; tried again if the second turns meanwhile.
+#[tokio::test]
+async fn a_timeout_of_now_is_not_past() {
+    rolled_back(async |write| {
+        loop {
+            let at = now();
+            let timeout = Value::Int(at);
+            let off = Some(Autoload::Off);
+            update_option(write, "_transient_oracle_now", &text("v"), off)
+                .await
+                .unwrap();
+            update_option(write, "_transient_timeout_oracle_now", &timeout, off)
+                .await
+                .unwrap();
+            let value = get_transient(write, "oracle_now").await.unwrap();
+            if now() == at {
+                assert_eq!(value, text("v"));
+                break;
+            }
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn deletes_and_keeps_site_transients() {
+    let setup = async |write: &mut Write<'_>| {
+        set_site_transient(write, "oracle_a", &text("one"), 0)
+            .await
+            .unwrap();
+        set_site_transient(write, "oracle_b", &text("one"), 3600)
+            .await
+            .unwrap();
+        let past = Value::Int(now() - 10);
+        let off = Some(Autoload::Off);
+        for name in ["update_core", "oracle_c"] {
+            let option = format!("_site_transient_{name}");
+            add_option(write, &option, &text("x"), off).await.unwrap();
+            let timeout = format!("_site_transient_timeout_{name}");
+            add_option(write, &timeout, &past, off).await.unwrap();
+        }
+    };
+    check("site-transient-delete", setup, async |write, ()| {
+        assert!(delete_site_transient(write, "oracle_a").await.unwrap());
+        assert!(delete_site_transient(write, "oracle_b").await.unwrap());
+        assert!(!delete_site_transient(write, "oracle_none").await.unwrap());
+        let kept = get_site_transient(write, "update_core").await.unwrap();
+        assert_eq!(kept, text("x"));
+        let gone = get_site_transient(write, "oracle_c").await.unwrap();
+        assert_eq!(gone, Value::Bool(false));
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn the_options_cache_names_are_refused() {
     rolled_back(async |write| {
         for name in ["alloptions", " notoptions "] {
@@ -337,8 +422,24 @@ async fn options_return_each_database_error() {
         set_transient(write, "oracle_b", &text("one"), 60)
             .await
             .unwrap();
+        let past = Value::Int(now() - 10);
+        set_transient(write, "oracle_c", &text("one"), 60)
+            .await
+            .unwrap();
+        update_option(write, "_transient_timeout_oracle_c", &past, None)
+            .await
+            .unwrap();
+        set_site_transient(write, "oracle_e", &text("one"), 60)
+            .await
+            .unwrap();
+        update_option(write, "_site_transient_timeout_oracle_e", &past, None)
+            .await
+            .unwrap();
     };
     fails_at_each_step(setup, async |write, ()| {
+        get_transient(write, "oracle_c").await?;
+        get_transient(write, "oracle_a").await?;
+        get_site_transient(write, "oracle_e").await?;
         update_option(write, "home", &text("http://127.0.0.1:8081"), None).await?;
         add_option(write, "oracle_new", &text("one"), None).await?;
         update_option(write, "oracle_new", &text("two"), None).await?;
@@ -352,6 +453,9 @@ async fn options_return_each_database_error() {
         set_site_transient(write, "oracle_s", &text("one"), 60).await?;
         set_site_transient(write, "oracle_s", &text("two"), 60).await?;
         expire_site_transient(write, "oracle_s").await?;
+        set_site_transient(write, "oracle_t", &text("one"), 60).await?;
+        get_site_transient(write, "oracle_t").await?;
+        delete_site_transient(write, "oracle_t").await?;
         Ok(())
     })
     .await;

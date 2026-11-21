@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use hyscribe_phpser::Value;
 use wasmtime::Store;
@@ -14,7 +14,7 @@ use wasmtime::component::Func;
 
 use crate::extension::{Answered, Args, Done};
 use crate::faults::{Counted, Kind};
-use crate::host::{Phase, State, classify, ticks};
+use crate::host::{Phase, State, begin, classify};
 use crate::value::{Crossing, Lifted, Lowered, lift, lower_all};
 use crate::{Extension, Extensions, Fault, Hook, Host, Site};
 
@@ -49,6 +49,9 @@ struct Slot {
     spent: Duration,
     stopped: bool,
 }
+
+/// A call's answer, or what stopped it.
+type Outcome = Result<Result<Lifted, String>, (Kind, Fault)>;
 
 /// What a callback was registered as, to honour its removal.
 #[derive(Clone, Copy)]
@@ -297,10 +300,9 @@ impl Shared {
         };
         let lowered: Vec<Lowered<'_>> = crossing.iter().map(Crossing::lowered).collect();
         let budget = extension.limits.request().saturating_sub(slot.spent);
-        let deadline = ticks(budget.min(extension.limits.call()));
-        let started = Instant::now();
-        let answer = self.run(extension, ext, &mut slot, deadline, (callback, &lowered));
-        slot.spent += started.elapsed();
+        let budget = budget.min(extension.limits.call());
+        let (answer, used) = self.run(extension, ext, &mut slot, budget, (callback, &lowered));
+        slot.spent += used;
         let fault = match answer {
             Ok(Ok(answer)) => match lift(answer) {
                 Some(value) => return Some(value),
@@ -325,23 +327,24 @@ impl Shared {
         None
     }
 
-    /// The call itself, in the slot's instance, made first if need be.
+    /// The call itself, in the slot's instance, made first if need be, and
+    /// the time it ran outside host calls.
     fn run(
         &self,
         extension: &Extension,
         ext: usize,
         slot: &mut Slot,
-        deadline: u64,
+        budget: Duration,
         args: Args<'_>,
-    ) -> Result<Result<Lifted, String>, (Kind, Fault)> {
+    ) -> (Outcome, Duration) {
         let (mut store, func) = match slot.instance.take() {
             Some((mut store, func)) => {
-                store.set_epoch_deadline(deadline);
+                begin(&mut store, budget);
                 (store, Ok(func))
             }
             None => {
                 let (mut store, instance) =
-                    extension.instantiate(&self.engine, self.live(ext), deadline);
+                    extension.instantiate(&self.engine, self.live(ext), budget);
                 let invoke = instance.and_then(|instance| {
                     let export = extension.export(None);
                     let invoke = instance.get_typed_func::<Args<'_>, Answered>(&mut store, export);
@@ -356,12 +359,13 @@ impl Shared {
             answer.map(|(answer,)| (func, answer))
         });
         store.data_mut().chains.clear();
+        let used = store.data().used();
         match answer {
             Ok((func, answer)) => {
                 slot.instance = Some((store, func));
-                Ok(answer)
+                (Ok(answer), used)
             }
-            Err(e) => Err(classify(&e, store.data())),
+            Err(e) => (Err(classify(&e, store.data())), used),
         }
     }
 
@@ -383,8 +387,8 @@ impl Shared {
         if extension.disabled() {
             return Err(Fault::Disabled);
         }
-        let deadline = ticks(extension.limits.call());
-        let (mut store, instance) = extension.instantiate(&self.engine, self.live(ext), deadline);
+        let budget = extension.limits.call();
+        let (mut store, instance) = extension.instantiate(&self.engine, self.live(ext), budget);
         let answer = instance
             .and_then(|instance| {
                 instance.get_typed_func::<(), Done>(&mut store, extension.export(Some(activate)))

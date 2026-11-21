@@ -1,0 +1,29 @@
+# The rows PHP WordPress writes for the action site-transient-delete (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-21 16:17:19 to 2026-11-21 16:17:19 UTC.
+# %wp_options:1% is 137.
+# %wp_options:2% is 138.
+# %wp_options:3% is 139.
+# %wp_options:4% is 140.
+# %wp_options:5% is 141.
+# %wp_options:6% is 142.
+# %wp_options:7% is 143.
+wp_options	_site_transient_oracle_a	-	autoload	off
+wp_options	_site_transient_oracle_a	-	option_id	%wp_options:1%
+wp_options	_site_transient_oracle_a	-	option_name	_site_transient_oracle_a
+wp_options	_site_transient_oracle_a	-	option_value	one
+wp_options	_site_transient_oracle_b	-	autoload	off
+wp_options	_site_transient_oracle_b	-	option_id	%wp_options:3%
+wp_options	_site_transient_oracle_b	-	option_name	_site_transient_oracle_b
+wp_options	_site_transient_oracle_b	-	option_value	one
+wp_options	_site_transient_oracle_c	-	autoload	off
+wp_options	_site_transient_oracle_c	-	option_id	%wp_options:6%
+wp_options	_site_transient_oracle_c	-	option_name	_site_transient_oracle_c
+wp_options	_site_transient_oracle_c	-	option_value	x
+wp_options	_site_transient_timeout_oracle_b	-	autoload	off
+wp_options	_site_transient_timeout_oracle_b	-	option_id	%wp_options:2%
+wp_options	_site_transient_timeout_oracle_b	-	option_name	_site_transient_timeout_oracle_b
+wp_options	_site_transient_timeout_oracle_b	-	option_value	%expiry%
+wp_options	_site_transient_timeout_oracle_c	-	autoload	off
+wp_options	_site_transient_timeout_oracle_c	-	option_id	%wp_options:7%
+wp_options	_site_transient_timeout_oracle_c	-	option_name	_site_transient_timeout_oracle_c
+wp_options	_site_transient_timeout_oracle_c	-	option_value	%expiry%

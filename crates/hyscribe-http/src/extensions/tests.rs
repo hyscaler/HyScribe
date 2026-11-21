@@ -62,7 +62,7 @@ async fn a_page_view_s_calls_commit_each_on_its_own() {
             .unwrap(),
     );
     let run = |call: fn(&Live) -> Result<Value, String>| {
-        let live = Live(Through::Own(Some(writer.clone()), Handle::current()));
+        let live = Live(Through::Own(Some(writer.clone()), Handle::current()), None);
         tokio::task::spawn_blocking(move || call(&live))
     };
     let missing = run(|live| {
@@ -118,10 +118,124 @@ async fn a_page_view_s_calls_commit_each_on_its_own() {
     );
 }
 
+/// Transients, meta and roles are read and written as WordPress's
+/// functions do, site transients apart, meta of each kind of object.
+#[tokio::test(flavor = "multi_thread")]
+async fn transients_meta_and_roles_go_through_wordpress_s_functions() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    hyscribe_testkit::writes::load_default_install(&saves())
+        .await
+        .unwrap();
+    let writer = Writer::open(&saves(), Mode::Primary).await.unwrap();
+    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()), None);
+    let answers = tokio::task::spawn_blocking(move || {
+        let post = ObjectKind::Post;
+        let transients = [
+            format!(
+                "{:?}",
+                live.set_transient("ext_cache", text("a"), 60, false)
+            ),
+            format!("{:?}", live.set_transient("ext_site", text("s"), 0, true)),
+            format!("{:?}", live.get_transient("ext_cache", false)),
+            format!("{:?}", live.get_transient("ext_site", true)),
+            format!("{:?}", live.get_transient("ext_site", false)),
+            format!("{:?}", live.delete_transient("ext_cache", false)),
+            format!("{:?}", live.delete_transient("ext_site", true)),
+            format!("{:?}", live.get_transient("ext_site", true)),
+        ];
+        let meta = [
+            format!(
+                "{:?}",
+                live.add_meta(post, 1, "_ext", text("a"), true)
+                    .map(|id| id.is_some())
+            ),
+            format!("{:?}", live.add_meta(post, 1, "_ext", text("b"), true)),
+            format!(
+                "{:?}",
+                live.update_meta(post, 1, "_ext", text("b"), Some(text("a")))
+            ),
+            format!("{:?}", live.get_meta(post, 1, "_ext")),
+            format!(
+                "{:?}",
+                live.update_meta(ObjectKind::User, 1, "_ext", text("u"), None)
+            ),
+            format!("{:?}", live.get_meta(ObjectKind::User, 1, "_ext")),
+            format!("{:?}", live.delete_meta(post, 1, "_ext", Some(text("x")))),
+            format!("{:?}", live.delete_meta(post, 1, "_ext", None)),
+            format!("{:?}", live.get_meta(post, 1, "_ext")),
+            format!("{:?}", live.get_meta(ObjectKind::Term, 1, "_ext")),
+            format!(
+                "{:?}",
+                live.add_meta(ObjectKind::Comment, 0, "_ext", text("c"), false)
+            ),
+        ];
+        let read = [("read".to_string(), true)];
+        let roles = [
+            format!("{:?}", live.add_role("ext_manager", "Ext Manager", &read)),
+            format!("{:?}", live.role_cap("ext_manager", "ext_cap", Some(true))),
+            format!("{:?}", live.role_cap("ext_manager", "read", None)),
+            format!("{:?}", live.role("ext_manager")),
+            format!("{:?}", live.remove_role("ext_manager")),
+            format!("{:?}", live.role("ext_manager")),
+        ];
+        (transients.join(" "), meta.join(" "), roles.join(" "))
+    });
+    let (transients, meta, roles) = answers.await.unwrap();
+    assert_eq!(
+        roles,
+        r#"Ok(true) Ok(true) Ok(true) Ok(Some([("ext_cap", true)])) Ok(true) Ok(None)"#
+    );
+    assert_eq!(
+        transients,
+        "Ok(true) Ok(true) Ok(Some(String([97]))) Ok(Some(String([115]))) Ok(None) Ok(true) Ok(true) Ok(None)"
+    );
+    assert_eq!(
+        meta,
+        "Ok(true) Ok(None) Ok(true) Ok([String([98])]) Ok(true) Ok([String([117])]) Ok(false) Ok(true) Ok([]) Ok([]) Ok(None)"
+    );
+}
+
+/// An extension's request goes through the site's client with WordPress's
+/// user agent; without a client, or from an action, it fails.
+#[tokio::test(flavor = "multi_thread")]
+async fn requests_go_through_the_site_s_client() {
+    let pages = Arc::new(crate::rest::tests::url_details::Pages::default());
+    let client =
+        hyscribe_fetch::Client::new(hyscribe_fetch::RootCertStore::empty(), pages, Arc::new(()));
+    let outbound = Outbound(
+        Some(Arc::new(client)),
+        "http://home.test".into(),
+        Handle::current(),
+    );
+    let live = Live(Through::Own(None, Handle::current()), Some(outbound));
+    let request = |url: &str| Outgoing {
+        method: "GET".into(),
+        url: url.into(),
+        headers: Vec::new(),
+        body: Vec::new(),
+        timeout: 5,
+    };
+    let answers = tokio::task::spawn_blocking(move || {
+        let page = live.fetch(&request("http://pages.test/agent"), &|_| true);
+        let lost = live.fetch(&request("http://nowhere.test/"), &|_| true);
+        let (sender, _) = mpsc::channel(1);
+        let acting = Live(Through::Action(sender), None);
+        let off = acting.fetch(&request("http://pages.test/agent"), &|_| true);
+        (page, lost, off)
+    });
+    let (page, lost, off) = answers.await.unwrap();
+    let (status, _, body) = page.unwrap();
+    assert_eq!(status, 200);
+    let title = "<title>WordPress/7.1.3; http://home.test</title>";
+    assert!(String::from_utf8(body).unwrap().contains(title));
+    assert_eq!(lost, Err("Error { kind: Resolve, hop: 0 }".into()));
+    assert_eq!(off, Err(NO_FETCHES.into()));
+}
+
 /// Without a writer, or over a database it cannot write, a call fails.
 #[tokio::test(flavor = "multi_thread")]
 async fn calls_fail_where_nothing_can_be_written() {
-    let read_only = Live(Through::Own(None, Handle::current()));
+    let read_only = Live(Through::Own(None, Handle::current()), None);
     let answer = tokio::task::spawn_blocking(move || read_only.get_option("x"));
     assert_eq!(answer.await.unwrap(), Err(READ_ONLY.into()));
     let missing = Database {
@@ -129,7 +243,7 @@ async fn calls_fail_where_nothing_can_be_written() {
         ..fixture_database()
     };
     let writer = Writer::open(&missing, Mode::Primary).await.unwrap();
-    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()));
+    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()), None);
     let answer = tokio::task::spawn_blocking(move || live.get_option("x"));
     assert!(answer.await.unwrap().is_err());
     let reader = Database {
@@ -138,12 +252,12 @@ async fn calls_fail_where_nothing_can_be_written() {
         ..fixture_database()
     };
     let writer = Writer::open(&reader, Mode::Primary).await.unwrap();
-    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()));
+    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()), None);
     let answer = tokio::task::spawn_blocking(move || live.add_option("x", Value::Null, None));
     assert!(answer.await.unwrap().is_err());
     let (sender, jobs) = mpsc::channel(1);
     drop(jobs);
-    let live = Live(Through::Action(sender));
+    let live = Live(Through::Action(sender), None);
     let answer = tokio::task::spawn_blocking(move || live.delete_option("x"));
     assert_eq!(answer.await.unwrap(), Err(GONE.into()));
 }
@@ -153,25 +267,8 @@ async fn calls_fail_where_nothing_can_be_written() {
 #[test]
 fn what_is_not_served_yet() {
     let (sender, _) = mpsc::channel(1);
-    let live = Live(Through::Action(sender));
-    let post = ObjectKind::Post;
+    let live = Live(Through::Action(sender), None);
     let unserved = Err(UNSERVED.to_string());
-    assert_eq!(
-        live.get_meta(post, 1, "k"),
-        unserved.clone().map(|()| Vec::new())
-    );
-    assert_eq!(
-        live.add_meta(post, 1, "k", Value::Null, false),
-        unserved.clone().map(|()| None)
-    );
-    assert_eq!(
-        live.update_meta(post, 1, "k", Value::Null, None),
-        unserved.clone().map(|()| true)
-    );
-    assert_eq!(
-        live.delete_meta(post, 1, "k", None),
-        unserved.clone().map(|()| true)
-    );
     assert_eq!(
         live.query(&Value::Null),
         unserved.clone().map(|()| Found::default())

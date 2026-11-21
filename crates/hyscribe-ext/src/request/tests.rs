@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::*;
+use std::time::Instant;
+
 use crate::Limits;
 use crate::tests::{TestSite, load};
 

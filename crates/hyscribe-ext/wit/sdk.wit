@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-/// HyScribe's extension SDK 0.1 (ADR 0022): what a plugin or theme component
+/// HyScribe's extension SDK 0.2 (ADR 0022): what a plugin or theme component
 /// imports from the host and exports to it. Every import is checked against
 /// the extension's manifest on every call; nothing is granted by default.
-package hyscribe:sdk@0.1.0;
+/// 0.2 only adds to 0.1, whose interfaces the host links under both versions.
+package hyscribe:sdk@0.2.0;
 
 interface types {
     /// The kind of a PHP value.
@@ -251,6 +252,59 @@ interface i18n {
     translate-plural: func(single: string, plural: string, number: u64, context: option<string>) -> string;
 }
 
+/// `get_transient()`, `set_transient()` and `delete_transient()`, or their
+/// `_site_transient` forms when `site` is true, for the transient names
+/// the manifest grants (0.2).
+interface transients {
+    use types.{value, sdk-error};
+
+    /// None for a missing or expired transient, as `false` answers in PHP.
+    get: func(name: string, site: bool) -> result<option<value>, sdk-error>;
+    /// `expiration` in seconds, 0 for none.
+    set: func(name: string, value: value, expiration: s64, site: bool) -> result<bool, sdk-error>;
+    delete: func(name: string, site: bool) -> result<bool, sdk-error>;
+}
+
+/// `get_role()`, `add_role()`, `remove_role()` and a role's `add_cap()`
+/// and `remove_cap()`, for the roles and capabilities the manifest grants
+/// (0.2). Any role may be read.
+interface roles {
+    use types.{sdk-error};
+
+    /// A capability and whether it is granted.
+    type capability = tuple<string, bool>;
+
+    /// `get_role( $role )->capabilities`: none for no such role.
+    get: func(role: string) -> result<option<list<capability>>, sdk-error>;
+    /// `add_role( $role, $display_name, $capabilities )`: false when the
+    /// role exists.
+    add: func(role: string, display-name: string, capabilities: list<capability>) -> result<bool, sdk-error>;
+    /// `remove_role( $role )`: false for no such role.
+    remove: func(role: string) -> result<bool, sdk-error>;
+    /// `get_role( $role )->add_cap( $cap, $grant )`: false for no such role.
+    add-cap: func(role: string, capability: string, grant: bool) -> result<bool, sdk-error>;
+    /// `get_role( $role )->remove_cap( $cap )`: false for no such role.
+    remove-cap: func(role: string, capability: string) -> result<bool, sdk-error>;
+}
+
+/// `wp_safe_remote_request()` to the hosts the manifest grants, through
+/// the host's outbound client (ADR 0019): every hop's addresses checked, a
+/// redirect followed for `GET` and `HEAD` only and only to a granted host,
+/// at most 30 seconds and 4 MiB of answer (0.2). Its time is the host's,
+/// not the call's.
+interface http {
+    use types.{sdk-error};
+
+    /// A request header: its name and its value.
+    type header = tuple<string, string>;
+
+    /// The status, the headers (names in lower case) and the body.
+    type response = tuple<u16, list<tuple<string, list<u8>>>, list<u8>>;
+
+    /// `$args`' `method`, `headers`, `body` and `timeout` (seconds).
+    send: func(method: string, url: string, headers: list<header>, body: list<u8>, timeout: u32) -> result<response, sdk-error>;
+}
+
 /// What the host calls in the extension.
 interface guest {
     use types.{value};
@@ -283,5 +337,8 @@ world plugin {
     import mail;
     import auth;
     import i18n;
+    import transients;
+    import roles;
+    import http;
     export guest;
 }

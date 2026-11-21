@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use hyscribe_ext::{
-    Asset, AssetKind, Extensions, Fault, Found, Grants, Host, Limits, Message, ObjectKind, Package,
-    Post, Request, Site,
+    Asset, AssetKind, Caps, Extensions, Fault, Found, Grants, Host, Incoming, Limits, Message, ObjectKind,
+    Outgoing, Package, Post, Request, Site,
 };
 use hyscribe_phpser::Value;
 use libfuzzer_sys::fuzz_target;
@@ -95,6 +95,30 @@ impl Site for Empty {
     fn add_inline(&self, _: AssetKind, _: &str, _: &str, _: bool) -> Result<(), String> {
         Err("read only".into())
     }
+    fn get_transient(&self, _: &str, _: bool) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
+    fn set_transient(&self, _: &str, _: Value, _: i64, _: bool) -> Result<bool, String> {
+        Err("read only".into())
+    }
+    fn delete_transient(&self, _: &str, _: bool) -> Result<bool, String> {
+        Err("read only".into())
+    }
+    fn fetch(&self, _: &Outgoing, _: &(dyn Fn(&str) -> bool + Sync)) -> Result<Incoming, String> {
+        Err("no network".into())
+    }
+    fn role(&self, _: &str) -> Result<Option<Caps>, String> {
+        Ok(None)
+    }
+    fn add_role(&self, _: &str, _: &str, _: &[(String, bool)]) -> Result<bool, String> {
+        Err("read only".into())
+    }
+    fn remove_role(&self, _: &str) -> Result<bool, String> {
+        Err("read only".into())
+    }
+    fn role_cap(&self, _: &str, _: &str, _: Option<bool>) -> Result<bool, String> {
+        Err("read only".into())
+    }
 }
 
 thread_local! {
@@ -115,6 +139,7 @@ fuzz_target!(|wasm: &[u8]| {
             ..Grants::default()
         };
         let package = Package {
+            sdk: "0.2",
             slug: "fuzz",
             wasm,
             grants,

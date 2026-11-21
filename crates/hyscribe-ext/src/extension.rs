@@ -7,17 +7,19 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use hyscribe_phpser::Value;
 use wasmtime::Engine;
 use wasmtime::component::{Component, ComponentExportIndex, Instance, InstancePre};
 
 use crate::faults::{self, Counted, Record};
-use crate::host::{Phase, State, classify, refused, ticks};
+use crate::host::{Phase, State, classify, refused};
 use crate::value::{Lifted, Lowered};
 use crate::{Fault, Grants, Host, Limits, ObjectKind};
 
-const GUEST: &str = "hyscribe:sdk/guest@0.1.0";
+/// What a component's SDK names start with.
+const SDK: &str = "hyscribe:sdk/";
 
 /// `guest.invoke`'s arguments and answer.
 pub(crate) type Args<'a> = (u32, &'a [Lowered<'a>]);
@@ -31,6 +33,8 @@ pub(crate) type Done = (Result<(), String>,);
 pub struct Package<'a> {
     /// The WordPress slug: its folder's name and its text domain.
     pub slug: &'a str,
+    /// The manifest's `sdk`, which the component's imports and export name.
+    pub sdk: &'a str,
     /// The component's bytes, compiled in memory, never read back compiled.
     pub wasm: &'a [u8],
     /// What the administrator approved.
@@ -156,7 +160,16 @@ impl Host {
                 pre.map(|pre| (component, pre))
             })
             .map_err(refused)?;
-        let found = component.get_export_index(None, GUEST).and_then(|guest| {
+        let types = component.component_type();
+        let mut imports = types.imports(&self.engine).map(|(name, _)| name);
+        if let Some(name) = imports.find(|name| !of_sdk(name, package.sdk)) {
+            return Err(Fault::Refused(format!(
+                "{name} is not of SDK {}, which its manifest names",
+                package.sdk
+            )));
+        }
+        let guest = format!("{SDK}guest@{}.0", package.sdk);
+        let found = component.get_export_index(None, &guest).and_then(|guest| {
             let export = |name| component.get_export_index(Some(&guest), name);
             let all = export("init").zip(export("invoke"));
             let all = all.zip(export("activate")).zip(export("deactivate"));
@@ -169,15 +182,14 @@ impl Host {
                 (init, exports)
             })
         });
-        let (init, exports) = found.ok_or(Fault::Refused(format!("no {GUEST}")))?;
+        let (init, exports) = found.ok_or(Fault::Refused(format!("no {guest}")))?;
         let (grants, slug) = (Arc::new(package.grants), Arc::from(package.slug));
-        let deadline = ticks(package.limits.call());
         let mut store = State::store(
             &self.engine,
             (&grants, &slug),
             Phase::Init,
             package.limits.memory(),
-            deadline,
+            package.limits.call(),
         );
         let answer = pre
             .instantiate(&mut store)
@@ -210,6 +222,16 @@ impl Host {
             disabled: AtomicBool::new(false),
         })
     }
+}
+
+/// Whether an import is one of SDK `sdk`'s interfaces, any patch version.
+pub(crate) fn of_sdk(name: &str, sdk: &str) -> bool {
+    let version = name.strip_prefix(SDK).and_then(|name| name.split_once('@'));
+    version.is_some_and(|(_, version)| {
+        version
+            .strip_prefix(sdk)
+            .is_some_and(|patch| patch.starts_with('.'))
+    })
 }
 
 impl Extension {
@@ -266,19 +288,19 @@ impl Extension {
         &self.registered.blocks
     }
 
-    /// A fresh instance in `phase`, its deadline `deadline` ticks away.
+    /// A fresh instance in `phase`, its first call bounded by `budget`.
     pub(crate) fn instantiate(
         &self,
         engine: &Engine,
         phase: Phase,
-        deadline: u64,
+        budget: Duration,
     ) -> (wasmtime::Store<State>, wasmtime::Result<Instance>) {
         let mut store = State::store(
             engine,
             (&self.grants, &self.slug),
             phase,
             self.limits.memory(),
-            deadline,
+            budget,
         );
         let instance = self.pre.instantiate(&mut store);
         (store, instance)

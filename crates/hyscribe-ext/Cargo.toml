@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 crc32fast = "1.4"
+hyscribe-kses.workspace = true
 hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
 # Cranelift only (no Winch), components, no WASI, no cache on disk, no async,

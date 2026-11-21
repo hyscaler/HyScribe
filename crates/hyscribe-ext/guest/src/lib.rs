@@ -25,8 +25,8 @@ use hyscribe_sdk::bindings::hyscribe::sdk::types::ValueKind;
 use hyscribe_sdk::mail::{self, Message};
 use hyscribe_sdk::query::{self, Query};
 use hyscribe_sdk::{
-    ObjectKind, Plugin, SdkError, Value, auth, blocks, content, cron, hooks, i18n, json, meta, options, rest,
-    shortcodes,
+    ObjectKind, Plugin, SdkError, Value, auth, blocks, content, cron, hooks, http, i18n, json,
+    meta, options, rest, roles, shortcodes, transients,
 };
 
 hyscribe_sdk::callbacks! {
@@ -63,6 +63,10 @@ hyscribe_sdk::callbacks! {
         Nest => nest,
         BodyClass => body_class,
         Footer => footer,
+        Transients => transients_round,
+        Roles => roles_round,
+        Http => http_round,
+        Slow => slow,
     }
 }
 
@@ -75,7 +79,10 @@ fn text(s: String) -> Answer {
 }
 
 fn first(args: &[Value]) -> String {
-    args.first().and_then(Value::text).unwrap_or_default().to_string()
+    args.first()
+        .and_then(Value::text)
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn content_filter(args: Vec<Value>) -> Answer {
@@ -134,7 +141,11 @@ fn seen(args: Vec<Value>) -> Answer {
 /// Fires `ext_chain` from inside a chain: run as another extension's step,
 /// the extension that fired the outer chain is running and is skipped.
 fn nest(args: Vec<Value>) -> Answer {
-    Ok(hooks::filter::<Guest>("ext_chain", Value::Text(first(&args)), &[]))
+    Ok(hooks::filter::<Guest>(
+        "ext_chain",
+        Value::Text(first(&args)),
+        &[],
+    ))
 }
 
 /// The page hooks' calls in this instance: a fresh instance per request
@@ -159,7 +170,9 @@ fn body_class(args: Vec<Value>) -> Answer {
             let calls = CALLS.fetch_add(1, Ordering::Relaxed) + 1;
             let open = list.strip_suffix(']').unwrap_or("[");
             let comma = if open.ends_with('[') { "" } else { "," };
-            Ok(Value::Json(format!("{open}{comma}\"ext-body\",\"ext-n{calls}\"]")))
+            Ok(Value::Json(format!(
+                "{open}{comma}\"ext-body\",\"ext-n{calls}\"]"
+            )))
         }
         (_, classes) => Ok(classes),
     }
@@ -172,7 +185,9 @@ fn footer(args: Vec<Value>) -> Answer {
         (Some("trap"), _) => trap(Vec::new()),
         (Some(_), Value::Text(footer)) => {
             let calls = CALLS.fetch_add(1, Ordering::Relaxed) + 1;
-            text(format!("{footer}<span id=\"ext-footer\">ext-n{calls}</span>"))
+            text(format!(
+                "{footer}<span id=\"ext-footer\">ext-n{calls}</span>"
+            ))
         }
         (_, footer) => Ok(footer),
     }
@@ -187,7 +202,11 @@ fn refuse(_: Vec<Value>) -> Answer {
 }
 
 fn recurse(n: u64) -> u64 {
-    if n == 0 { 0 } else { black_box(recurse(black_box(n - 1))) + 1 }
+    if n == 0 {
+        0
+    } else {
+        black_box(recurse(black_box(n - 1))) + 1
+    }
 }
 
 fn deep(_: Vec<Value>) -> Answer {
@@ -195,7 +214,11 @@ fn deep(_: Vec<Value>) -> Answer {
 }
 
 fn current(_: Vec<Value>) -> Answer {
-    text(format!("{:?} {}", hooks::current(), hooks::did_action("ext_action")))
+    text(format!(
+        "{:?} {}",
+        hooks::current(),
+        hooks::did_action("ext_action")
+    ))
 }
 
 fn shortcode(args: Vec<Value>) -> Answer {
@@ -300,13 +323,111 @@ fn meta_round(_: Vec<Value>) -> Answer {
     ])
 }
 
+/// A name of `len` characters starting with `prefix`.
+fn long(prefix: &str, len: usize) -> String {
+    let mut name = String::from(prefix);
+    name.extend(core::iter::repeat_n('x', len - prefix.len()));
+    name
+}
+
+fn transients_round(_: Vec<Value>) -> Answer {
+    rounds(&[
+        &transients::set("ext_cache", &"a".into(), 60),
+        &transients::get("ext_cache"),
+        &transients::set_site("ext_site", &"s".into(), 0),
+        &transients::get_site("ext_site"),
+        &transients::get_site("ext_cache"),
+        &transients::set("ext_site", &"x".into(), 0),
+        &transients::delete("ext_tmp_1"),
+        &transients::delete("ext_cache"),
+        &transients::get("ext_cache"),
+        &transients::delete(&long("ext_tmp_", 172)),
+        &transients::delete(&long("ext_tmp_", 173)),
+        &transients::delete_site(&long("ext_site", 167)),
+        &transients::delete_site(&long("ext_site", 168)),
+        &transients::get("ext_tmp_fail"),
+        &transients::set("ext_tmp_fail", &"a".into(), 0),
+        &transients::delete_site("ext_site_fail"),
+        &transients::set("ext_cache", &Value::Json("{".into()), 0),
+        &transients::get("ext_tmp_bytes"),
+    ])
+}
+
+fn http_round(_: Vec<Value>) -> Answer {
+    let get = |url: &str| http::send("GET", url, &[], &[], 5);
+    let with =
+        |name: &str, value: &str| http::send("GET", "https://api.test/", &[(name, value)], &[], 5);
+    rounds(&[
+        &http::send(
+            "POST",
+            "https://api.test/verify",
+            &[("X-Key", "k")],
+            b"a=b",
+            5,
+        ),
+        &get("https://API.test/"),
+        &http::send("HEAD", "http://api.test/", &[], &[], 5),
+        &http::send("OPTIONS", "http://api.test/", &[], &[], 5),
+        &get("https://other.test/"),
+        &get("ftp://api.test/"),
+        &get("https:///x"),
+        &get("//api.test/x"),
+        &http::send("TRACE", "https://api.test/", &[], &[], 5),
+        &with("Host", "x"),
+        &with("X-A", "a\r\nX-B: b"),
+        &with("", "x"),
+        &with("a b", "x"),
+        &get("https://api.test/fail"),
+    ])
+}
+
+/// Three host calls of 40 ms each, past its budget were they the call's.
+fn slow(_: Vec<Value>) -> Answer {
+    let sent = (0..3).filter(|_| http::send("GET", "https://api.test/slow", &[], &[], 5).is_ok());
+    Ok(Value::Int(sent.count() as i64))
+}
+
+fn roles_round(_: Vec<Value>) -> Answer {
+    rounds(&[
+        &roles::add(
+            "ext_manager",
+            "Ext Manager",
+            &[("read", true), ("ext_cap", true)],
+        ),
+        &roles::add("ext_manager", "Again", &[]),
+        &roles::get("ext_manager"),
+        &roles::add("ext_other", "Other", &[]),
+        &roles::add("ext_manager", "Ext Manager", &[("manage_options", true)]),
+        &roles::add_cap("administrator", "ext_cap", false),
+        &roles::get("administrator"),
+        &roles::add_cap("administrator", "manage_options", false),
+        &roles::remove_cap("administrator", "ext_cap"),
+        &roles::get("administrator"),
+        &roles::remove_cap("nobody", "read"),
+        &roles::get("nobody"),
+        &roles::remove("ext_manager"),
+        &roles::remove("administrator"),
+        &roles::get("ext_fail"),
+        &roles::add("ext_fail", "fail", &[]),
+        &roles::remove("ext_fail"),
+        &roles::add_cap("ext_fail", "read", true),
+    ])
+}
+
 fn ids(found: Result<query::Found, SdkError>) -> Result<(Vec<u64>, u64, u32), SdkError> {
-    found.map(|found| (found.posts.iter().map(|post| post.id).collect(), found.total, found.max_pages))
+    found.map(|found| {
+        (
+            found.posts.iter().map(|post| post.id).collect(),
+            found.total,
+            found.max_pages,
+        )
+    })
 }
 
 fn query_round(_: Vec<Value>) -> Answer {
     let typed = |json: &str| ids(Query::new().var("post_type", json).posts());
-    let post = |id| query::get_post(id).map(|post| post.map(|post| (post.id, post.post_type, post.title)));
+    let post =
+        |id| query::get_post(id).map(|post| post.map(|post| (post.id, post.post_type, post.title)));
     rounds(&[
         &ids(Query::new().posts()),
         &typed("\"ext_item\""),
@@ -423,9 +544,23 @@ fn fire_round(_: Vec<Value>) -> Answer {
     let stale = raw_hooks::run_step(u64::MAX, 0, &[]);
     let steps = raw_hooks::chain("ext_chain").map(|(token, links)| {
         let bad = (ValueKind::Json, 0, 0.0, String::from("{"));
-        (links.len(), raw_hooks::run_step(token, 99, &[]), raw_hooks::run_step(token, 0, &[bad]))
+        (
+            links.len(),
+            raw_hooks::run_step(token, 99, &[]),
+            raw_hooks::run_step(token, 0, &[bad]),
+        )
     });
-    rounds(&[&chained, &stepped, &sensitive, &granted, &none, &nested, &hooks::current(), &stale, &steps])
+    rounds(&[
+        &chained,
+        &stepped,
+        &sensitive,
+        &granted,
+        &none,
+        &nested,
+        &hooks::current(),
+        &stale,
+        &steps,
+    ])
 }
 
 /// Removing its own callbacks and shortcodes for the request.
@@ -457,8 +592,16 @@ fn in_init() -> String {
     let post = ObjectKind::Post;
     let long_type = "ext_item_named_too_long";
     let long_taxonomy = "ext_kind_named_far_too_long_for_wp";
-    let steps: [&dyn Debug; 48] = [
+    let steps: [&dyn Debug; 56] = [
         &options::get("ext"),
+        &transients::get("ext_cache"),
+        &transients::set("ext_cache", &one, 0),
+        &transients::delete("ext_cache"),
+        &roles::get("ext_manager"),
+        &roles::add("ext_manager", "Ext Manager", &[]),
+        &roles::remove("ext_manager"),
+        &roles::add_cap("ext_manager", "read", true),
+        &http::send("GET", "https://api.test/", &[], &[], 5),
         &options::set("ext", &one, None),
         &options::add("ext", &one, None),
         &options::delete("ext"),
@@ -525,6 +668,14 @@ Err(SdkError::Failed("runs in a request, not in init"))
 Err(SdkError::Failed("runs in a request, not in init"))
 Err(SdkError::Failed("runs in a request, not in init"))
 Err(SdkError::Failed("runs in a request, not in init"))
+Err(SdkError::Failed("runs in a request, not in init"))
+Err(SdkError::Failed("runs in a request, not in init"))
+Err(SdkError::Failed("runs in a request, not in init"))
+Err(SdkError::Failed("runs in a request, not in init"))
+Err(SdkError::Failed("runs in a request, not in init"))
+Err(SdkError::Failed("runs in a request, not in init"))
+Err(SdkError::Failed("runs in a request, not in init"))
+Err(SdkError::Failed("runs in a request, not in init"))
 Err(SdkError::Invalid("Post type names must be between 1 and 20 characters in length."))
 Err(SdkError::Invalid("Taxonomy names must be between 1 and 32 characters in length."))
 Err(SdkError::Failed("runs in a request, not in init"))
@@ -560,7 +711,7 @@ Err(SdkError::Invalid("../x is not a folder inside the package"))
 Err(SdkError::Denied("user_has_cap is not in the manifest"))
 Err(SdkError::Denied("the_content is not in the manifest"))"#;
 
-const FILTERS: [(&str, Cb, i32, u32); 28] = [
+const FILTERS: [(&str, Cb, i32, u32); 32] = [
     ("the_content", Cb::Content, 10, 1),
     ("ext_trap", Cb::Trap, 10, 1),
     ("ext_loop", Cb::Spin, 10, 1),
@@ -589,6 +740,10 @@ const FILTERS: [(&str, Cb, i32, u32); 28] = [
     ("ext_nest", Cb::Nest, 10, 1),
     ("body_class", Cb::BodyClass, 10, 1),
     ("admin_footer_text", Cb::Footer, 10, 1),
+    ("ext_transients", Cb::Transients, 10, 1),
+    ("ext_roles", Cb::Roles, 10, 1),
+    ("ext_http", Cb::Http, 10, 1),
+    ("ext_slow", Cb::Slow, 10, 1),
 ];
 
 fn why(e: SdkError) -> String {
@@ -603,22 +758,37 @@ impl Plugin for Guest {
             hooks::on_filter(hook, callback, priority, accepted).map_err(why)?;
         }
         hooks::on_action("ext_action", Cb::Seen, 10, 2).map_err(why)?;
-        content::register_post_type("ext_item", &json::object(&[("public", "true")])).map_err(why)?;
+        content::register_post_type("ext_item", &json::object(&[("public", "true")]))
+            .map_err(why)?;
         content::register_taxonomy("ext_kind", &["ext_item".into()], "{}").map_err(why)?;
         meta::register(ObjectKind::Post, "ext_item", "_ext", "{\"single\":true}").map_err(why)?;
-        rest::route("ext/v1", "/items", &["GET", "POST"], Cb::Route, Cb::Permission, "{}").map_err(why)?;
+        rest::route(
+            "ext/v1",
+            "/items",
+            &["GET", "POST"],
+            Cb::Route,
+            Cb::Permission,
+            "{}",
+        )
+        .map_err(why)?;
         shortcodes::register("ext", Cb::Shortcode).map_err(why)?;
         blocks::register("blocks/card", Some(Cb::Render.into())).map_err(why)?;
         blocks::register("blocks/static", None).map_err(why)?;
         let answered = in_init();
-        if answered == IN_INIT { Ok(()) } else { Err(answered) }
+        if answered == IN_INIT {
+            Ok(())
+        } else {
+            Err(answered)
+        }
     }
 
     fn activate() -> Result<(), String> {
         match switched().as_deref() {
             Some("trap") => trap(Vec::new()).map(|_| ()),
             Some("refuse") => Err("refused".into()),
-            _ => options::add("ext_active", &Value::Bool(true), None).map(|_| ()).map_err(why),
+            _ => options::add("ext_active", &Value::Bool(true), None)
+                .map(|_| ())
+                .map_err(why),
         }
     }
 

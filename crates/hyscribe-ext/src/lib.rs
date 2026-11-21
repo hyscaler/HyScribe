@@ -37,7 +37,9 @@ pub use limits::{CEILING, DEFAULT, Limits};
 pub use manifest::Manifest;
 pub use request::{Report, Request, Rest};
 pub use runtime::Runtime;
-pub use site::{Asset, AssetKind, Found, Message, ObjectKind, Post, Site};
+pub use site::{
+    Asset, AssetKind, Caps, Found, Incoming, Message, ObjectKind, Outgoing, Post, Site,
+};
 
 /// What went wrong in an extension.
 #[derive(Clone, Debug, PartialEq, Eq)]

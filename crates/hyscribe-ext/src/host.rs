@@ -7,10 +7,10 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use wasmtime::component::Linker;
-use wasmtime::{Config, Engine, ResourceLimiter, Store, Trap};
+use wasmtime::{Config, Engine, ResourceLimiter, Store, Trap, UpdateDeadline};
 
 use crate::extension::Registrations;
 use crate::faults::Kind;
@@ -23,6 +23,10 @@ pub const TICK: Duration = Duration::from_millis(1);
 /// The Wasm stack of a call, wasmtime's default, set here so the limits
 /// hold it in one place.
 const STACK: usize = 512 << 10;
+
+/// The longest a call runs, its host calls included: a request's own
+/// limit (`REQUEST_TIME_LIMIT`, an open question).
+const WALL: Duration = Duration::from_secs(30);
 
 /// The most elements a table may grow to.
 const TABLE: usize = 10_000;
@@ -109,17 +113,22 @@ pub(crate) struct State {
     pub(crate) removed: BTreeSet<(String, u32, i32)>,
     /// Its own shortcodes it removed for this request.
     pub(crate) removed_shortcodes: BTreeSet<String>,
+    /// When the current call began, and the time it may run.
+    clock: (Instant, Duration),
+    /// The time the current call spent in host calls, which its budget
+    /// leaves out (ADR 0023): `REQUEST_TIME_LIMIT` bounds it instead.
+    pub(crate) host: Duration,
 }
 
 impl State {
-    /// A store for an extension in `phase`, bounded by `memory` bytes and
-    /// interrupted `ticks` from now.
+    /// A store for an extension in `phase`, bounded by `memory` bytes, its
+    /// first call by `budget`.
     pub(crate) fn store(
         engine: &Engine,
         (grants, slug): (&Arc<Grants>, &Arc<str>),
         phase: Phase,
         memory: usize,
-        ticks: u64,
+        budget: Duration,
     ) -> Store<State> {
         let state = State {
             grants: grants.clone(),
@@ -132,12 +141,40 @@ impl State {
             next_token: 0,
             removed: BTreeSet::new(),
             removed_shortcodes: BTreeSet::new(),
+            clock: (Instant::now(), budget),
+            host: Duration::ZERO,
         };
         let mut store = Store::new(engine, state);
         store.limiter(|state| state);
-        store.set_epoch_deadline(ticks);
+        store.epoch_deadline_callback(|cx| {
+            let left = cx.data().left();
+            Ok(match ticks(left) {
+                0 => UpdateDeadline::Interrupt,
+                ticks => UpdateDeadline::Continue(ticks),
+            })
+        });
+        store.set_epoch_deadline(ticks(budget));
         store
     }
+
+    /// The time the current call has run, its host calls left out.
+    pub(crate) fn used(&self) -> Duration {
+        self.clock.0.elapsed().saturating_sub(self.host)
+    }
+
+    /// What is left of the current call's budget, and never more than
+    /// what is left of `WALL` since it began, host calls included.
+    fn left(&self) -> Duration {
+        let wall = WALL.saturating_sub(self.clock.0.elapsed());
+        self.clock.1.saturating_sub(self.used()).min(wall)
+    }
+}
+
+/// Starts a call of at most `budget` on `store`'s instance.
+pub(crate) fn begin(store: &mut Store<State>, budget: Duration) {
+    let state = store.data_mut();
+    (state.clock, state.host) = ((Instant::now(), budget), Duration::ZERO);
+    store.set_epoch_deadline(ticks(budget));
 }
 
 impl ResourceLimiter for State {
@@ -177,6 +214,6 @@ pub(crate) fn classify(e: &wasmtime::Error, state: &State) -> (Kind, Fault) {
 }
 
 /// A deadline in ticks: whole milliseconds, as the ticker counts them.
-pub(crate) fn ticks(time: Duration) -> u64 {
+fn ticks(time: Duration) -> u64 {
     u64::try_from(time.as_millis()).unwrap_or(u64::MAX)
 }

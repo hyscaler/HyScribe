@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 [package]
 name = "hyscribe-sdk"
-description = "HyScribe's extension SDK 0.1: WordPress's hooks, options, meta, queries, REST routes, shortcodes, blocks, assets, cron, mail and capabilities for a WebAssembly component (ADR 0022)"
+description = "HyScribe's extension SDK 0.2: WordPress's hooks, options, transients, meta, queries, REST routes, shortcodes, blocks, assets, cron, mail and capabilities for a WebAssembly component (ADR 0022)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -11,10 +11,18 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use hyscribe_db::{Write, Writer};
-use hyscribe_ext::{Asset, AssetKind, Found, Message, ObjectKind, Post, Report, Request};
+use hyscribe_ext::{
+    Asset, AssetKind, Caps, Found, Incoming, Message, ObjectKind, Outgoing, Post, Report, Request,
+};
+use hyscribe_fetch::{Args, Client};
 use hyscribe_model::hooks::{self, Dispatch};
 use hyscribe_phpser::{Key, Value};
-use hyscribe_write::options::{Autoload, add_option, delete_option, get_option, update_option};
+use hyscribe_write::options::{
+    Autoload, Meta, add_metadata, add_option, delete_metadata, delete_option,
+    delete_site_transient, delete_transient, get_metadata, get_option, get_site_transient,
+    get_transient, set_site_transient, set_transient, update_metadata, update_option,
+};
+use hyscribe_write::roles::{add_role, get_role, remove_role, set_cap};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot};
 
@@ -28,6 +36,10 @@ const READ_ONLY: &str = "the site is read only";
 
 /// What a call answers once the action it ran in has gone.
 const GONE: &str = "the action ended";
+
+/// What a request answers with outbound fetches off (`HTTP_OUTBOUND`), or
+/// from an action, which fetches nothing.
+const NO_FETCHES: &str = "outbound requests are off";
 
 /// Database work of an extension's host call, run in an action's `Write`.
 type Job =
@@ -57,8 +69,13 @@ impl Drop for Done {
     }
 }
 
-/// The site an extension's host calls reach, once their grants are checked.
-struct Live(Through);
+/// The client of an extension's requests, the site's `home` and the
+/// runtime that runs them.
+struct Outbound(Option<Arc<Client>>, String, Handle);
+
+/// The site an extension's host calls reach, once their grants are
+/// checked: where their database calls run, and how they fetch.
+struct Live(Through, Option<Outbound>);
 
 fn failed(err: impl std::fmt::Debug) -> String {
     format!("{err:?}")
@@ -68,29 +85,73 @@ fn autoload(on: Option<bool>) -> Option<Autoload> {
     on.map(|on| if on { Autoload::On } else { Autoload::Off })
 }
 
-/// An extension's database call, run in a `Write`, answering a PHP value.
+/// An extension's database call, run in a `Write`, its answer kept by
+/// the call itself: one instantiation for every kind of answer.
 type Call = Box<
     dyn for<'a, 'w> FnOnce(
             &'a mut Write<'w>,
-        ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + 'a>>
+        ) -> Pin<Box<dyn Future<Output = Result<(), String>> + 'a>>
         + Send,
 >;
 
-/// What `update_option()` and its kin answered, as a PHP value.
-fn yes(answer: Value) -> bool {
-    answer == Value::Bool(true)
+/// The database work of a host call, answering `T` or an error.
+type Work<T, E> = Box<
+    dyn for<'a, 'w> FnOnce(&'a mut Write<'w>) -> Pin<Box<dyn Future<Output = Result<T, E>> + 'a>>
+        + Send,
+>;
+
+fn lock<T>(slot: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    slot.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// `get_option()` and the transients answer `false` for none.
+fn found(value: Value) -> Option<Value> {
+    (value != Value::Bool(false)).then_some(value)
+}
+
+/// The meta table of an object kind.
+fn meta(kind: ObjectKind) -> Meta {
+    match kind {
+        ObjectKind::Post => Meta::Post,
+        ObjectKind::User => Meta::User,
+        ObjectKind::Term => Meta::Term,
+        ObjectKind::Comment => Meta::Comment,
+    }
+}
+
+/// An optional value as PHP's meta functions default it: `''`.
+fn or_empty(value: Option<Value>) -> Value {
+    value.unwrap_or(Value::String(Vec::new()))
 }
 
 impl Live {
+    /// `work`'s answer, run where this site's database calls run.
+    fn ask<T: Send + 'static, E: std::fmt::Debug + 'static>(
+        &self,
+        work: Work<T, E>,
+    ) -> Result<T, String> {
+        let slot = Arc::new(std::sync::Mutex::new(None));
+        let kept = slot.clone();
+        let ran = self.run(Box::new(move |write| {
+            Box::pin(async move {
+                let answer = work(write).await.map_err(failed);
+                answer.map(|answer| *lock(&kept) = Some(answer))
+            })
+        }));
+        // Without `?`, so no instance has an error branch of its own.
+        ran.and_then(|()| lock(&slot).take().ok_or(GONE.to_string()))
+    }
+
     /// Runs `call` where this site's database calls run.
-    fn run(&self, call: Call) -> Result<Value, String> {
+    fn run(&self, call: Call) -> Result<(), String> {
         match &self.0 {
             Through::Own(None, _) => Err(READ_ONLY.into()),
             Through::Own(Some(writer), handle) => tokio::task::block_in_place(|| {
                 handle.block_on(async {
                     let mut write = writer.begin().await.map_err(failed)?;
-                    let done = call(&mut write).await?;
-                    write.commit().await.map(|()| done).map_err(failed)
+                    call(&mut write).await?;
+                    write.commit().await.map_err(failed)
                 })
             }),
             Through::Action(jobs) => {
@@ -115,80 +176,187 @@ impl hyscribe_ext::Site for Live {
 
     fn get_option(&self, name: &str) -> Result<Option<Value>, String> {
         let name = name.to_string();
-        let call: Call = Box::new(move |write| {
-            Box::pin(async move { get_option(write, &name).await.map_err(failed) })
-        });
-        let value = self.run(call)?;
-        Ok((value != Value::Bool(false)).then_some(value))
+        let got: Work<_, _> =
+            Box::new(move |write| Box::pin(async move { get_option(write, &name).await }));
+        self.ask(got).map(found)
     }
 
     fn update_option(&self, name: &str, value: Value, on: Option<bool>) -> Result<bool, String> {
         let name = name.to_string();
-        let call: Call = Box::new(move |write| {
-            Box::pin(async move {
-                let updated = update_option(write, &name, &value, autoload(on)).await;
-                updated.map(Value::Bool).map_err(failed)
-            })
-        });
-        self.run(call).map(yes)
+        self.ask(Box::new(move |write| {
+            Box::pin(async move { update_option(write, &name, &value, autoload(on)).await })
+        }))
     }
 
     fn add_option(&self, name: &str, value: Value, on: Option<bool>) -> Result<bool, String> {
         let name = name.to_string();
-        let call: Call = Box::new(move |write| {
-            Box::pin(async move {
-                let added = add_option(write, &name, &value, autoload(on)).await;
-                added.map(Value::Bool).map_err(failed)
-            })
-        });
-        self.run(call).map(yes)
+        self.ask(Box::new(move |write| {
+            Box::pin(async move { add_option(write, &name, &value, autoload(on)).await })
+        }))
     }
 
     fn delete_option(&self, name: &str) -> Result<bool, String> {
         let name = name.to_string();
-        let call: Call = Box::new(move |write| {
-            Box::pin(async move {
-                let deleted = delete_option(write, &name).await;
-                deleted.map(Value::Bool).map_err(failed)
-            })
-        });
-        self.run(call).map(yes)
+        self.ask(Box::new(move |write| {
+            Box::pin(async move { delete_option(write, &name).await })
+        }))
     }
 
-    fn get_meta(&self, _: ObjectKind, _: u64, _: &str) -> Result<Vec<Value>, String> {
-        Err(UNSERVED.into())
+    fn get_transient(&self, name: &str, site: bool) -> Result<Option<Value>, String> {
+        let name = name.to_string();
+        let got: Work<_, _> = Box::new(move |write| {
+            Box::pin(async move {
+                if site {
+                    get_site_transient(write, &name).await
+                } else {
+                    get_transient(write, &name).await
+                }
+            })
+        });
+        self.ask(got).map(found)
+    }
+
+    fn set_transient(
+        &self,
+        name: &str,
+        value: Value,
+        expiration: i64,
+        site: bool,
+    ) -> Result<bool, String> {
+        let name = name.to_string();
+        self.ask(Box::new(move |write| {
+            Box::pin(async move {
+                if site {
+                    set_site_transient(write, &name, &value, expiration).await
+                } else {
+                    set_transient(write, &name, &value, expiration).await
+                }
+            })
+        }))
+    }
+
+    fn delete_transient(&self, name: &str, site: bool) -> Result<bool, String> {
+        let name = name.to_string();
+        self.ask(Box::new(move |write| {
+            Box::pin(async move {
+                if site {
+                    delete_site_transient(write, &name).await
+                } else {
+                    delete_transient(write, &name).await
+                }
+            })
+        }))
+    }
+
+    fn fetch(
+        &self,
+        request: &Outgoing,
+        allowed: &(dyn Fn(&str) -> bool + Sync),
+    ) -> Result<Incoming, String> {
+        let Some(Outbound(Some(client), home, handle)) = &self.1 else {
+            return Err(NO_FETCHES.into());
+        };
+        let mut args = Args::new(format!("WordPress/7.1.3; {home}"));
+        args.timeout = std::time::Duration::from_secs(request.timeout.into());
+        let outgoing = hyscribe_fetch::Outgoing {
+            method: &request.method,
+            headers: &request.headers,
+            body: &request.body,
+        };
+        let sent = client.send_within(
+            request.url.as_bytes(),
+            home.as_bytes(),
+            (args, outgoing),
+            allowed,
+        );
+        let fetched = tokio::task::block_in_place(|| handle.block_on(sent));
+        let fetched = fetched.map_err(failed)?;
+        Ok((fetched.status, fetched.headers, fetched.body))
+    }
+
+    fn role(&self, role: &str) -> Result<Option<Caps>, String> {
+        let role = role.to_string();
+        self.ask(Box::new(move |write| {
+            Box::pin(async move { get_role(write, &role).await })
+        }))
+    }
+
+    fn add_role(
+        &self,
+        role: &str,
+        display_name: &str,
+        caps: &[(String, bool)],
+    ) -> Result<bool, String> {
+        let (role, name, caps) = (role.to_string(), display_name.to_string(), caps.to_vec());
+        self.ask(Box::new(move |write| {
+            Box::pin(async move { add_role(write, &role, &name, &caps).await })
+        }))
+    }
+
+    fn remove_role(&self, role: &str) -> Result<bool, String> {
+        let role = role.to_string();
+        self.ask(Box::new(move |write| {
+            Box::pin(async move { remove_role(write, &role).await })
+        }))
+    }
+
+    fn role_cap(&self, role: &str, cap: &str, grant: Option<bool>) -> Result<bool, String> {
+        let (role, cap) = (role.to_string(), cap.to_string());
+        self.ask(Box::new(move |write| {
+            Box::pin(async move { set_cap(write, &role, &cap, grant).await })
+        }))
+    }
+
+    fn get_meta(&self, kind: ObjectKind, id: u64, key: &str) -> Result<Vec<Value>, String> {
+        let key = key.to_string();
+        self.ask(Box::new(move |write| {
+            Box::pin(async move { get_metadata(write, meta(kind), id, &key).await })
+        }))
     }
 
     fn add_meta(
         &self,
-        _: ObjectKind,
-        _: u64,
-        _: &str,
-        _: Value,
-        _: bool,
+        kind: ObjectKind,
+        id: u64,
+        key: &str,
+        value: Value,
+        unique: bool,
     ) -> Result<Option<u64>, String> {
-        Err(UNSERVED.into())
+        let key = key.to_string();
+        self.ask(Box::new(move |write| {
+            Box::pin(async move { add_metadata(write, meta(kind), id, &key, &value, unique).await })
+        }))
     }
 
     fn update_meta(
         &self,
-        _: ObjectKind,
-        _: u64,
-        _: &str,
-        _: Value,
-        _: Option<Value>,
+        kind: ObjectKind,
+        id: u64,
+        key: &str,
+        value: Value,
+        previous: Option<Value>,
     ) -> Result<bool, String> {
-        Err(UNSERVED.into())
+        let (key, previous) = (key.to_string(), or_empty(previous));
+        self.ask(Box::new(move |write| {
+            Box::pin(async move {
+                update_metadata(write, meta(kind), id, &key, &value, &previous).await
+            })
+        }))
     }
 
     fn delete_meta(
         &self,
-        _: ObjectKind,
-        _: u64,
-        _: &str,
-        _: Option<Value>,
+        kind: ObjectKind,
+        id: u64,
+        key: &str,
+        value: Option<Value>,
     ) -> Result<bool, String> {
-        Err(UNSERVED.into())
+        let (key, value) = (key.to_string(), or_empty(value));
+        self.ask(Box::new(move |write| {
+            Box::pin(
+                async move { delete_metadata(write, meta(kind), id, &key, &value, false).await },
+            )
+        }))
     }
 
     fn public_post_type(&self, post_type: &str) -> bool {
@@ -296,7 +464,11 @@ fn line(report: &Report) -> String {
 pub(crate) fn request(site: &Site) -> Option<Arc<Request>> {
     let runtime = site.extensions.as_ref();
     runtime.and_then(|runtime| {
-        let live = Live(Through::Own(site.writer.clone(), Handle::current()));
+        let outbound = Outbound(site.fetch.clone(), site.home.clone(), Handle::current());
+        let live = Live(
+            Through::Own(site.writer.clone(), Handle::current()),
+            Some(outbound),
+        );
         let stored = site.options.get("active_plugins").map(Vec::as_slice);
         let listed = hyscribe_admin::plugins::option_array(stored).unwrap_or_default();
         let (request, reports) = runtime.request(&files(&listed), Arc::new(live));
@@ -329,7 +501,7 @@ impl Acted {
         make: impl FnOnce(Arc<dyn hyscribe_ext::Site>) -> Result<Request, E>,
     ) -> Result<Acted, E> {
         let (sender, jobs) = mpsc::channel(1);
-        let request = make(Arc::new(Live(Through::Action(sender.clone()))))?;
+        let request = make(Arc::new(Live(Through::Action(sender.clone()), None)))?;
         Ok(Acted {
             request: Arc::new(request),
             sender,

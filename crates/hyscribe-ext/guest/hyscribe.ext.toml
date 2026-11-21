@@ -6,7 +6,7 @@
 kind = "plugin"
 id = "hyscribe-test"
 version = "0.1.0"
-sdk = "0.1"
+sdk = "0.2"
 replaces = "hyscribe-test/hyscribe-test.php"
 replaces_versions = ">=0.1"
 compatibility = "full"
@@ -30,7 +30,8 @@ filters = [
   "ext_options", "ext_cron", "ext_echo", "ext_meta", "ext_query", "ext_mail",
   "ext_auth", "ext_assets", "ext_fire", "ext_chain", "ext_remove", "ext_current",
   "ext_bad_json", "ext_error", "ext_stack", "ext_count", "ext_gone", "ext_nest",
-  "body_class", "admin_footer_text",
+  "body_class", "admin_footer_text", "ext_transients", "ext_roles", "ext_http",
+  "ext_slow",
 ]
 shortcodes = ["ext", "ext_gone"]
 sensitive = ["map_meta_cap"]
@@ -44,3 +45,14 @@ write = ["ext_kind", "ext_kind_named_far_too_long_for_wp"]
 
 [rest]
 namespaces = ["ext/v1"]
+
+[transients]
+names = ["ext_cache", "ext_tmp_*"]
+site = ["ext_site*"]
+
+[roles]
+names = ["ext_manager", "ext_fail"]
+capabilities = ["ext_cap", "read"]
+
+[http]
+hosts = ["api.test", "redirect.test"]

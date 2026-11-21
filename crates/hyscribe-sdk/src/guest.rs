@@ -570,3 +570,110 @@ pub mod i18n {
         wit::translate_plural(single, plural, number, Some(context))
     }
 }
+
+/// `get_transient()` and friends, and their site forms, for the transient
+/// names the manifest grants (SDK 0.2).
+pub mod transients {
+    use super::SdkError;
+    use super::bindings::hyscribe::sdk::transients as wit;
+    use crate::Value;
+
+    /// `get_transient( $name )`: none when missing or expired.
+    pub fn get(name: &str) -> Result<Option<Value>, SdkError> {
+        wit::get(name, false).map(|value| value.map(Value::__from_wit))
+    }
+
+    /// `set_transient( $name, $value, $expiration )`, 0 for no expiry.
+    pub fn set(name: &str, value: &Value, expiration: i64) -> Result<bool, SdkError> {
+        wit::set(name, &value.__to_wit(), expiration, false)
+    }
+
+    /// `delete_transient( $name )`.
+    pub fn delete(name: &str) -> Result<bool, SdkError> {
+        wit::delete(name, false)
+    }
+
+    /// `get_site_transient( $name )`.
+    pub fn get_site(name: &str) -> Result<Option<Value>, SdkError> {
+        wit::get(name, true).map(|value| value.map(Value::__from_wit))
+    }
+
+    /// `set_site_transient( $name, $value, $expiration )`.
+    pub fn set_site(name: &str, value: &Value, expiration: i64) -> Result<bool, SdkError> {
+        wit::set(name, &value.__to_wit(), expiration, true)
+    }
+
+    /// `delete_site_transient( $name )`.
+    pub fn delete_site(name: &str) -> Result<bool, SdkError> {
+        wit::delete(name, true)
+    }
+}
+
+/// `get_role()`, `add_role()`, `remove_role()` and a role's `add_cap()`
+/// and `remove_cap()`, for the roles and capabilities the manifest grants
+/// (SDK 0.2).
+pub mod roles {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use super::SdkError;
+    use super::bindings::hyscribe::sdk::roles as wit;
+
+    /// `get_role( $role )->capabilities`: none for no such role.
+    pub fn get(role: &str) -> Result<Option<Vec<(String, bool)>>, SdkError> {
+        wit::get(role)
+    }
+
+    /// `add_role( $role, $display_name, $capabilities )`: false when the
+    /// role exists.
+    pub fn add(role: &str, display_name: &str, caps: &[(&str, bool)]) -> Result<bool, SdkError> {
+        let caps: Vec<(String, bool)> = caps
+            .iter()
+            .map(|(cap, grant)| (String::from(*cap), *grant))
+            .collect();
+        wit::add(role, display_name, &caps)
+    }
+
+    /// `remove_role( $role )`: false for no such role.
+    pub fn remove(role: &str) -> Result<bool, SdkError> {
+        wit::remove(role)
+    }
+
+    /// `get_role( $role )->add_cap( $cap, $grant )`: false for no such role.
+    pub fn add_cap(role: &str, cap: &str, grant: bool) -> Result<bool, SdkError> {
+        wit::add_cap(role, cap, grant)
+    }
+
+    /// `get_role( $role )->remove_cap( $cap )`: false for no such role.
+    pub fn remove_cap(role: &str, cap: &str) -> Result<bool, SdkError> {
+        wit::remove_cap(role, cap)
+    }
+}
+
+/// `wp_safe_remote_request()` to the hosts the manifest grants (SDK 0.2).
+pub mod http {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use super::SdkError;
+    use super::bindings::hyscribe::sdk::http as wit;
+
+    /// An answer: its status, its headers (names in lower case) and its body.
+    pub type Response = (u16, Vec<(String, Vec<u8>)>, Vec<u8>);
+
+    /// `wp_safe_remote_request( $url, array( 'method' => $method, 'headers'
+    /// => $headers, 'body' => $body, 'timeout' => $timeout ) )`.
+    pub fn send(
+        method: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+        timeout: u32,
+    ) -> Result<Response, SdkError> {
+        let headers: Vec<(String, String)> = headers
+            .iter()
+            .map(|(name, value)| (String::from(*name), String::from(*value)))
+            .collect();
+        wit::send(method, url, &headers, body, timeout)
+    }
+}

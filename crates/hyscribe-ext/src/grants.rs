@@ -5,8 +5,9 @@
 
 use std::collections::BTreeSet;
 
-/// The manifest's `[capabilities]`, `[hooks]`, `[meta]`, `[taxonomies]` and
-/// `[rest]`, once the administrator approved them.
+/// The manifest's `[capabilities]`, `[hooks]`, `[meta]`, `[taxonomies]`,
+/// `[rest]` and SDK 0.2's `[transients]`, `[roles]` and `[http]`,
+/// once the administrator approved them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Grants {
     /// `[hooks] actions`: actions it adds callbacks to, cron hooks among them.
@@ -35,7 +36,28 @@ pub struct Grants {
     pub mail: bool,
     /// Folders under `uploads/` whose files it may attach to mail.
     pub filesystem: BTreeSet<String>,
+    /// `[transients] names`: transients it reads and writes, a name or a
+    /// prefix ending in `*`.
+    pub transients: BTreeSet<String>,
+    /// `[transients] site`: site transients, the same way.
+    pub site_transients: BTreeSet<String>,
+    /// `[roles] names`: the roles it adds and removes, never WordPress's.
+    pub roles: BTreeSet<String>,
+    /// `[roles] capabilities`: the capabilities it gives or takes from any
+    /// role, its own included.
+    pub capabilities: BTreeSet<String>,
+    /// `[http] hosts`: the hosts it sends requests to, redirects included.
+    pub hosts: BTreeSet<String>,
 }
+
+/// WordPress's own roles, which no extension removes or adds anew.
+const CORE_ROLES: [&str; 5] = [
+    "administrator",
+    "editor",
+    "author",
+    "contributor",
+    "subscriber",
+];
 
 /// The hooks that change who is logged in, what they may do, what is
 /// filtered, or that see passwords, keys or mail: a grant of their own.
@@ -105,6 +127,17 @@ impl Grants {
                 "Mail attachments from",
                 self.filesystem.iter().cloned().collect(),
             ),
+            ("Transients", self.transients.iter().cloned().collect()),
+            (
+                "Site transients",
+                self.site_transients.iter().cloned().collect(),
+            ),
+            ("Roles it adds", self.roles.iter().cloned().collect()),
+            (
+                "Capabilities it gives roles",
+                self.capabilities.iter().cloned().collect(),
+            ),
+            ("Sends requests to", self.hosts.iter().cloned().collect()),
         ];
         lists
             .into_iter()
@@ -113,8 +146,9 @@ impl Grants {
     }
 
     /// The checks the manifest passes before anything loads: a sensitive
-    /// hook named only as an action or filter, a meta grant of every key, or
-    /// a hook no extension may have refuses the package.
+    /// hook named only as an action or filter, a meta or transient grant of
+    /// every name, a role grant of WordPress's own roles, or a hook no
+    /// extension may have refuses the package.
     pub fn check(&self) -> Result<(), String> {
         let named = self.actions.iter().chain(&self.filters);
         if let Some(hook) = named.clone().find(|hook| self.is_sensitive(hook)) {
@@ -130,6 +164,18 @@ impl Grants {
         }
         if self.meta.contains("*") {
             return Err("a meta grant names its keys or their prefix".into());
+        }
+        if self.transients.contains("*") || self.site_transients.contains("*") {
+            return Err("a transient grant names its transients or their prefix".into());
+        }
+        if let Some(role) = self
+            .roles
+            .iter()
+            .find(|role| CORE_ROLES.contains(&role.as_str()))
+        {
+            return Err(format!(
+                "{role} is WordPress's own role: [roles] names its own"
+            ));
         }
         Ok(())
     }
@@ -162,11 +208,42 @@ impl Grants {
 
     /// The meta key `key`, by name or by a prefix ending in `*`.
     pub(crate) fn meta(&self, key: &str) -> Result<(), String> {
-        let granted = self.meta.iter().any(|grant| match grant.strip_suffix('*') {
-            Some(prefix) => key.starts_with(prefix),
-            None => grant == key,
-        });
-        allow(granted, || format!("meta key {key} is not in the manifest"))
+        allow(named(&self.meta, key), || {
+            format!("meta key {key} is not in the manifest")
+        })
+    }
+
+    /// The transient `name`, or the site transient, by name or prefix.
+    pub(crate) fn transient(&self, name: &str, site: bool) -> Result<(), String> {
+        let (granted, what) = if site {
+            (&self.site_transients, "site transient")
+        } else {
+            (&self.transients, "transient")
+        };
+        allow(named(granted, name), || {
+            format!("{what} {name} is not in the manifest")
+        })
+    }
+
+    /// The role `name`, to add or remove.
+    pub(crate) fn role(&self, name: &str) -> Result<(), String> {
+        allow(self.roles.contains(name), || {
+            format!("role {name} is not in the manifest")
+        })
+    }
+
+    /// The capability `name`, to give or take from a role.
+    pub(crate) fn capability(&self, name: &str) -> Result<(), String> {
+        allow(self.capabilities.contains(name), || {
+            format!("capability {name} is not in the manifest")
+        })
+    }
+
+    /// A request to, or a redirect through, `host`, its case ignored.
+    pub fn host(&self, host: &str) -> bool {
+        self.hosts
+            .iter()
+            .any(|granted| granted.eq_ignore_ascii_case(host))
     }
 
     /// The post type `name`, to register or read.
@@ -218,6 +295,14 @@ impl Grants {
 pub(crate) fn relative(path: &str) -> bool {
     !path.contains(['\\', ':', '\0'])
         && path.split('/').all(|step| !matches!(step, "" | "." | ".."))
+}
+
+/// Whether `grants` names `name`, or a prefix of it ending in `*`.
+fn named(grants: &BTreeSet<String>, name: &str) -> bool {
+    grants.iter().any(|grant| match grant.strip_suffix('*') {
+        Some(prefix) => name.starts_with(prefix),
+        None => grant == name,
+    })
 }
 
 fn allow(granted: bool, why: impl FnOnce() -> String) -> Result<(), String> {

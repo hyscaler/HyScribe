@@ -21,6 +21,8 @@ pub(crate) use guest::{component, grants};
 pub(crate) struct TestSite {
     options: Mutex<BTreeMap<String, Value>>,
     meta: Mutex<BTreeMap<(u8, u64, String), Vec<Value>>>,
+    pub(crate) transients: Mutex<BTreeMap<(bool, String), (Value, i64)>>,
+    roles: Mutex<Vec<(String, Caps)>>,
     events: Mutex<Vec<(i64, String, Vec<Value>)>>,
     pub(crate) log: Mutex<Vec<String>>,
     pub(crate) now: AtomicU64,
@@ -57,6 +59,11 @@ impl TestSite {
     pub(crate) fn new() -> Arc<TestSite> {
         let site = TestSite::default();
         held(&site.options).insert("ext_bytes".into(), Value::String(vec![0xff]));
+        let administrator = (
+            "administrator".into(),
+            vec![("manage_options".into(), true)],
+        );
+        held(&site.roles).push(administrator);
         Arc::new(site)
     }
 
@@ -105,6 +112,94 @@ impl Site for TestSite {
         fails(name)?;
         let mut options = self.options.lock().unwrap_or_else(PoisonError::into_inner);
         Ok(options.remove(name).is_some())
+    }
+
+    fn get_transient(&self, name: &str, site: bool) -> Result<Option<Value>, String> {
+        fails(name)?;
+        if name.ends_with("bytes") {
+            return Ok(Some(Value::String(vec![0xff])));
+        }
+        let held = held(&self.transients);
+        Ok(held
+            .get(&(site, name.into()))
+            .map(|(value, _)| value.clone()))
+    }
+
+    fn set_transient(
+        &self,
+        name: &str,
+        value: Value,
+        expiration: i64,
+        site: bool,
+    ) -> Result<bool, String> {
+        fails(name)?;
+        held(&self.transients).insert((site, name.into()), (value, expiration));
+        Ok(true)
+    }
+
+    fn delete_transient(&self, name: &str, site: bool) -> Result<bool, String> {
+        fails(name)?;
+        Ok(held(&self.transients)
+            .remove(&(site, name.into()))
+            .is_some())
+    }
+
+    fn fetch(
+        &self,
+        request: &Outgoing,
+        allowed: &(dyn Fn(&str) -> bool + Sync),
+    ) -> Result<Incoming, String> {
+        fails(&request.url)?;
+        if request.url.ends_with("slow") {
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        let hops = [allowed("redirect.test"), allowed("evil.test")];
+        self.note(format!("fetch {request:?} {hops:?}"));
+        let headers = vec![("content-type".into(), b"text/plain".to_vec())];
+        Ok((200, headers, request.body.clone()))
+    }
+
+    fn role(&self, role: &str) -> Result<Option<Caps>, String> {
+        fails(role)?;
+        let roles = held(&self.roles);
+        Ok(roles
+            .iter()
+            .find(|(held, _)| held == role)
+            .map(|(_, caps)| caps.clone()))
+    }
+
+    fn add_role(
+        &self,
+        role: &str,
+        display_name: &str,
+        caps: &[(String, bool)],
+    ) -> Result<bool, String> {
+        fails(display_name)?;
+        let mut roles = held(&self.roles);
+        if roles.iter().any(|(held, _)| held == role) {
+            return Ok(false);
+        }
+        roles.push((role.into(), caps.to_vec()));
+        Ok(true)
+    }
+
+    fn remove_role(&self, role: &str) -> Result<bool, String> {
+        fails(role)?;
+        let mut roles = held(&self.roles);
+        let before = roles.len();
+        roles.retain(|(held, _)| held != role);
+        Ok(roles.len() != before)
+    }
+
+    fn role_cap(&self, role: &str, cap: &str, grant: Option<bool>) -> Result<bool, String> {
+        fails(role)?;
+        let mut roles = held(&self.roles);
+        let Some((_, caps)) = roles.iter_mut().find(|(held, _)| held == role) else {
+            return Ok(false);
+        };
+        caps.retain(|(held, _)| held != cap);
+        caps.extend(grant.map(|grant| (cap.to_string(), grant)));
+        Ok(true)
     }
 
     fn get_meta(&self, kind: ObjectKind, id: u64, key: &str) -> Result<Vec<Value>, String> {
@@ -322,6 +417,7 @@ pub(crate) fn load(slugs: &[&str], limits: Limits) -> Result<Loaded, Fault> {
     for slug in slugs {
         let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
         list.push(Arc::new(host.load(Package {
+            sdk: "0.2",
             slug,
             wasm: guest::component(),
             grants: grants(),
@@ -390,7 +486,7 @@ fn registers_in_init_only() -> Result<(), Fault> {
     let loaded = load(&["ext"], Limits::default())?;
     let extension = loaded.extensions.list().first().ok_or(Fault::Disabled)?;
     assert_eq!(extension.slug(), "ext");
-    assert_eq!(extension.hooks().len(), 29);
+    assert_eq!(extension.hooks().len(), 33);
     assert_eq!(
         extension.hooks().last(),
         Some(&Hook {
@@ -812,6 +908,7 @@ fn three_faults_in_ten_minutes_disable() -> Result<(), Fault> {
     assert_eq!(request.activate(0), Err(Fault::Disabled));
     let folder = loaded.folders.first().ok_or(Fault::Disabled)?.path();
     let again = Package {
+        sdk: "0.2",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -821,6 +918,7 @@ fn three_faults_in_ten_minutes_disable() -> Result<(), Fault> {
     assert_eq!(loaded.host.load(again).err(), Some(Fault::Disabled));
     faults::clear(folder).map_err(|e| Fault::Refused(e.to_string()))?;
     let cleared = Package {
+        sdk: "0.2",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -954,6 +1052,7 @@ fn a_fault_record_that_cannot_be_written_is_reported() -> Result<(), Fault> {
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let gone = folder.path().join("gone");
     let package = Package {
+        sdk: "0.2",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -991,6 +1090,7 @@ fn grants_nothing_by_default() -> Result<(), Fault> {
     let host = Host::new()?;
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let package = |grants| Package {
+        sdk: "0.2",
         slug: "ext",
         wasm: guest::component(),
         grants,
@@ -1023,6 +1123,7 @@ fn refuses_what_is_not_an_extension() -> Result<(), Fault> {
     let host = Host::new()?;
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let package = |wasm, limits| Package {
+        sdk: "0.2",
         slug: "ext",
         wasm,
         grants: grants(),
@@ -1036,7 +1137,7 @@ fn refuses_what_is_not_an_extension() -> Result<(), Fault> {
     let empty = [0, b'a', b's', b'm', 0x0d, 0, 1, 0];
     assert_eq!(
         host.load(package(&empty, Limits::default())).err(),
-        Some(Fault::Refused("no hyscribe:sdk/guest@0.1.0".into()))
+        Some(Fault::Refused("no hyscribe:sdk/guest@0.2.0".into()))
     );
     // A deadline of no ticks interrupts `init` at its first check.
     let hurried = Limits {
@@ -1066,6 +1167,133 @@ fn refuses_what_is_not_an_extension() -> Result<(), Fault> {
 }
 
 #[test]
+fn links_the_sdk_its_manifest_names() -> Result<(), Fault> {
+    let host = Host::new()?;
+    let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
+    let package = Package {
+        sdk: "0.1",
+        slug: "ext",
+        wasm: guest::component(),
+        grants: grants(),
+        limits: Limits::default(),
+        folder: folder.path(),
+    };
+    let Err(Fault::Refused(why)) = host.load(package) else {
+        panic!("a 0.2 component loaded as 0.1");
+    };
+    assert!(why.starts_with("hyscribe:sdk/"), "{why}");
+    assert!(
+        why.ends_with("@0.2.0 is not of SDK 0.1, which its manifest names"),
+        "{why}"
+    );
+    assert!(extension::of_sdk("hyscribe:sdk/hooks@0.2.1", "0.2"));
+    assert!(!extension::of_sdk("hyscribe:sdk/hooks@0.20.0", "0.2"));
+    assert!(!extension::of_sdk("hyscribe:sdk/hooks", "0.2"));
+    assert!(!extension::of_sdk("wasi:cli/stdout@0.2.0", "0.2"));
+    Ok(())
+}
+
+#[test]
+fn transients_are_checked_against_their_grant() -> Result<(), Fault> {
+    let loaded = load(&["ext"], Limits::default())?;
+    let site = TestSite::new();
+    let request = loaded.request(&site);
+    let failed = r#"Err(SdkError::Failed("the database went away"))"#;
+    let expected = [
+        r#"Ok(true) Ok(Some(Text("a"))) Ok(true) Ok(Some(Text("s")))"#,
+        r#"Err(SdkError::Denied("site transient ext_cache is not in the manifest"))"#,
+        r#"Err(SdkError::Denied("transient ext_site is not in the manifest"))"#,
+        "Ok(false) Ok(true) Ok(None) Ok(false)",
+        r#"Err(SdkError::Invalid("a transient name is at most 172 characters"))"#,
+        "Ok(false)",
+        r#"Err(SdkError::Invalid("a transient name is at most 167 characters"))"#,
+        failed,
+        failed,
+        failed,
+        r#"Err(SdkError::Invalid("a value that does not decode"))"#,
+        r#"Err(SdkError::Failed("a value that does not cross"))"#,
+    ];
+    assert_eq!(round(&request, "ext_transients"), expected.join(" "));
+    let held = held(&site.transients);
+    let site_transient = held.get(&(true, "ext_site".into()));
+    assert_eq!(site_transient, Some(&(text("s"), 0)));
+    assert_eq!(held.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn roles_and_capabilities_are_checked_against_their_grant() -> Result<(), Fault> {
+    let loaded = load(&["ext"], Limits::default())?;
+    let request = loaded.request(&TestSite::new());
+    let failed = r#"Err(SdkError::Failed("the database went away"))"#;
+    let expected = [
+        r#"Ok(true) Ok(false) Ok(Some([("read", true), ("ext_cap", true)]))"#,
+        r#"Err(SdkError::Denied("role ext_other is not in the manifest"))"#,
+        r#"Err(SdkError::Denied("capability manage_options is not in the manifest"))"#,
+        r#"Ok(true) Ok(Some([("manage_options", true), ("ext_cap", false)]))"#,
+        r#"Err(SdkError::Denied("capability manage_options is not in the manifest"))"#,
+        r#"Ok(true) Ok(Some([("manage_options", true)])) Ok(false) Ok(None) Ok(true)"#,
+        r#"Err(SdkError::Denied("role administrator is not in the manifest"))"#,
+        failed,
+        failed,
+        failed,
+        failed,
+    ];
+    assert_eq!(round(&request, "ext_roles"), expected.join(" "));
+    Ok(())
+}
+
+#[test]
+fn requests_go_to_granted_hosts_only() -> Result<(), Fault> {
+    let loaded = load(&["ext"], Limits::default())?;
+    let site = TestSite::new();
+    let request = loaded.request(&site);
+    let ok = "Ok((200, [(\"content-type\", [116, 101, 120, 116, 47, 112, 108, 97, 105, 110])], [97, 61, 98]))";
+    let empty =
+        "Ok((200, [(\"content-type\", [116, 101, 120, 116, 47, 112, 108, 97, 105, 110])], []))";
+    let invalid = |why: &str| format!("Err(SdkError::Invalid({why:?}))");
+    let expected = [
+        ok.to_string(),
+        empty.into(),
+        empty.into(),
+        empty.into(),
+        r#"Err(SdkError::Denied("host other.test is not in the manifest"))"#.into(),
+        invalid("ftp://api.test/ is not an HTTP URL"),
+        invalid("https:///x is not an HTTP URL"),
+        invalid("//api.test/x is not an HTTP URL"),
+        invalid("TRACE is not a method"),
+        invalid("Host is not a header it sends"),
+        invalid("X-A is not a header it sends"),
+        invalid(" is not a header it sends"),
+        invalid("a b is not a header it sends"),
+        r#"Err(SdkError::Failed("the database went away"))"#.into(),
+    ];
+    assert_eq!(round(&request, "ext_http"), expected.join(" "));
+    let logged = site.logged();
+    let sent = r#"fetch Outgoing { method: "POST", url: "https://api.test/verify", headers: [("X-Key", "k")], body: [97, 61, 98], timeout: 5 } [true, false]"#;
+    assert_eq!(logged.first().map(String::as_str), Some(sent));
+    Ok(())
+}
+
+/// Time in host calls is the host's: a call whose host calls outlast its
+/// budget, and its extension's for the request, still answers.
+#[test]
+fn host_calls_are_left_out_of_the_budget() -> Result<(), Fault> {
+    let limits = Limits {
+        call_ms: 20,
+        request_ms: 30,
+        ..Limits::default()
+    };
+    let loaded = load(&["ext"], limits)?;
+    let request = loaded.request(&TestSite::new());
+    for _ in 0..2 {
+        assert_eq!(request.filter("ext_slow", Value::Null, &[]), Value::Int(3));
+    }
+    assert_eq!(request.reports(), Vec::new());
+    Ok(())
+}
+
+#[test]
 fn bounds_tables_and_memory_at_their_limits() -> Result<(), Fault> {
     let host = Host::new()?;
     let grants = Arc::new(Grants::default());
@@ -1075,7 +1303,7 @@ fn bounds_tables_and_memory_at_their_limits() -> Result<(), Fault> {
         (&grants, &slug),
         host::Phase::Init,
         1 << 16,
-        1,
+        Duration::from_millis(1),
     )
     .into_data();
     use wasmtime::ResourceLimiter;

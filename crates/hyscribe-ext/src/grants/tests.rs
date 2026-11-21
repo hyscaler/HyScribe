@@ -20,6 +20,11 @@ fn grants() -> Grants {
         rest: set(&["contact-form-7/v1"]),
         mail: true,
         filesystem: set(&["uploads/wpcf7_uploads"]),
+        transients: set(&["wpcf7_*"]),
+        site_transients: set(&["wpcf7_site"]),
+        roles: set(&["wpseo_manager"]),
+        capabilities: set(&["wpseo_manage_options"]),
+        hosts: set(&["www.google.com"]),
     }
 }
 
@@ -144,6 +149,28 @@ fn names_by_grant() {
         grants.shortcode("gallery"),
         Err("shortcode gallery is not in the manifest".into())
     );
+    assert_eq!(grants.transient("wpcf7_x", false), Ok(()));
+    assert_eq!(grants.transient("wpcf7_site", true), Ok(()));
+    assert_eq!(
+        grants.transient("wpcf7_site_x", true),
+        Err("site transient wpcf7_site_x is not in the manifest".into())
+    );
+    assert_eq!(
+        grants.transient("doing_cron", false),
+        Err("transient doing_cron is not in the manifest".into())
+    );
+    assert_eq!(grants.role("wpseo_manager"), Ok(()));
+    assert_eq!(
+        grants.role("editor"),
+        Err("role editor is not in the manifest".into())
+    );
+    assert_eq!(grants.capability("wpseo_manage_options"), Ok(()));
+    assert_eq!(
+        grants.capability("manage_options"),
+        Err("capability manage_options is not in the manifest".into())
+    );
+    assert!(grants.host("WWW.google.com"));
+    assert!(!grants.host("google.com"));
 }
 
 #[test]
@@ -208,6 +235,11 @@ fn lists_what_it_asks_for() {
             "Shortcodes",
             "Mail",
             "Mail attachments from",
+            "Transients",
+            "Site transients",
+            "Roles it adds",
+            "Capabilities it gives roles",
+            "Sends requests to",
         ]
     );
     assert_eq!(listed[1].1, ["wpcf7_contact_form"]);

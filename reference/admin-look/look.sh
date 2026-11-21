@@ -11,7 +11,11 @@ DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 MU=/var/www/html/wp-content/mu-plugins
 case "${1:-}" in
-  add) "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-look.php" < "$(dirname "$0")/hyscribe-look.php" ;;
+  add)
+    # The footer names the workspace's version, as the binary does.
+    version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$(dirname "$0")/../../Cargo.toml" | head -n 1)
+    sed "s/@HYSCRIBE_VERSION@/$version/" "$(dirname "$0")/hyscribe-look.php" \
+      | "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-look.php" ;;
   remove) "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-look.php" ;;
   *) echo "usage: $0 add | remove" >&2; exit 2 ;;
 esac

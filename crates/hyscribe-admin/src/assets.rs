@@ -591,9 +591,10 @@ impl Dependencies {
             .unwrap_or_default()
     }
 
-    /// `WP_Scripts::do_item()`. In English no script has translations, and
-    /// no core script with a strategy has dependents or inline scripts, so
-    /// each keeps its intended strategy and fetch priority.
+    /// `WP_Scripts::do_item()`. In English only hs-admin's own wording gives
+    /// scripts translations, and no core script with a strategy has
+    /// dependents or inline scripts, so each keeps its intended strategy and
+    /// fetch priority.
     fn do_script(
         &mut self,
         urls: &dyn Urls,
@@ -665,7 +666,12 @@ impl Dependencies {
             attributes.push((b"fetchpriority", Some(fetchpriority.as_bytes())));
         }
         let script = tag(b"script", &attributes, None);
-        let markup = [before, script, after].concat();
+        let translations = if item.textdomain {
+            translations_tag(handle)
+        } else {
+            Vec::new()
+        };
+        let markup = [translations, before, script, after].concat();
         self.emit(out, &markup);
         true
     }
@@ -731,6 +737,23 @@ impl Dependencies {
         out.extend(self.print_html.as_bytes());
         out
     }
+}
+
+/// `print_translations()`'s tag of a script's locale data, if it has any.
+fn translations_tag(handle: &str) -> Vec<u8> {
+    let Some(json) = crate::look::script_translations(handle) else {
+        return Vec::new();
+    };
+    let id = format!("{handle}-js-translations");
+    let source = String::from_utf8_lossy(&rawurlencode(id.as_bytes())).into_owned();
+    let text = format!(
+        "\n( function( domain, translations ) {{\n\tvar localeData = translations.locale_data[ domain ] || translations.locale_data.messages;\n\tlocaleData[\"\"].domain = domain;\n\twp.i18n.setLocaleData( localeData, domain );\n}} )( \"default\", {json} );\n//# sourceURL={source}\n"
+    );
+    tag(
+        b"script",
+        &[(b"id", Some(id.as_bytes()))],
+        Some(text.as_bytes()),
+    )
 }
 
 #[cfg(test)]

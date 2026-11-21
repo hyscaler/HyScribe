@@ -7,7 +7,8 @@
 // hashes instead, of the page under hs-admin's URLs (as hs_admin_page() of
 // hyscribe-testkit put it before ADR 0008's 2026-11-17 amendment, keeping
 // relative form actions' `.php`; the oracle shows no update notice) with every
-// nonce as %nonce%: sha256 of its screen meta and content, a tab, and
+// nonce as %nonce% and the footer's HyScribe version as %version%: sha256
+// of its screen meta and content, a tab, and
 // sha256 of all of it. A list sorted
 // by author or parent, or the search for jpg (its results tie on their dates),
 // whose ties the database breaks as it goes, is
@@ -54,6 +55,8 @@ foreach ( array( "href='", 'href="', '"url":"' ) as $prefix ) {
 	$page = $out . $page;
 }
 $page = preg_replace( '/%nonce:[^%]*%/', '%nonce%', $page );
+// The footer's HyScribe version, so a release leaves the hashes as they are.
+$page = preg_replace( '/(<p id="footer-upgrade" class="alignright">\n\t\tHyScribe )[^\t]*/', '$1%version%', $page );
 if ( preg_match( '/orderby=(author|parent)|s=jpg/', $argv[4] ) ) {
 	$start = strpos( $page, '<tbody id="the-list"' );
 	$page  = substr( $page, 0, $start ) . substr( $page, strpos( $page, "\t</tbody>" ) );

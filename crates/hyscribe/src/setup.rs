@@ -266,7 +266,7 @@ pub(crate) fn questions(key: &'static str) -> Vec<Question> {
         "DB_PREFIX" => ("Table prefix", "wp_"),
         "WP_HOME" => ("WP_HOME, the site address (empty for the stored one)", ""),
         "WP_SITEURL" => (
-            "WP_SITEURL, the WordPress address (empty for the stored one)",
+            "WP_SITEURL, the HyScribe address (empty for the stored one)",
             "",
         ),
         _ => return Vec::new(),
@@ -293,7 +293,7 @@ pub(crate) fn questions(key: &'static str) -> Vec<Question> {
 pub(crate) fn not_copied(key: &str) -> String {
     match key {
         "EMPTY_TRASH_DAYS" => format!(
-            "{key} is not a literal number of days, so it is not copied: WordPress's 30 holds"
+            "{key} is not a literal number of days, so it is not copied: the default of 30 holds"
         ),
         "UPLOADS" => format!(
             "{key} is not a literal in a WordPress folder given, so it is not copied: \
@@ -559,7 +559,7 @@ async fn checked(
     if let Some(plan) = new {
         let installed = plan.install(&config.database).await?;
         report.push_str(&format!(
-            "  Installed WordPress 7.1.3's {} tables and first content in {}\n",
+            "  Installed the site's {} tables and first content in {}\n",
             installed.tables.len(),
             config.database.name
         ));

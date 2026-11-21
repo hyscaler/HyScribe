@@ -457,7 +457,11 @@ async fn the_lists_actions_answer_as_php() {
         assert_eq!(response.status().as_str(), status, "{case} {to}");
         if status == "200" {
             let php = String::from_utf8(hyscribe_testkit::unhex(php_body)).unwrap();
-            let php = undated(&unnonced(&hyscribe_testkit::hs_admin_page(&php)));
+            let php = hyscribe_testkit::hs_admin_page(&php);
+            let php = undated(&unnonced(&hyscribe_testkit::footer_version(
+                &php,
+                "%version%",
+            )));
             let page = undated(&unnonced(&masked_nonces(&page_of(response).await)));
             assert_eq!(page, php, "{case} {to}");
         }

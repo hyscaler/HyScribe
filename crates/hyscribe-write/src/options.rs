@@ -181,8 +181,7 @@ pub async fn set_transient(
     value: &Value,
     expiration: i64,
 ) -> Result<bool, Error> {
-    let timeout = format!("_transient_timeout_{name}");
-    let option = format!("_transient_{name}");
+    let (option, timeout) = transient_options(name, false);
     let expires = Value::Int(now() + expiration);
     if get_option(write, &option).await? == Value::Bool(false) {
         let mut autoload = Autoload::On;
@@ -223,11 +222,72 @@ pub async fn settings_errors_shown(write: &mut Write<'_>, now: i64) -> Result<()
 /// `delete_transient( $name )` without an object cache: the option, and
 /// its timeout when there was one.
 pub async fn delete_transient(write: &mut Write<'_>, name: &str) -> Result<bool, Error> {
-    let deleted = delete_option(write, &format!("_transient_{name}")).await?;
+    delete_pair(write, transient_options(name, false)).await
+}
+
+/// `delete_site_transient( $name )` on a single site, as `delete_transient()`.
+pub async fn delete_site_transient(write: &mut Write<'_>, name: &str) -> Result<bool, Error> {
+    delete_pair(write, transient_options(name, true)).await
+}
+
+async fn delete_pair(
+    write: &mut Write<'_>,
+    (option, timeout): (String, String),
+) -> Result<bool, Error> {
+    let deleted = delete_option(write, &option).await?;
     if deleted {
-        delete_option(write, &format!("_transient_timeout_{name}")).await?;
+        delete_option(write, &timeout).await?;
     }
     Ok(deleted)
+}
+
+/// The values of `autoload` that `wp_load_alloptions()` loads.
+const AUTOLOADED: [&str; 4] = ["yes", "on", "auto-on", "auto"];
+
+/// The site transients `get_site_transient()` never expires.
+const NO_TIMEOUT: [&str; 3] = ["update_core", "update_plugins", "update_themes"];
+
+/// A transient's option and its timeout's, or a site transient's.
+fn transient_options(name: &str, site: bool) -> (String, String) {
+    let kind = if site {
+        "_site_transient_"
+    } else {
+        "_transient_"
+    };
+    (format!("{kind}{name}"), format!("{kind}timeout_{name}"))
+}
+
+/// Whether the timeout option `timeout` holds a time already past.
+async fn expired(write: &mut Write<'_>, timeout: &str) -> Result<bool, DbError> {
+    let timeout = get_option(write, timeout).await?;
+    Ok(timeout != Value::Bool(false) && timeout.to_int() < now())
+}
+
+/// `get_transient( $name )` without an object cache: one not autoloaded
+/// may have a timeout, and once it is past both options are deleted and
+/// it answers `false`.
+pub async fn get_transient(write: &mut Write<'_>, name: &str) -> Result<Value, Error> {
+    let (option, timeout) = transient_options(name, false);
+    let autoload = write.option_autoload(&option).await?;
+    let loaded = autoload.is_some_and(|autoload| AUTOLOADED.contains(&autoload.as_str()));
+    if !loaded && expired(write, &timeout).await? {
+        delete_option(write, &option).await?;
+        delete_option(write, &timeout).await?;
+        return Ok(Value::Bool(false));
+    }
+    Ok(get_option(write, &option).await?)
+}
+
+/// `get_site_transient( $name )` on a single site: past its timeout, both
+/// options are deleted and it answers `false`; WordPress's update checks
+/// never expire.
+pub async fn get_site_transient(write: &mut Write<'_>, name: &str) -> Result<Value, Error> {
+    let (option, timeout) = transient_options(name, true);
+    if !NO_TIMEOUT.contains(&name) && expired(write, &timeout).await? {
+        expire_site_transient(write, name).await?;
+        return Ok(Value::Bool(false));
+    }
+    Ok(get_option(write, &option).await?)
 }
 
 /// `set_site_transient( $name, $value, $expiration )` on a single site
@@ -239,8 +299,7 @@ pub async fn set_site_transient(
     value: &Value,
     expiration: i64,
 ) -> Result<bool, Error> {
-    let timeout = format!("_site_transient_timeout_{name}");
-    let option = format!("_site_transient_{name}");
+    let (option, timeout) = transient_options(name, true);
     let expires = Value::Int(now() + expiration);
     let off = Some(Autoload::Off);
     if get_option(write, &option).await? == Value::Bool(false) {
@@ -258,8 +317,9 @@ pub async fn set_site_transient(
 /// What `get_site_transient( $name )` writes for a transient whose timeout
 /// has passed: both options deleted.
 pub async fn expire_site_transient(write: &mut Write<'_>, name: &str) -> Result<(), Error> {
-    delete_option(write, &format!("_site_transient_{name}")).await?;
-    delete_option(write, &format!("_site_transient_timeout_{name}")).await?;
+    let (option, timeout) = transient_options(name, true);
+    delete_option(write, &option).await?;
+    delete_option(write, &timeout).await?;
     Ok(())
 }
 

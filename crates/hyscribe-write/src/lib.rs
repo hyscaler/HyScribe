@@ -23,6 +23,7 @@ pub mod install;
 pub mod options;
 pub mod posts;
 pub mod privacy;
+pub mod roles;
 mod steps;
 pub mod terms;
 pub mod themes;

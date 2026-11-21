@@ -300,6 +300,8 @@ fn what_is_not_served_yet() {
     assert_eq!(live.register_asset("ext", &asset), unserved.clone());
     assert_eq!(live.enqueue(AssetKind::Style, "h"), unserved.clone());
     assert_eq!(live.add_inline(AssetKind::Script, "h", "", false), unserved);
+    let call = hyscribe_ext::ThemeCall::HavePosts;
+    assert_eq!(live.theme("t", &call), Err(UNSERVED.to_string()));
     assert!(live.public_post_type("attachment") && live.public_post_type("post"));
     assert!(live.public_post_type("page") && !live.public_post_type("ext_item"));
     assert_eq!(live.translate("ext", "Hello", Some("ctx")), "Hello");

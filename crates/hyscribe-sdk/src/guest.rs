@@ -8,13 +8,23 @@ use alloc::vec::Vec;
 
 use crate::{Plugin, Value};
 
-/// The bindings wit-bindgen generates for the `plugin` world. Guest code,
-/// inside the sandbox: the one place the SDK allows `unsafe`.
+/// The bindings wit-bindgen generates for the `plugin` world, or the
+/// `theme` world with the `theme` feature. Guest code, inside the sandbox:
+/// the one place the SDK allows `unsafe`.
 #[doc(hidden)]
 #[allow(unsafe_code, missing_docs, clippy::all)]
 pub mod bindings {
+    #[cfg(not(feature = "theme"))]
     wit_bindgen::generate!({
         world: "plugin",
+        path: "../hyscribe-ext/wit",
+        pub_export_macro: true,
+        export_macro_name: "export",
+        default_bindings_module: "::hyscribe_sdk::bindings",
+    });
+    #[cfg(feature = "theme")]
+    wit_bindgen::generate!({
+        world: "theme",
         path: "../hyscribe-ext/wit",
         pub_export_macro: true,
         export_macro_name: "export",
@@ -66,11 +76,12 @@ pub fn __invoke<P: Plugin>(callback: u32, args: Vec<wit::Value>) -> Result<wit::
     P::invoke(callback, args).map(|value| value.__to_wit())
 }
 
-/// Exports a [`Plugin`] as the component's `guest`, with the allocator,
-/// panic handler and canonical ABI allocator a component without `std`
-/// needs, so it imports nothing from WASI.
+/// What every component needs: the allocator, panic handler and canonical
+/// ABI allocator a component without `std` needs, so it imports nothing
+/// from WASI, and its `guest`.
+#[doc(hidden)]
 #[macro_export]
-macro_rules! plugin {
+macro_rules! __component {
     ($plugin:ty) => {
         #[global_allocator]
         static ALLOCATOR: $crate::__Allocator = $crate::__Allocator;
@@ -96,7 +107,11 @@ macro_rules! plugin {
                 if old_len == 0 {
                     ALLOCATOR.alloc(Layout::from_size_align_unchecked(new_len, align))
                 } else {
-                    ALLOCATOR.realloc(old, Layout::from_size_align_unchecked(old_len, align), new_len)
+                    ALLOCATOR.realloc(
+                        old,
+                        Layout::from_size_align_unchecked(old_len, align),
+                        new_len,
+                    )
                 }
             };
             if ptr.is_null() {
@@ -141,8 +156,39 @@ macro_rules! plugin {
             fn invoke(
                 callback: u32,
                 args: $crate::__Vec<$crate::bindings::hyscribe::sdk::types::Value>,
-            ) -> ::core::result::Result<$crate::bindings::hyscribe::sdk::types::Value, $crate::__String> {
+            ) -> ::core::result::Result<
+                $crate::bindings::hyscribe::sdk::types::Value,
+                $crate::__String,
+            > {
                 $crate::__invoke::<$plugin>(callback, args)
+            }
+        }
+    };
+}
+
+/// Exports a [`Plugin`] as the component's `guest`.
+#[cfg(not(feature = "theme"))]
+#[macro_export]
+macro_rules! plugin {
+    ($plugin:ty) => {
+        $crate::__component!($plugin);
+        $crate::bindings::export!(Exported with_types_in $crate::bindings);
+    };
+}
+
+/// Exports a [`Theme`](crate::Theme) as the component's `guest` and
+/// `theme-guest`.
+#[cfg(feature = "theme")]
+#[macro_export]
+macro_rules! theme {
+    ($theme:ty) => {
+        $crate::__component!($theme);
+
+        impl $crate::bindings::exports::hyscribe::sdk::theme_guest::Guest for Exported {
+            fn render(
+                file: $crate::__String,
+            ) -> ::core::result::Result<$crate::__Vec<u8>, $crate::__String> {
+                <$theme as $crate::Theme>::render(&file)
             }
         }
 
@@ -675,5 +721,203 @@ pub mod http {
             .map(|(name, value)| (String::from(*name), String::from(*value)))
             .collect();
         wit::send(method, url, &headers, body, timeout)
+    }
+}
+
+/// The loop and the template tags a classic theme's templates call (SDK
+/// 0.3, ADR 0023), by WordPress's names.
+#[cfg(feature = "theme")]
+pub mod template {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use super::bindings::hyscribe::sdk::template::{self as wit, PartKind};
+    use super::{SdkError, to_wit};
+    use crate::Value;
+
+    /// `have_posts()`.
+    pub fn have_posts() -> bool {
+        wit::have_posts()
+    }
+
+    /// `the_post()`.
+    pub fn the_post() {
+        wit::the_post();
+    }
+
+    /// `rewind_posts()`.
+    pub fn rewind_posts() {
+        wit::rewind_posts();
+    }
+
+    /// `wp_reset_postdata()`.
+    pub fn wp_reset_postdata() {
+        wit::reset_postdata();
+    }
+
+    /// `in_the_loop()`.
+    pub fn in_the_loop() -> bool {
+        wit::in_the_loop()
+    }
+
+    /// A conditional tag by name: `is( "is_singular", &[] )` is `is_singular()`.
+    pub fn is(name: &str, args: &[Value]) -> Result<bool, SdkError> {
+        wit::conditional(name, &to_wit(args))
+    }
+
+    /// A template tag that prints, by name: the bytes PHP prints.
+    pub fn print(name: &str, args: &[Value]) -> Result<Vec<u8>, SdkError> {
+        wit::print(name, &to_wit(args))
+    }
+
+    /// A template tag that answers a value, by name.
+    pub fn get(name: &str, args: &[Value]) -> Result<Value, SdkError> {
+        wit::get(name, &to_wit(args)).map(Value::__from_wit)
+    }
+
+    /// `get_header( $name, $args )`: the file to render, if any.
+    pub fn get_header(name: Option<&str>, args: &[Value]) -> Option<String> {
+        wit::part(PartKind::Header, "header", name, &to_wit(args))
+    }
+
+    /// `get_footer( $name, $args )`.
+    pub fn get_footer(name: Option<&str>, args: &[Value]) -> Option<String> {
+        wit::part(PartKind::Footer, "footer", name, &to_wit(args))
+    }
+
+    /// `get_sidebar( $name, $args )`.
+    pub fn get_sidebar(name: Option<&str>, args: &[Value]) -> Option<String> {
+        wit::part(PartKind::Sidebar, "sidebar", name, &to_wit(args))
+    }
+
+    /// `get_template_part( $slug, $name, $args )`.
+    pub fn get_template_part(slug: &str, name: Option<&str>, args: &[Value]) -> Option<String> {
+        wit::part(PartKind::TemplatePart, slug, name, &to_wit(args))
+    }
+}
+
+/// What a classic theme's `functions.php` sets up, and its theme mods (SDK
+/// 0.3, ADR 0023).
+#[cfg(feature = "theme")]
+pub mod theme {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use super::bindings::hyscribe::sdk::theme_setup as wit;
+    pub use super::bindings::hyscribe::sdk::theme_setup::TemplateFile;
+    use super::{SdkError, to_wit};
+    use crate::Value;
+
+    /// The template files the theme has, in `init`.
+    pub fn templates(files: &[TemplateFile]) -> Result<(), SdkError> {
+        wit::templates(files)
+    }
+
+    /// `add_theme_support( $feature, ...$args )`.
+    pub fn add_support(feature: &str, args: &[Value]) -> Result<(), SdkError> {
+        wit::add_support(feature, &to_wit(args))
+    }
+
+    /// `remove_theme_support( $feature )`.
+    pub fn remove_support(feature: &str) -> bool {
+        wit::remove_support(feature)
+    }
+
+    /// `register_nav_menus( $locations )`: each location and its description.
+    pub fn register_nav_menus(locations: &[(&str, &str)]) -> Result<(), SdkError> {
+        let locations: Vec<(String, String)> = locations
+            .iter()
+            .map(|(location, description)| (String::from(*location), String::from(*description)))
+            .collect();
+        wit::register_nav_menus(&locations)
+    }
+
+    /// `register_sidebar( $args )`, its arguments as JSON: its id.
+    pub fn register_sidebar(args: &str) -> Result<String, SdkError> {
+        wit::register_sidebar(args)
+    }
+
+    /// `add_image_size( $name, $width, $height, $crop )`.
+    pub fn add_image_size(
+        name: &str,
+        width: u32,
+        height: u32,
+        crop: &Value,
+    ) -> Result<(), SdkError> {
+        wit::add_image_size(name, width, height, &crop.__to_wit())
+    }
+
+    /// `set_post_thumbnail_size( $width, $height, $crop )`.
+    pub fn set_post_thumbnail_size(width: u32, height: u32, crop: &Value) -> Result<(), SdkError> {
+        wit::set_post_thumbnail_size(width, height, &crop.__to_wit())
+    }
+
+    /// `add_editor_style( $stylesheets )`, files of the package's `public/`.
+    pub fn add_editor_style(files: &[&str]) -> Result<(), SdkError> {
+        let files: Vec<String> = files.iter().map(|file| String::from(*file)).collect();
+        wit::add_editor_style(&files)
+    }
+
+    /// `$content_width = $width`.
+    pub fn set_content_width(width: u32) -> Result<(), SdkError> {
+        wit::set_content_width(width)
+    }
+
+    /// `register_block_style( $block_name, $style_properties )`, as JSON.
+    pub fn register_block_style(block: &str, args: &str) -> Result<(), SdkError> {
+        wit::register_block_style(block, args)
+    }
+
+    /// `register_block_pattern( $pattern_name, $pattern_properties )`, as JSON.
+    pub fn register_block_pattern(name: &str, args: &str) -> Result<(), SdkError> {
+        wit::register_block_pattern(name, args)
+    }
+
+    /// `get_theme_mod( $name, $default )`.
+    pub fn get_mod(name: &str, default: Option<&Value>) -> Result<Option<Value>, SdkError> {
+        let default = default.map(Value::__to_wit);
+        let value = wit::get_mod(name, default.as_ref());
+        value.map(|value| value.map(Value::__from_wit))
+    }
+
+    /// `set_theme_mod( $name, $value )`.
+    pub fn set_mod(name: &str, value: &Value) -> Result<bool, SdkError> {
+        wit::set_mod(name, &value.__to_wit())
+    }
+
+    /// `remove_theme_mod( $name )`.
+    pub fn remove_mod(name: &str) -> Result<bool, SdkError> {
+        wit::remove_mod(name)
+    }
+}
+
+/// `customize_register`'s `$wp_customize` (SDK 0.3, ADR 0023).
+#[cfg(feature = "theme")]
+pub mod customize {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use super::SdkError;
+    use super::bindings::hyscribe::sdk::customize as wit;
+    pub use super::bindings::hyscribe::sdk::customize::CustomizeKind;
+
+    /// `$wp_customize->add_panel()` and the others: its id, its arguments
+    /// as JSON and its callbacks (`sanitize_callback` and the rest) by number.
+    pub fn add(
+        kind: CustomizeKind,
+        id: &str,
+        args: &str,
+        callbacks: &[(&str, u32)],
+    ) -> Result<(), SdkError> {
+        let callbacks: Vec<(String, u32)> = callbacks
+            .iter()
+            .map(|(role, callback)| (String::from(*role), *callback))
+            .collect();
+        wit::add(kind, id, args, &callbacks)
+    }
+
+    /// `$wp_customize->remove_panel()` and the others.
+    pub fn remove(kind: CustomizeKind, id: &str) -> bool {
+        wit::remove(kind, id)
     }
 }

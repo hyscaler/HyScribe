@@ -145,6 +145,7 @@ pub fn install((plugins, packages): (&Path, &Path), bytes: &[u8]) -> Result<Mani
     let id = manifest.id.as_str();
     let staging = plugins.join(format!(".{id}.new"));
     let package = Package {
+        kind: manifest.kind,
         sdk: &manifest.sdk,
         slug: id,
         wasm: hyx.file(COMPONENT).unwrap_or_default(),

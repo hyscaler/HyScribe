@@ -95,6 +95,7 @@ impl Runtime {
         let host = self.host.get_or_init(Host::new).as_ref();
         host.map_err(Clone::clone).and_then(|host| {
             let package = Package {
+                kind: manifest.kind,
                 sdk: &manifest.sdk,
                 slug: &manifest.id,
                 wasm: &wasm,

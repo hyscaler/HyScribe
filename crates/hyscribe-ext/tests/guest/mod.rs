@@ -10,13 +10,13 @@ use std::sync::OnceLock;
 
 use hyscribe_ext::{
     Asset, AssetKind, Caps, Found, Grants, Incoming, Message, ObjectKind, Outgoing, Post, Site,
+    ThemeCall,
 };
 use hyscribe_phpser::Value;
 
-/// The test extension's component bytes.
-pub fn component() -> &'static [u8] {
-    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
-    WASM.get_or_init(|| {
+/// The component `build.sh` builds with `arg`, read once per test binary.
+fn built(arg: &str, once: &'static OnceLock<Vec<u8>>) -> &'static [u8] {
+    once.get_or_init(|| {
         // From either crate that includes this module.
         let script = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -24,6 +24,7 @@ pub fn component() -> &'static [u8] {
         );
         let built = Command::new("sh")
             .arg(script)
+            .arg(arg)
             .output()
             .expect("run guest/build.sh");
         assert!(
@@ -34,6 +35,19 @@ pub fn component() -> &'static [u8] {
         let path = String::from_utf8_lossy(&built.stdout);
         std::fs::read(path.trim()).expect("read the guest component")
     })
+}
+
+/// The test extension's component bytes.
+pub fn component() -> &'static [u8] {
+    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
+    built("", &WASM)
+}
+
+/// The test theme's component bytes (ADR 0023).
+#[allow(dead_code, reason = "the cost harness loads no theme")]
+pub fn theme() -> &'static [u8] {
+    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
+    built("theme", &WASM)
 }
 
 /// A site that does nothing and holds nothing, for a test that never
@@ -166,6 +180,9 @@ impl Site for Quiet {
     }
     fn add_inline(&self, _: AssetKind, _: &str, _: &str, _: bool) -> Result<(), String> {
         Ok(())
+    }
+    fn theme(&self, _: &str, _: &ThemeCall) -> Result<Value, String> {
+        Ok(Value::Null)
     }
 }
 

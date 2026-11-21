@@ -432,6 +432,10 @@ impl hyscribe_ext::Site for Live {
     fn add_inline(&self, _: AssetKind, _: &str, _: &str, _: bool) -> Result<(), String> {
         Err(UNSERVED.into())
     }
+
+    fn theme(&self, _: &str, _: &hyscribe_ext::ThemeCall) -> Result<Value, String> {
+        Err(UNSERVED.into())
+    }
 }
 
 /// The plugin files of `active_plugins` as PHP walks it.

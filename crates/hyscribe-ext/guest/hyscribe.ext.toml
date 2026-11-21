@@ -6,7 +6,7 @@
 kind = "plugin"
 id = "hyscribe-test"
 version = "0.1.0"
-sdk = "0.2"
+sdk = "0.3"
 replaces = "hyscribe-test/hyscribe-test.php"
 replaces_versions = ">=0.1"
 compatibility = "full"

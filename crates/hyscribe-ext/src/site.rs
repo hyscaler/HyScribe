@@ -134,6 +134,103 @@ pub struct Outgoing {
 /// An answer: its status, its headers (names in lower case) and its body.
 pub type Incoming = (u16, Vec<(String, Vec<u8>)>, Vec<u8>);
 
+/// The template part functions (`template.part-kind`, SDK 0.3).
+#[derive(ComponentType, Lift, Clone, Copy, Debug, PartialEq, Eq)]
+#[component(enum)]
+#[repr(u8)]
+pub enum Part {
+    /// `get_header()`.
+    #[component(name = "header")]
+    Header,
+    /// `get_footer()`.
+    #[component(name = "footer")]
+    Footer,
+    /// `get_sidebar()`.
+    #[component(name = "sidebar")]
+    Sidebar,
+    /// `get_template_part()`.
+    #[component(name = "template-part")]
+    TemplatePart,
+}
+
+/// What `$wp_customize` adds (`customize.customize-kind`, SDK 0.3).
+#[derive(ComponentType, Lift, Clone, Copy, Debug, PartialEq, Eq)]
+#[component(enum)]
+#[repr(u8)]
+pub enum CustomizeKind {
+    /// `add_panel()`.
+    #[component(name = "panel")]
+    Panel,
+    /// `add_section()`.
+    #[component(name = "section")]
+    Section,
+    /// `add_setting()`.
+    #[component(name = "setting")]
+    Setting,
+    /// `add_control()`.
+    #[component(name = "control")]
+    Control,
+    /// `selective_refresh->add_partial()`.
+    #[component(name = "partial")]
+    Partial,
+}
+
+/// A call of the theme world's `template`, `theme-setup` and `customize`
+/// interfaces (SDK 0.3, ADR 0023), its arguments checked; a theme makes
+/// them, so they reach the request's query and its theme state.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ThemeCall {
+    /// `have_posts()`: answers a boolean.
+    HavePosts,
+    /// `the_post()`.
+    ThePost,
+    /// `rewind_posts()`.
+    RewindPosts,
+    /// `wp_reset_postdata()`.
+    ResetPostdata,
+    /// `in_the_loop()`: answers a boolean.
+    InTheLoop,
+    /// A conditional tag by name, with its arguments: answers a boolean.
+    Conditional(String, Vec<Value>),
+    /// A template tag that prints: answers the bytes, as a string.
+    Print(String, Vec<Value>),
+    /// A template tag that answers a value.
+    Get(String, Vec<Value>),
+    /// `get_header()` and the others: answers the template file to
+    /// render, null for none.
+    Part(Part, String, Option<String>, Vec<Value>),
+    /// `add_theme_support( $feature, ...$args )`.
+    AddSupport(String, Vec<Value>),
+    /// `remove_theme_support( $feature )`: answers a boolean.
+    RemoveSupport(String),
+    /// `register_nav_menus( $locations )`.
+    NavMenus(Vec<(String, String)>),
+    /// `register_sidebar( $args )`: answers its id.
+    Sidebar(Value),
+    /// `add_image_size( $name, $width, $height, $crop )`.
+    ImageSize(String, u32, u32, Value),
+    /// `set_post_thumbnail_size( $width, $height, $crop )`.
+    ThumbnailSize(u32, u32, Value),
+    /// `add_editor_style( $stylesheets )`, paths inside `public/`.
+    EditorStyle(Vec<String>),
+    /// `$content_width`.
+    ContentWidth(u32),
+    /// `register_block_style( $block_name, $style_properties )`.
+    BlockStyle(String, Value),
+    /// `register_block_pattern( $pattern_name, $pattern_properties )`.
+    BlockPattern(String, Value),
+    /// `get_theme_mod( $name, $default )`: answers the value, null for none.
+    GetMod(String, Option<Value>),
+    /// `set_theme_mod( $name, $value )`: answers a boolean.
+    SetMod(String, Value),
+    /// `remove_theme_mod( $name )`: answers a boolean.
+    RemoveMod(String),
+    /// `$wp_customize->add_*()`: its id, arguments and callbacks by number.
+    Customize(CustomizeKind, String, Value, Vec<(String, u32)>),
+    /// `$wp_customize->remove_*()`: answers a boolean.
+    Uncustomize(CustomizeKind, String),
+}
+
 /// The site a request runs on. Each call's grant is checked before it is
 /// made; errors answer `sdk-error.failed`.
 pub trait Site: Send + Sync {
@@ -268,4 +365,6 @@ pub trait Site: Send + Sync {
         data: &str,
         before: bool,
     ) -> Result<(), String>;
+    /// A call of the theme `stylesheet` (SDK 0.3), answered as a PHP value.
+    fn theme(&self, stylesheet: &str, call: &ThemeCall) -> Result<Value, String>;
 }

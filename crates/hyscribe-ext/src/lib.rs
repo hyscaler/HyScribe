@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The extension host (ADR 0022): WebAssembly components of the SDK's
-//! `plugin` world under wasmtime, behind their manifest's grants.
+//! `plugin` and `theme` worlds (ADR 0023) under wasmtime, behind their
+//! manifest's grants.
 //!
 //! - One [`Host`] per process: the engine, the SDK's host functions and the
 //!   epoch ticker
@@ -30,7 +31,9 @@ mod runtime;
 mod site;
 mod value;
 
-pub use extension::{Block, Extension, Extensions, Hook, MetaKey, Package, Route, Taxonomy};
+pub use extension::{
+    Block, Extension, Extensions, Hook, MetaKey, Package, Route, Taxonomy, TemplateFile,
+};
 pub use grants::Grants;
 pub use host::{Host, TICK};
 pub use limits::{CEILING, DEFAULT, Limits};
@@ -38,7 +41,8 @@ pub use manifest::Manifest;
 pub use request::{Report, Request, Rest};
 pub use runtime::Runtime;
 pub use site::{
-    Asset, AssetKind, Caps, Found, Incoming, Message, ObjectKind, Outgoing, Post, Site,
+    Asset, AssetKind, Caps, CustomizeKind, Found, Incoming, Message, ObjectKind, Outgoing, Part,
+    Post, Site, ThemeCall,
 };
 
 /// What went wrong in an extension.

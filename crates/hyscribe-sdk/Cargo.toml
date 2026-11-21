@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 [package]
 name = "hyscribe-sdk"
-description = "HyScribe's extension SDK 0.2: WordPress's hooks, options, transients, meta, queries, REST routes, shortcodes, blocks, assets, cron, mail and capabilities for a WebAssembly component (ADR 0022)"
+description = "HyScribe's extension SDK 0.3: WordPress's hooks, options, transients, meta, queries, REST routes, shortcodes, blocks, assets, cron, mail, capabilities and classic themes' template tags for a WebAssembly component (ADR 0022, 0023)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,11 @@ rust-version.workspace = true
 license = "Apache-2.0 OR MIT"
 repository.workspace = true
 publish.workspace = true
+
+[features]
+# A classic theme: the `theme` world's bindings in place of the `plugin`
+# world's (ADR 0023), exported with `theme!`.
+theme = []
 
 # Only a component uses the bindings: built for wasm32-wasip2, they import
 # the SDK's interfaces and nothing from WASI.

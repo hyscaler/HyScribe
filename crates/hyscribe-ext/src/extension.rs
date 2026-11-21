@@ -15,11 +15,15 @@ use wasmtime::component::{Component, ComponentExportIndex, Instance, InstancePre
 
 use crate::faults::{self, Counted, Record};
 use crate::host::{Phase, State, classify, refused};
+use crate::manifest::Kind;
 use crate::value::{Lifted, Lowered};
 use crate::{Fault, Grants, Host, Limits, ObjectKind};
 
 /// What a component's SDK names start with.
 const SDK: &str = "hyscribe:sdk/";
+
+/// The interfaces only the `theme` world imports (SDK 0.3, ADR 0023).
+const THEME_ONLY: [&str; 3] = ["template", "theme-setup", "customize"];
 
 /// `guest.invoke`'s arguments and answer.
 pub(crate) type Args<'a> = (u32, &'a [Lowered<'a>]);
@@ -28,9 +32,14 @@ pub(crate) type Answered = (Result<Lifted, String>,);
 /// What `guest.init`, `guest.activate` and `guest.deactivate` answer.
 pub(crate) type Done = (Result<(), String>,);
 
+/// `theme-guest.render`'s argument and answer.
+pub(crate) type Rendered = (Result<Vec<u8>, String>,);
+
 /// What the host needs to load a package; the manifest's parsing and the
 /// package's unpacking are the lifecycle's (MVP 11.3).
 pub struct Package<'a> {
+    /// A plugin, or a theme of the `theme` world.
+    pub kind: Kind,
     /// The WordPress slug: its folder's name and its text domain.
     pub slug: &'a str,
     /// The manifest's `sdk`, which the component's imports and export name.
@@ -110,6 +119,17 @@ pub struct Block {
     pub render: Option<u32>,
 }
 
+/// A template file a theme has (`theme-setup.template-file`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TemplateFile {
+    /// Its path in the theme, such as `template-parts/header.php`.
+    pub file: String,
+    /// A page template's `Template Name`.
+    pub name: Option<String>,
+    /// A page template's `Template Post Type`.
+    pub post_types: Vec<String>,
+}
+
 /// What `init` registered.
 #[derive(Debug, Default)]
 pub(crate) struct Registrations {
@@ -120,6 +140,7 @@ pub(crate) struct Registrations {
     pub(crate) routes: Vec<Route>,
     pub(crate) shortcodes: Vec<(String, u32)>,
     pub(crate) blocks: Vec<Block>,
+    pub(crate) templates: Vec<TemplateFile>,
 }
 
 /// The guest's exports beside `init`.
@@ -168,6 +189,25 @@ impl Host {
                 package.sdk
             )));
         }
+        let mut imports = types.imports(&self.engine).map(|(name, _)| name);
+        let theme_only = |name: &&str| THEME_ONLY.iter().any(|only| of(name, only));
+        if let Some(name) = imports
+            .find(theme_only)
+            .filter(|_| package.kind == Kind::Plugin)
+        {
+            return Err(Fault::Refused(format!(
+                "{name} is a theme's, not a plugin's"
+            )));
+        }
+        let theme_guest = format!("{SDK}theme-guest@{}.0", package.sdk);
+        let render = match package.kind {
+            Kind::Plugin => None,
+            Kind::Theme => {
+                let found = component.get_export_index(None, &theme_guest);
+                let render = found.and_then(|at| component.get_export_index(Some(&at), "render"));
+                Some(render.ok_or(Fault::Refused(format!("no {theme_guest}")))?)
+            }
+        };
         let guest = format!("{SDK}guest@{}.0", package.sdk);
         let found = component.get_export_index(None, &guest).and_then(|guest| {
             let export = |name| component.get_export_index(Some(&guest), name);
@@ -202,7 +242,15 @@ impl Host {
                     .and_then(|_| {
                         instance.get_typed_func::<(), Done>(&mut store, &exports.deactivate)
                     })
-                    .and_then(|_| instance.get_typed_func::<(), Done>(&mut store, &init))
+                    .and_then(|_| match &render {
+                        Some(render) => {
+                            let typed =
+                                instance.get_typed_func::<(&str,), Rendered>(&mut store, render);
+                            typed.map(drop)
+                        }
+                        None => Ok(()),
+                    })
+                    .and_then(|()| instance.get_typed_func::<(), Done>(&mut store, &init))
             })
             .and_then(|init| init.call(&mut store, ()));
         match answer {
@@ -222,6 +270,12 @@ impl Host {
             disabled: AtomicBool::new(false),
         })
     }
+}
+
+/// Whether an import is the SDK's interface `interface`, any version.
+pub(crate) fn of(name: &str, interface: &str) -> bool {
+    let named = name.strip_prefix(SDK).and_then(|name| name.split_once('@'));
+    named.is_some_and(|(named, _)| named == interface)
 }
 
 /// Whether an import is one of SDK `sdk`'s interfaces, any patch version.
@@ -286,6 +340,11 @@ impl Extension {
     /// Its blocks.
     pub fn blocks(&self) -> &[Block] {
         &self.registered.blocks
+    }
+
+    /// A theme's template files.
+    pub fn templates(&self) -> &[TemplateFile] {
+        &self.registered.templates
     }
 
     /// A fresh instance in `phase`, its first call bounded by `budget`.

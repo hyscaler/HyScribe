@@ -54,7 +54,8 @@ fn reads_a_package() {
         [manifest::FILE, COMPONENT, "public/css/a.css", "LICENSE"]
     );
     assert_eq!(hyx.files[2].1, css);
-    let theme = b"[extension]\nkind = 'theme'\nid = 't'\nversion = '1'\nsdk = '0.1'\nlicense = 'MIT'\nname = 'T'\n";
+    let theme =
+        b"[extension]\nkind = 'theme'\nid = 't'\nversion = '1'\nsdk = '0.3'\nlicense = 'MIT'\n";
     let hyx = Hyx::read(&zip(&[(manifest::FILE, theme, false)])).unwrap();
     assert_eq!(hyx.files.len(), 1);
 }

@@ -22,4 +22,6 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# The test theme shares this lockfile and profile.
 [workspace]
+members = ["theme"]

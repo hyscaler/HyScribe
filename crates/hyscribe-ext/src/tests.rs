@@ -26,6 +26,7 @@ pub(crate) struct TestSite {
     events: Mutex<Vec<(i64, String, Vec<Value>)>>,
     pub(crate) log: Mutex<Vec<String>>,
     pub(crate) now: AtomicU64,
+    mods: Mutex<BTreeMap<String, Value>>,
 }
 
 fn text(s: &str) -> Value {
@@ -391,6 +392,61 @@ impl Site for TestSite {
         self.note(format!("inline {kind:?} {handle} {data} {before}"));
         Ok(())
     }
+
+    fn theme(&self, stylesheet: &str, call: &ThemeCall) -> Result<Value, String> {
+        self.note(format!("theme {stylesheet} {call:?}"));
+        let bytes = Value::String(vec![0xff]);
+        Ok(match call {
+            ThemeCall::HavePosts => Value::Bool(true),
+            ThemeCall::RemoveSupport(feature) => {
+                fails(feature)?;
+                Value::Bool(true)
+            }
+            ThemeCall::Conditional(name, _) => {
+                fails(name)?;
+                Value::Bool(name == "is_home")
+            }
+            ThemeCall::Print(name, _) | ThemeCall::Get(name, _) if name == "bytes" => bytes,
+            ThemeCall::Print(name, _) => {
+                fails(name)?;
+                match name.as_str() {
+                    // A core tag firing a hook, as `wp_head()` does.
+                    "wp_head" => Value::String(hyscribe_model::hooks::apply_filters(
+                        "ext_theme_head",
+                        b"<head>".to_vec(),
+                        &[],
+                    )),
+                    "slow" => {
+                        std::thread::sleep(Duration::from_millis(40));
+                        text("slow")
+                    }
+                    name => text(&format!("<{name}>")),
+                }
+            }
+            ThemeCall::Get(name, _) => {
+                fails(name)?;
+                Value::Int(7)
+            }
+            ThemeCall::Part(_, slug, name, _) => match name.as_deref() {
+                None => Value::Null,
+                Some("bytes") => bytes,
+                Some(name) => text(&format!("{slug}-{name}.php")),
+            },
+            ThemeCall::Sidebar(_) => text("sidebar-1"),
+            ThemeCall::GetMod(name, default) if name == "bytes" => default.clone().unwrap_or(bytes),
+            ThemeCall::GetMod(name, default) => {
+                let held = held(&self.mods).get(name).cloned();
+                held.or_else(|| default.clone()).unwrap_or_default()
+            }
+            ThemeCall::SetMod(name, value) => {
+                held(&self.mods).insert(name.clone(), value.clone());
+                Value::Bool(true)
+            }
+            ThemeCall::RemoveMod(name) => Value::Bool(held(&self.mods).remove(name).is_some()),
+            ThemeCall::Uncustomize(_, id) => Value::Bool(id == "x"),
+            _ => Value::Null,
+        })
+    }
 }
 
 pub(crate) struct Loaded {
@@ -417,7 +473,8 @@ pub(crate) fn load(slugs: &[&str], limits: Limits) -> Result<Loaded, Fault> {
     for slug in slugs {
         let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
         list.push(Arc::new(host.load(Package {
-            sdk: "0.2",
+            kind: manifest::Kind::Plugin,
+            sdk: "0.3",
             slug,
             wasm: guest::component(),
             grants: grants(),
@@ -908,7 +965,8 @@ fn three_faults_in_ten_minutes_disable() -> Result<(), Fault> {
     assert_eq!(request.activate(0), Err(Fault::Disabled));
     let folder = loaded.folders.first().ok_or(Fault::Disabled)?.path();
     let again = Package {
-        sdk: "0.2",
+        kind: manifest::Kind::Plugin,
+        sdk: "0.3",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -918,7 +976,8 @@ fn three_faults_in_ten_minutes_disable() -> Result<(), Fault> {
     assert_eq!(loaded.host.load(again).err(), Some(Fault::Disabled));
     faults::clear(folder).map_err(|e| Fault::Refused(e.to_string()))?;
     let cleared = Package {
-        sdk: "0.2",
+        kind: manifest::Kind::Plugin,
+        sdk: "0.3",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -1052,7 +1111,8 @@ fn a_fault_record_that_cannot_be_written_is_reported() -> Result<(), Fault> {
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let gone = folder.path().join("gone");
     let package = Package {
-        sdk: "0.2",
+        kind: manifest::Kind::Plugin,
+        sdk: "0.3",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -1090,7 +1150,8 @@ fn grants_nothing_by_default() -> Result<(), Fault> {
     let host = Host::new()?;
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let package = |grants| Package {
-        sdk: "0.2",
+        kind: manifest::Kind::Plugin,
+        sdk: "0.3",
         slug: "ext",
         wasm: guest::component(),
         grants,
@@ -1123,7 +1184,8 @@ fn refuses_what_is_not_an_extension() -> Result<(), Fault> {
     let host = Host::new()?;
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let package = |wasm, limits| Package {
-        sdk: "0.2",
+        kind: manifest::Kind::Plugin,
+        sdk: "0.3",
         slug: "ext",
         wasm,
         grants: grants(),
@@ -1137,7 +1199,7 @@ fn refuses_what_is_not_an_extension() -> Result<(), Fault> {
     let empty = [0, b'a', b's', b'm', 0x0d, 0, 1, 0];
     assert_eq!(
         host.load(package(&empty, Limits::default())).err(),
-        Some(Fault::Refused("no hyscribe:sdk/guest@0.2.0".into()))
+        Some(Fault::Refused("no hyscribe:sdk/guest@0.3.0".into()))
     );
     // A deadline of no ticks interrupts `init` at its first check.
     let hurried = Limits {
@@ -1171,6 +1233,7 @@ fn links_the_sdk_its_manifest_names() -> Result<(), Fault> {
     let host = Host::new()?;
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let package = Package {
+        kind: manifest::Kind::Plugin,
         sdk: "0.1",
         slug: "ext",
         wasm: guest::component(),
@@ -1179,11 +1242,11 @@ fn links_the_sdk_its_manifest_names() -> Result<(), Fault> {
         folder: folder.path(),
     };
     let Err(Fault::Refused(why)) = host.load(package) else {
-        panic!("a 0.2 component loaded as 0.1");
+        panic!("a 0.3 component loaded as 0.1");
     };
     assert!(why.starts_with("hyscribe:sdk/"), "{why}");
     assert!(
-        why.ends_with("@0.2.0 is not of SDK 0.1, which its manifest names"),
+        why.ends_with("@0.3.0 is not of SDK 0.1, which its manifest names"),
         "{why}"
     );
     assert!(extension::of_sdk("hyscribe:sdk/hooks@0.2.1", "0.2"));
@@ -1328,3 +1391,5 @@ fn dropping_the_host_stops_its_ticker() -> Result<(), Fault> {
     assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
     Ok(())
 }
+
+mod theme;

@@ -66,6 +66,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyscribe-ext-theme"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-sdk",
+]
+
+[[package]]
 name = "hyscribe-sdk"
 version = "0.1.0"
 dependencies = [

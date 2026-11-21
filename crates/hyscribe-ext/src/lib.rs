@@ -21,6 +21,7 @@ mod calls;
 mod extension;
 pub mod faults;
 mod grants;
+mod hierarchy;
 mod host;
 pub mod hyx;
 pub mod installed;
@@ -35,6 +36,7 @@ pub use extension::{
     Block, Extension, Extensions, Hook, MetaKey, Package, Route, Taxonomy, TemplateFile,
 };
 pub use grants::Grants;
+pub use hierarchy::locate;
 pub use host::{Host, TICK};
 pub use limits::{CEILING, DEFAULT, Limits};
 pub use manifest::Manifest;

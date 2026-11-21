@@ -204,7 +204,7 @@ fn deletes_a_plugin_and_its_packages_only() {
     fs::write(packages.join("stray.hyx"), &same).unwrap();
     let deleted = delete((&plugins, &packages), "hyscribe-test", &idle).unwrap();
     assert_eq!(
-        deleted.packages,
+        deleted,
         ["hyscribe-test-0.1.0.hyx", "hyscribe-test-0.2.0.hyx"]
     );
     assert!(!plugins.join("hyscribe-test").exists());
@@ -273,7 +273,7 @@ fn removes_links_and_never_follows_them() {
     // A link standing for the whole plugin's folder is removed itself.
     std::os::unix::fs::symlink(&outside, plugins.join("linked")).unwrap();
     let done = delete((&plugins, &packages), "linked", &idle).unwrap();
-    assert!(done.packages.is_empty() && !plugins.join("linked").exists());
+    assert!(done.is_empty() && !plugins.join("linked").exists());
     assert_eq!(fs::read(outside.join("keep")).unwrap(), b"x");
 }
 
@@ -287,7 +287,7 @@ fn finishes_what_a_crash_left_and_reports_a_failure() {
     fs::rename(plugins.join("hyscribe-test"), &aside).unwrap();
     fs::remove_file(&package).unwrap();
     let done = delete((&plugins, &packages), "hyscribe-test", &idle).unwrap();
-    assert!(done.packages.is_empty());
+    assert!(done.is_empty());
     assert_eq!(fs::read_dir(&plugins).unwrap().count(), 0);
     // Folders that cannot be changed keep the plugin whole and its packages.
     let package = kept(dir.path(), "hyscribe-test", "0.1.0");

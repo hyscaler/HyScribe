@@ -358,7 +358,8 @@ impl Extensions {
     }
 
     /// The extensions, in load order.
-    pub fn list(&self) -> &[Arc<Extension>] {
+    #[cfg(test)]
+    pub(crate) fn list(&self) -> &[Arc<Extension>] {
         &self.list
     }
 

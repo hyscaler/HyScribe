@@ -189,25 +189,18 @@ fn unpack(plugins: &Path, staging: &Path, hyx: &Hyx) -> std::io::Result<()> {
         .and_then(|()| gone(fs::remove_dir_all(&old)))
 }
 
-/// What `hyscribe plugin delete` removed from `packages/`.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Deleted {
-    /// The file names of the packages removed.
-    pub packages: Vec<String>,
-}
-
 /// `hyscribe plugin delete`: removes `plugins/<id>/` and the plugin's kept
 /// packages, unless `active` (asked only of an installed plugin) lists one
 /// of its files. The folder is renamed aside, then removed, so a crash
 /// leaves no plugin that loads; a symlink in its place, or in `packages/`,
 /// is removed itself, and nothing is followed out of the folders. A failure
 /// is reported once the rest is done, and running the command again
-/// finishes the removal.
+/// finishes the removal. It answers the file names of the packages removed.
 pub fn delete(
     (plugins, packages): (&Path, &Path),
     id: &str,
     active: &dyn Fn() -> Result<Vec<String>, String>,
-) -> Result<Deleted, String> {
+) -> Result<Vec<String>, String> {
     if !manifest::slug(id) {
         return Err(format!(
             "{id:?} is not a plugin id: lowercase letters, digits, - and _ only"
@@ -240,12 +233,10 @@ pub fn delete(
         note(&folder, remove_tree(&folder));
         note(&aside, remove_tree(&aside));
     }
-    let mut deleted = Deleted {
-        packages: Vec::new(),
-    };
+    let mut deleted = Vec::new();
     for path in owned {
         match remove_tree(&path) {
-            Ok(()) => deleted.packages.extend(
+            Ok(()) => deleted.extend(
                 path.file_name()
                     .and_then(|name| name.to_str())
                     .map(String::from),

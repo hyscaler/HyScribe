@@ -254,7 +254,7 @@ fn delete_plugin(home: &Path, env: &HashMap<String, String>, id: &str) -> Result
     let deleted = hyscribe_ext::installed::delete((&folders.0, &folders.1), id, &active)?;
     Ok(format!(
         "Deleted plugins/{id}/ and {} kept package(s).\n",
-        deleted.packages.len()
+        deleted.len()
     ))
 }
 

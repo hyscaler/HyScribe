@@ -240,7 +240,7 @@ impl Grants {
     }
 
     /// A request to, or a redirect through, `host`, its case ignored.
-    pub fn host(&self, host: &str) -> bool {
+    pub(crate) fn host(&self, host: &str) -> bool {
         self.hosts
             .iter()
             .any(|granted| granted.eq_ignore_ascii_case(host))

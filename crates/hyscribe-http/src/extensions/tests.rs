@@ -246,6 +246,37 @@ fn faults_are_logged() {
     assert_eq!(String::from_utf8(out).unwrap(), line.repeat(2));
 }
 
+/// An action's extensions read the action's own writes, and report their
+/// faults; the action's rollback leaves nothing behind.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_s_extensions_report_their_faults() {
+    let dir = tempfile::tempdir().unwrap();
+    install(dir.path());
+    let runtime = hyscribe_ext::Runtime::new(dir.path());
+    let found = installed::find(dir.path(), FILE).unwrap();
+    let mut acted = Acted::new(|live| runtime.activating(&[], &found, live)).unwrap();
+    let writer = Writer::open(&fixture_database(), Mode::Primary).await;
+    let writer = writer.unwrap().unwrap();
+    let mut write = writer.begin().await.unwrap();
+    update_option(&mut write, "ext_hooks", &text("trap"), None)
+        .await
+        .unwrap();
+    let run = |request: &Request| {
+        request
+            .index("hyscribe-test")
+            .map(|at| request.activate(at))
+    };
+    // The action waits for its extensions until their thread says it is done.
+    let ran = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        acted.run(&mut write, run),
+    );
+    let activated = ran.await.expect("the extensions' thread ends the wait");
+    assert!(matches!(activated, Some(Err(hyscribe_ext::Fault::Trap(_)))));
+    let reports = acted.reports();
+    assert!(matches!(reports.as_slice(), [Report { hook, .. }] if hook == "activate"));
+}
+
 /// A panic in the extensions' thread is the action's.
 #[tokio::test(flavor = "multi_thread")]
 #[should_panic(expected = "in the extensions' thread")]

@@ -225,6 +225,13 @@ fn active_plugins_files() {
     assert!(dispatch(&None).is_none());
 }
 
+/// A site without a plugins folder runs no extension.
+#[tokio::test]
+async fn no_extensions_without_a_plugins_folder() {
+    let site = crate::tests::oracle_site().await;
+    assert!(request(&site).is_none());
+}
+
 /// A fault is logged with its extension, hook, callback and fault.
 #[test]
 fn faults_are_logged() {

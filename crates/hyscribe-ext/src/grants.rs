@@ -5,9 +5,9 @@
 
 use std::collections::BTreeSet;
 
-/// The manifest's `[capabilities]` and `[hooks]`, once the administrator
-/// approved them.
-#[derive(Clone, Debug, Default)]
+/// The manifest's `[capabilities]`, `[hooks]`, `[meta]`, `[taxonomies]` and
+/// `[rest]`, once the administrator approved them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Grants {
     /// `[hooks] actions`: actions it adds callbacks to, cron hooks among them.
     pub actions: BTreeSet<String>,
@@ -24,8 +24,11 @@ pub struct Grants {
     pub meta: BTreeSet<String>,
     /// Post types it registers or reads beyond the public ones.
     pub post_types: BTreeSet<String>,
-    /// Taxonomies it registers.
+    /// `[taxonomies] write`: the taxonomies it registers.
     pub taxonomies: BTreeSet<String>,
+    /// `[taxonomies] read`: the taxonomies it reads beyond its own; SDK 0.1
+    /// has no call that reads terms, so it grants nothing yet.
+    pub read_taxonomies: BTreeSet<String>,
     /// Its REST namespaces, such as `contact-form-7/v1`.
     pub rest: BTreeSet<String>,
     /// `wp_mail()`.
@@ -74,6 +77,39 @@ impl Grants {
                 hook.strip_prefix(prefix)
                     .is_some_and(|option| !self.options.contains(option))
             })
+    }
+
+    /// What it asks for, as the Plugins screen lists it before activation:
+    /// each grant that names anything, with its names; the sensitive hooks
+    /// apart.
+    pub fn listed(&self) -> Vec<(&'static str, Vec<String>)> {
+        let mail = self.mail.then(|| "wp_mail()".to_string());
+        let lists = [
+            ("Options", self.options.iter().cloned().collect()),
+            ("Post types", self.post_types.iter().cloned().collect()),
+            ("Meta keys", self.meta.iter().cloned().collect()),
+            (
+                "Taxonomies it registers",
+                self.taxonomies.iter().cloned().collect(),
+            ),
+            (
+                "Taxonomies it reads",
+                self.read_taxonomies.iter().cloned().collect(),
+            ),
+            ("REST namespaces", self.rest.iter().cloned().collect()),
+            ("Actions", self.actions.iter().cloned().collect()),
+            ("Filters", self.filters.iter().cloned().collect()),
+            ("Shortcodes", self.shortcodes.iter().cloned().collect()),
+            ("Mail", mail.into_iter().collect()),
+            (
+                "Mail attachments from",
+                self.filesystem.iter().cloned().collect(),
+            ),
+        ];
+        lists
+            .into_iter()
+            .filter(|(_, names): &(_, Vec<String>)| !names.is_empty())
+            .collect()
     }
 
     /// The checks the manifest passes before anything loads: a sensitive

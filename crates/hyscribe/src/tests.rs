@@ -1256,3 +1256,73 @@ fn uploads_go_to_their_folder() {
     let existing = uploads_dir(&keys(&[("UPLOADS_DIR", "/srv/site/uploads")]), home);
     assert_eq!(existing, std::path::Path::new("/srv/site/uploads"));
 }
+
+/// The test extension, built from source as `hyscribe-ext`'s tests build it.
+#[allow(dead_code, reason = "only its component is used here")]
+#[path = "../../hyscribe-ext/tests/guest/mod.rs"]
+mod guest;
+
+/// `plugin install` unpacks a local package into `plugins/`, and refuses
+/// root, a file it cannot read and a package it does not take.
+#[test]
+fn plugin_install() {
+    let home = tempfile::tempdir().unwrap();
+    let manifest = include_bytes!("../../hyscribe-ext/guest/hyscribe.ext.toml");
+    let package = hyscribe_testkit::hyx::zip(&[
+        ("hyscribe.ext.toml", manifest, true),
+        ("extension.wasm", guest::component(), true),
+    ]);
+    let file = home.path().join("hyscribe-test-0.1.0.hyx");
+    std::fs::write(&file, package).unwrap();
+    let path = file.to_str().unwrap();
+    let output = run_with(&["plugin", "install", path], &[], home.path());
+    assert_eq!((output.code, output.err.as_str()), (0, ""));
+    assert_eq!(
+        output.out,
+        "Installed HyScribe Test 0.1.0 into plugins/hyscribe-test/, standing in for hyscribe-test/hyscribe-test.php. Activate it from the Plugins screen.\n"
+    );
+    assert!(
+        home.path()
+            .join("plugins/hyscribe-test/extension.wasm")
+            .is_file()
+    );
+    assert!(
+        home.path()
+            .join("packages/hyscribe-test-0.1.0.hyx")
+            .is_file()
+    );
+    let root = run_as(
+        &["plugin", "install", path],
+        HashMap::new(),
+        home.path(),
+        0,
+        child_server(),
+    );
+    assert_eq!(root.code, 1);
+    assert!(root.err.contains("refusing to run as root"));
+    let gone = home.path().join("gone.hyx");
+    let missing = run_with(
+        &["plugin", "install", gone.to_str().unwrap()],
+        &[],
+        home.path(),
+    );
+    assert_eq!(missing.code, 1);
+    assert!(
+        missing.err.starts_with("error: cannot read "),
+        "{}",
+        missing.err
+    );
+    // One byte more than a package may hold is read, and refused.
+    std::fs::File::create(&file)
+        .unwrap()
+        .set_len(hyscribe_ext::hyx::MAX_TOTAL + 1)
+        .unwrap();
+    let large = run_with(&["plugin", "install", path], &[], home.path());
+    assert!(large.err.contains("a package is at most"), "{}", large.err);
+    std::fs::write(&file, "not a package").unwrap();
+    let refused = run_with(&["plugin", "install", path], &[], home.path());
+    assert_eq!(
+        (refused.code, refused.err.as_str()),
+        (1, "error: not a zip archive\n")
+    );
+}

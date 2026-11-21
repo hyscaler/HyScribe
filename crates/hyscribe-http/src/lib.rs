@@ -135,6 +135,8 @@ pub struct Site {
     limiter: Arc<login::limits::Limiter>,
     /// The uploads folder, where uploads are written and served from.
     uploads: Option<Arc<Uploads>>,
+    /// The installed plugins' folder, `hyscribe/plugins/` (MVP 11.3).
+    plugins: Option<Arc<std::path::Path>>,
     /// The installation as configured, which the admin shows.
     install: Arc<Install>,
     /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
@@ -207,6 +209,7 @@ impl Site {
             constants: hyscribe_config::Constants::default(),
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             uploads: None,
+            plugins: None,
             install: unconfigured(),
             fetch: None,
             feed_hosts: Arc::default(),
@@ -260,6 +263,7 @@ impl Site {
             constants: self.constants,
             limiter: Arc::clone(&self.limiter),
             uploads: self.uploads.clone(),
+            plugins: self.plugins.clone(),
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
             feed_hosts: Arc::clone(&self.feed_hosts),
@@ -314,6 +318,14 @@ impl Site {
     pub fn with_uploads(self, uploads: Uploads) -> Site {
         Site {
             uploads: Some(Arc::new(uploads)),
+            ..self
+        }
+    }
+
+    /// The site whose installed plugins are in `folder`.
+    pub fn with_plugins(self, folder: &std::path::Path) -> Site {
+        Site {
+            plugins: Some(Arc::from(folder)),
             ..self
         }
     }

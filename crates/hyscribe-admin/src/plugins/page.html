@@ -1,0 +1,46 @@
+
+<div class="wrap">
+<h1 class="wp-heading-inline">
+Plugins</h1>
+
+
+<hr class="wp-header-end">
+
+
+%views%
+<form class="search-form search-plugins" method="get">
+%search%</form>
+
+<form method="post" id="bulk-action-form">
+
+<input type="hidden" name="plugin_status" value="%status%" />
+<input type="hidden" name="paged" value="1" />
+
+<input type="hidden" id="_wpnonce" name="_wpnonce" value="%nonce%" />%referer%	<div class="tablenav top">
+
+				<div class="alignleft actions bulkactions%hidden%">
+			%bulk_top%		</div>
+		%extra_top%%pages_top%
+		<br class="clear" />
+	</div>
+		<h2 class='screen-reader-text'>Plugins list</h2><table class="wp-list-table widefat plugins">
+			<thead>
+	<tr>
+		%head%	</tr>
+	</thead>
+
+	<tbody id="the-list"
+				>
+		%rows%	</tbody>
+
+	<tfoot>
+	<tr>
+		%foot%	</tr>
+	</tfoot>
+
+</table>
+%bottom%		</form>
+
+	<span class="spinner"></span>
+</div>
+

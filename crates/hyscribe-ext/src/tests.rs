@@ -13,7 +13,7 @@ use crate::host::State;
 
 #[path = "../tests/guest/mod.rs"]
 mod guest;
-pub(crate) use guest::grants;
+pub(crate) use guest::{component, grants};
 
 /// A site in memory, failing where a name asks it to, and logging what
 /// the extension did that leaves no other trace.

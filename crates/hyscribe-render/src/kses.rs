@@ -165,6 +165,26 @@ fn checks(spec: Value) -> Vec<Check> {
         .collect()
 }
 
+/// The tags `_get_plugin_data_markup_translate()` keeps in a plugin's name
+/// (`$allowed_tags_in_links`), and with links in its other headers.
+static PLUGIN_NAME: LazyLock<AllowedHtml> = LazyLock::new(|| {
+    AllowedHtml::from_json(
+        br#"{"abbr":{"title":true},"acronym":{"title":true},"code":true,"em":true,"strong":true}"#,
+    )
+});
+static PLUGIN_TEXT: LazyLock<AllowedHtml> = LazyLock::new(|| {
+    AllowedHtml::from_json(
+        br#"{"abbr":{"title":true},"acronym":{"title":true},"code":true,"em":true,"strong":true,"a":{"href":true,"title":true}}"#,
+    )
+});
+
+/// A plugin header as `_get_plugin_data_markup_translate()` sanitizes it:
+/// its name without links, its description, author or version with them.
+pub fn wp_kses_plugin_data(content: &[u8], links: bool) -> Vec<u8> {
+    let allowed = if links { &PLUGIN_TEXT } else { &PLUGIN_NAME };
+    wp_kses(content, allowed, b"")
+}
+
 /// `wp_kses_post( $data )`. `upload_host` is the host of `wp_upload_dir()`'s
 /// URL, with `:port` where it has one: embedded PDFs must come from there.
 pub fn wp_kses_post(content: &[u8], upload_host: &[u8]) -> Vec<u8> {

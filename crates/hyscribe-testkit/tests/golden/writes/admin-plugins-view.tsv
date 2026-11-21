@@ -1,0 +1,7 @@
+# The rows PHP WordPress writes for the action admin-plugins-view (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-21 00:55:12 to 2026-11-21 00:55:12 UTC.
+# %wp_options:1% is 130.
+wp_options	recently_activated	+	autoload	off
+wp_options	recently_activated	+	option_id	%wp_options:1%
+wp_options	recently_activated	+	option_name	recently_activated
+wp_options	recently_activated	+	option_value	a:0:{}

@@ -312,6 +312,7 @@ pub fn admin(site: &dyn ActionSite, screen: &str, asked: &Asked, post: bool) -> 
         "options-permalink" => permalinks(site, asked)?,
         "options-privacy" => privacy(site, asked)?,
         "themes" => themes(site, asked)?,
+        "plugins" => plugins(site, asked)?,
         "revision" => restore(site, asked)?,
         "upload" => media_list(site, asked)?,
         _ => return None,
@@ -784,6 +785,7 @@ pub fn action(screen: &str, asked: &Asked) -> Vec<u8> {
         // Those two handlers' checks run only for their own arguments.
         "options" if [&b"adminhash"[..], b"dismiss"].contains(&&asked.action()[..]) => Vec::new(),
         "options-privacy" => privacy_action(asked).unwrap_or_default(),
+        "plugins" => plugins_action(asked).unwrap_or_default(),
         "edit-tags" => terms_action(asked).unwrap_or_default(),
         "post" if asked.post("deletepost").is_some() => b"delete".to_vec(),
         _ => asked.action(),
@@ -1034,6 +1036,37 @@ fn themes(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
         String::from_utf8_lossy(&stylesheet.unwrap_or_default())
     );
     Some(referer(site, asked, &nonce))
+}
+
+/// `WP_Plugins_List_Table::current_action()`: clearing the recently active
+/// list before the list's own.
+fn plugins_action(asked: &Asked) -> Option<Vec<u8>> {
+    if asked.post("clear-recent-list").is_some() {
+        return Some(b"clear-recent-list".to_vec());
+    }
+    Some(asked.current_action(false)?.to_php_string())
+}
+
+/// `plugins.php`'s actions, once the menu let the user in: activating and
+/// deactivating one plugin by its nonce; deleting is refused; the others
+/// are not ported.
+fn plugins(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
+    let action = plugins_action(asked)?;
+    if !site.current_user_can("activate_plugins", &[]) {
+        return Some(Err(no_access()));
+    }
+    let plugin = asked.request("plugin").map(Value::to_php_string);
+    let plugin = String::from_utf8_lossy(&plugin.unwrap_or_default()).into_owned();
+    Some(match &action[..] {
+        b"activate" => referer(site, asked, &format!("activate-plugin_{plugin}")),
+        b"deactivate" => referer(site, asked, &format!("deactivate-plugin_{plugin}")),
+        // `delete_plugins` is never granted (docs/ADMIN.md).
+        b"delete-selected" => Err(died(
+            500,
+            "Sorry, you are not allowed to delete plugins for this site.",
+        )),
+        _ => Ok(()),
+    })
 }
 
 /// The Ajax actions `admin-ajax.php` answers for a user logged in, by the

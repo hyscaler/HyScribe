@@ -21,7 +21,10 @@ mod extension;
 pub mod faults;
 mod grants;
 mod host;
+pub mod hyx;
+pub mod installed;
 mod limits;
+pub mod manifest;
 mod request;
 mod site;
 mod value;
@@ -30,6 +33,7 @@ pub use extension::{Block, Extension, Extensions, Hook, MetaKey, Package, Route,
 pub use grants::Grants;
 pub use host::{Host, TICK};
 pub use limits::{CEILING, DEFAULT, Limits};
+pub use manifest::Manifest;
 pub use request::{Report, Request, Rest};
 pub use site::{Asset, AssetKind, Found, Message, ObjectKind, Post, Site};
 

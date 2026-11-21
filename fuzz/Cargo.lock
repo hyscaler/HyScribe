@@ -948,6 +948,7 @@ dependencies = [
  "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-db",
+ "hyscribe-ext",
  "hyscribe-fetch",
  "hyscribe-http",
  "hyscribe-mail",
@@ -1008,8 +1009,10 @@ dependencies = [
 name = "hyscribe-ext"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "hyscribe-model",
  "hyscribe-phpser",
+ "miniz_oxide 0.8.9",
  "wasmtime",
 ]
 
@@ -1070,6 +1073,7 @@ dependencies = [
  "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-db",
+ "hyscribe-ext",
  "hyscribe-fetch",
  "hyscribe-image",
  "hyscribe-kses",

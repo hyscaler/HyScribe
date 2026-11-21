@@ -19,6 +19,7 @@ hyscribe-admin.workspace = true
 hyscribe-auth.workspace = true
 hyscribe-config.workspace = true
 hyscribe-db.workspace = true
+hyscribe-ext.workspace = true
 hyscribe-fetch.workspace = true
 hyscribe-image.workspace = true
 hyscribe-kses.workspace = true

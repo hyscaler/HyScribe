@@ -443,6 +443,16 @@ impl Role {
             ("h9iconnone", "site_icon") => b"954",
             ("h9iconbig", "site_icon") => b"955",
             ("o36bad", "active_plugins") => b"s:3:\"abc\";",
+            ("x13active", "active_plugins") => {
+                b"a:1:{i:0;s:31:\"hyscribe-test/hyscribe-test.php\";}"
+            }
+            ("x13missing", "active_plugins") => {
+                b"a:2:{i:0;s:31:\"hyscribe-test/hyscribe-test.php\";i:1;s:19:\"missing/missing.php\";}"
+            }
+            ("x13badrecent", "recently_activated") => b"s:1:\"x\";",
+            ("x13recent", "recently_activated") => {
+                b"a:2:{s:31:\"hyscribe-test/hyscribe-test.php\";i:4102444800;s:11:\"old/old.php\";i:1000000000;}"
+            }
             ("o36one", "active_plugins") => b"a:1:{i:0;s:19:\"missing/missing.php\";}",
             ("o36two", "active_plugins") => b"a:2:{i:0;s:11:\"one/one.php\";i:1;s:7:\"two.php\";}",
             ("o36path", "active_plugins") => b"a:1:{i:0;s:11:\"../evil.php\";}",
@@ -1000,6 +1010,9 @@ impl PageSite for Role {
                 _ => return None,
             };
             return Some(value.to_vec());
+        }
+        if self.variant() == "x13hidden" && name == "managepluginscolumnshidden" {
+            return Some(b"a:1:{i:0;s:11:\"description\";}".to_vec());
         }
         if self.variant() == "a5hidden" {
             let value: &[u8] = match name {

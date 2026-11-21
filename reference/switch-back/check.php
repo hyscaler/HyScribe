@@ -254,6 +254,19 @@ if ( $styles ) {
 	}
 }
 
+// The plugins: the site's own, which HyScribe does not have, still active, and
+// the one the extension HyScribe activated stands in for, as PHP loads them.
+if ( $default_install ) {
+	$active = array( 'hello.php', 'hyscribe-test/hyscribe-test.php' );
+	if ( get_option( 'active_plugins' ) !== $active ) {
+		$failures[] = 'active_plugins is not ' . implode( ', ', $active );
+	}
+	$loaded = array_map( 'plugin_basename', wp_get_active_and_valid_plugins() );
+	if ( $loaded !== $active ) {
+		$failures[] = 'PHP loads the plugins ' . implode( ', ', $loaded );
+	}
+}
+
 // The cron events HyScribe scheduled, as wp-cron.php reads them.
 foreach ( _get_cron_array() as $timestamp => $hooks ) {
 	foreach ( $hooks as $hook => $events ) {

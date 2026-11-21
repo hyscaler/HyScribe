@@ -368,7 +368,7 @@ async fn logged_in_users_are_let_in() {
         assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{file}");
     }
     for path in [
-        "/hs-admin/plugins?plugin_status=active",
+        "/hs-admin/plugins?s=x",
         "/hs-admin/nav-menus",
         "/hs-admin/site-health?tab=status",
         "/hs-admin/site-editor",

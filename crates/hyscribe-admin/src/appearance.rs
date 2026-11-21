@@ -12,29 +12,24 @@ use hyscribe_render::date::human_time_diff;
 use hyscribe_render::theme;
 
 use crate::admin_bar::BarSite;
-use crate::list_table::wp_referer_field;
-use crate::list_table::{Column, Order, column_headers, fill, screen_options};
+use crate::list_table::fill;
 use crate::menu::{Screen, link};
-use crate::page::{HelpTab, Page, Request, admin_page, json, text, wp_admin_notice};
-use crate::posts::{Answer, PostsSite, hidden_columns, per_page};
+use crate::page::{HelpTab, Page, Request, admin_page, json, text};
+use crate::posts::{Answer, PostsSite};
 use crate::tools::NOTICES;
 
 const THEMES: &str = include_str!("appearance/themes.html");
 const SETTINGS: &str = include_str!("appearance/settings.json");
 const THEME_JSON: &str = include_str!("appearance/theme.json");
 const THEME_BLOCK: &str = include_str!("appearance/theme.html");
-const PLUGINS: &str = include_str!("appearance/plugins.html");
-const UPDATE_ROWS: &str = include_str!("appearance/update-rows.html");
+/// The update rows' templates `updates` prints on the Themes and Plugins screens.
+pub(crate) const UPDATE_ROWS: &str = include_str!("appearance/update-rows.html");
 
 const THEMES_OVERVIEW: &str = "<p>This screen is used for managing your installed themes. Aside from the default theme(s) included with your HyScribe installation, themes are designed and developed by third parties.</p><p>From this screen you can:</p><ul><li>Hover or tap to see Activate and Live Preview buttons.</li><li>Click Customize for the active theme or Live Preview for any other theme to see a live preview.</li><li>Click on a theme to open the Theme Details dialog and see the theme name, version, author, description, tags, and the Delete link.</li><li>Use the buttons at the top of the dialog, or <code>alt</code>/<code>option</code> plus the left or right arrow keys on your keyboard, to navigate between themes quickly.</li></ul><p>The active theme is displayed highlighted as the first theme.</p><p>The search for installed themes will search for terms in their name, description, author, or tag. <span id=\"live-search-desc\">The search results will be updated as you type.</span></p>";
 
 const THEMES_CUSTOMIZE: &str = "<p>Tap or hover on any theme then click the Live Preview button to see a live preview of that theme and change theme options in a separate, full-screen view. You can also find a Live Preview button at the bottom of the theme details screen. Any installed theme can be previewed and customized in this way.</p><p>The theme being previewed is fully interactive &mdash; navigate to different pages to see how the theme handles posts, archives, and other page templates. The settings may differ depending on what theme features the theme being previewed supports. To accept the new settings and activate the theme all in one step, click the Activate &amp; Publish button above the menu.</p><p>When previewing on smaller monitors, you can use the collapse icon at the bottom of the left-hand pane. This will hide the pane, giving you more room to preview your site in the new theme. To bring the pane back, click on the collapse icon again.</p>";
 
 const THEMES_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/work-with-themes/\">Documentation on Using Themes</a></p><p><a href=\"https://wordpress.org/documentation/article/appearance-themes-screen/\">Documentation on Managing Themes</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
-
-const PLUGINS_OVERVIEW: &str = "<p>Plugins extend and expand the functionality of HyScribe. Once a plugin is installed, you may activate it or deactivate it here.</p><p>The search for installed plugins will search for terms in their name, description, or author. <span id=\"live-search-desc\" class=\"hide-if-no-js\">The search results will be updated as you type.</span></p><p>If you would like to see more plugins to choose from, click on the &#8220;Add Plugin&#8221; button and you will be able to browse or search for additional plugins from the <a href=\"https://wordpress.org/plugins/\">Plugin Directory</a>. Plugins in the Plugin Directory are designed and developed by third parties, and are compatible with the license HyScribe uses. Oh, and they are free!</p>";
-
-const PLUGINS_SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\"https://wordpress.org/documentation/article/manage-plugins/\">Documentation on Managing Plugins</a></p><p><a href=\"https://wordpress.org/support/forums/\">Support forums</a></p>";
 
 /// `wp_get_auto_update_message()` at `now`, from the `cron` option.
 pub fn auto_update_message(cron: &[u8], now: i64) -> String {
@@ -385,165 +380,6 @@ pub(crate) fn updates_settings(site: &dyn PostsSite, items: Option<&str>) -> Str
         None => settings,
     }
 }
-
-/// `validate_file()`: a path that climbs out of its folder or names a drive.
-fn invalid_path(file: &str) -> bool {
-    let file = file.replace('\\', "/");
-    let climbs = file.matches("../").count();
-    climbs > 1
-        || file == "../"
-        || (climbs == 1 && !file.ends_with("../"))
-        || file.as_bytes().get(1) == Some(&b':')
-}
-
-/// `validate_active_plugins()`'s notices, without the write that
-/// deactivates the plugins: HyScribe has no plugin files, so every
-/// plugin the site names is missing. `None` where PHP would write the
-/// option back or find a file.
-pub(crate) fn missing_plugins(stored: Option<Vec<u8>>) -> Option<String> {
-    // `get_option( 'active_plugins', array() )`.
-    let Some(stored) = stored else {
-        return Some(String::new());
-    };
-    let Maybe::Value(Value::Array(listed)) = maybe_unserialize(&stored) else {
-        return None;
-    };
-    let mut files: Vec<String> = Vec::new();
-    for (_, plugin) in &listed {
-        let Value::String(bytes) = plugin else {
-            return None;
-        };
-        if bytes.is_empty() {
-            return None;
-        }
-        let file = crate::text(bytes);
-        if !files.contains(&file) {
-            files.push(file);
-        }
-    }
-    let notices = files.iter().map(|file| {
-        let error = if invalid_path(file) {
-            "Invalid plugin path."
-        } else {
-            "Plugin file does not exist."
-        };
-        let message = format!(
-            "The plugin <code>{}</code> has been deactivated due to an error: {error}",
-            esc_html(file.as_bytes())
-        );
-        wp_admin_notice(&message, "message", "error", true, "")
-    });
-    Some(notices.collect())
-}
-
-/// Where the Troubleshooting help names the plugins folder: relative to the
-/// HyScribe folder, in place of PHP's `WP_PLUGIN_DIR`.
-pub const PLUGIN_DIR: &str = "hyscribe/plugins/";
-
-/// `plugins.php` with no plugin installed.
-pub fn plugins(site: &dyn PostsSite, request: &Request) -> Option<Answer> {
-    let missing = missing_plugins(site.option("active_plugins"))?;
-    let hidden = hidden_columns(site, "plugins");
-    let hidden: Vec<&str> = hidden.iter().map(String::as_str).collect();
-    let columns = [
-        Column {
-            key: "cb",
-            label: String::new(),
-            sort: None,
-            primary: false,
-        },
-        Column {
-            key: "name",
-            label: "Plugin".into(),
-            sort: None,
-            primary: true,
-        },
-        Column {
-            key: "description",
-            label: "Description".into(),
-            sort: None,
-            primary: false,
-        },
-    ];
-    let headers = |counter, with_id| {
-        column_headers(
-            &columns,
-            &hidden,
-            &Order::default(),
-            request.canonical,
-            counter,
-            with_id,
-        )
-    };
-    let shown = columns.iter().filter(|c| !hidden.contains(&c.key)).count();
-    let content = missing
-        + &fill(
-            PLUGINS,
-            &[
-                ("nonce", site.nonce("bulk-plugins")),
-                ("referer", wp_referer_field(request.uri)),
-                ("head", headers(1, true)),
-                ("foot", headers(2, false)),
-                ("colspan", shown.to_string()),
-            ],
-        )
-        + NOTICES
-        + UPDATE_ROWS;
-    let options = screen_options(
-        &columns,
-        &hidden.iter().map(|h| (*h).to_string()).collect::<Vec<_>>(),
-        "plugins_per_page",
-        per_page(site, "plugins_per_page", 999),
-        "",
-        site.nonce("screen-options-nonce"),
-    );
-    let troubleshooting = format!(
-        "<p>Most of the time, plugins play nicely with the core of HyScribe and with other plugins. Sometimes, though, a plugin&#8217;s code will get in the way of another plugin, causing compatibility issues. If your site starts doing strange things, this may be the problem. Try deactivating all your plugins and re-activating them in various combinations until you isolate which one(s) caused the issue.</p><p>If something goes wrong with a plugin and you cannot use HyScribe, delete or rename that file in the <code>{PLUGIN_DIR}</code> directory and it will be automatically deactivated.</p>"
-    );
-    let help = [
-        HelpTab {
-            id: "overview",
-            title: "Overview",
-            content: PLUGINS_OVERVIEW,
-        },
-        HelpTab {
-            id: "compatibility-problems",
-            title: "Troubleshooting",
-            content: &troubleshooting,
-        },
-    ];
-    let page = Page {
-        screen: Screen {
-            pagenow: "plugins.php",
-            typenow: "",
-            taxonomy: "",
-            parent_file: Some("plugins.php"),
-            submenu_file: None,
-        },
-        id: "plugins",
-        title: "Plugins",
-        help: &help,
-        sidebar: PLUGINS_SIDEBAR,
-        screen_options: &options,
-        styles: &["thickbox"],
-        scripts: &["updates", "plugin-install", "thickbox"],
-        late_scripts: &[],
-        script_data: &[("updates", updates_settings(site, Some(PLUGIN_COUNTS)))],
-        script_after: &[],
-        late_styles: &[],
-        admin_head: "",
-        admin_footer: "",
-        footer_scripts: "",
-        content: &content,
-        canonical: request.canonical,
-        origin: request.origin,
-        view: None,
-    };
-    Some(Answer::from_page(admin_page(site, &page, request.browser)))
-}
-
-/// `_wpUpdatesItemCounts`' plugins, with none installed.
-const PLUGIN_COUNTS: &str = "\"plugins\":{\"all\":[],\"search\":[],\"active\":[],\"inactive\":[],\"recently_activated\":[],\"upgrade\":[],\"mustuse\":[],\"dropins\":[],\"paused\":[]},";
 
 #[cfg(test)]
 pub(crate) mod tests;

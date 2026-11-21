@@ -289,6 +289,12 @@ fn actions_are_named_as_php_names_them() {
         ("options-privacy", "action=create-privacy-page", ""),
         ("edit-tags", "action=delete&delete_tags[]=2", "bulk-delete"),
         ("edit-tags", "action=-1", ""),
+        (
+            "plugins",
+            "action=deactivate-selected",
+            "deactivate-selected",
+        ),
+        ("plugins", "action=-1", ""),
     ] {
         // `post.php`'s and `comment.php`'s Delete buttons are posted.
         let (get, post) = match query.split_once("&deletepost") {
@@ -1054,4 +1060,36 @@ fn attachment_saves_that_php_answers_an_error_are_refused() {
     assert_eq!(sent(wrong), Some(403));
     let post = "action=save-attachment&id=1&changes[title]=x&nonce=%nonce:update-post_1%";
     assert_eq!(sent(post), Some(200));
+}
+
+/// `plugins.php`'s actions: activating and deactivating one plugin by its
+/// nonce, deleting refused as `delete_plugins` is never granted, and the
+/// others, clearing the recently active list among them, not ported.
+#[test]
+fn plugin_actions() {
+    let admin = role("administrator");
+    let file = "hyscribe-test/hyscribe-test.php";
+    assert_eq!(outcome(&admin, "plugins.php", None), None);
+    for action in ["activate", "deactivate"] {
+        let target = format!("plugins.php?action={action}&plugin={file}");
+        let nonced = format!("{target}&{}", nonce(&format!("{action}-plugin_{file}")));
+        assert_eq!(outcome(&admin, &nonced, None), Some(501), "{action}");
+        assert_eq!(outcome(&admin, &target, None), Some(403), "{action}");
+        assert_eq!(
+            outcome(&role("editor"), &nonced, None),
+            Some(403),
+            "{action}"
+        );
+    }
+    let delete = format!(
+        "plugins.php?action=delete-selected&checked[]={file}&{}",
+        nonce("bulk-plugins")
+    );
+    assert_eq!(outcome(&admin, &delete, None), Some(500));
+    let clear = Some("clear-recent-list=Clear+List&action=-1");
+    assert_eq!(outcome(&admin, "plugins.php", clear), Some(501));
+    assert_eq!(
+        outcome(&admin, "plugins.php?action=resume", None),
+        Some(501)
+    );
 }

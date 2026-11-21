@@ -216,6 +216,37 @@ impl Server {
         String::from_utf8_lossy(&[output.stdout, output.stderr].concat()).into_owned()
     }
 
+    /// `hyscribe plugin install` of the test extension (MVP 11.3), its
+    /// component built from source, packaged with its manifest.
+    fn install(&self) -> String {
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../hyscribe-ext/guest/build.sh"
+        );
+        let built = Command::new("sh").arg(script).output().unwrap();
+        assert!(
+            built.status.success(),
+            "{}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let wasm = std::fs::read(String::from_utf8_lossy(&built.stdout).trim()).unwrap();
+        let manifest = include_bytes!("../../hyscribe-ext/guest/hyscribe.ext.toml");
+        let package = hyscribe_testkit::hyx::zip(&[
+            ("hyscribe.ext.toml", manifest, true),
+            ("extension.wasm", &wasm, true),
+        ]);
+        let file = self.home.join("hyscribe-test.hyx");
+        std::fs::write(&file, package).unwrap();
+        let output = Command::new(self.home.join("hyscribe"))
+            .env_clear()
+            .arg("plugin")
+            .arg("install")
+            .arg(&file)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&[output.stdout, output.stderr].concat()).into_owned()
+    }
+
     fn service(&self, verb: &str) -> String {
         let output = Command::new(self.home.join("hyscribe"))
             .env_clear()
@@ -442,6 +473,15 @@ fn writes_for_php_to_read() {
                 continue;
             }
             _ => {}
+        }
+        // `hyscribe plugin install` of the test extension, packaged here.
+        if method == "INSTALL" {
+            let out = server.install();
+            eprintln!("{case}\t{}", out.trim());
+            if !out.starts_with("Installed ") {
+                failures.push(format!("{case}: {out:?}"));
+            }
+            continue;
         }
         if method == "RESTART" {
             server.service("stop");

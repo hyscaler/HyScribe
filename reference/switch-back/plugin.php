@@ -39,3 +39,10 @@ add_filter(
 		return new WP_Error( 'switch_back_offline', 'No outbound requests during the switch-back suite.' );
 	}
 );
+
+// The update checks the Plugins and Themes screens make as they load, which
+// would ask WordPress.org about the plugins the suite activates.
+foreach ( array( 'plugins', 'themes', 'update', 'update-core' ) as $hyscribe_check ) {
+	remove_action( "load-$hyscribe_check.php", "wp_update_plugins" );
+	remove_action( "load-$hyscribe_check.php", "wp_update_themes" );
+}

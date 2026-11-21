@@ -235,7 +235,7 @@ fn what_php_computes_is_asked_for_or_left_safe() {
             .into(),
         "  ALLOW_UNFILTERED_UPLOADS is not a literal".into(),
         "  EMPTY_TRASH_DAYS is not a literal number of days, so it is not copied: \
-         WordPress's 30 holds\n"
+         the default of 30 holds\n"
             .into(),
         format!(
             "  Warning: UPLOADS_DIR {}/uploads is not a folder yet\n",
@@ -877,7 +877,7 @@ fn a_new_site_is_installed_in_an_empty_database() {
         "? Administrator email address: ",
         "? Discourage search engines from indexing this site? [y/N]: ",
         "? Site address, where visitors will open it [http://127.0.0.1:8080]: ",
-        "  Installed WordPress 7.1.3's 12 tables and first content in wordpress_saves\n",
+        "  Installed the site's 12 tables and first content in wordpress_saves\n",
         "  Connected to wordpress_saves on ",
     ] {
         assert!(ran.out.contains(expected), "{expected}\n{}", ran.out);

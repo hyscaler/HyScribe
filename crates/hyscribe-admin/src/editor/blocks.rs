@@ -109,7 +109,7 @@ fn a_source_without_context_uses_null() {
 }
 
 /// `get_block_editor_server_block_settings()`: each block type's fields
-/// that are set, under the editor's names.
+/// that are set, under the editor's names, with hs-admin's descriptions.
 pub fn server_block_settings(theme: &Theme) -> Value {
     const FIELDS: [(&str, &str); 19] = [
         ("api_version", "apiVersion"),
@@ -143,6 +143,8 @@ pub fn server_block_settings(theme: &Theme) -> Value {
             let value = block.get_str(field).filter(|v| !unset(v))?;
             let value = match *field {
                 "variations" => instance_descriptions(&themed_variations(theme, block, value)),
+                "description" => crate::look::block_description(&value.to_php_string())
+                    .map_or_else(|| value.clone(), text),
                 _ => value.clone(),
             };
             Some((Key::String(key.as_bytes().to_vec()), value))

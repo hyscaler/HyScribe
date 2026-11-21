@@ -48,9 +48,11 @@
 
 extern crate alloc;
 
+mod api;
 pub mod json;
 mod value;
 
+pub use api::*;
 pub use value::Value;
 
 #[doc(hidden)]
@@ -63,6 +65,17 @@ mod guest;
 
 #[cfg(target_arch = "wasm32")]
 pub use guest::*;
+
+/// The SDK's interfaces: the host's bindings in a component.
+#[cfg(target_arch = "wasm32")]
+use guest::bindings::hyscribe::sdk as sys;
+
+/// The SDK's interfaces natively: the test host's.
+#[cfg(not(target_arch = "wasm32"))]
+mod sys;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod test;
 
 /// What the host calls in a plugin (`guest`).
 pub trait Plugin {

@@ -100,6 +100,10 @@ php_checks() {
   "$DOCKER" exec "$NAME" grep -q "define( 'WP_DEBUG_LOG', true )" "$WP/wp-config.php" || return 1
   "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $WP/wp-content/mu-plugins && cat > $WP/wp-content/mu-plugins/hyscribe-switch-back.php" < "$HERE/plugin.php" || return 1
   "$DOCKER" exec "$NAME" rm -f "$WP/wp-content/debug.log" || return 1
+  # The plugin the test extension HyScribe activated stands in for (MVP 11.3).
+  "$DOCKER" exec "$NAME" mkdir -p "$WP/wp-content/plugins/hyscribe-test" || return 1
+  "$DOCKER" exec -i "$NAME" sh -c "cat > $WP/wp-content/plugins/hyscribe-test/hyscribe-test.php" \
+    < "$ROOT/reference/plugins/hyscribe-test/hyscribe-test.php" || return 1
   "$DOCKER" exec -i "$NAME" sh -c 'cat > /tmp/hyscribe-rewrite-rules' < "$OUT/rewrite_rules.txt" || return 1
   "$DOCKER" exec -i "$NAME" sh -c 'cat > /tmp/hyscribe-rest.tsv' < "$OUT/rest.tsv" || return 1
 

@@ -158,6 +158,7 @@ fn refuses_what_the_format_does_not_allow() {
     assert!(refused(&plugin(&description)).contains("description must be a valid value"));
     assert!(refused(&plugin("author = 'a\\u0007'\n").replace('\'', "\"")).contains("author"));
     assert!(refused(&"#".repeat(65 << 10)).contains("larger than"));
+    assert!(refused("a = 1\n").contains("line 1: a is outside a table"));
     assert!(
         Manifest::parse(b"[extension]\nid = '\xff'\n")
             .unwrap_err()
@@ -235,6 +236,8 @@ fn refuses_the_rest_of_toml() {
         ("[a]\nb = 99999999999999999999\n", "expected a value"),
         ("[a]\nb = trueish\n", "unexpected text after the value"),
         ("[a]\nb = yes\n", "expected a value"),
+        ("[a]\nb = tru\n", "expected a value"),
+        ("[a]\n= 1\n", "line 2: expected a bare key"),
         ("[a]\nb = { c = 1 }\n", "expected a value"),
         (
             "[a]\nb = \"\"\"x\"\"\"\n",

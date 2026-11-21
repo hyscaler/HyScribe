@@ -147,6 +147,12 @@ fn unusual_active_plugins_are_not_ported() {
     let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
     let site = Role("o36bad:administrator");
     assert_eq!(plugins(&site, &request, &[], &Args::default()), None);
+    let site = Role("x13badrecent:administrator");
+    assert_eq!(plugins(&site, &request, &[], &Args::default()), None);
+    // One who may not activate gets no Activate link, nor the screen.
+    let editor = Role("x13inactive:editor");
+    let refused = plugins(&editor, &request, &[installed()], &Args::default());
+    assert!(matches!(refused, Some(Answer::Denied(_))));
 }
 
 /// Paths that climb or name a drive are invalid paths, others missing

@@ -27,7 +27,10 @@ fn view(settings: bool, rules: bool) -> View {
 #[tokio::test]
 async fn a_settings_view_fails_with_its_statement() {
     let writer = writer().await;
-    let view = view(true, true);
+    let view = View {
+        recent: true,
+        ..view(true, true)
+    };
     let ctx = context(1, SITE, SITE, Default::default());
     let saved = settled(async |budget| {
         let mut write = writer.begin().await;

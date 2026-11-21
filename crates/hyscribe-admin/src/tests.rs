@@ -449,6 +449,7 @@ impl Role {
             ("x13missing", "active_plugins") => {
                 b"a:2:{i:0;s:31:\"hyscribe-test/hyscribe-test.php\";i:1;s:19:\"missing/missing.php\";}"
             }
+            ("x13badrecent", "recently_activated") => b"s:1:\"x\";",
             ("x13recent", "recently_activated") => {
                 b"a:2:{s:31:\"hyscribe-test/hyscribe-test.php\";i:4102444800;s:11:\"old/old.php\";i:1000000000;}"
             }

@@ -91,9 +91,7 @@ pub(super) trait Acting: ActionSite {
     /// Deletes the files kept, once the action is `committed`, or forgets them.
     fn settle_files(&self, _committed: bool) {}
     /// The installed plugins' folder, `hyscribe/plugins/`, if the site has one.
-    fn plugins(&self) -> Option<&std::path::Path> {
-        None
-    }
+    fn plugins(&self) -> Option<&std::path::Path>;
 }
 
 /// An answer once the action's mails were sent: changed only by mails it

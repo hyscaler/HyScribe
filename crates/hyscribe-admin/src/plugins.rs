@@ -21,6 +21,7 @@ use crate::list_table::{
 use crate::menu::{Screen, link};
 use crate::page::{HelpTab, Page, Request, admin_page, json, query_strings, wp_admin_notice};
 use crate::posts::{Answer, PostsSite, hidden_columns, per_page};
+use crate::text;
 use crate::tools::NOTICES;
 
 const PAGE: &str = include_str!("plugins/page.html");
@@ -142,7 +143,7 @@ pub fn active_plugins(stored: Option<Vec<u8>>) -> Option<Vec<String>> {
         if bytes.is_empty() {
             return None;
         }
-        let file = crate::text(bytes);
+        let file = text(bytes);
         if !files.contains(&file) {
             files.push(file);
         }
@@ -449,10 +450,6 @@ pub fn plugins(
         view: None,
     };
     Some(Answer::from_page(admin_page(site, &page, request.browser)))
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// `wp_nonce_url( $url, $action )` of a relative `wp-admin` URL, as its

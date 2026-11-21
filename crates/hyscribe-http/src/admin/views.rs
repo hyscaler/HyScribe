@@ -320,7 +320,8 @@ pub(super) fn viewed(
         || view.synced.newer.is_some()
         || view.welcome.is_some()
         || view.settings
-        || view.rules;
+        || view.rules
+        || view.recent;
     let saved = match drafted {
         // The Quick Draft form is shown to all who may write posts.
         Some((write, _)) => handle.block_on(write.commit()).map_err(Error::from),

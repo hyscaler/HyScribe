@@ -36,7 +36,8 @@ pub fn list(plugins: &Path) -> Vec<Installed> {
     let mut names: Vec<String> = fs::read_dir(plugins)
         .into_iter()
         .flatten()
-        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
         .collect();
     names.sort();
     names

@@ -199,28 +199,99 @@ async fn refusals_write_nothing() {
     let path = Some(dir.path().to_path_buf());
     let none = async |_: &mut Connection| Ok::<(), String>(());
     let action = async |conn: &mut Connection, ()| {
-        let mut asked = async |action, get: &str, dir: Option<PathBuf>| {
-            answer((&writer, &mut *conn), action, get, dir).await
-        };
-        let invalid = asked(b"activate", "plugin=..%2Fx.php", path.clone()).await;
+        let invalid = answer(
+            (&writer, &mut *conn),
+            b"activate",
+            "plugin=..%2Fx.php",
+            path.clone(),
+        )
+        .await;
         assert!(matches!(invalid, Ok(Answer::Died("Invalid plugin path."))));
-        let missing = asked(b"activate", "plugin=missing%2Fmissing.php", path.clone()).await;
+        let missing = answer(
+            (&writer, &mut *conn),
+            b"activate",
+            "plugin=missing%2Fmissing.php",
+            path.clone(),
+        )
+        .await;
         assert!(matches!(
             missing,
             Ok(Answer::Died("Plugin file does not exist."))
         ));
-        let nowhere = asked(b"activate", &format!("plugin={FILE}"), None).await;
+        let nowhere = answer(
+            (&writer, &mut *conn),
+            b"activate",
+            &format!("plugin={FILE}"),
+            None,
+        )
+        .await;
         assert!(matches!(
             nowhere,
             Ok(Answer::Died("Plugin file does not exist."))
         ));
         let get = format!("plugin={FILE}&from=import");
-        let imported = asked(b"activate", &get, path.clone()).await;
+        let imported = answer((&writer, &mut *conn), b"activate", &get, path.clone()).await;
         assert!(matches!(imported, Err(hyscribe_write::Error::Unported(_))));
+        // Active already, an activation writes only `recently_activated`;
+        // a deactivation needs no `active_plugins`, nor an extension.
+        let mut write = writer.begin_on(conn).await.unwrap();
+        update_option(&mut write, "active_plugins", &list(&[FILE]), None)
+            .await
+            .unwrap();
+        write.commit().await.unwrap();
+        let again = answer(
+            (&writer, &mut *conn),
+            b"activate",
+            &format!("plugin={FILE}"),
+            path.clone(),
+        )
+        .await;
+        assert!(matches!(again, Ok(Answer::Redirect(_))));
+        let mut write = writer.begin_on(conn).await.unwrap();
+        let text = Value::String(b"x".to_vec());
+        update_option(&mut write, "active_plugins", &text, None)
+            .await
+            .unwrap();
+        write.commit().await.unwrap();
+        let unread = answer(
+            (&writer, &mut *conn),
+            b"activate",
+            &format!("plugin={FILE}"),
+            path.clone(),
+        )
+        .await;
+        assert!(matches!(unread, Err(hyscribe_write::Error::Unported(_))));
+        let mut write = writer.begin_on(conn).await.unwrap();
+        hyscribe_write::options::delete_option(&mut write, "active_plugins")
+            .await
+            .unwrap();
+        write.commit().await.unwrap();
+        let none = answer(
+            (&writer, &mut *conn),
+            b"deactivate",
+            &format!("plugin={FILE}"),
+            None,
+        )
+        .await;
+        assert!(matches!(none, Ok(Answer::Redirect(_))));
+        // The approval the activation above wrote, made a folder.
+        std::fs::remove_file(folder.join(APPROVED)).unwrap();
         std::fs::create_dir(folder.join(APPROVED)).unwrap();
-        let unapproved = asked(b"activate", &format!("plugin={FILE}"), path.clone()).await;
+        let unapproved = answer(
+            (&writer, &mut *conn),
+            b"activate",
+            &format!("plugin={FILE}"),
+            path.clone(),
+        )
+        .await;
         assert!(matches!(unapproved, Err(hyscribe_write::Error::Refused(_))));
-        let unrevoked = asked(b"deactivate", &format!("plugin={FILE}"), path.clone()).await;
+        let unrevoked = answer(
+            (&writer, &mut *conn),
+            b"deactivate",
+            &format!("plugin={FILE}"),
+            path.clone(),
+        )
+        .await;
         assert!(matches!(unrevoked, Err(hyscribe_write::Error::Refused(_))));
         Ok(())
     };
@@ -492,4 +563,19 @@ async fn activation_and_deactivation_answer_as_php() {
             same(&compared(&php), &compared(&page), "activated");
         }
     }
+}
+
+/// An extension asking for more than the defaults is listed with its limits.
+#[test]
+fn limits_asked_for_are_listed() {
+    let text = format!("{MANIFEST}\n[limits]\ncall_ms = 100\n");
+    let installed = hyscribe_ext::installed::Installed {
+        manifest: hyscribe_ext::Manifest::parse(text.as_bytes()).unwrap(),
+        folder: PathBuf::new(),
+        approved: false,
+        disabled: false,
+    };
+    let plugin = crate::admin::listed(installed);
+    assert_eq!(plugin.limits, Some((100, 250, 16)));
+    assert_eq!(plugin.file, FILE);
 }

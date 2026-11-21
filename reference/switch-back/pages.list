@@ -80,3 +80,6 @@ admin	/wp-admin/site-editor.php	200	site-editor
 # Cron: the scheduled post it published, the trashed post it deleted.
 visitor	/a-cron-scheduled-post/	200	Published by HyScribe cron.
 visitor	/a-cron-trashed-post/	404	Page not found
+# Plugins: Hello Dolly and the plugin the test extension stands in for, both active.
+admin	/wp-admin/plugins.php	200	aria-label="Deactivate Hello Dolly"
+admin	/wp-admin/plugins.php	200	aria-label="Deactivate HyScribe Test"

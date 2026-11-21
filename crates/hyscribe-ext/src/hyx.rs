@@ -123,8 +123,8 @@ struct At<'a>(&'a [u8], usize);
 
 impl At<'_> {
     fn bytes<const N: usize>(&self, at: usize) -> Option<[u8; N]> {
-        let from = self.1.checked_add(at)?;
-        self.0.get(from..from.checked_add(N)?)?.try_into().ok()
+        let from = self.1.saturating_add(at);
+        self.0.get(from..from.saturating_add(N))?.try_into().ok()
     }
 
     fn u16(&self, at: usize) -> Option<u16> {
@@ -250,7 +250,7 @@ impl Entry {
             && header.u16(8) == Some(u16::from(self.deflated) * 8)
             && raw == Some(name.as_bytes());
         let data = start
-            .and_then(|start| bytes.get(start..start.checked_add(self.stored)?))
+            .and_then(|start| bytes.get(start..start.saturating_add(self.stored)))
             .filter(|_| matches)
             .ok_or_else(|| format!("{name} does not match its local header"))?;
         let limit = usize::try_from(self.size).unwrap_or(usize::MAX);

@@ -83,10 +83,8 @@ impl Manifest {
         let mut tables = toml::parse(text)?;
         let mut taken = |name: &str| {
             let found = tables.iter().position(|(table, _)| table == name);
-            Keys(
-                found.map(|n| tables.remove(n).1).unwrap_or_default(),
-                name.into(),
-            )
+            let keys = found.map(|n| tables.remove(n).1).unwrap_or_default();
+            Keys(keys, name.into(), None)
         };
         let mut extension = taken("extension");
         let mut capabilities = taken("capabilities");
@@ -98,45 +96,55 @@ impl Manifest {
         if let Some((table, _)) = tables.first() {
             return Err(format!("{FILE} has no table [{table}]"));
         }
+        let given = extension.text("kind");
+        let kind_error = extension.2.take();
+        let kind = match given.as_deref() {
+            Some("plugin") => Some(Kind::Plugin),
+            Some("theme") => Some(Kind::Theme),
+            _ => None,
+        };
+        let id = extension.text("id").filter(|id| slug(id));
         let manifest = Manifest {
-            kind: match extension.text("kind")?.as_deref() {
-                Some("plugin") => Kind::Plugin,
-                Some("theme") => Kind::Theme,
-                _ => return Err("[extension] kind must be plugin or theme".into()),
-            },
-            id: extension.text("id")?.filter(|id| slug(id)).ok_or(
-                "[extension] id must be a slug: lowercase letters, digits, - and _, at most 100",
-            )?,
-            version: extension.required("version", version)?,
-            sdk: extension.required("sdk", |sdk| SDK.contains(&sdk))?,
-            replaces: extension.text("replaces")?,
-            replaces_versions: extension.optional("replaces_versions", expression)?,
-            compatibility: extension
-                .optional("compatibility", |c| matches!(c, "full" | "partial"))?,
-            license: extension.required("license", expression)?,
-            name: extension.required("name", shown)?,
-            description: extension
-                .optional("description", shown)?
-                .unwrap_or_default(),
-            author: extension.optional("author", shown)?.unwrap_or_default(),
-            author_uri: extension.optional("author_uri", shown)?.unwrap_or_default(),
-            plugin_uri: extension.optional("plugin_uri", shown)?.unwrap_or_default(),
+            kind: kind.unwrap_or(Kind::Plugin),
+            id: id.clone().unwrap_or_default(),
+            version: extension.required("version", version),
+            sdk: extension.required("sdk", |sdk| SDK.contains(&sdk)),
+            replaces: extension.text("replaces"),
+            replaces_versions: extension.optional("replaces_versions", expression),
+            compatibility: extension.optional("compatibility", |c| matches!(c, "full" | "partial")),
+            license: extension.required("license", expression),
+            name: extension.required("name", shown),
+            description: extension.optional("description", shown).unwrap_or_default(),
+            author: extension.optional("author", shown).unwrap_or_default(),
+            author_uri: extension.optional("author_uri", shown).unwrap_or_default(),
+            plugin_uri: extension.optional("plugin_uri", shown).unwrap_or_default(),
             grants: Grants {
-                options: capabilities.names("options")?,
-                post_types: capabilities.names("post_types")?,
-                mail: capabilities.flag("mail")?,
-                filesystem: capabilities.names("filesystem")?,
-                actions: hooks.names("actions")?,
-                filters: hooks.names("filters")?,
-                shortcodes: hooks.names("shortcodes")?,
-                sensitive: hooks.names("sensitive")?,
-                meta: meta.names("keys")?,
-                read_taxonomies: taxonomies.names("read")?,
-                taxonomies: taxonomies.names("write")?,
-                rest: rest.names("namespaces")?,
+                options: capabilities.names("options"),
+                post_types: capabilities.names("post_types"),
+                mail: capabilities.flag("mail"),
+                filesystem: capabilities.names("filesystem"),
+                actions: hooks.names("actions"),
+                filters: hooks.names("filters"),
+                shortcodes: hooks.names("shortcodes"),
+                sensitive: hooks.names("sensitive"),
+                meta: meta.names("keys"),
+                read_taxonomies: taxonomies.names("read"),
+                taxonomies: taxonomies.names("write"),
+                rest: rest.names("namespaces"),
             },
             limits: limits.limits()?,
         };
+        if kind.is_none() {
+            return Err(
+                kind_error.unwrap_or_else(|| "[extension] kind must be plugin or theme".into())
+            );
+        }
+        if id.is_none() {
+            return Err(
+                "[extension] id must be a slug: lowercase letters, digits, - and _, at most 100"
+                    .into(),
+            );
+        }
         for keys in [extension, capabilities, hooks, meta, taxonomies, rest] {
             keys.done()?;
         }
@@ -211,9 +219,10 @@ fn shown(text: &str) -> bool {
     text.len() <= MAX_TEXT && !text.chars().any(char::is_control)
 }
 
-/// The keys of one table, taken as they are read; whatever is left over
-/// is unknown and refuses the manifest.
-struct Keys(Vec<(String, Item)>, String);
+/// The keys of one table, taken as they are read, its name, and the first
+/// value that did not read; whatever is left over is unknown, and either
+/// refuses the manifest.
+struct Keys(Vec<(String, Item)>, String, Option<String>);
 
 impl Keys {
     fn take(&mut self, key: &str) -> Option<Item> {
@@ -221,46 +230,60 @@ impl Keys {
         Some(self.0.remove(found).1)
     }
 
-    fn wrong(&self, key: &str, what: &str) -> String {
-        format!("[{}] {key} must be {what}", self.1)
+    /// Keeps the first refusal, `key` not being `what`.
+    fn wrong(&mut self, key: &str, what: &str) {
+        let why = format!("[{}] {key} must be {what}", self.1);
+        self.2.get_or_insert(why);
     }
 
-    fn text(&mut self, key: &str) -> Result<Option<String>, String> {
+    fn text(&mut self, key: &str) -> Option<String> {
         match self.take(key) {
-            None => Ok(None),
-            Some(Item::Text(text)) => Ok(Some(text)),
-            Some(_) => Err(self.wrong(key, "a string")),
-        }
-    }
-
-    fn optional(&mut self, key: &str, valid: fn(&str) -> bool) -> Result<Option<String>, String> {
-        match self.text(key)? {
-            Some(text) if !valid(&text) => Err(self.wrong(key, "a valid value")),
-            text => Ok(text),
-        }
-    }
-
-    fn required(&mut self, key: &str, valid: fn(&str) -> bool) -> Result<String, String> {
-        let text = self.optional(key, valid)?;
-        text.filter(|text| !text.is_empty())
-            .ok_or_else(|| self.wrong(key, "given"))
-    }
-
-    fn flag(&mut self, key: &str) -> Result<bool, String> {
-        match self.take(key) {
-            None => Ok(false),
-            Some(Item::Bool(flag)) => Ok(flag),
-            Some(_) => Err(self.wrong(key, "true or false")),
-        }
-    }
-
-    fn names(&mut self, key: &str) -> Result<BTreeSet<String>, String> {
-        match self.take(key) {
-            None => Ok(BTreeSet::new()),
-            Some(Item::List(names)) if names.iter().all(|name| visible(name)) => {
-                Ok(names.into_iter().collect())
+            Some(Item::Text(text)) => Some(text),
+            None => None,
+            Some(_) => {
+                self.wrong(key, "a string");
+                None
             }
-            Some(_) => Err(self.wrong(key, "a list of names without spaces")),
+        }
+    }
+
+    fn optional(&mut self, key: &str, valid: fn(&str) -> bool) -> Option<String> {
+        let text = self.text(key);
+        if text.as_deref().is_some_and(|text| !valid(text)) {
+            self.wrong(key, "a valid value");
+        }
+        text
+    }
+
+    fn required(&mut self, key: &str, valid: fn(&str) -> bool) -> String {
+        let text = self.optional(key, valid).unwrap_or_default();
+        if text.is_empty() {
+            self.wrong(key, "given");
+        }
+        text
+    }
+
+    fn flag(&mut self, key: &str) -> bool {
+        match self.take(key) {
+            None => false,
+            Some(Item::Bool(flag)) => flag,
+            Some(_) => {
+                self.wrong(key, "true or false");
+                false
+            }
+        }
+    }
+
+    fn names(&mut self, key: &str) -> BTreeSet<String> {
+        match self.take(key) {
+            None => BTreeSet::new(),
+            Some(Item::List(names)) if names.iter().all(|name| visible(name)) => {
+                names.into_iter().collect()
+            }
+            Some(_) => {
+                self.wrong(key, "a list of names without spaces");
+                BTreeSet::new()
+            }
         }
     }
 
@@ -268,7 +291,7 @@ impl Keys {
         let mut asked = Vec::new();
         for (key, item) in &self.0 {
             let Item::Int(value) = item else {
-                return Err(self.wrong(key, "an integer"));
+                return Err(format!("[limits] {key} must be an integer"));
             };
             asked.push((key.as_str(), *value));
         }
@@ -276,9 +299,10 @@ impl Keys {
     }
 
     fn done(self) -> Result<(), String> {
-        match self.0.first() {
-            Some((key, _)) => Err(format!("[{}] has no key {key}", self.1)),
-            None => Ok(()),
+        match (self.2, self.0.first()) {
+            (Some(why), _) => Err(why),
+            (None, Some((key, _))) => Err(format!("[{}] has no key {key}", self.1)),
+            (None, None) => Ok(()),
         }
     }
 }

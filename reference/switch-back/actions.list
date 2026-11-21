@@ -193,3 +193,10 @@ theme-switch	admin	GET	/hs-admin/themes?action=activate&stylesheet=twentytwentyf
 theme-view	admin	GET	/hs-admin/themes?activated=true	-	-	-	200
 theme-back	admin	GET	/hs-admin/themes?action=activate&stylesheet=twentytwentyfive	-	switch-theme_twentytwentyfive	_wpnonce	302
 theme-back-view	admin	GET	/hs-admin/themes?activated=true	-	-	-	200
+# Plugins (MVP 11.3): the site's own plugin, Hello Dolly, active and missing from HyScribe; the test
+# extension installed (`hyscribe plugin install`), the screen shown, the extension activated beside it.
+plugins-original	-	SQL	UPDATE wp_options SET option_value = 'a:1:{i:0;s:9:"hello.php";}' WHERE option_name = 'active_plugins'	-	-	-	-
+plugin-install	-	INSTALL	-	-	-	-	-
+plugins-view	admin	GET	/hs-admin/plugins	-	-	-	200
+plugin-activate	admin	GET	/hs-admin/plugins?action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	-	activate-plugin_hyscribe-test/hyscribe-test.php	_wpnonce	302
+plugins-activated	admin	GET	/hs-admin/plugins?activate=true&plugin_status=all&paged=1&s=	-	-	-	200

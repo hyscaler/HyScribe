@@ -38,7 +38,23 @@ enum Through {
     /// Each in a transaction of its own, committed at once.
     Own(Option<Arc<Writer>>, Handle),
     /// In the action's transaction, which runs the jobs sent while it waits.
-    Action(mpsc::Sender<Job>),
+    Action(mpsc::Sender<Sent>),
+}
+
+/// What the extensions' thread sends an action: a job, or that it is done.
+enum Sent {
+    Job(Job),
+    Done,
+}
+
+/// Tells the action the extensions' thread is done, when it ends, also by
+/// a panic.
+struct Done(mpsc::Sender<Sent>);
+
+impl Drop for Done {
+    fn drop(&mut self) {
+        let _ = self.0.blocking_send(Sent::Done);
+    }
 }
 
 /// The site an extension's host calls reach, once their grants are checked.
@@ -78,7 +94,7 @@ impl Live {
                         let _ = answer.send(job(write).await);
                     })
                 });
-                let sent = jobs.blocking_send(job).ok();
+                let sent = jobs.blocking_send(Sent::Job(job)).ok();
                 let answer = sent.and_then(|()| answered.blocking_recv().ok());
                 answer.unwrap_or(Err(GONE.into()))
             }
@@ -278,7 +294,8 @@ pub(crate) fn dispatch(request: &Option<Arc<Request>>) -> Option<Arc<dyn Dispatc
 /// transaction while it waits for them.
 pub(crate) struct Acted {
     request: Arc<Request>,
-    jobs: mpsc::Receiver<Job>,
+    sender: mpsc::Sender<Sent>,
+    jobs: mpsc::Receiver<Sent>,
 }
 
 impl Acted {
@@ -287,9 +304,10 @@ impl Acted {
         make: impl FnOnce(Arc<dyn hyscribe_ext::Site>) -> Result<Request, E>,
     ) -> Result<Acted, E> {
         let (sender, jobs) = mpsc::channel(1);
-        let request = make(Arc::new(Live(Through::Action(sender))))?;
+        let request = make(Arc::new(Live(Through::Action(sender.clone()))))?;
         Ok(Acted {
             request: Arc::new(request),
+            sender,
             jobs,
         })
     }
@@ -303,16 +321,16 @@ impl Acted {
     ) -> R {
         let request = self.request.clone();
         let dispatch: Arc<dyn Dispatch> = request.clone();
-        let mut task =
-            tokio::task::spawn_blocking(move || hooks::scoped(&dispatch, || run(&request)));
-        loop {
-            tokio::select! {
-                done = &mut task => {
-                    return done.unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()));
-                }
-                Some(job) = self.jobs.recv() => job(write).await,
-            }
+        let done = Done(self.sender.clone());
+        let task = tokio::task::spawn_blocking(move || {
+            let _done = done;
+            hooks::scoped(&dispatch, || run(&request))
+        });
+        while let Some(Sent::Job(job)) = self.jobs.recv().await {
+            job(write).await;
         }
+        task.await
+            .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))
     }
 
     /// What went wrong in the extensions so far.

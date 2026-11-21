@@ -68,22 +68,28 @@ fn autoload(on: Option<bool>) -> Option<Autoload> {
     on.map(|on| if on { Autoload::On } else { Autoload::Off })
 }
 
-impl Live {
-    /// Runs `job` where this site's database calls run.
-    fn run<T: Send + 'static>(
-        &self,
-        job: impl for<'a, 'w> FnOnce(
+/// An extension's database call, run in a `Write`, answering a PHP value.
+type Call = Box<
+    dyn for<'a, 'w> FnOnce(
             &'a mut Write<'w>,
-        ) -> Pin<Box<dyn Future<Output = Result<T, String>> + 'a>>
-        + Send
-        + 'static,
-    ) -> Result<T, String> {
+        ) -> Pin<Box<dyn Future<Output = Result<Value, String>> + 'a>>
+        + Send,
+>;
+
+/// What `update_option()` and its kin answered, as a PHP value.
+fn yes(answer: Value) -> bool {
+    answer == Value::Bool(true)
+}
+
+impl Live {
+    /// Runs `call` where this site's database calls run.
+    fn run(&self, call: Call) -> Result<Value, String> {
         match &self.0 {
             Through::Own(None, _) => Err(READ_ONLY.into()),
             Through::Own(Some(writer), handle) => tokio::task::block_in_place(|| {
                 handle.block_on(async {
                     let mut write = writer.begin().await.map_err(failed)?;
-                    let done = job(&mut write).await?;
+                    let done = call(&mut write).await?;
                     write.commit().await.map(|()| done).map_err(failed)
                 })
             }),
@@ -91,7 +97,7 @@ impl Live {
                 let (answer, answered) = oneshot::channel();
                 let job: Job = Box::new(move |write| {
                     Box::pin(async move {
-                        let _ = answer.send(job(write).await);
+                        let _ = answer.send(call(write).await);
                     })
                 });
                 let sent = jobs.blocking_send(Sent::Job(job)).ok();
@@ -109,39 +115,44 @@ impl hyscribe_ext::Site for Live {
 
     fn get_option(&self, name: &str) -> Result<Option<Value>, String> {
         let name = name.to_string();
-        self.run(move |write| {
-            Box::pin(async move {
-                let value = get_option(write, &name).await.map_err(failed)?;
-                Ok((value != Value::Bool(false)).then_some(value))
-            })
-        })
+        let call: Call = Box::new(move |write| {
+            Box::pin(async move { get_option(write, &name).await.map_err(failed) })
+        });
+        let value = self.run(call)?;
+        Ok((value != Value::Bool(false)).then_some(value))
     }
 
     fn update_option(&self, name: &str, value: Value, on: Option<bool>) -> Result<bool, String> {
         let name = name.to_string();
-        self.run(move |write| {
+        let call: Call = Box::new(move |write| {
             Box::pin(async move {
                 let updated = update_option(write, &name, &value, autoload(on)).await;
-                updated.map_err(failed)
+                updated.map(Value::Bool).map_err(failed)
             })
-        })
+        });
+        self.run(call).map(yes)
     }
 
     fn add_option(&self, name: &str, value: Value, on: Option<bool>) -> Result<bool, String> {
         let name = name.to_string();
-        self.run(move |write| {
+        let call: Call = Box::new(move |write| {
             Box::pin(async move {
                 let added = add_option(write, &name, &value, autoload(on)).await;
-                added.map_err(failed)
+                added.map(Value::Bool).map_err(failed)
             })
-        })
+        });
+        self.run(call).map(yes)
     }
 
     fn delete_option(&self, name: &str) -> Result<bool, String> {
         let name = name.to_string();
-        self.run(move |write| {
-            Box::pin(async move { delete_option(write, &name).await.map_err(failed) })
-        })
+        let call: Call = Box::new(move |write| {
+            Box::pin(async move {
+                let deleted = delete_option(write, &name).await;
+                deleted.map(Value::Bool).map_err(failed)
+            })
+        });
+        self.run(call).map(yes)
     }
 
     fn get_meta(&self, _: ObjectKind, _: u64, _: &str) -> Result<Vec<Value>, String> {
@@ -299,6 +310,11 @@ pub(crate) fn dispatch(request: &Arc<Request>) -> Arc<dyn Dispatch> {
     request.clone()
 }
 
+/// What an action runs of its extensions, and what it answers: a lifecycle
+/// export's outcome, if it ran one.
+pub(crate) type Run = Box<dyn FnOnce(&Request) -> Ran + Send>;
+pub(crate) type Ran = Option<Result<(), hyscribe_ext::Fault>>;
+
 /// Extensions run from an action: their database calls run in the action's
 /// transaction while it waits for them.
 pub(crate) struct Acted {
@@ -323,11 +339,7 @@ impl Acted {
 
     /// Runs `run` on a blocking thread, the request answering its hooks,
     /// while the database calls it makes run in `write`.
-    pub(crate) async fn run<R: Send + 'static>(
-        &mut self,
-        write: &mut Write<'_>,
-        run: impl FnOnce(&Request) -> R + Send + 'static,
-    ) -> R {
+    pub(crate) async fn run(&mut self, write: &mut Write<'_>, run: Run) -> Ran {
         let request = self.request.clone();
         let dispatch: Arc<dyn Dispatch> = request.clone();
         let done = Done(self.sender.clone());

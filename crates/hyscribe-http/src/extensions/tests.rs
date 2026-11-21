@@ -261,11 +261,11 @@ async fn an_action_s_extensions_report_their_faults() {
     update_option(&mut write, "ext_hooks", &text("trap"), None)
         .await
         .unwrap();
-    let run = |request: &Request| {
+    let run: Run = Box::new(|request| {
         request
             .index("hyscribe-test")
             .map(|at| request.activate(at))
-    };
+    });
     // The action waits for its extensions until their thread says it is done.
     let ran = tokio::time::timeout(
         std::time::Duration::from_secs(60),
@@ -291,6 +291,9 @@ async fn a_panic_on_the_extensions_thread_is_the_action_s() {
     let writer = writer.unwrap().unwrap();
     let mut write = writer.begin().await.unwrap();
     acted
-        .run(&mut write, |_| panic!("in the extensions' thread"))
+        .run(
+            &mut write,
+            Box::new(|_| panic!("in the extensions' thread")),
+        )
         .await;
 }

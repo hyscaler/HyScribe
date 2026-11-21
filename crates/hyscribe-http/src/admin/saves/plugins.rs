@@ -20,7 +20,7 @@ use hyscribe_write::Error;
 use hyscribe_write::options::{Autoload, get_option, update_option};
 
 use super::{Acting, Saving, Stop, text};
-use crate::extensions::{Acted, files, log};
+use crate::extensions::{Acted, Run, files, log};
 
 /// Why an activation stops when the extension's folder does not take it.
 const UNAPPROVED: &str = "the approval could not be written";
@@ -101,10 +101,10 @@ async fn activation(
     };
     let mut acted = made.inspect_err(loaded).ok()?;
     let file = file.to_string();
-    let run = move |request: &hyscribe_ext::Request| {
+    let run: Run = Box::new(move |request| {
         do_action("activate_plugin", &[&file, &false]);
         request.index(&slug).map(|at| request.activate(at))
-    };
+    });
     let activated = acted.run(write, run).await;
     if activated != Some(Ok(())) {
         log(&acted.reports(), &mut std::io::stderr());
@@ -156,8 +156,10 @@ pub(super) fn activate<'a>(
             current = (0..).map(Key::Int).zip(files).collect();
             update_option(write, "active_plugins", &Value::Array(current), None).await?;
             let file = file.clone();
-            let run =
-                move |_: &hyscribe_ext::Request| do_action("activated_plugin", &[&file, &false]);
+            let run: Run = Box::new(move |_| {
+                do_action("activated_plugin", &[&file, &false]);
+                None
+            });
             acted.run(write, run).await;
             log(&acted.reports(), &mut std::io::stderr());
         }
@@ -196,12 +198,13 @@ async fn deactivation(
     };
     let slug = found(site, file).map(|(_, found)| found.manifest.id);
     let file = file.to_string();
-    let run = move |request: &hyscribe_ext::Request| {
+    let run: Run = Box::new(move |request| {
         do_action("deactivate_plugin", &[&file, &false]);
         let at = slug.and_then(|slug| request.index(&slug));
         let _ = at.map(|at| request.deactivate(at));
         do_action("deactivated_plugin", &[&file, &false]);
-    };
+        None
+    });
     acted.run(write, run).await;
     log(&acted.reports(), &mut std::io::stderr());
 }

@@ -221,13 +221,8 @@ pub fn run(ctx: Context<'_>) -> u8 {
 /// `plugins/` and kept in `packages/` (MVP 11.3). Where packages come from
 /// and whether they are signed are not decided: only a local file.
 fn install_plugin(home: &Path, file: &Path) -> Result<String, String> {
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    let read = std::fs::File::open(file).and_then(|f| {
-        f.take(hyscribe_ext::hyx::MAX_TOTAL + 1)
-            .read_to_end(&mut bytes)
-    });
-    read.map_err(|err| format!("cannot read {}: {err}", file.display()))?;
+    let read = hyscribe_ext::installed::read_at_most(file, hyscribe_ext::hyx::MAX_TOTAL);
+    let bytes = read.map_err(|err| format!("cannot read {}: {err}", file.display()))?;
     let folders = (home.join("plugins"), home.join("packages"));
     let manifest = hyscribe_ext::installed::install((&folders.0, &folders.1), &bytes)?;
     Ok(format!(

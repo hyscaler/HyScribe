@@ -75,12 +75,16 @@ fn read(plugins: &Path, id: &str) -> Option<Installed> {
 }
 
 fn manifest_in(folder: &Path, name: &str) -> Option<Manifest> {
-    let mut bytes = Vec::new();
-    let file = fs::File::open(folder.join(name)).ok()?;
-    file.take(manifest::MAX_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
+    let bytes = read_at_most(&folder.join(name), manifest::MAX_BYTES).ok()?;
     Manifest::parse(&bytes).ok()
+}
+
+/// The file at `path`, reading one byte past `max` at most, so a caller
+/// can tell a file that is larger.
+pub fn read_at_most(path: &Path, max: u64) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    let read = fs::File::open(path).and_then(|f| f.take(max + 1).read_to_end(&mut bytes));
+    read.map(|_| bytes)
 }
 
 /// Approves the plugin's grants and limits as its manifest now has them:
@@ -108,11 +112,16 @@ fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut new = path.as_os_str().to_owned();
     new.push(".new");
     let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true).mode(0o644);
-    let written = options
-        .open(&new)
-        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()));
-    written.and_then(|()| fs::rename(&new, path))
+    let written = write_with(options.create(true).truncate(true), Path::new(&new), bytes);
+    written
+        .and_then(|file| file.sync_all())
+        .and_then(|()| fs::rename(&new, path))
+}
+
+/// Opens `path` for writing with `options`, mode 0644, and writes `bytes`.
+fn write_with(options: &mut OpenOptions, path: &Path, bytes: &[u8]) -> std::io::Result<fs::File> {
+    let opened = options.write(true).mode(0o644).open(path);
+    opened.and_then(|mut file| file.write_all(bytes).map(|()| file))
 }
 
 /// `hyscribe plugin install`: reads the package, loads its component with
@@ -128,10 +137,9 @@ pub fn install((plugins, packages): (&Path, &Path), bytes: &[u8]) -> Result<Mani
     }
     let id = manifest.id.as_str();
     let staging = plugins.join(format!(".{id}.new"));
-    let wasm = hyx.files.iter().find(|(name, _)| name == COMPONENT);
     let package = Package {
         slug: id,
-        wasm: wasm.map(|(_, wasm)| wasm.as_slice()).unwrap_or_default(),
+        wasm: hyx.file(COMPONENT).unwrap_or_default(),
         grants: manifest.grants.clone(),
         limits: manifest.limits,
         folder: &staging,
@@ -159,11 +167,8 @@ fn unpack(plugins: &Path, staging: &Path, hyx: &Hyx) -> std::io::Result<()> {
     let write = |(name, data): &(String, Vec<u8>)| {
         let path = staging.join(name);
         let parent = path.parent().unwrap_or(staging);
-        fs::create_dir_all(parent).and_then(|()| {
-            let mut options = OpenOptions::new();
-            let file = options.write(true).create_new(true).mode(0o644).open(&path);
-            file.and_then(|mut file| file.write_all(data))
-        })
+        fs::create_dir_all(parent)
+            .and_then(|()| write_with(OpenOptions::new().create_new(true), &path, data).map(drop))
     };
     let keep = |kept: &&str| gone(fs::rename(folder.join(kept), staging.join(kept)));
     gone(fs::remove_dir_all(staging))

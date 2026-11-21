@@ -60,6 +60,12 @@ impl Asked<'_> {
         lookup(self.post, name).or_else(|| lookup(self.get, name))
     }
 
+    /// `$_REQUEST['plugin']` as text, empty when absent.
+    pub fn plugin(&self) -> String {
+        let plugin = self.request("plugin").map(Value::to_php_string);
+        String::from_utf8_lossy(&plugin.unwrap_or_default()).into_owned()
+    }
+
     fn get(&self, name: &str) -> Option<&Value> {
         lookup(self.get, name)
     }
@@ -1055,8 +1061,7 @@ fn plugins(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
     if !site.current_user_can("activate_plugins", &[]) {
         return Some(Err(no_access()));
     }
-    let plugin = asked.request("plugin").map(Value::to_php_string);
-    let plugin = String::from_utf8_lossy(&plugin.unwrap_or_default()).into_owned();
+    let plugin = asked.plugin();
     Some(match &action[..] {
         b"activate" => referer(site, asked, &format!("activate-plugin_{plugin}")),
         b"deactivate" => referer(site, asked, &format!("deactivate-plugin_{plugin}")),

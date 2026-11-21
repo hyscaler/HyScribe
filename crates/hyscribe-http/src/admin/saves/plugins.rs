@@ -29,10 +29,10 @@ fn listed(asked: &Asked) -> String {
     format!("plugin_status={status}&paged={page}&s={s}")
 }
 
-/// `$_REQUEST['plugin']`, unslashed.
-fn plugin(asked: &Asked) -> String {
-    let plugin = asked.request("plugin").map(Value::to_php_string);
-    text(&plugin.unwrap_or_default())
+/// The installed extension that stands in for plugin `file`, if any.
+fn found(site: &dyn Acting, file: &str) -> Option<Installed> {
+    site.plugins()
+        .and_then(|plugins| installed::find(plugins, file))
 }
 
 /// `validate_plugin()` over the installed extensions: `wp_die()` of its
@@ -41,19 +41,14 @@ fn validated(file: &str, site: &dyn Acting) -> Result<Installed, Stop> {
     if hyscribe_admin::plugins::invalid_path(file) {
         return Err(Stop::Died(Answer::Died("Invalid plugin path.")));
     }
-    let found = site
-        .plugins()
-        .and_then(|plugins| installed::find(plugins, file));
-    found.ok_or(Stop::Died(Answer::Died("Plugin file does not exist.")))
+    found(site, file).ok_or(Stop::Died(Answer::Died("Plugin file does not exist.")))
 }
 
 /// `get_option( 'active_plugins', array() )`, which PHP walks as an array.
 async fn active(write: &mut Write<'_>) -> Result<Vec<(Key, Value)>, Stop> {
-    match get_option(write, "active_plugins").await? {
-        Value::Bool(false) => Ok(Vec::new()),
-        Value::Array(active) => Ok(active),
-        _ => Err(Error::Unported("an active_plugins that is not an array").into()),
-    }
+    let stored = write.option_value("active_plugins").await?;
+    hyscribe_admin::plugins::option_array(stored.as_deref())
+        .ok_or(Error::Unported("an active_plugins that is not an array").into())
 }
 
 /// `(array) get_option( 'recently_activated' )`.
@@ -89,9 +84,9 @@ pub(super) fn activate<'a>(
         {
             return Err(Error::Unported("an activation from an importer").into());
         }
-        let given = plugin(asked);
+        let given = asked.plugin();
         let file = text(php_trim(given.as_bytes()));
-        let found = validated(&file, site)?;
+        let extension = validated(&file, site)?;
         let mut current = active(write).await?;
         if !current.iter().any(|(_, entry)| *entry == named(&file)) {
             let mut files: Vec<Value> = current.into_iter().map(|(_, entry)| entry).collect();
@@ -104,8 +99,8 @@ pub(super) fn activate<'a>(
         recent.retain(|(key, _)| key.to_php_string() != given.as_bytes());
         let autoload = Some(Autoload::Off);
         update_option(write, "recently_activated", &Value::Array(recent), autoload).await?;
-        let approved =
-            installed::approve(&found).and_then(|()| hyscribe_ext::faults::clear(&found.folder));
+        let approved = installed::approve(&extension)
+            .and_then(|()| hyscribe_ext::faults::clear(&extension.folder));
         approved.map_err(|_| Error::Refused("the approval could not be written"))?;
         Ok(redirect(site, asked, "activate"))
     })
@@ -120,7 +115,7 @@ pub(super) fn deactivate<'a>(
     site: &'a dyn Acting,
 ) -> Saving<'a> {
     Box::pin(async move {
-        let file = plugin(asked);
+        let file = asked.plugin();
         let mut current = active(write).await?;
         let at = current.iter().position(|(_, entry)| *entry == named(&file));
         if let Some(at) = at {
@@ -143,10 +138,7 @@ pub(super) fn deactivate<'a>(
             Some(Autoload::Off),
         )
         .await?;
-        let found = site
-            .plugins()
-            .and_then(|plugins| installed::find(plugins, &file));
-        if let Some(found) = found {
+        if let Some(found) = found(site, &file) {
             installed::revoke(&found)
                 .map_err(|_| Error::Refused("the approval could not be removed"))?;
         }

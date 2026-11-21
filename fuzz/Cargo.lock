@@ -1008,8 +1008,10 @@ dependencies = [
 name = "hyscribe-ext"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "hyscribe-model",
  "hyscribe-phpser",
+ "miniz_oxide 0.8.9",
  "wasmtime",
 ]
 

@@ -15,6 +15,7 @@ fn view(settings: bool, rules: bool) -> View {
         draft: false,
         settings,
         rules,
+        recent: false,
         editor: None,
         site_editor: false,
     }

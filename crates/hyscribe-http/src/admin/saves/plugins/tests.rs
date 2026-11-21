@@ -1,0 +1,495 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The activation and deactivation against the write oracle
+//! (`reference/writes/actions-plugins.php`), with the test extension's
+//! manifest installed in a folder of the test's own.
+
+use std::path::{Path, PathBuf};
+
+use hyscribe_db::{Connection, Writer};
+use hyscribe_ext::installed::APPROVED;
+use hyscribe_phpser::{Key, Value};
+use hyscribe_testkit::fixture_database;
+use hyscribe_testkit::writes::check_writes;
+use hyscribe_write::options::{Autoload, update_option};
+
+use super::super::handler;
+use super::super::tests::unread::Unread;
+use super::super::tests::{SITE, acted, asked, fields, turn, writer};
+use super::*;
+
+const MANIFEST: &str = include_str!("../../../../../hyscribe-ext/guest/hyscribe.ext.toml");
+const FILE: &str = "hyscribe-test/hyscribe-test.php";
+
+/// A plugins folder with the test extension's manifest, and its own folder.
+fn plugins() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("hyscribe-test");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::write(folder.join("hyscribe.ext.toml"), MANIFEST).unwrap();
+    (dir, folder)
+}
+
+fn list(files: &[&str]) -> Value {
+    let files = files
+        .iter()
+        .map(|file| Value::String(file.as_bytes().to_vec()));
+    Value::Array((0..).map(Key::Int).zip(files).collect())
+}
+
+/// `recently_activated` as the cases that have one start from.
+fn recent() -> Value {
+    Value::Array(vec![
+        (Key::String(FILE.into()), Value::Int(4_102_444_800)),
+        (
+            Key::String(b"old/old.php".to_vec()),
+            Value::Int(1_000_000_000),
+        ),
+    ])
+}
+
+/// `action` of the test extension from `active` and `recently`, as the
+/// golden `admin-plugins-<golden>`, answering a redirect to `done`.
+async fn case(
+    writer: &Writer,
+    golden: &str,
+    (active, recently): (&[&str], Option<Value>),
+    (action, done): (&'static [u8], &str),
+    dir: &Path,
+) {
+    let setup = async |conn: &mut Connection| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        update_option(&mut write, "active_plugins", &list(active), None)
+            .await
+            .unwrap();
+        if let Some(recently) = &recently {
+            update_option(
+                &mut write,
+                "recently_activated",
+                recently,
+                Some(Autoload::Off),
+            )
+            .await
+            .unwrap();
+        }
+        write.commit().await.unwrap();
+        Ok::<(), String>(())
+    };
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
+    .unwrap();
+    let action = async |conn: &mut Connection, ()| {
+        let get = fields(&format!(
+            "action={}&plugin={FILE}&plugin_status=all&paged=1&s=",
+            text(action)
+        ));
+        let asked = Asked {
+            now,
+            ..asked("/hs-admin/plugins", &get, &[])
+        };
+        let handler = handler("plugins", action).unwrap();
+        let site = Unread(Default::default(), false, Some(dir.to_path_buf()));
+        let answer = acted(writer, conn, (handler, &site), &asked).await;
+        let to = format!("{SITE}/hs-admin/plugins?{done}=true&plugin_status=all&paged=1&s=");
+        assert_eq!(answer.map_err(|e| format!("{e:?}"))?, Answer::Redirect(to));
+        Ok(())
+    };
+    let golden = format!("admin-plugins-{golden}");
+    check_writes(&fixture_database(), &golden, setup, action)
+        .await
+        .unwrap();
+}
+
+/// Each case writes PHP's rows, as one action whose every statement can
+/// fail; activation approves the extension, deactivation takes it back.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_actions_write_php_s_rows() {
+    let _turn = turn().await;
+    let writer = writer().await;
+    let (dir, folder) = plugins();
+    let path = dir.path();
+    std::fs::write(folder.join(hyscribe_ext::faults::FILE), "nonsense").unwrap();
+    case(
+        &writer,
+        "activate",
+        (&[], None),
+        (b"activate", "activate"),
+        path,
+    )
+    .await;
+    assert!(folder.join(APPROVED).is_file());
+    assert!(!folder.join(hyscribe_ext::faults::FILE).exists());
+    let other = ["wordfence/wordfence.php"];
+    case(
+        &writer,
+        "activate-sorted",
+        (&other, None),
+        (b"activate", "activate"),
+        path,
+    )
+    .await;
+    case(
+        &writer,
+        "activate-recent",
+        (&[], Some(recent())),
+        (b"activate", "activate"),
+        path,
+    )
+    .await;
+    case(
+        &writer,
+        "deactivate",
+        (&[FILE], None),
+        (b"deactivate", "deactivate"),
+        path,
+    )
+    .await;
+    assert!(!folder.join(APPROVED).exists());
+    let both = [FILE, "wordfence/wordfence.php"];
+    case(
+        &writer,
+        "deactivate-kept",
+        (&both, None),
+        (b"deactivate", "deactivate"),
+        path,
+    )
+    .await;
+    let inactive = (&[][..], Some(recent()));
+    case(
+        &writer,
+        "deactivate-inactive",
+        inactive,
+        (b"deactivate", "deactivate"),
+        path,
+    )
+    .await;
+}
+
+/// The answer of `action` on `get` on a site whose plugins are in `dir`.
+async fn answer(
+    (writer, conn): (&Writer, &mut Connection),
+    action: &'static [u8],
+    get: &str,
+    dir: Option<PathBuf>,
+) -> Result<Answer, hyscribe_write::Error> {
+    let get = fields(&format!("action={}&{get}", text(action)));
+    let asked = asked("/hs-admin/plugins", &get, &[]);
+    let site = Unread(Default::default(), false, dir);
+    acted(
+        writer,
+        conn,
+        (handler("plugins", action).unwrap(), &site),
+        &asked,
+    )
+    .await
+}
+
+/// What PHP dies of, or cannot go on with, writes nothing; an approval
+/// that cannot be written or taken back stops the action, its rows rolled
+/// back.
+#[tokio::test(flavor = "multi_thread")]
+async fn refusals_write_nothing() {
+    let _turn = turn().await;
+    let writer = writer().await;
+    let (dir, folder) = plugins();
+    let path = Some(dir.path().to_path_buf());
+    let none = async |_: &mut Connection| Ok::<(), String>(());
+    let action = async |conn: &mut Connection, ()| {
+        let mut asked = async |action, get: &str, dir: Option<PathBuf>| {
+            answer((&writer, &mut *conn), action, get, dir).await
+        };
+        let invalid = asked(b"activate", "plugin=..%2Fx.php", path.clone()).await;
+        assert!(matches!(invalid, Ok(Answer::Died("Invalid plugin path."))));
+        let missing = asked(b"activate", "plugin=missing%2Fmissing.php", path.clone()).await;
+        assert!(matches!(
+            missing,
+            Ok(Answer::Died("Plugin file does not exist."))
+        ));
+        let nowhere = asked(b"activate", &format!("plugin={FILE}"), None).await;
+        assert!(matches!(
+            nowhere,
+            Ok(Answer::Died("Plugin file does not exist."))
+        ));
+        let get = format!("plugin={FILE}&from=import");
+        let imported = asked(b"activate", &get, path.clone()).await;
+        assert!(matches!(imported, Err(hyscribe_write::Error::Unported(_))));
+        std::fs::create_dir(folder.join(APPROVED)).unwrap();
+        let unapproved = asked(b"activate", &format!("plugin={FILE}"), path.clone()).await;
+        assert!(matches!(unapproved, Err(hyscribe_write::Error::Refused(_))));
+        let unrevoked = asked(b"deactivate", &format!("plugin={FILE}"), path.clone()).await;
+        assert!(matches!(unrevoked, Err(hyscribe_write::Error::Refused(_))));
+        Ok(())
+    };
+    // Nothing is written: the golden of one that writes tells no rows apart.
+    let checked = check_writes(
+        &fixture_database(),
+        "admin-plugins-deactivate-inactive",
+        none,
+        action,
+    )
+    .await;
+    assert!(checked.unwrap_err().contains("recently_activated"));
+}
+
+/// A view keeps the plugins of the last week, as PHP's does; every
+/// statement of it can fail, and nothing is kept then.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_view_keeps_the_last_week() {
+    let _turn = turn().await;
+    let writer = writer().await;
+    let stale = Value::Array(vec![
+        (Key::String(FILE.into()), Value::Int(4_102_444_800)),
+        (
+            Key::String(b"old/old.php".to_vec()),
+            Value::Int(1_000_000_000),
+        ),
+        (
+            Key::String(b"x/x.php".to_vec()),
+            Value::String(b"soon".to_vec()),
+        ),
+    ]);
+    for (golden, stored) in [("view", None), ("view-recent", Some(stale))] {
+        let setup = async |conn: &mut Connection| {
+            if let Some(stored) = &stored {
+                let mut write = writer.begin_on(conn).await.unwrap();
+                let off = Some(Autoload::Off);
+                update_option(&mut write, "recently_activated", stored, off)
+                    .await
+                    .unwrap();
+                write.commit().await.unwrap();
+            }
+            Ok::<(), String>(())
+        };
+        let action = async |conn: &mut Connection, ()| {
+            let kept = super::super::tests::settled(async |budget| {
+                let mut write = writer.begin_on(conn).await?;
+                write.fail_after(budget);
+                keep_recent(&mut write, 2_000_000_000).await?;
+                write.commit().await.map_err(hyscribe_write::Error::from)
+            });
+            kept.await.map_err(|err| format!("{err:?}"))
+        };
+        let golden = format!("admin-plugins-{golden}");
+        check_writes(&fixture_database(), &golden, setup, action)
+            .await
+            .unwrap();
+    }
+    // A value the screen does not read is left as it is.
+    let setup = async |conn: &mut Connection| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        let text = Value::String(b"x".to_vec());
+        update_option(&mut write, "recently_activated", &text, None)
+            .await
+            .unwrap();
+        write.commit().await.unwrap();
+        Ok::<(), String>(())
+    };
+    let action = async |conn: &mut Connection, ()| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        keep_recent(&mut write, 0).await.unwrap();
+        write.commit().await.map_err(|err| err.to_string())
+    };
+    let none = check_writes(&fixture_database(), "admin-plugins-view", setup, action).await;
+    assert!(none.unwrap_err().contains("recently_activated"));
+}
+
+/// `reference/plugins/golden.sh`'s answers to the actions: a case, its
+/// status, its `Location`, its body in hexadecimal and the options after.
+const ACTIONS: &str = include_str!("../../../../tests/golden/plugin-actions.tsv");
+
+/// `reference/plugins/golden.sh`'s views of the screen.
+const SCREENS: &str = include_str!("../../../../../hyscribe-admin/tests/golden/plugins.tsv");
+
+/// The recorded page of the view `variant` with `query`, as hs-admin
+/// prints it, its plugins folder named as HyScribe names it.
+fn screen(variant: &str, query: &str) -> String {
+    let start = format!("{variant}\t{query}\t");
+    let row = SCREENS.lines().find(|line| line.starts_with(&start));
+    let page = row.unwrap().rsplit('\t').next().unwrap();
+    let page = String::from_utf8(hyscribe_testkit::unhex(page)).unwrap();
+    hyscribe_testkit::hs_admin_page(&page)
+        .replace("/var/www/html/wp-content/plugins", "hyscribe/plugins/")
+}
+
+/// `page` with its nonces and HyScribe's own part of its rows taken out.
+fn compared(page: &str) -> String {
+    let mut out = String::new();
+    let mut rest = page;
+    while let Some((before, after)) = rest.split_once("<div class=\"hyscribe-grants ") {
+        out.push_str(before);
+        rest = after.split_once("</div>").map_or("", |(_, tail)| tail);
+    }
+    // Times, like nonces, are ten digits.
+    crate::admin::saves::posts::tests::unnonced(&(out + rest)).replace("%time%", "%nonce%")
+}
+
+/// Fails with where `ours` first differs from `php`.
+fn same(php: &str, ours: &str, what: &str) {
+    let at = php.bytes().zip(ours.bytes()).position(|(a, b)| a != b);
+    let at = at.unwrap_or(php.len().min(ours.len()));
+    let near = |text: &str| {
+        text.get(at.saturating_sub(80)..)
+            .unwrap_or_default()
+            .chars()
+            .take(240)
+            .collect::<String>()
+    };
+    assert!(
+        php == ours,
+        "{what}\n  php:  {:?}\n  ours: {:?}",
+        near(php),
+        near(ours)
+    );
+}
+
+/// The recorded answer of `case`: its fields after its name.
+fn action_row(case: &str) -> Vec<&'static str> {
+    let start = format!("{case}\t");
+    let row = ACTIONS.lines().find(|line| line.starts_with(&start));
+    row.unwrap().split('\t').skip(1).collect()
+}
+
+/// hs-admin on `database` with the test extension installed, logged in as
+/// user 1, with `writer` if any.
+async fn served(
+    database: &str,
+    writer: Option<Writer>,
+    dir: &Path,
+) -> (std::sync::Arc<crate::Site>, String, tempfile::TempDir) {
+    let (plugins, _) = plugins();
+    let (site, cookies) = crate::admin::tests::logged_in(database, dir).await;
+    let site = std::sync::Arc::try_unwrap(site).ok().unwrap();
+    let site = site.with_plugins(plugins.path()).with_writer(writer);
+    (std::sync::Arc::new(site), cookies, plugins)
+}
+
+/// The screen lists the installed extension as PHP lists the plugin it
+/// stands in for, but for what it asks for, shown before activation.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_screen_lists_installed_extensions() {
+    use crate::admin::tests::{page_of, send};
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies, _plugins) = served("wordpress", None, dir.path()).await;
+    for query in ["", "?plugin_status=search"] {
+        let uri = format!("/hs-admin/plugins{query}");
+        let response = send(&site, "GET", &uri, &cookies, None).await;
+        assert_eq!(response.status(), 200);
+        let page = page_of(response).await;
+        assert_eq!(page.contains("hyscribe-grants"), query.is_empty());
+        let php = screen("x13inactive", query);
+        same(&compared(&php), &compared(&page), query);
+    }
+    let response = send(&site, "GET", "/hs-admin/plugins?s=x", &cookies, None).await;
+    assert_eq!(response.status(), 501);
+}
+
+/// The refusals and the deaths of `reference/plugins/actions.list`, as PHP
+/// answers them, writing nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn refused_actions_answer_as_php() {
+    use crate::admin::tests::{page_of, send, session_nonce, unwritable};
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies, plugins) = served("wordpress", None, dir.path()).await;
+    let site = unwritable(site, "wp_").await;
+    let test = "hyscribe-test%2Fhyscribe-test.php";
+    let cases = [
+        (
+            "activate-bad-nonce",
+            format!("action=activate&plugin={test}"),
+            None,
+        ),
+        (
+            "activate-missing",
+            "action=activate&plugin=missing%2Fmissing.php".to_string(),
+            Some("activate-plugin_missing/missing.php"),
+        ),
+        (
+            "activate-invalid",
+            "action=activate&plugin=..%2Fx.php".to_string(),
+            Some("activate-plugin_../x.php"),
+        ),
+        (
+            "deactivate-bad-nonce",
+            format!("action=deactivate&plugin={test}"),
+            None,
+        ),
+        (
+            "delete",
+            format!("action=delete-selected&checked%5B0%5D={test}"),
+            Some("bulk-plugins"),
+        ),
+    ];
+    for (case, query, action) in cases {
+        let nonce = match action {
+            Some(action) => session_nonce(&site, &cookies, action).await,
+            None => "0123456789".into(),
+        };
+        let uri =
+            format!("/hs-admin/plugins?{query}&plugin_status=all&paged=1&s=&_wpnonce={nonce}");
+        let response = send(&site, "GET", &uri, &cookies, None).await;
+        let [status, _, body, ..] = action_row(case)[..] else {
+            panic!("{case}");
+        };
+        assert_eq!(response.status().as_str(), status, "{case}");
+        let php = String::from_utf8(hyscribe_testkit::unhex(body)).unwrap();
+        let php = hyscribe_testkit::hs_admin_page(&php);
+        same(&php, &page_of(response).await, case);
+    }
+    drop(plugins);
+}
+
+/// Activating and deactivating through hs-admin answer PHP's redirects, the
+/// screen after an activation is PHP's whole, and `active_plugins` holds
+/// the plugin the extension stands in for, as PHP reads it.
+#[tokio::test(flavor = "multi_thread")]
+async fn activation_and_deactivation_answer_as_php() {
+    use crate::admin::tests::{SAVES, location, page_of, send, session_nonce};
+    let _saves = SAVES.lock().await;
+    let config = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&config)
+        .await
+        .unwrap();
+    let writer = Writer::open(&config, hyscribe_config::Mode::Primary)
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies, _plugins) = served("wordpress_saves", writer, dir.path()).await;
+    for action in ["activate", "deactivate"] {
+        let nonce = session_nonce(&site, &cookies, &format!("{action}-plugin_{FILE}")).await;
+        let uri = format!(
+            "/hs-admin/plugins?action={action}&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=&_wpnonce={nonce}"
+        );
+        let response = send(&site, "GET", &uri, &cookies, None).await;
+        let [status, php_location, _, active, _] = action_row(action)[..] else {
+            panic!("{action}");
+        };
+        assert_eq!(response.status().as_str(), status, "{action}");
+        let to = location(&response).to_string();
+        let php_location = php_location.replace("/wp-admin/plugins.php", "/hs-admin/plugins");
+        assert_eq!(to, php_location);
+        let reloaded = std::sync::Arc::new(site.reloaded().await.unwrap());
+        let stored = reloaded.options.get("active_plugins").cloned();
+        assert_eq!(format!("{} on", text(&stored.unwrap_or_default())), active);
+        if action == "activate" {
+            let response = send(
+                &reloaded,
+                "GET",
+                to.trim_start_matches(SITE),
+                &cookies,
+                None,
+            )
+            .await;
+            let page = page_of(response).await;
+            let php = screen("x13active", "?activate=true&plugin_status=all&paged=1&s=");
+            assert!(!page.contains("hyscribe-grants"));
+            same(&compared(&php), &compared(&page), "activated");
+        }
+    }
+}

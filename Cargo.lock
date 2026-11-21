@@ -1023,6 +1023,7 @@ dependencies = [
  "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-db",
+ "hyscribe-ext",
  "hyscribe-fetch",
  "hyscribe-http",
  "hyscribe-mail",
@@ -1095,8 +1096,11 @@ dependencies = [
 name = "hyscribe-ext"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "hyscribe-model",
  "hyscribe-phpser",
+ "hyscribe-testkit",
+ "miniz_oxide",
  "tempfile",
  "wasmtime",
 ]
@@ -1138,6 +1142,7 @@ dependencies = [
  "hyscribe-auth",
  "hyscribe-config",
  "hyscribe-db",
+ "hyscribe-ext",
  "hyscribe-fetch",
  "hyscribe-image",
  "hyscribe-kses",
@@ -1221,6 +1226,7 @@ dependencies = [
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
+ "hyscribe-render",
  "hyscribe-testkit",
  "hyscribe-theme-json",
  "icu_normalizer",
@@ -1265,9 +1271,11 @@ dependencies = [
 name = "hyscribe-testkit"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "hyscribe-config",
  "hyscribe-model",
  "hyscribe-phpser",
+ "miniz_oxide",
  "sqlx",
  "tokio",
 ]

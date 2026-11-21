@@ -208,3 +208,14 @@ fn comments_get_ugc_links() {
     let filtered = wp_rel_ugc(&wp_kses_comment(content.as_bytes()), home);
     assert_eq!(String::from_utf8(filtered).unwrap(), saved);
 }
+
+/// A plugin's headers keep emphasis and code, and links but in its name.
+#[test]
+fn plugin_headers_keep_what_php_keeps() {
+    let header = b"<a href=\"https://x.test/\" class=\"c\">A</a> <em>B</em> <script>c</script>'s";
+    assert_eq!(
+        wp_kses_plugin_data(header, true),
+        b"<a href=\"https://x.test/\">A</a> <em>B</em> c's"
+    );
+    assert_eq!(wp_kses_plugin_data(header, false), b"A <em>B</em> c's");
+}

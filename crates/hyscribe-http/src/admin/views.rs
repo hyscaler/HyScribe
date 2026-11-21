@@ -40,6 +40,9 @@ pub(super) struct View {
     settings: bool,
     /// Whether the view is the Permalinks screen's, which refreshes the rules.
     rules: bool,
+    /// Whether the view is the Plugins screen's, which keeps the plugins
+    /// recently active.
+    recent: bool,
     /// The block editor's post, for a page whose preloads are all answered.
     editor: Option<Target>,
     /// Whether the view is the site editor's page, its preloads answered.
@@ -108,6 +111,7 @@ pub(super) fn plan(
         draft: dashboard && needs_draft(admin),
         settings: updated && SETTINGS.contains(&path),
         rules: path == "/hs-admin/options-permalink",
+        recent: path == "/hs-admin/plugins",
         editor: editor.filter(|target| answered_before(admin, target, &preloads)),
         site_editor: path == "/hs-admin/site-editor" && site_editor_before(admin, query, &preloads),
     }
@@ -171,6 +175,7 @@ pub(super) fn quick_press(admin: &Admin) -> View {
         draft: needs_draft(admin),
         settings: false,
         rules: false,
+        recent: false,
         editor: None,
         site_editor: false,
     }
@@ -189,6 +194,10 @@ pub(super) async fn written<'w>(
     // `options-permalink.php` flushes before its header syncs the settings.
     if view.rules && page {
         flush_rewrite_rules(&mut write).await?;
+    }
+    // `prepare_items()` runs before the header.
+    if view.recent && page {
+        super::saves::plugins::keep_recent(&mut write, ctx.now).await?;
     }
     save_settings(&mut write, ctx.user, &view.synced, (ctx.now, page)).await?;
     if let Some(shown) = view.welcome.filter(|_| page) {

@@ -34,7 +34,7 @@ async fn answered(
         media_trash: trash,
         ..Constants::default()
     };
-    let site = Unread(constants, false);
+    let site = Unread(constants, false, None);
     let answer = match screen {
         "admin-ajax" => {
             let handler = ajax_handler(action).unwrap();
@@ -563,7 +563,7 @@ async fn saves_stop_as_php_stops() {
         }
     }
     // Files are deleted once their rows are, in the uploads folder only.
-    let bare = Unread(Constants::default(), true);
+    let bare = Unread(Constants::default(), true, None);
     let body = "action=delete-post&id=801";
     let answer = tried_ajax(&bare, &[], b"delete-post", body).await;
     assert!(unported(&answer), "{answer:?}");

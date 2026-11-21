@@ -12,9 +12,10 @@ use super::super::Acting;
 use super::SITE;
 
 /// A site any other read of fails the test: the write oracle's
-/// `admin_url()`, and its constants, by default HyScribe's.
+/// `admin_url()`, its constants, by default HyScribe's, whether it has no
+/// uploads folder, and its plugins folder.
 #[derive(Default)]
-pub(in crate::admin::saves) struct Unread(pub Constants, pub bool);
+pub(in crate::admin::saves) struct Unread(pub Constants, pub bool, pub Option<std::path::PathBuf>);
 
 impl CapabilityData for Unread {
     fn option(&self, _: &str) -> Option<Vec<u8>> {
@@ -91,6 +92,9 @@ impl Acting for Unread {
     }
     fn delete_files(&self, _: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
         !self.1
+    }
+    fn plugins(&self) -> Option<&std::path::Path> {
+        self.2.as_deref()
     }
     fn outbox(&self) -> &crate::mail::Outbox {
         crate::mail::tests::outbox()

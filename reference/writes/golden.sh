@@ -33,6 +33,9 @@ for state in site-writes template-writes autosaves editor-saves editor-meta comm
   "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/$state.sql" < "$ROOT/reference/rest/$state.sql"
 done
 "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/attachment-edit.sql" < "$ROOT/reference/attachment-edit/content.sql"
+# The plugin the test extension stands in for (actions-plugins.php).
+"$DOCKER" exec "$NAME" mkdir -p "$DIR/plugins"
+"$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/plugins/hyscribe-test.php" < "$ROOT/reference/plugins/hyscribe-test/hyscribe-test.php"
 mkdir -p "$OUT"
 if [ $# -eq 0 ]; then
   set -- $("$DOCKER" exec "$NAME" php "$DIR/run.php")

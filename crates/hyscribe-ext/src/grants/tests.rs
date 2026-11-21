@@ -16,6 +16,7 @@ fn grants() -> Grants {
         meta: set(&["_form", "_yoast_wpseo_*"]),
         post_types: set(&["wpcf7_contact_form"]),
         taxonomies: set(&["wpcf7_kind"]),
+        read_taxonomies: set(&["category"]),
         rest: set(&["contact-form-7/v1"]),
         mail: true,
         filesystem: set(&["uploads/wpcf7_uploads"]),
@@ -187,4 +188,29 @@ fn relative_paths() {
     ] {
         assert!(!relative(path), "{path:?}");
     }
+}
+
+#[test]
+fn lists_what_it_asks_for() {
+    let listed = grants().listed();
+    let labels: Vec<&str> = listed.iter().map(|(label, _)| *label).collect();
+    assert_eq!(
+        labels,
+        [
+            "Options",
+            "Post types",
+            "Meta keys",
+            "Taxonomies it registers",
+            "Taxonomies it reads",
+            "REST namespaces",
+            "Actions",
+            "Filters",
+            "Shortcodes",
+            "Mail",
+            "Mail attachments from",
+        ]
+    );
+    assert_eq!(listed[1].1, ["wpcf7_contact_form"]);
+    assert_eq!(listed[9].1, ["wp_mail()"]);
+    assert_eq!(Grants::default().listed(), []);
 }

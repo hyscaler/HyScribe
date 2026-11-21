@@ -15,6 +15,7 @@ pub mod login;
 pub mod media;
 pub mod menu;
 pub mod page;
+pub mod plugins;
 pub mod posts;
 pub mod profile;
 pub mod revisions;

@@ -11,7 +11,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::actions::{ActionSite, Asked, Body, Refusal, admin_ajax};
 use hyscribe_admin::admin_bar::{BarSite, Browser};
-use hyscribe_admin::appearance::{Notice as ThemesNotice, plugins, themes};
+use hyscribe_admin::appearance::{Notice as ThemesNotice, themes};
 use hyscribe_admin::assets::Urls;
 use hyscribe_admin::comments::{
     CommentArgs, CommentEditSite, CommentQuery, CommentsSite, MODERATED, comment_edit,
@@ -26,6 +26,7 @@ use hyscribe_admin::media::{
 };
 use hyscribe_admin::menu::MenuUser;
 use hyscribe_admin::page::{PageSite, REMOVABLE, Request, query_strings};
+use hyscribe_admin::plugins::{Args as PluginArgs, Plugin, plugins};
 use hyscribe_admin::posts::{
     Answer, BULK, ListArgs, PostType, PostsSite, edit, kept_ids, sorted_ids,
 };
@@ -1102,6 +1103,39 @@ fn edit_args(query: &str) -> Option<EditArgs> {
 
 /// The value of `name` in a query that may give only it: `None` for
 /// another argument, `Some(None)` for none.
+/// An installed extension as the Plugins screen lists it.
+fn listed(installed: hyscribe_ext::installed::Installed) -> Plugin {
+    let manifest = installed.manifest;
+    let limits = manifest.limits;
+    let asked = |time: std::time::Duration| u64::try_from(time.as_millis()).unwrap_or(u64::MAX);
+    Plugin {
+        file: manifest.replaces.unwrap_or_default(),
+        grants: manifest.grants.listed(),
+        sensitive: manifest.grants.sensitive.into_iter().collect(),
+        limits: (limits != hyscribe_ext::DEFAULT).then(|| {
+            let memory = u64::try_from(limits.memory() >> 20).unwrap_or(u64::MAX);
+            (asked(limits.call()), asked(limits.request()), memory)
+        }),
+        name: manifest.name,
+        description: manifest.description,
+        version: manifest.version,
+        author: manifest.author,
+        author_uri: manifest.author_uri,
+        plugin_uri: manifest.plugin_uri,
+        approved: installed.approved,
+        disabled: installed.disabled,
+    }
+}
+
+impl crate::Site {
+    /// The extensions installed in the plugins folder, as the Plugins
+    /// screen lists them; none without the folder.
+    pub(crate) fn installed_plugins(&self) -> Vec<Plugin> {
+        let found = self.plugins.as_deref().map(hyscribe_ext::installed::list);
+        found.unwrap_or_default().into_iter().map(listed).collect()
+    }
+}
+
 fn only_argument(query: &str, name: &str) -> Option<Option<String>> {
     let mut found = None;
     for (key, value) in query_strings(query)? {
@@ -1457,10 +1491,12 @@ fn screen(
         // Nobody may update here (the updates are HyScribe's releases, an open question;
         // `update_core` is never granted): refused as PHP refuses the menu.
         "/hs-admin/update-core" => Answer::from_page(None),
-        // Refused as PHP refuses; its arguments and actions are not ported.
+        // Refused as PHP refuses; the installed extensions listed.
         "/hs-admin/plugins" if !admin.can("activate_plugins") => Answer::from_page(None),
-        "/hs-admin/plugins" if request_uri.contains('?') => return None,
-        "/hs-admin/plugins" => plugins(admin, &request)?,
+        "/hs-admin/plugins" => {
+            let installed = admin.site.installed_plugins();
+            plugins(admin, &request, &installed, &PluginArgs::parse(query)?)?
+        }
         "/hs-admin/site-health" if !admin.can("view_site_health_checks") => Answer::from_page(None),
         // The Info tab of the bundled theme, and the Status tab with
         // HyScribe's own checks.

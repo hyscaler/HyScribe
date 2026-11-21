@@ -502,6 +502,7 @@ async fn a_failed_read_is_the_database_error_page() {
         constants: hyscribe_config::Constants::default(),
         limiter: Arc::new(crate::login::limits::Limiter::new(Default::default())),
         uploads: None,
+        plugins: None,
         install: crate::unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),

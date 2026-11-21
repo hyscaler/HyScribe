@@ -53,10 +53,25 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    /// Plugins: HyScribe extensions packaged as `.hyx` files.
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
+    },
     /// WP-Cron, for DISABLE_WP_CRON sites whose system cron runs it.
     Cron {
         #[command(subcommand)]
         command: CronCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginCommand {
+    /// Install a `.hyx` package from a local file into plugins/<slug>/,
+    /// replacing an older one; activate it from the Plugins screen.
+    Install {
+        /// The package's path.
+        file: PathBuf,
     },
 }
 
@@ -172,6 +187,11 @@ pub fn run(ctx: Context<'_>) -> u8 {
             refuse_root(euid).and_then(|()| setup::command(&home, &mut term).map(Reply::text))
         }
         Command::Service { command } => service(command, &site, &mut term),
+        Command::Plugin {
+            command: PluginCommand::Install { file },
+        } => refuse_root(euid)
+            .and_then(|()| install_plugin(&home, &file))
+            .map(Reply::text),
         Command::Cron {
             command: CronCommand::Run,
         } => refuse_root(euid)
@@ -194,6 +214,29 @@ pub fn run(ctx: Context<'_>) -> u8 {
             1
         }
     }
+}
+
+/// `hyscribe plugin install <file>`: the package read (no larger than a
+/// package may be), checked, its component loaded once, then unpacked into
+/// `plugins/` and kept in `packages/` (MVP 11.3). Where packages come from
+/// and whether they are signed are not decided: only a local file.
+fn install_plugin(home: &Path, file: &Path) -> Result<String, String> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    let read = std::fs::File::open(file).and_then(|f| {
+        f.take(hyscribe_ext::hyx::MAX_TOTAL + 1)
+            .read_to_end(&mut bytes)
+    });
+    read.map_err(|err| format!("cannot read {}: {err}", file.display()))?;
+    let folders = (home.join("plugins"), home.join("packages"));
+    let manifest = hyscribe_ext::installed::install((&folders.0, &folders.1), &bytes)?;
+    Ok(format!(
+        "Installed {} {} into plugins/{}/, standing in for {}. Activate it from the Plugins screen.\n",
+        manifest.name,
+        manifest.version,
+        manifest.id,
+        manifest.replaces.unwrap_or_default()
+    ))
 }
 
 /// The parts of the context the server commands use.
@@ -360,6 +403,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                         config.image_limits,
                     ))
                     .with_install(install(&config, &site.server.0))
+                    .with_plugins(&home.join("plugins"))
                     .with_writer(writer);
             let fetch = config.http_outbound.then(outbound);
             let fetching = outbound_line(fetch.as_ref());

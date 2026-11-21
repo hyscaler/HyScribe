@@ -15,7 +15,11 @@ use hyscribe_phpser::Value;
 pub fn component() -> &'static [u8] {
     static WASM: OnceLock<Vec<u8>> = OnceLock::new();
     WASM.get_or_init(|| {
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/guest/build.sh");
+        // From either crate that includes this module.
+        let script = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../hyscribe-ext/guest/build.sh"
+        );
         let built = Command::new("sh")
             .arg(script)
             .output()
@@ -162,6 +166,7 @@ pub fn grants() -> Grants {
         meta: names("_ext _ext_*"),
         post_types: names("ext_item ext_item_named_too_long"),
         taxonomies: names("ext_kind ext_kind_named_far_too_long_for_wp"),
+        read_taxonomies: names("category"),
         rest: names("ext/v1"),
         mail: true,
         filesystem: names("uploads/ext"),

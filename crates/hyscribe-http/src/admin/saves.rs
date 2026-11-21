@@ -31,6 +31,7 @@ pub(super) mod dashboard;
 pub(super) mod heartbeat;
 pub(super) mod media;
 pub(super) mod options;
+pub(super) mod plugins;
 mod posts;
 pub(super) mod screen;
 mod terms;
@@ -89,6 +90,10 @@ pub(super) trait Acting: ActionSite {
     fn delete_files(&self, files: Vec<(Vec<u8>, Vec<u8>)>) -> bool;
     /// Deletes the files kept, once the action is `committed`, or forgets them.
     fn settle_files(&self, _committed: bool) {}
+    /// The installed plugins' folder, `hyscribe/plugins/`, if the site has one.
+    fn plugins(&self) -> Option<&std::path::Path> {
+        None
+    }
 }
 
 /// An answer once the action's mails were sent: changed only by mails it
@@ -127,6 +132,9 @@ impl Acting for Admin<'_> {
     fn delete_files(&self, files: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
         self.files.borrow_mut().extend(files);
         self.site.uploads.is_some()
+    }
+    fn plugins(&self) -> Option<&std::path::Path> {
+        self.site.plugins.as_deref()
     }
     fn settle_files(&self, committed: bool) {
         let files = std::mem::take(&mut *self.files.borrow_mut());
@@ -192,6 +200,8 @@ pub(super) fn handler(screen: &str, action: &[u8]) -> Option<Handler> {
         ("options-permalink", b"") => Some(options::permalinks),
         ("options-privacy", b"create-privacy-page") => Some(options::create_privacy_page),
         ("themes", b"activate") => Some(themes::activate),
+        ("plugins", b"activate") => Some(plugins::activate),
+        ("plugins", b"deactivate") => Some(plugins::deactivate),
         ("edit-tags", b"add-tag") => Some(terms::add_tag),
         ("edit-tags", b"delete") => Some(terms::delete),
         ("edit-tags", b"bulk-delete") => Some(terms::bulk_delete),

@@ -7,8 +7,8 @@ use crate::Limits;
 use crate::tests::{TestSite, load};
 
 fn spend(request: &Request, spent: Duration) {
-    if let Some(slot) = request.0.slots.first() {
-        lock(slot).spent = spent;
+    if let Some(ledger) = request.0.ledgers.first() {
+        lock(ledger).spent = spent;
     }
 }
 

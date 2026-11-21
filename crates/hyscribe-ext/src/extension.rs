@@ -143,11 +143,12 @@ pub(crate) struct Registrations {
     pub(crate) templates: Vec<TemplateFile>,
 }
 
-/// The guest's exports beside `init`.
+/// The guest's exports beside `init`, and a theme's `render`.
 struct Exports {
     invoke: ComponentExportIndex,
     activate: ComponentExportIndex,
     deactivate: ComponentExportIndex,
+    render: Option<ComponentExportIndex>,
 }
 
 /// A loaded extension.
@@ -218,11 +219,13 @@ impl Host {
                     invoke,
                     activate,
                     deactivate,
+                    render: None,
                 };
                 (init, exports)
             })
         });
-        let (init, exports) = found.ok_or(Fault::Refused(format!("no {guest}")))?;
+        let (init, mut exports) = found.ok_or(Fault::Refused(format!("no {guest}")))?;
+        exports.render = render;
         let (grants, slug) = (Arc::new(package.grants), Arc::from(package.slug));
         let mut store = State::store(
             &self.engine,
@@ -242,7 +245,7 @@ impl Host {
                     .and_then(|_| {
                         instance.get_typed_func::<(), Done>(&mut store, &exports.deactivate)
                     })
-                    .and_then(|_| match &render {
+                    .and_then(|_| match &exports.render {
                         Some(render) => {
                             let typed =
                                 instance.get_typed_func::<(&str,), Rendered>(&mut store, render);
@@ -363,6 +366,11 @@ impl Extension {
         );
         let instance = self.pre.instantiate(&mut store);
         (store, instance)
+    }
+
+    /// A theme's `render`.
+    pub(crate) fn render(&self) -> Option<&ComponentExportIndex> {
+        self.exports.render.as_ref()
     }
 
     /// The index of `invoke`, or of `activate` or `deactivate`.

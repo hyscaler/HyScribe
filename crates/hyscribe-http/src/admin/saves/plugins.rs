@@ -189,7 +189,7 @@ async fn deactivation(
     };
     let active = files(current);
     let made = Acted::new(|live| {
-        let (request, reports) = runtime.request(&active, live);
+        let (request, reports) = runtime.request(&active, None, live);
         log(&reports, &mut std::io::stderr());
         request.ok_or(())
     });

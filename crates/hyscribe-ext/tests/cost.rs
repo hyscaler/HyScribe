@@ -58,15 +58,15 @@ fn the_content_10000_times() -> Result<(), Fault> {
     let file = "hyscribe-test/hyscribe-test.php";
     let found = installed::find(plugins.path(), file).ok_or(Fault::Disabled)?;
     installed::approve(&found).map_err(|e| Fault::Refused(e.to_string()))?;
-    let runtime = Runtime::new(plugins.path());
+    let runtime = Runtime::new(plugins.path(), plugins.path());
     let files = [file.to_string()];
     let started = Instant::now();
-    let (first, _) = runtime.request(&files, site.clone());
+    let (first, _) = runtime.request(&files, None, site.clone());
     let loaded = started.elapsed();
     assert!(first.is_some());
     let started = Instant::now();
     for _ in 0..1_000 {
-        black_box(runtime.request(&files, site.clone()));
+        black_box(runtime.request(&files, None, site.clone()));
     }
     println!(
         "the runtime's active set: loaded once in {:.1} ms, then {} a request (1,000 requests)",

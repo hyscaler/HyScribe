@@ -159,6 +159,7 @@ fuzz_target!(|wasm: &[u8]| {
                     let request = Request::new(host, &extensions, Arc::new(Empty));
                     request.filter("the_content", Value::String(b"<p>x</p>".to_vec()), &[]);
                     let _ = request.activate(0);
+                    let _ = request.render("index.php");
                 }
                 Err(fault) => assert!(!matches!(fault, Fault::Guest(_) | Fault::Disabled | Fault::Value(_))),
             }

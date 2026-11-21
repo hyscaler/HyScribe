@@ -351,7 +351,7 @@ fn faults_are_logged() {
 async fn an_action_s_extensions_report_their_faults() {
     let dir = tempfile::tempdir().unwrap();
     install(dir.path());
-    let runtime = hyscribe_ext::Runtime::new(dir.path());
+    let runtime = hyscribe_ext::Runtime::new(dir.path(), dir.path());
     let found = installed::find(dir.path(), FILE).unwrap();
     let mut acted = Acted::new(|live| runtime.activating(&[], &found, live)).unwrap();
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
@@ -382,7 +382,7 @@ async fn an_action_s_extensions_report_their_faults() {
 async fn a_panic_on_the_extensions_thread_is_the_action_s() {
     let dir = tempfile::tempdir().unwrap();
     install(dir.path());
-    let runtime = hyscribe_ext::Runtime::new(dir.path());
+    let runtime = hyscribe_ext::Runtime::new(dir.path(), dir.path());
     let found = installed::find(dir.path(), FILE).unwrap();
     let mut acted = Acted::new(|live| runtime.activating(&[], &found, live)).unwrap();
     assert_eq!(acted.reports(), Vec::new());

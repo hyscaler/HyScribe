@@ -39,7 +39,7 @@ pub use host::{Host, TICK};
 pub use limits::{CEILING, DEFAULT, Limits};
 pub use manifest::Manifest;
 pub use request::{Report, Request, Rest};
-pub use runtime::Runtime;
+pub use runtime::{Active, Runtime};
 pub use site::{
     Asset, AssetKind, Caps, CustomizeKind, Found, Incoming, Message, ObjectKind, Outgoing, Part,
     Post, Site, ThemeCall,

@@ -142,3 +142,117 @@ fn a_component_loads_as_its_own_kind_only() -> Result<(), Fault> {
     assert!(!extension::of("hyscribe:sdk/template", "template"));
     Ok(())
 }
+
+use hyscribe_model::hooks::{Dispatch, scoped};
+
+/// The test theme's request as the dispatcher of the hooks its templates'
+/// host calls fire.
+fn dispatching(loaded: &Loaded, site: &Arc<TestSite>) -> (Arc<Request>, Arc<dyn Dispatch>) {
+    let request = Arc::new(loaded.request(site));
+    let dispatch: Arc<dyn Dispatch> = request.clone();
+    (request, dispatch)
+}
+
+#[test]
+fn renders_in_an_instance_of_its_own() -> Result<(), Fault> {
+    let loaded = theme(Limits::default())?;
+    let site = TestSite::new();
+    let (request, dispatch) = dispatching(&loaded, &site);
+    assert_eq!(request.templates().map(<[_]>::len), Some(3));
+    // `wp_head` fires a hook the theme answers while it renders.
+    let page = b"<head><!-- theme hook --><main>index</main>".to_vec();
+    for _ in 0..2 {
+        assert_eq!(
+            scoped(&dispatch, || request.render("index.php")),
+            Ok(page.clone())
+        );
+    }
+    let refused = Fault::Guest("no template missing.php".into());
+    assert_eq!(request.render("missing.php"), Err(refused.clone()));
+    let reports = request.reports();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(
+        reports.first().map(|r| (&r.hook, &r.fault)),
+        Some((&"missing.php".to_string(), &refused))
+    );
+    // A theme's callbacks still run after its own error.
+    assert_eq!(
+        request.filter("ext_theme_head", text("h"), &[]),
+        text("h<!-- theme hook -->")
+    );
+    Ok(())
+}
+
+#[test]
+fn host_calls_are_left_out_of_rendering_time() -> Result<(), Fault> {
+    let limits = Limits {
+        call_ms: 20,
+        request_ms: 30,
+        ..Limits::default()
+    };
+    let loaded = theme(limits)?;
+    let request = loaded.request(&TestSite::new());
+    for _ in 0..2 {
+        assert_eq!(request.render("slow.php"), Ok(b"slow".to_vec()));
+    }
+    assert_eq!(request.reports(), Vec::new());
+    Ok(())
+}
+
+#[test]
+fn a_fault_in_rendering_stops_the_theme() -> Result<(), Fault> {
+    let loaded = theme(Limits::default())?;
+    let site = TestSite::new();
+    let request = loaded.request(&site);
+    assert!(matches!(request.render("trap.php"), Err(Fault::Trap(_))));
+    let stopped = Fault::Refused("stopped in this request".into());
+    assert_eq!(request.render("index.php"), Err(stopped));
+    assert_eq!(request.filter("ext_theme_head", text("h"), &[]), text("h"));
+    let request = loaded.request(&site);
+    assert_eq!(request.render("spin.php"), Err(Fault::Timeout));
+    let request = loaded.request(&site);
+    assert!(matches!(request.render("trap.php"), Err(Fault::Trap(_))));
+    let record = loaded.record(0).map(|record| record.disabled().is_some());
+    assert_eq!(record, Some(true));
+    let request = loaded.request(&site);
+    assert_eq!(request.render("index.php"), Err(Fault::Disabled));
+    Ok(())
+}
+
+/// A dispatcher that renders again from inside the theme's render.
+struct Nested(Arc<Request>, Mutex<Option<Result<Vec<u8>, Fault>>>);
+
+impl Dispatch for Nested {
+    fn attached(&self, _: &str) -> bool {
+        true
+    }
+
+    fn filter(&self, _: &str, value: Value, _: &[Value]) -> Value {
+        *held(&self.1) = Some(self.0.render("index.php"));
+        value
+    }
+
+    fn action(&self, _: &str, _: &[Value]) {}
+}
+
+#[test]
+fn a_theme_renders_once_at_a_time_and_a_plugin_never() -> Result<(), Fault> {
+    let loaded = theme(Limits::default())?;
+    let request = Arc::new(loaded.request(&TestSite::new()));
+    let nested = Arc::new(Nested(request.clone(), Mutex::new(None)));
+    let dispatch: Arc<dyn Dispatch> = nested.clone();
+    assert!(scoped(&dispatch, || request.render("index.php")).is_ok());
+    let inner = held(&nested.1).clone();
+    assert_eq!(
+        inner,
+        Some(Err(Fault::Refused("the theme is rendering".into())))
+    );
+    let plugins = load(&["ext"], Limits::default())?;
+    let request = plugins.request(&TestSite::new());
+    assert_eq!(request.templates(), None);
+    assert_eq!(
+        request.render("index.php"),
+        Err(Fault::Refused("no theme".into()))
+    );
+    Ok(())
+}

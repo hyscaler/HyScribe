@@ -17,12 +17,12 @@ use crate::{Host, Package, faults};
 /// the installed one; a package cannot hold a file of this name.
 pub const APPROVED: &str = "approved.ext.toml";
 
-/// An installed plugin.
+/// An installed plugin or theme.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Installed {
     /// Its manifest.
     pub manifest: Manifest,
-    /// Its folder, `hyscribe/plugins/<id>/`.
+    /// Its folder, `hyscribe/plugins/<id>/` or `hyscribe/themes/<id>/`.
     pub folder: PathBuf,
     /// Whether its grants and limits are those approved at its activation.
     pub approved: bool,
@@ -42,24 +42,33 @@ pub fn list(plugins: &Path) -> Vec<Installed> {
     names.sort();
     names
         .iter()
-        .filter_map(|name| read(plugins, name))
+        .filter_map(|name| read(plugins, name, Kind::Plugin))
         .collect()
 }
 
 /// The installed plugin whose `replaces` is `file`, `<id>/<file>.php`.
 pub fn find(plugins: &Path, file: &str) -> Option<Installed> {
     let (id, _) = file.split_once('/')?;
-    read(plugins, id).filter(|installed| installed.manifest.replaces.as_deref() == Some(file))
+    let found = read(plugins, id, Kind::Plugin);
+    found.filter(|installed| installed.manifest.replaces.as_deref() == Some(file))
 }
 
-/// The plugin in `plugins/<id>/`, if one is installed there.
-fn read(plugins: &Path, id: &str) -> Option<Installed> {
+/// The theme `stylesheet` installed in `themes/<stylesheet>/`; a child
+/// (its `template` another theme) runs only with its parent installed
+/// beside it, whose files are served at the parent's URL (ADR 0023).
+pub fn theme(themes: &Path, stylesheet: &str, template: &str) -> Option<Installed> {
+    let parent = template == stylesheet || read(themes, template, Kind::Theme).is_some();
+    read(themes, stylesheet, Kind::Theme).filter(|_| parent)
+}
+
+/// The extension of `kind` in `folder/<id>/`, if one is installed there.
+fn read(folder: &Path, id: &str, kind: Kind) -> Option<Installed> {
     if !manifest::slug(id) {
         return None;
     }
-    let folder = plugins.join(id);
+    let folder = folder.join(id);
     let manifest = manifest_in(&folder, manifest::FILE)?;
-    if manifest.id != id || manifest.kind != Kind::Plugin {
+    if manifest.id != id || manifest.kind != kind {
         return None;
     }
     let approved = manifest_in(&folder, APPROVED).is_some_and(|approved| {

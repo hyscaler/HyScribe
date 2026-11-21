@@ -323,9 +323,10 @@ impl Site {
         }
     }
 
-    /// The site whose extensions are installed in `folder`.
-    pub fn with_plugins(self, folder: &std::path::Path) -> Site {
-        let runtime = hyscribe_ext::Runtime::new(folder);
+    /// The site whose plugins are installed in `plugins` and whose themes
+    /// are installed in `themes`.
+    pub fn with_extensions(self, plugins: &std::path::Path, themes: &std::path::Path) -> Site {
+        let runtime = hyscribe_ext::Runtime::new(plugins, themes);
         Site {
             extensions: Some(Arc::new(runtime)),
             ..self

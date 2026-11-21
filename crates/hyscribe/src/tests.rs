@@ -1326,3 +1326,83 @@ fn plugin_install() {
         (1, "error: not a zip archive\n")
     );
 }
+
+/// `plugin delete` removes an installed plugin that `active_plugins` does
+/// not name, and otherwise changes nothing.
+#[test]
+fn plugin_delete() {
+    let _saves = SAVES.lock().unwrap_or_else(|e| e.into_inner());
+    let active = |value: &str| {
+        let value = value.replace('\'', "''");
+        saves_with(&[format!(
+            "UPDATE wp_options SET option_value = '{value}' WHERE option_name = 'active_plugins'"
+        )]);
+    };
+    active("a:0:{}");
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let manifest = include_bytes!("../../hyscribe-ext/guest/hyscribe.ext.toml");
+    let package = hyscribe_testkit::hyx::zip(&[
+        ("hyscribe.ext.toml", manifest, true),
+        ("extension.wasm", guest::component(), true),
+    ]);
+    let file = home.join("hyscribe-test-0.1.0.hyx");
+    std::fs::write(&file, package).unwrap();
+    let path = file.to_str().unwrap();
+    let delete = |id: &str, extra: &[(&str, &str)]| {
+        let mut env = site_env(home);
+        env.insert("DB_NAME".into(), "wordpress_saves".into());
+        env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        run_as(&["plugin", "delete", id], env, home, USER, child_server())
+    };
+    let install = || assert_eq!(run_with(&["plugin", "install", path], &[], home).code, 0);
+    let folder = home.join("plugins/hyscribe-test");
+    let kept = home.join("packages/hyscribe-test-0.1.0.hyx");
+    install();
+    let untouched = |why: &str| {
+        assert!(folder.is_dir() && kept.is_file(), "{why}");
+    };
+    let refused = |id: &str, extra: &[(&str, &str)], message: &str| {
+        let output = delete(id, extra);
+        assert_eq!(output.code, 1, "{message}");
+        assert!(output.err.contains(message), "{}", output.err);
+    };
+    let root = run_as(
+        &["plugin", "delete", "hyscribe-test"],
+        site_env(home),
+        home,
+        0,
+        child_server(),
+    );
+    assert!(root.err.contains("refusing to run as root"), "{}", root.err);
+    refused("../x", &[], "is not a plugin id");
+    refused("other", &[], "other is not installed");
+    untouched("refusals before the database");
+    let none = run_with(&["plugin", "delete", "hyscribe-test"], &[], home);
+    assert_eq!(none.err, "error: no configuration: run ./hyscribe setup\n");
+    refused(
+        "hyscribe-test",
+        &[("DB_PORT", "1")],
+        "cannot read active_plugins",
+    );
+    untouched("no configuration, no database");
+    active("a:1:{i:0;s:31:\"hyscribe-test/hyscribe-test.php\";}");
+    refused("hyscribe-test", &[], "is active: deactivate it");
+    untouched("active");
+    active("not a list");
+    refused("hyscribe-test", &[], "active_plugins is not a list");
+    untouched("active_plugins unreadable");
+    active("a:2:{i:0;i:5;i:1;s:11:\"other/x.php\";}");
+    let done = delete("hyscribe-test", &[]);
+    assert_eq!((done.code, done.err.as_str()), (0, ""));
+    assert_eq!(
+        done.out,
+        "Deleted plugins/hyscribe-test/ and 1 kept package(s).\n"
+    );
+    assert!(!folder.exists() && !kept.exists());
+    // An option that is not there names no plugin.
+    saves_with(&["DELETE FROM wp_options WHERE option_name = 'active_plugins'".to_string()]);
+    install();
+    assert_eq!(delete("hyscribe-test", &[]).code, 0);
+    assert!(!folder.exists() && !kept.exists());
+}

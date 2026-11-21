@@ -188,5 +188,114 @@ fn unpack(plugins: &Path, staging: &Path, hyx: &Hyx) -> std::io::Result<()> {
         .and_then(|()| gone(fs::remove_dir_all(&old)))
 }
 
+/// What `hyscribe plugin delete` removed from `packages/`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Deleted {
+    /// The file names of the packages removed.
+    pub packages: Vec<String>,
+}
+
+/// `hyscribe plugin delete`: removes `plugins/<id>/` and the plugin's kept
+/// packages, unless `active` (asked only of an installed plugin) lists one
+/// of its files. The folder is renamed aside, then removed, so a crash
+/// leaves no plugin that loads; a symlink in its place, or in `packages/`,
+/// is removed itself, and nothing is followed out of the folders. A failure
+/// is reported once the rest is done, and running the command again
+/// finishes the removal.
+pub fn delete(
+    (plugins, packages): (&Path, &Path),
+    id: &str,
+    active: &dyn Fn() -> Result<Vec<String>, String>,
+) -> Result<Deleted, String> {
+    if !manifest::slug(id) {
+        return Err(format!(
+            "{id:?} is not a plugin id: lowercase letters, digits, - and _ only"
+        ));
+    }
+    let folder = plugins.join(id);
+    let aside = plugins.join(format!(".{id}.deleting"));
+    let owned = owned_packages(packages, id);
+    let present = |path: &Path| fs::symlink_metadata(path).is_ok();
+    if !(present(&folder) || present(&aside) || !owned.is_empty()) {
+        return Err(format!("{id} is not installed"));
+    }
+    let prefix = format!("{id}/");
+    if active()?.iter().any(|file| file.starts_with(&prefix)) {
+        return Err(format!(
+            "{id} is active: deactivate it from the Plugins screen first; nothing was changed"
+        ));
+    }
+    let mut errors = Vec::new();
+    let mut note = |path: &Path, done: std::io::Result<()>| {
+        if let Err(e) = done {
+            errors.push(format!("{}: {e}", path.display()));
+        }
+    };
+    note(&aside, remove_tree(&aside));
+    let is_folder = fs::symlink_metadata(&folder).is_ok_and(|meta| meta.is_dir());
+    if is_folder && let Err(e) = fs::rename(&folder, &aside) {
+        note(&folder, Err(e));
+    } else {
+        note(&folder, remove_tree(&folder));
+        note(&aside, remove_tree(&aside));
+    }
+    let mut deleted = Deleted {
+        packages: Vec::new(),
+    };
+    for path in owned {
+        match remove_tree(&path) {
+            Ok(()) => deleted.packages.extend(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(String::from),
+            ),
+            done => note(&path, done),
+        }
+    }
+    if errors.is_empty() {
+        Ok(deleted)
+    } else {
+        Err(format!(
+            "could not fully delete {id}; fix this and run the command again: {}",
+            errors.join("; ")
+        ))
+    }
+}
+
+/// The files of `packages` that are `<id>-<version>.hyx` of this plugin: a
+/// plugin whose id continues this one's with a `-` has the same prefix, so
+/// each is read for the id it names.
+fn owned_packages(packages: &Path, id: &str) -> Vec<PathBuf> {
+    let prefix = format!("{id}-");
+    let mut found: Vec<PathBuf> = fs::read_dir(packages)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with(&prefix) && name.ends_with(".hyx")
+        })
+        .map(|entry| entry.path())
+        .collect();
+    found.sort();
+    found.retain(|path| {
+        let bytes = read_at_most(path, crate::hyx::MAX_TOTAL).unwrap_or_default();
+        Hyx::read(&bytes).is_ok_and(|hyx| hyx.manifest.id == id)
+    });
+    found
+}
+
+/// Removes a folder with what it holds, or a file or symlink itself; what
+/// is not there is removed already.
+fn remove_tree(path: &Path) -> std::io::Result<()> {
+    let is_folder = fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir());
+    gone(if is_folder {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    })
+}
+
 #[cfg(test)]
 mod tests;

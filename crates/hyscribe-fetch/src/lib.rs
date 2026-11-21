@@ -153,7 +153,8 @@ pub struct Outgoing<'a> {
     /// The method, upper case.
     pub method: &'a str,
     /// Headers added after the client's own; a `User-Agent` among them
-    /// replaces the arguments' one.
+    /// replaces the arguments' one. A redirect to another origin sends
+    /// none of them.
     pub headers: &'a [(String, String)],
     /// The body, sent with its length.
     pub body: &'a [u8],
@@ -233,10 +234,24 @@ impl Client {
         let fail = |kind, hop| Err(Error { kind, hop });
         let deadline = Instant::now() + args.timeout.min(MAX_TIME);
         let limit = args.limit_response_size.unwrap_or(MAX_BYTES).min(MAX_BYTES);
+        let origin =
+            |url: &[u8]| validate_url(url, home).map(|target| (target.https, target.authority));
+        let first = origin(url);
         let mut url = url.to_vec();
         for hop in 0..=args.redirection.min(MAX_REDIRECTS) {
             let check = (hop > 0).then_some(allowed);
-            let hop_sent = self.hop(&url, home, (&args, outgoing), (limit, check));
+            // The extension's headers (its credentials among them) go to
+            // the origin it named only: not to another host, nor over
+            // plain HTTP after HTTPS, which a redirect may lead to.
+            let sent = if origin(&url) == first {
+                outgoing
+            } else {
+                Outgoing {
+                    headers: &[],
+                    ..outgoing
+                }
+            };
+            let hop_sent = self.hop(&url, home, (&args, sent), (limit, check));
             match timeout_at(deadline, hop_sent).await {
                 Err(_) => return fail(Kind::Timeout, hop),
                 Ok(Err(kind)) => return fail(kind, hop),

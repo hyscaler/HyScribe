@@ -396,6 +396,57 @@ async fn sends_an_extension_s_request() {
     assert_eq!(refused, failed(Kind::Protocol, 0));
 }
 
+/// A listener redirecting its first request to `location` and answering
+/// every later one with the request as it came.
+async fn redirecting_to(location: &'static str) -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut first = true;
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut buffer = [0; 4096];
+            let read = stream.read(&mut buffer).await.unwrap_or(0);
+            let head = if first {
+                format!("HTTP/1.1 302 Found\r\nLocation: {location}\r\n\r\n")
+            } else {
+                format!("HTTP/1.1 200 OK\r\nContent-Length: {read}\r\n\r\n")
+            };
+            first = false;
+            let _ = stream.write_all(head.as_bytes()).await;
+            let _ = stream.write_all(&buffer[..read]).await;
+        }
+    });
+    address
+}
+
+/// An extension's headers follow a redirect within its origin, and are
+/// dropped on one to another host: its credentials stay with the host
+/// they were meant for.
+#[tokio::test]
+async fn an_extension_s_headers_stay_with_its_origin() {
+    let headers = [("Authorization".to_string(), "Bearer k".to_string())];
+    let outgoing = Outgoing {
+        method: "GET",
+        headers: &headers,
+        body: b"",
+    };
+    let fetch = |location| async move {
+        let client = client(Table::new(redirecting_to(location).await));
+        let fetched = client
+            .send_within(b"http://pages.test/", b"", (args(), outgoing), &|_| true)
+            .await;
+        String::from_utf8(fetched.unwrap().body).unwrap()
+    };
+    let same = fetch("/next").await;
+    assert!(same.contains("authorization: Bearer k"), "{same}");
+    let other = fetch("http://two.test/").await;
+    assert!(
+        other.starts_with("GET / HTTP/1.1\r\nhost: two.test\r\n"),
+        "{other}"
+    );
+    assert!(!other.contains("authorization"), "{other}");
+}
+
 /// A body read to its limit stops there: no more is awaited, and the
 /// connection is closed, however much more the server says it sends.
 #[tokio::test]

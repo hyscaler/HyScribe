@@ -1101,8 +1101,6 @@ fn edit_args(query: &str) -> Option<EditArgs> {
     Some(args)
 }
 
-/// The value of `name` in a query that may give only it: `None` for
-/// another argument, `Some(None)` for none.
 /// An installed extension as the Plugins screen lists it.
 fn listed(installed: hyscribe_ext::installed::Installed) -> Plugin {
     let manifest = installed.manifest;
@@ -1136,6 +1134,8 @@ impl crate::Site {
     }
 }
 
+/// The value of `name` in a query that may give only it: `None` for
+/// another argument, `Some(None)` for none.
 fn only_argument(query: &str, name: &str) -> Option<Option<String>> {
     let mut found = None;
     for (key, value) in query_strings(query)? {

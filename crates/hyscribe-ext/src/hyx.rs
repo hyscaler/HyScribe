@@ -108,17 +108,27 @@ impl Hyx {
         if let Some(parent) = nested {
             return Err(format!("{parent} is a file and a folder"));
         }
-        let file = |wanted: &str| files.iter().find(|(name, _)| name == wanted);
-        let (_, text) = file(manifest::FILE).ok_or("a package has a hyscribe.ext.toml")?;
+        let text = find(&files, manifest::FILE).ok_or("a package has a hyscribe.ext.toml")?;
         let manifest = Manifest::parse(text)?;
-        if manifest.kind == Kind::Plugin && file(COMPONENT).is_none() {
+        let hyx = Hyx { manifest, files };
+        if hyx.manifest.kind == Kind::Plugin && hyx.file(COMPONENT).is_none() {
             return Err(format!("a plugin package has an {COMPONENT}"));
         }
-        Ok(Hyx { manifest, files })
+        Ok(hyx)
+    }
+
+    /// The contents of the file named `name`.
+    pub fn file(&self, name: &str) -> Option<&[u8]> {
+        find(&self.files, name)
     }
 }
 
 /// Little endian fields of the archive at an offset.
+fn find<'a>(files: &'a [(String, Vec<u8>)], name: &str) -> Option<&'a [u8]> {
+    let (_, data) = files.iter().find(|(file, _)| file == name)?;
+    Some(data)
+}
+
 struct At<'a>(&'a [u8], usize);
 
 impl At<'_> {

@@ -32,7 +32,7 @@ const SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\
 
 /// Where the Troubleshooting help names the plugins folder: relative to the
 /// HyScribe folder, in place of PHP's `WP_PLUGIN_DIR`.
-pub const PLUGIN_DIR: &str = "hyscribe/plugins/";
+const PLUGIN_DIR: &str = "hyscribe/plugins/";
 
 /// `WEEK_IN_SECONDS`, how long a plugin stays recently active.
 const WEEK: i64 = 604_800;
@@ -125,16 +125,22 @@ pub fn invalid_path(file: &str) -> bool {
         || file.as_bytes().get(1) == Some(&b':')
 }
 
-/// The plugin files `active_plugins` names, each once; `None` where PHP
-/// would write the option back.
-pub fn active_plugins(stored: Option<Vec<u8>>) -> Option<Vec<String>> {
-    // `get_option( 'active_plugins', array() )`.
+/// An array option as PHP walks it: empty where the option is missing,
+/// `None` where it is stored as anything but an array.
+pub fn option_array(stored: Option<&[u8]>) -> Option<Vec<(Key, Value)>> {
     let Some(stored) = stored else {
         return Some(Vec::new());
     };
-    let Maybe::Value(Value::Array(listed)) = maybe_unserialize(&stored) else {
-        return None;
-    };
+    match maybe_unserialize(stored) {
+        Maybe::Value(Value::Array(listed)) => Some(listed),
+        _ => None,
+    }
+}
+
+/// The plugin files `active_plugins` names, each once; `None` where PHP
+/// would write the option back.
+fn active_plugins(stored: Option<Vec<u8>>) -> Option<Vec<String>> {
+    let listed = option_array(stored.as_deref())?;
     let mut files: Vec<String> = Vec::new();
     for (_, plugin) in &listed {
         let Value::String(bytes) = plugin else {
@@ -175,12 +181,7 @@ fn missing_plugins(active: &[String], installed: &[Plugin]) -> String {
 /// `recently_activated` as `prepare_items()` keeps it at `now`: the plugins
 /// deactivated within a week, by file; `None` when it is not an array.
 pub fn recently_activated(stored: Option<&[u8]>, now: i64) -> Option<Vec<(Key, Value)>> {
-    let Some(stored) = stored else {
-        return Some(Vec::new());
-    };
-    let Maybe::Value(Value::Array(recent)) = maybe_unserialize(stored) else {
-        return None;
-    };
+    let recent = option_array(stored)?;
     let kept = recent
         .into_iter()
         .filter(|(_, time)| matches!(time, Value::Int(time) if time.saturating_add(WEEK) >= now));

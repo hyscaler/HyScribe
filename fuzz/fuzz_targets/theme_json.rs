@@ -57,6 +57,7 @@ fuzz_target!(|data: &[u8]| {
         blocks: blocks(),
         block_styles: &[],
         theme: Some(data),
+        parent_theme: Some(data),
         theme_styles: &partials,
         user: Some(data),
     });

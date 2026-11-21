@@ -1221,6 +1221,7 @@ dependencies = [
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
+ "hyscribe-render",
  "hyscribe-testkit",
  "hyscribe-theme-json",
  "icu_normalizer",

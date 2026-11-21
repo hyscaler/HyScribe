@@ -49,6 +49,21 @@ fn nonces_of(from: &str, to: &str) -> String {
     }
 }
 
+/// `text` with the age of each overdue automatic update masked.
+fn unaged(text: &str) -> String {
+    const OVERDUE: &str = "Automatic update overdue by ";
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find(OVERDUE) {
+        let after = rest.get(at + OVERDUE.len()..).unwrap();
+        out.push_str(rest.get(..at + OVERDUE.len()).unwrap());
+        out.push_str("%age%");
+        rest = after.get(after.find('.').unwrap()..).unwrap();
+    }
+    out.push_str(rest);
+    out
+}
+
 /// A site on `wordpress_saves`, loaded afresh, logged in, in primary mode.
 async fn site(dir: &std::path::Path) -> (Arc<crate::Site>, String) {
     let config = copy().await;
@@ -114,9 +129,10 @@ async fn the_activations_answer_as_php() {
         assert_eq!(response.status().as_str(), status, "{case}");
         let php = hs_admin_page(&String::from_utf8(unhex(php_body)).unwrap());
         let page = page_of(response).await;
-        // Times, like nonces, are ten digits.
-        let php = unnonced(&php).replace("%time%", "%nonce%");
-        let page = unnonced(&page);
+        // Times, like nonces, are ten digits; the overdue update's age is
+        // counted from the clock, so it grows after recording.
+        let php = unaged(&unnonced(&php).replace("%time%", "%nonce%"));
+        let page = unaged(&unnonced(&page));
         let at = page.bytes().zip(php.bytes()).position(|(a, b)| a != b);
         let near = |text: &str| {
             text.get(at.unwrap_or(0).saturating_sub(100)..)

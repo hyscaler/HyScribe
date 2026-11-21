@@ -15,7 +15,11 @@ use super::SITE;
 /// `admin_url()`, its constants, by default HyScribe's, whether it has no
 /// uploads folder, and its plugins folder.
 #[derive(Default)]
-pub(in crate::admin::saves) struct Unread(pub Constants, pub bool, pub Option<std::path::PathBuf>);
+pub(in crate::admin::saves) struct Unread(
+    pub Constants,
+    pub bool,
+    pub Option<hyscribe_ext::Runtime>,
+);
 
 impl CapabilityData for Unread {
     fn option(&self, _: &str) -> Option<Vec<u8>> {
@@ -78,8 +82,8 @@ impl Acting for Unread {
     fn user_can(&self, _: u64, _: &str) -> bool {
         unreachable!()
     }
-    fn create_nonce(&self, _: &str) -> String {
-        unreachable!()
+    fn create_nonce(&self, action: &str) -> String {
+        format!("nonce-{action}")
     }
     fn constants(&self) -> Constants {
         self.0
@@ -93,8 +97,8 @@ impl Acting for Unread {
     fn delete_files(&self, _: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
         !self.1
     }
-    fn plugins(&self) -> Option<&std::path::Path> {
-        self.2.as_deref()
+    fn extensions(&self) -> Option<&hyscribe_ext::Runtime> {
+        self.2.as_ref()
     }
     fn outbox(&self) -> &crate::mail::Outbox {
         crate::mail::tests::outbox()

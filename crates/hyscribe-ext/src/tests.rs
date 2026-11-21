@@ -71,6 +71,10 @@ impl TestSite {
     pub(crate) fn option(&self, name: &str) -> Option<Value> {
         held(&self.options).get(name).cloned()
     }
+
+    pub(crate) fn set_option(&self, name: &str, value: &str) {
+        held(&self.options).insert(name.into(), text(value));
+    }
 }
 
 impl Site for TestSite {
@@ -317,13 +321,13 @@ pub(crate) fn load(slugs: &[&str], limits: Limits) -> Result<Loaded, Fault> {
     let mut folders = Vec::new();
     for slug in slugs {
         let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
-        list.push(host.load(Package {
+        list.push(Arc::new(host.load(Package {
             slug,
             wasm: guest::component(),
             grants: grants(),
             limits,
             folder: folder.path(),
-        })?);
+        })?));
         folders.push(folder);
     }
     let extensions = Arc::new(Extensions::new(list));
@@ -386,7 +390,7 @@ fn registers_in_init_only() -> Result<(), Fault> {
     let loaded = load(&["ext"], Limits::default())?;
     let extension = loaded.extensions.list().first().ok_or(Fault::Disabled)?;
     assert_eq!(extension.slug(), "ext");
-    assert_eq!(extension.hooks().len(), 27);
+    assert_eq!(extension.hooks().len(), 29);
     assert_eq!(
         extension.hooks().last(),
         Some(&Hook {
@@ -920,6 +924,12 @@ fn activates_and_deactivates_in_instances_of_their_own() -> Result<(), Fault> {
     );
     assert_eq!(request.activate(0), Ok(()));
     assert_eq!(site.option("ext_active"), Some(Value::Bool(true)));
+    assert_eq!(request.deactivate(0), Ok(()));
+    assert_eq!(site.option("ext_active"), None);
+    site.set_option("ext_hooks", "refuse");
+    assert_eq!(request.activate(0), Err(Fault::Guest("refused".into())));
+    site.set_option("ext_hooks", "trap");
+    assert!(matches!(request.activate(0), Err(Fault::Trap(_))));
     assert!(matches!(request.deactivate(0), Err(Fault::Trap(_))));
     assert_eq!(
         request.activate(1),
@@ -930,10 +940,10 @@ fn activates_and_deactivates_in_instances_of_their_own() -> Result<(), Fault> {
         .into_iter()
         .map(|report| report.hook)
         .collect();
-    assert_eq!(hooks, ["deactivate", "deactivate"]);
+    assert_eq!(hooks, ["deactivate", "activate", "activate", "deactivate"]);
     assert_eq!(
         loaded.record(0).map(|record| record.faults().len()),
-        Some(1)
+        Some(2)
     );
     Ok(())
 }
@@ -950,7 +960,7 @@ fn a_fault_record_that_cannot_be_written_is_reported() -> Result<(), Fault> {
         limits: Limits::default(),
         folder: &gone,
     };
-    let extensions = Arc::new(Extensions::new(vec![host.load(package)?]));
+    let extensions = Arc::new(Extensions::new(vec![Arc::new(host.load(package)?)]));
     let site = TestSite::new();
     let request = Request::new(&host, &extensions, site.clone());
     request.filter("ext_trap", Value::Null, &[]);
@@ -963,8 +973,8 @@ fn a_fault_record_that_cannot_be_written_is_reported() -> Result<(), Fault> {
         matches!(faults.as_slice(), [Fault::Unrecorded(_), Fault::Trap(_)]),
         "{faults:?}"
     );
+    site.set_option("ext_hooks", "trap");
     let request = Request::new(&host, &extensions, site);
-    request.activate(0)?;
     assert!(matches!(request.deactivate(0), Err(Fault::Trap(_))));
     assert!(matches!(
         request.reports().first(),

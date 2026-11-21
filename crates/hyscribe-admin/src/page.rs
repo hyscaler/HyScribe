@@ -4,6 +4,7 @@
 //! `admin-footer.php` print it around the screen's own markup.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, parse_url};
+use hyscribe_model::hooks::apply_filters;
 use hyscribe_phpser::{
     Key, Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, parse_str, stripslashes,
     urlencode,
@@ -838,9 +839,15 @@ fn screen_meta(page: &Page) -> String {
 /// HyScribe's version (ADR 0008).
 fn footer(site: &dyn PageSite, (page, extras): (&Page, &Extras), assets: &mut Assets) -> String {
     let urls: &dyn Urls = site;
+    let thanks = "<span id=\"footer-thankyou\">Thank you for creating with HyScribe.</span>";
     let mut out = format!(
-        "\n<div class=\"clear\"></div></div><!-- wpbody-content -->\n<div class=\"clear\"></div></div><!-- wpbody -->\n<div class=\"clear\"></div></div><!-- wpcontent -->\n\n<div id=\"wpfooter\" role=\"contentinfo\">\n\t\t<p id=\"footer-left\" class=\"alignleft\">\n\t\t<span id=\"footer-thankyou\">Thank you for creating with HyScribe.</span>\t</p>\n\t<p id=\"footer-upgrade\" class=\"alignright\">\n\t\tHyScribe {}\t</p>\n\t<div class=\"clear\"></div>\n</div>\n",
-        env!("CARGO_PKG_VERSION")
+        "\n<div class=\"clear\"></div></div><!-- wpbody-content -->\n<div class=\"clear\"></div></div><!-- wpbody -->\n<div class=\"clear\"></div></div><!-- wpcontent -->\n\n<div id=\"wpfooter\" role=\"contentinfo\">\n\t\t<p id=\"footer-left\" class=\"alignleft\">\n\t\t{}\t</p>\n\t<p id=\"footer-upgrade\" class=\"alignright\">\n\t\t{}\t</p>\n\t<div class=\"clear\"></div>\n</div>\n",
+        apply_filters("admin_footer_text", thanks.to_string(), &[]),
+        apply_filters(
+            "update_footer",
+            format!("HyScribe {}", env!("CARGO_PKG_VERSION")),
+            &[]
+        )
     );
     out.push_str(page.admin_footer);
     let login = site.login_url();

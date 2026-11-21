@@ -4,6 +4,7 @@
 //! the classes of a post and of the page body.
 
 use hyscribe_kses::esc_attr;
+use hyscribe_model::hooks::apply_filters;
 use hyscribe_model::{Post, PostQuery};
 use hyscribe_phpser::{Value, decode, is_empty_string, php_trim};
 
@@ -367,13 +368,18 @@ pub fn body_class(
             .concat(),
         );
     }
-    let mut unique: Vec<Vec<u8>> = Vec::with_capacity(classes.len());
-    for class in classes.iter().map(|class| esc_attr(class).into_bytes()) {
+    let escaped = classes.iter().map(|class| esc_attr(class).into_bytes());
+    // No caller passes `$css_class`.
+    let none: Vec<Vec<u8>> = Vec::new();
+    let filtered = apply_filters("body_class", escaped.collect::<Vec<_>>(), &[&none]);
+    let mut unique: Vec<Vec<u8>> = Vec::with_capacity(filtered.len());
+    for class in filtered {
         if !unique.contains(&class) {
             unique.push(class);
         }
     }
-    unique.join(&b' ')
+    // `body_class()` escapes them again, joined.
+    esc_attr(&unique.join(&b' ')).into_bytes()
 }
 
 /// The mime type without the `application/`, `image/`, `text/`, `audio/`,

@@ -208,3 +208,43 @@ fn scopes_nest_and_restore() {
     assert!(panicked.is_err());
     assert_eq!(apply_filters("hook", 0_i64, &[]), 0);
 }
+
+#[test]
+fn work_carried_to_another_thread_keeps_its_dispatcher() {
+    let (fixed, dispatch) = fixed(Value::Int(3));
+    let carried = scoped(&dispatch, || carry(|| apply_filters("hook", 0_i64, &[])));
+    let plain = carry(|| apply_filters("hook", 0_i64, &[]));
+    let threads = std::thread::spawn(move || (carried(), plain()));
+    assert_eq!(threads.join().ok(), Some((3, 0)));
+    assert_eq!(seen(&fixed).len(), 1);
+}
+
+/// Pending once, then ready with what the filter gave at each poll.
+struct Twice(Vec<i64>);
+
+impl Future for Twice {
+    type Output = Vec<i64>;
+
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Vec<i64>> {
+        self.0.push(apply_filters("hook", 0_i64, &[]));
+        if self.0.len() < 2 {
+            return Poll::Pending;
+        }
+        Poll::Ready(self.0.clone())
+    }
+}
+
+#[test]
+fn a_future_within_a_dispatcher_has_it_at_each_poll_only() {
+    let (_, dispatch) = fixed(Value::Int(4));
+    let mut cx = Context::from_waker(std::task::Waker::noop());
+    let mut future = within(Some(dispatch), Twice(Vec::new()));
+    assert_eq!(Pin::new(&mut future).poll(&mut cx), Poll::Pending);
+    assert_eq!(apply_filters("hook", 0_i64, &[]), 0);
+    let polled = Pin::new(&mut future).poll(&mut cx);
+    assert_eq!(polled, Poll::Ready(vec![4, 4]));
+    let mut plain = within(None, Twice(Vec::new()));
+    assert_eq!(Pin::new(&mut plain).poll(&mut cx), Poll::Pending);
+    let polled = Pin::new(&mut plain).poll(&mut cx);
+    assert_eq!(polled, Poll::Ready(vec![0, 0]));
+}

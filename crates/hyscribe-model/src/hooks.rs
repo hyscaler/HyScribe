@@ -8,16 +8,21 @@
 //! arguments are of another type does not cross yet, and its value stays
 //! as it was, as does a value whose answer does not read back as its type.
 //! What an answer gives goes through the same checks as the value it
-//! replaced.
+//! replaced. The embedder enters the scope for each request: [`within`] for
+//! its future, wherever it is polled, and [`carry`] for work it hands to a
+//! blocking thread.
 
 use std::any::Any;
 use std::cell::RefCell;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use hyscribe_phpser::{Float, Key, Value};
 
 /// What runs the callbacks extensions attached: the runtime's request.
-pub trait Dispatch {
+pub trait Dispatch: Send + Sync {
     /// Whether any extension has a callback on `hook`.
     fn attached(&self, hook: &str) -> bool;
     /// `apply_filters( $hook, $value, ...$args )` over the extensions' callbacks.
@@ -47,10 +52,52 @@ pub fn scoped<R>(dispatch: &Arc<dyn Dispatch>, run: impl FnOnce() -> R) -> R {
     run()
 }
 
+/// The dispatcher on this thread, if any.
+fn current() -> Option<Arc<dyn Dispatch>> {
+    DISPATCH.with(|dispatch| dispatch.borrow().clone())
+}
+
 /// The dispatcher on this thread, when an extension attached to `hook`.
 fn attached(hook: &str) -> Option<Arc<dyn Dispatch>> {
-    let dispatch = DISPATCH.with(|dispatch| dispatch.borrow().clone());
-    dispatch.filter(|dispatch| dispatch.attached(hook))
+    current().filter(|dispatch| dispatch.attached(hook))
+}
+
+/// Runs `run` with `dispatch`, or as plain calls without one.
+fn maybe<R>(dispatch: Option<&Arc<dyn Dispatch>>, run: impl FnOnce() -> R) -> R {
+    match dispatch {
+        Some(dispatch) => scoped(dispatch, run),
+        None => run(),
+    }
+}
+
+/// `run`, to be run on another thread with the dispatcher of this one.
+pub fn carry<R>(run: impl FnOnce() -> R + Send) -> impl FnOnce() -> R + Send {
+    let dispatch = current();
+    move || maybe(dispatch.as_ref(), run)
+}
+
+/// A future answering the hooks it fires with its dispatcher, set on the
+/// thread for each poll only, so tasks sharing a thread keep their own.
+pub struct Within<F> {
+    dispatch: Option<Arc<dyn Dispatch>>,
+    future: Pin<Box<F>>,
+}
+
+/// `future` with `dispatch` answering its hooks, or as plain calls.
+pub fn within<F: Future>(dispatch: Option<Arc<dyn Dispatch>>, future: F) -> Within<F> {
+    Within {
+        dispatch,
+        future: Box::pin(future),
+    }
+}
+
+impl<F: Future> Future for Within<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
+        let this = self.get_mut();
+        maybe(this.dispatch.as_ref(), || this.future.as_mut().poll(cx))
+    }
 }
 
 fn bytes(text: &[u8]) -> Value {

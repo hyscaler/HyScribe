@@ -83,12 +83,18 @@ pub struct Plugin {
     pub disabled: bool,
 }
 
+/// The notice of an activation that ended in a fatal error. The frame PHP
+/// adds to show the error is taken out again by the notice's kses, so it
+/// never shows, nor does its `error_scrape` action run.
+const FATAL: &str =
+    "Plugin could not be activated because it triggered a <strong>fatal error</strong>.";
+
 /// What a view of the screen asks for: the status shown and the notice
-/// an action sent back.
+/// an action sent back, with its classes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Args {
     status: String,
-    notice: Option<&'static str>,
+    notice: Option<(&'static str, &'static str)>,
 }
 
 impl Args {
@@ -96,20 +102,25 @@ impl Args {
     /// a search, a sort, a later page, another action's notice.
     pub fn parse(query: &str) -> Option<Args> {
         let (mut status, mut activate, mut deactivate) = ("all".to_string(), false, false);
+        let mut error = false;
         for (name, value) in query_strings(query)? {
             match (name.as_str(), value.as_str()) {
                 ("plugin_status", given) => status = sanitize_key(given.as_bytes()),
-                ("paged", "" | "1") | ("s", "") => {}
+                ("paged", "" | "1") | ("s", "") | ("plugin" | "_error_nonce", _) => {}
                 ("activate", _) => activate = true,
                 ("deactivate", _) => deactivate = true,
+                ("error", given) if given != "resuming" => error = true,
                 _ => return None,
             }
         }
         // `plugins.php` shows the first notice asked for, in this order.
-        let notice = if activate {
-            Some("Plugin activated.")
+        let done = |message| (message, "is-dismissible updated");
+        let notice = if error {
+            Some((FATAL, "error"))
+        } else if activate {
+            Some(done("Plugin activated."))
         } else {
-            deactivate.then_some("Plugin deactivated.")
+            deactivate.then_some(done("Plugin deactivated."))
         };
         Some(Args { status, notice })
     }
@@ -241,6 +252,7 @@ pub fn plugins(
         .map(|(_, items)| items.as_slice())
         .unwrap_or_default();
     let uri = text(&remove_query_arg(&TEMPORARY, request.uri.as_bytes()));
+    let canonical = text(&remove_query_arg(&TEMPORARY, request.canonical.as_bytes()));
     let hidden = hidden_columns(site, "plugins");
     let hidden: Vec<&str> = hidden.iter().map(String::as_str).collect();
     let columns = [
@@ -268,7 +280,7 @@ pub fn plugins(
             &columns,
             &hidden,
             &Order::default(),
-            request.canonical,
+            &canonical,
             counter,
             with_id,
         )
@@ -287,16 +299,7 @@ pub fn plugins(
     } else {
         ""
     };
-    let pages = |which| {
-        pagination(
-            which,
-            "Plugins list navigation",
-            total,
-            1,
-            1,
-            request.canonical,
-        )
-    };
+    let pages = |which| pagination(which, "Plugins list navigation", total, 1, 1, &canonical);
     let rows = if items.is_empty() {
         let message = if installed.is_empty() {
             "No plugins are currently available."
@@ -353,8 +356,8 @@ pub fn plugins(
             pages("bottom")
         )
     };
-    let notice = args.notice.map_or_else(String::new, |notice| {
-        wp_admin_notice(notice, "message", "is-dismissible updated", true, "")
+    let notice = args.notice.map_or_else(String::new, |(notice, classes)| {
+        wp_admin_notice(notice, "message", classes, true, "")
     });
     let content = missing
         + &notice
@@ -450,7 +453,7 @@ pub fn plugins(
         admin_footer: "",
         footer_scripts: "",
         content: &content,
-        canonical: request.canonical,
+        canonical: &canonical,
         origin: request.origin,
         view: None,
     };

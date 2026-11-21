@@ -26,6 +26,7 @@ pub mod installed;
 mod limits;
 pub mod manifest;
 mod request;
+mod runtime;
 mod site;
 mod value;
 
@@ -35,6 +36,7 @@ pub use host::{Host, TICK};
 pub use limits::{CEILING, DEFAULT, Limits};
 pub use manifest::Manifest;
 pub use request::{Report, Request, Rest};
+pub use runtime::Runtime;
 pub use site::{Asset, AssetKind, Found, Message, ObjectKind, Post, Site};
 
 /// What went wrong in an extension.

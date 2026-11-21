@@ -1,6 +1,6 @@
 # The rows PHP WordPress writes for the action admin-plugins-deactivate (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-21 00:51:30 to 2026-11-21 00:51:30 UTC.
-# %wp_options:1% is 133.
+# %now% and %unix% stand for times from 2026-11-21 09:15:12 to 2026-11-21 09:15:12 UTC.
+# %wp_options:1% is 136.
 wp_options	active_plugins	~	option_value	a:1:{i:0;s:31:"hyscribe-test/hyscribe-test.php";}	a:0:{}
 wp_options	recently_activated	+	autoload	off
 wp_options	recently_activated	+	option_id	%wp_options:1%

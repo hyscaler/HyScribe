@@ -55,10 +55,10 @@ pub(crate) async fn refuse(
     let handler = Handler::pick(headers, entry);
     let site = Arc::clone(site);
     let (now, handle) = (now(), Handle::current());
-    let checked = tokio::task::spawn_blocking(move || {
+    let checked = tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
         let proof = (action.as_str(), nonce.as_slice());
         (!verifies(&site, (handle, now), &jar, proof, grace)).then(|| denied(&site, handler))
-    })
+    }))
     .await;
     settled(checked)
 }

@@ -8,6 +8,7 @@ activate-recent	x13recent	administrator	action=activate&plugin=hyscribe-test%2Fh
 activate-bad-nonce	x13inactive	administrator	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	bad
 activate-missing	x13inactive	administrator	action=activate&plugin=missing%2Fmissing.php&plugin_status=all&paged=1&s=	activate-plugin_missing/missing.php
 activate-invalid	x13inactive	administrator	action=activate&plugin=..%2Fx.php&plugin_status=all&paged=1&s=	activate-plugin_../x.php
+activate-fails	x13fail	administrator	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	activate-plugin_%file%
 activate-editor	x13inactive	editor	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	activate-plugin_%file%
 deactivate	x13active	administrator	action=deactivate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	deactivate-plugin_%file%
 deactivate-kept	x13both	administrator	action=deactivate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	deactivate-plugin_%file%

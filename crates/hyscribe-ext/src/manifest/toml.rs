@@ -250,11 +250,12 @@ impl Reader<'_> {
             b'U' => 8,
             _ => return Err(self.error("an unknown escape")),
         };
+        // Past the end the digits are none, which do not parse.
         let hex = self.bytes.get(self.at..self.at + width).unwrap_or_default();
         self.at += width;
         let code = std::str::from_utf8(hex)
             .ok()
-            .filter(|hex| hex.len() == width && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+            .filter(|hex| hex.bytes().all(|b| b.is_ascii_hexdigit()))
             .and_then(|hex| u32::from_str_radix(hex, 16).ok());
         code.and_then(char::from_u32)
             .ok_or_else(|| self.error("an escape that is not a character"))

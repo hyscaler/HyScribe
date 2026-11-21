@@ -62,6 +62,7 @@ fn reads_a_package() {
 #[test]
 fn refuses_what_is_not_a_package() {
     assert!(refused(&vec![0; (MAX_TOTAL + 1) as usize]).contains("at most"));
+    assert!(refused(&vec![0; MAX_TOTAL as usize]).contains("not a zip archive"));
     assert!(refused(b"PK").contains("not a zip archive"));
     let good = package(&[]);
     let end = good.len() - 22;
@@ -84,6 +85,9 @@ fn refuses_what_is_not_a_package() {
     let many = patched(good.clone(), end + 8, &10_001u16.to_le_bytes());
     let many = patched(many, end + 10, &10_001u16.to_le_bytes());
     assert!(refused(&many).contains("at most 10000 entries"));
+    let most = patched(good.clone(), end + 8, &10_000u16.to_le_bytes());
+    let most = patched(most, end + 10, &10_000u16.to_le_bytes());
+    assert!(!refused(&most).contains("entries"));
     let fewer = patched(good.clone(), end + 8, &[1, 0]);
     let fewer = patched(fewer, end + 10, &[1, 0]);
     assert!(refused(&fewer).contains("holds more than its entries"));
@@ -164,6 +168,22 @@ fn refuses_entries_it_cannot_trust() {
         Hyx::read(&other).unwrap_err(),
         "a package has a hyscribe.ext.toml"
     );
+    // At the limits, an entry is read on: here to its local header.
+    let at_most = [
+        ((64u32 << 20).to_le_bytes(), 1u32 << 20, "larger than"),
+        (100u32.to_le_bytes(), 1, "the size it says"),
+    ];
+    for (size, stored, not) in at_most {
+        let bytes = zip(&[("LICENSE", b"x", false)]);
+        let at = central(&bytes);
+        let bytes = patched(patched(bytes, at + 10, &[8, 0]), at + 24, &size);
+        let bytes = patched(bytes, at + 20, &stored.to_le_bytes());
+        let error = refused(&bytes);
+        assert!(
+            !error.contains(not) && error.contains("local header"),
+            "{error}"
+        );
+    }
     let error = refused(&package(&[("public/", b"x", false)]));
     assert!(error.contains("public/ does not have the size it says"));
     let zeros = vec![0; 200_000];
@@ -187,6 +207,21 @@ fn refuses_more_than_the_total() {
         at += 46 + name.len();
     }
     assert!(refused(&bytes).contains("holds at most 268435456 bytes"));
+    // Exactly the most a package may hold is read on.
+    let names: Vec<String> = (0..4).map(|n| format!("public/{n}")).collect();
+    let entries: Vec<(&str, &[u8], bool)> = names
+        .iter()
+        .map(|n| (n.as_str(), b"x".as_slice(), false))
+        .collect();
+    let mut bytes = zip(&entries);
+    let mut at = central(&bytes);
+    for name in &names {
+        bytes = patched(bytes, at + 10, &[8, 0]);
+        bytes = patched(bytes, at + 20, &(1u32 << 20).to_le_bytes());
+        bytes = patched(bytes, at + 24, &(64u32 << 20).to_le_bytes());
+        at += 46 + name.len();
+    }
+    assert!(refused(&bytes).contains("local header"));
 }
 
 #[test]

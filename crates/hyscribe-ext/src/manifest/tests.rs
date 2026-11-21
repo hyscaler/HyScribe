@@ -159,6 +159,9 @@ fn refuses_what_the_format_does_not_allow() {
     assert!(refused(&plugin("author = 'a\\u0007'\n").replace('\'', "\"")).contains("author"));
     assert!(refused(&"#".repeat(65 << 10)).contains("larger than"));
     assert!(refused("a = 1\n").contains("line 1: a is outside a table"));
+    let largest = format!("{}{}", plugin(""), "#".repeat(65_536 - plugin("").len()));
+    assert_eq!(largest.len(), 65_536);
+    assert!(Manifest::parse(largest.as_bytes()).is_ok());
     assert!(
         Manifest::parse(b"[extension]\nid = '\xff'\n")
             .unwrap_err()
@@ -266,4 +269,14 @@ fn refuses_the_rest_of_toml() {
         let error = parse(text).expect_err(text);
         assert!(error.contains(why), "{text:?}: {error}");
     }
+}
+
+/// A Unicode escape cut short by the end of the text is no character.
+#[test]
+fn a_short_escape_at_the_end() {
+    let error = parse("[a]\nb = \"\\u00").unwrap_err();
+    assert!(
+        error.contains("an escape that is not a character"),
+        "{error}"
+    );
 }

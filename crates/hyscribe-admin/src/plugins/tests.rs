@@ -234,13 +234,20 @@ fn rows_of_bare_plugins() {
         file: "twin/twin.php".into(),
         ..bare.clone()
     };
+    let triplet = Plugin {
+        file: "triplet/triplet.php".into(),
+        ..bare.clone()
+    };
     let site = Role("x13inactive:administrator");
     let canonical = format!("{SITE}/hs-admin/plugins");
     let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
-    let Some(Answer::Page(page)) = plugins(&site, &request, &[bare, twin], &Args::default()) else {
+    let Some(Answer::Page(page)) =
+        plugins(&site, &request, &[bare, twin, triplet], &Args::default())
+    else {
         panic!("no page");
     };
     assert!(page.contains("id=\"activate-bare\"") && page.contains("id=\"activate-bare-2\""));
+    assert!(page.contains("id=\"activate-bare-3\""));
     assert!(page.contains("<div class='plugin-description'><p>&nbsp;</p></div>"));
     assert!(page.contains("<div class='inactive second plugin-version-author-uri'></div>"));
     let author = Plugin {

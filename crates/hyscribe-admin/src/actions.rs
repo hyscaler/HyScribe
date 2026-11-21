@@ -1048,8 +1048,8 @@ fn plugins_action(asked: &Asked) -> Option<Vec<u8>> {
 }
 
 /// `plugins.php`'s actions, once the menu let the user in: activating and
-/// deactivating one plugin by its nonce; deleting is refused, as
-/// `delete_plugins` is never granted; the others are not ported.
+/// deactivating one plugin by its nonce; deleting is refused; the others
+/// are not ported.
 fn plugins(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
     let action = plugins_action(asked)?;
     if !site.current_user_can("activate_plugins", &[]) {
@@ -1060,7 +1060,8 @@ fn plugins(site: &dyn ActionSite, asked: &Asked) -> Option<Checked> {
     Some(match &action[..] {
         b"activate" => referer(site, asked, &format!("activate-plugin_{plugin}")),
         b"deactivate" => referer(site, asked, &format!("deactivate-plugin_{plugin}")),
-        b"delete-selected" if !site.current_user_can("delete_plugins", &[]) => Err(died(
+        // `delete_plugins` is never granted (docs/ADMIN.md).
+        b"delete-selected" => Err(died(
             500,
             "Sorry, you are not allowed to delete plugins for this site.",
         )),

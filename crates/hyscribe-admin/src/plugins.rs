@@ -497,7 +497,9 @@ fn single_row(
         )
     };
     let mut actions = Vec::new();
-    if active && site.can("deactivate_plugins") {
+    // `activate_plugin` and `deactivate_plugin` both map to `activate_plugins`.
+    let may = site.can("activate_plugins");
+    if active && may {
         let href = nonce_link(
             site,
             &url("deactivate"),
@@ -511,7 +513,7 @@ fn single_row(
                 esc_attr(id.as_bytes())
             ),
         ));
-    } else if !active && site.can("activate_plugins") {
+    } else if may {
         let href = nonce_link(
             site,
             &url("activate"),

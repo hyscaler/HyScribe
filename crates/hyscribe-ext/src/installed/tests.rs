@@ -89,6 +89,10 @@ fn lists_only_plugins_in_their_own_folders() {
     write("theme", theme);
     fs::write(plugins.join("loose.txt"), "").unwrap();
     fs::create_dir(plugins.join("empty")).unwrap();
+    // A manifest one byte larger than a manifest may be.
+    let large = MANIFEST.replace("hyscribe-test", "large");
+    let large = format!("{large}{}", "#".repeat(65_537 - large.len()));
+    write("large", &large);
     let names: Vec<String> = list(plugins).into_iter().map(|i| i.manifest.id).collect();
     assert_eq!(names, ["hyscribe-test"]);
     assert_eq!(find(plugins, "hyscribe-test/other.php"), None);

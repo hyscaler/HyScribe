@@ -73,6 +73,12 @@ enum PluginCommand {
         /// The package's path.
         file: PathBuf,
     },
+    /// Delete an installed plugin's folder and kept packages; an active
+    /// one is refused (deactivate it from the Plugins screen first).
+    Delete {
+        /// The plugin's id, its folder's name in plugins/.
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -192,13 +198,15 @@ pub fn run(ctx: Context<'_>) -> u8 {
         } => refuse_root(euid)
             .and_then(|()| install_plugin(&home, &file))
             .map(Reply::text),
+        Command::Plugin {
+            command: PluginCommand::Delete { id },
+        } => refuse_root(euid)
+            .and_then(|()| delete_plugin(&home, &env, &id))
+            .map(Reply::text),
         Command::Cron {
             command: CronCommand::Run,
         } => refuse_root(euid)
-            .and_then(|()| hyscribe_config::load(&home, &env).map_err(|err| err.to_string()))
-            .and_then(|config| {
-                config.ok_or_else(|| "no configuration: run ./hyscribe setup".to_string())
-            })
+            .and_then(|()| configured(&home, &env))
             .and_then(|config| cron::run(&config, &home, &mut *term.out))
             .map(Reply::text),
     };
@@ -232,6 +240,61 @@ fn install_plugin(home: &Path, file: &Path) -> Result<String, String> {
         manifest.id,
         manifest.replaces.unwrap_or_default()
     ))
+}
+
+/// `hyscribe plugin delete <id>`: `plugins/<id>/` and the plugin's kept
+/// packages removed unless `active_plugins` names one of its files. PHP's
+/// `delete_plugins()` writes only for the PHP plugin's own files (its
+/// `uninstall_plugins` entry and update transient), which stay as the
+/// extension is not them, so nothing is written to the database: it is
+/// read, and only for a plugin that is installed.
+fn delete_plugin(home: &Path, env: &HashMap<String, String>, id: &str) -> Result<String, String> {
+    let folders = (home.join("plugins"), home.join("packages"));
+    let active = || active_plugins(&configured(home, env)?);
+    let deleted = hyscribe_ext::installed::delete((&folders.0, &folders.1), id, &active)?;
+    Ok(format!(
+        "Deleted plugins/{id}/ and {} kept package(s).\n",
+        deleted.packages.len()
+    ))
+}
+
+/// The files `active_plugins` names, read from the database.
+fn active_plugins(config: &hyscribe_config::Config) -> Result<Vec<String>, String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(failed("cannot start the runtime".into()));
+    let read = |runtime: tokio::runtime::Runtime| {
+        let stored = runtime.block_on(async {
+            let db = hyscribe_db::Db::connect(&config.database).await?;
+            db.option("active_plugins").await
+        });
+        stored.map_err(|err| format!("cannot read active_plugins: {err}"))
+    };
+    let stored = runtime.and_then(read)?;
+    let Some(stored) = stored else {
+        return Ok(Vec::new());
+    };
+    match hyscribe_phpser::maybe_unserialize(&stored) {
+        hyscribe_phpser::Maybe::Value(hyscribe_phpser::Value::Array(listed)) => Ok(listed
+            .iter()
+            .filter_map(|(_, entry)| match entry {
+                hyscribe_phpser::Value::String(file) => Some(String::from_utf8_lossy(file).into()),
+                _ => None,
+            })
+            .collect()),
+        _ => Err("active_plugins is not a list, so no plugin can be told inactive".into()),
+    }
+}
+
+/// The configuration of a set up site.
+fn configured(
+    home: &Path,
+    env: &HashMap<String, String>,
+) -> Result<hyscribe_config::Config, String> {
+    hyscribe_config::load(home, env)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| "no configuration: run ./hyscribe setup".to_string())
 }
 
 /// The parts of the context the server commands use.

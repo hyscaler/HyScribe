@@ -171,7 +171,13 @@ pub(crate) fn theme_data(sources: &Sources<'_>, blocks: &mut Blocks) -> Value {
         .collect();
     blocks.register_styles(&styles);
     let data = sources.theme.map_or_else(latest, decode);
-    let theme = theme_json::new(inject(data, &variations), Origin::Theme, blocks);
+    let mut theme = theme_json::new(inject(data, &variations), Origin::Theme, blocks);
+    // A child theme's `theme.json` is merged into its parent's.
+    if let Some(parent) = sources.parent_theme {
+        let mut merged = theme_json::new(decode(parent), Origin::Theme, blocks);
+        theme_json::merge(&mut merged, &theme);
+        theme = merged;
+    }
     let mut with_supports = theme_json::new(
         theme_supports(sources.theme.is_some()),
         Origin::Theme,

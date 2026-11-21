@@ -278,9 +278,11 @@ impl Role {
 
     /// The active theme: Twenty Twenty-Four in the `tt4` variant (`e5tt4`
     /// of the block editor), Twenty Twenty-Three in `tt3` (`e5tt3`), and
-    /// else Twenty Twenty-Five.
+    /// the fixture child of Twenty Twenty-Five in `kid5`, and else Twenty
+    /// Twenty-Five.
     pub fn theme_slug(&self) -> &'static str {
         match self.variant() {
+            "kid5" => "hyscribe-fixture-child",
             "tt4" | "e5tt4" => "twentytwentyfour",
             "tt3" | "e5tt3" => "twentytwentythree",
             _ => "twentytwentyfive",
@@ -451,6 +453,7 @@ impl Role {
             ("tt4" | "tt3" | "e5tt4" | "e5tt3", "stylesheet" | "template") => {
                 self.theme_slug().as_bytes()
             }
+            ("kid5", "stylesheet") => self.theme_slug().as_bytes(),
             ("a5auto", "auto_update_themes") => b"a:1:{i:0;s:16:\"twentytwentyfive\";}",
             ("j9parent", "template") => b"gone",
             ("g9gone" | "g9noswitch" | "g9nooptions", "stylesheet" | "template")
@@ -1078,13 +1081,22 @@ impl PageSite for Role {
         String::from_utf8(stylesheet).unwrap()
     }
     fn active_theme(&self) -> &hyscribe_render::theme::Theme {
-        static THEMES: [OnceLock<hyscribe_render::theme::Theme>; 3] =
-            [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+        static THEMES: [OnceLock<hyscribe_render::theme::Theme>; 4] = [
+            OnceLock::new(),
+            OnceLock::new(),
+            OnceLock::new(),
+            OnceLock::new(),
+        ];
         let slug = self.theme_slug();
-        let at = ["twentytwentyfive", "twentytwentyfour", "twentytwentythree"]
-            .iter()
-            .position(|known| *known == slug)
-            .unwrap();
+        let at = [
+            "twentytwentyfive",
+            "twentytwentyfour",
+            "twentytwentythree",
+            "hyscribe-fixture-child",
+        ]
+        .iter()
+        .position(|known| *known == slug)
+        .unwrap();
         THEMES[at].get_or_init(|| hyscribe_render::theme::load(slug, None))
     }
     fn font_faces(&self, with_theme: bool) -> Vec<u8> {

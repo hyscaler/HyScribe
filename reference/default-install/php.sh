@@ -16,7 +16,8 @@
 # another container of the network (the screenshot browser) reaches the
 # site by name. HYSCRIBE_PHP_EXTRA is PHP added to wp-config.php. The themes
 # pinned in themes/pinned.tsv that reference/themes/pin.sh unpacked
-# are mounted read only into wp-content/themes.
+# are mounted read only into wp-content/themes, and so are the fixture themes
+# of reference/themes/fixtures (10.3), which HyScribe embeds only in its tests.
 set -euo pipefail
 
 DOCKER="${DOCKER:-docker}"
@@ -40,6 +41,11 @@ fi
 for pinned in "$ROOT"/target/pinned-themes/*/; do
   [ -d "$pinned" ] || continue
   UPLOADS+=(-v "${pinned%/}:/var/www/html/wp-content/themes/$(basename "$pinned"):ro")
+done
+
+for fixture in "$ROOT"/reference/themes/fixtures/*/; do
+  [ -d "$fixture" ] || continue
+  UPLOADS+=(-v "${fixture%/}:/var/www/html/wp-content/themes/$(basename "$fixture"):ro")
 done
 
 case "${1:-}" in

@@ -44,7 +44,8 @@ pub(super) fn activate<'a>(
         let Some(old) = embedded(&old) else {
             return Err(Error::Unported("a switch from a theme the site does not have").into());
         };
-        switch_theme(write, (new.0, &new.1), (old.0, &old.1)).await?;
+        let template = theme::template_of(new.0).unwrap_or(new.0);
+        switch_theme(write, (new.0, &new.1), template, (old.0, &old.1)).await?;
         let to = site.admin_url("themes.php?activated=true");
         Ok(Answer::Redirect(to))
     })

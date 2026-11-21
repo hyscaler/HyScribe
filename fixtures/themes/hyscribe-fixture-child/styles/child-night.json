@@ -1,0 +1,11 @@
+{
+	"$schema": "https://schemas.wp.org/wp/6.7/theme.json",
+	"version": 3,
+	"title": "Child Night",
+	"styles": {
+		"color": {
+			"background": "#0B1D13",
+			"text": "#E8F5E9"
+		}
+	}
+}

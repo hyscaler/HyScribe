@@ -388,10 +388,7 @@ impl Head<'_> {
     fn own_style(&self, own: &OwnStyle, siteurl: &str) -> Style {
         Style::file(
             &own.handle,
-            &format!(
-                "{siteurl}/wp-content/themes/{}/{}",
-                self.theme.slug, own.src
-            ),
+            &format!("{siteurl}/wp-content/themes/{}/{}", own.theme, own.src),
             own.css,
             own.version.as_deref(),
         )
@@ -498,7 +495,7 @@ impl Head<'_> {
         let siteurl = self.siteurl();
         font_faces(
             self.theme.global.setting(&["typography", "fontFamilies"]),
-            &format!("{siteurl}/wp-content/themes/{}", self.theme.slug),
+            &|path| self.theme.file_uri(&siteurl, path),
         )
     }
 }
@@ -507,7 +504,7 @@ impl Theme {
     /// `wp_print_font_faces()` `with_theme` (not for a missing child), then
     /// `wp_print_font_faces_from_style_variations()`, as the admin prints.
     pub fn admin_font_faces(&self, siteurl: &str, with_theme: bool) -> Vec<u8> {
-        let theme_uri = format!("{siteurl}/wp-content/themes/{}", self.slug);
+        let theme_uri = |path: &str| self.file_uri(siteurl, path);
         let families = self.global.setting(&["typography", "fontFamilies"]);
         let mut out = if with_theme {
             font_faces(families, &theme_uri)
@@ -515,7 +512,7 @@ impl Theme {
             Vec::new()
         };
         let mut fonts = Vec::new();
-        for variation in crate::theme::style_variations(self.data) {
+        for variation in crate::theme::style_variations(self) {
             let families = variation
                 .get_str("settings")
                 .and_then(|v| v.get_str("typography"))
@@ -540,8 +537,8 @@ impl Theme {
 }
 
 /// `wp_print_font_faces()` for a `fontFamilies` setting, with `file:./`
-/// sources under `theme_uri`.
-fn font_faces(families: Option<&Value>, theme_uri: &str) -> Vec<u8> {
+/// sources as the URLs `theme_uri` gives their paths (`get_theme_file_uri()`).
+fn font_faces(families: Option<&Value>, theme_uri: &dyn Fn(&str) -> String) -> Vec<u8> {
     let mut css = Vec::new();
     for (_, origin) in families.and_then(Value::as_array).unwrap_or_default() {
         for (_, family) in origin.as_array().unwrap_or_default() {
@@ -580,7 +577,7 @@ fn font_faces(families: Option<&Value>, theme_uri: &str) -> Vec<u8> {
 
 /// One `@font-face` rule, as `WP_Font_Face_Resolver` converts a
 /// `fontFace` entry and `WP_Font_Face` validates and prints it.
-fn font_face(face: &Value, family: &[u8], theme_uri: &str) -> Option<Vec<u8>> {
+fn font_face(face: &Value, family: &[u8], theme_uri: &dyn Fn(&str) -> String) -> Option<Vec<u8>> {
     // convert_font_face_properties(): the family set, then the keys
     // kebab-cased, which moves camelCase keys to the end.
     let mut properties: Vec<(String, Value)> = face
@@ -685,10 +682,11 @@ fn font_face(face: &Value, family: &[u8], theme_uri: &str) -> Option<Vec<u8>> {
 }
 
 /// `to_theme_file_uri()`: `file:./` sources as URLs in the theme.
-fn theme_file_uris(src: &Value, theme_uri: &str) -> Value {
+fn theme_file_uris(src: &Value, theme_uri: &dyn Fn(&str) -> String) -> Value {
     let uri = |url: &Value| match url {
         Value::String(s) if s.starts_with(b"file:./") => {
-            Value::String([theme_uri.as_bytes(), b"/", s.get(7..).unwrap_or_default()].concat())
+            let path = String::from_utf8_lossy(s.get(7..).unwrap_or_default());
+            Value::String(theme_uri(&path).into_bytes())
         }
         other => other.clone(),
     };

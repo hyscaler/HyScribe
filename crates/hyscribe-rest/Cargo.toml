@@ -18,6 +18,7 @@ hyscribe-phpser.workspace = true
 hyscribe-render.workspace = true
 
 [dev-dependencies]
+hyscribe-render = { workspace = true, features = ["fixture-themes"] }
 hyscribe-auth.workspace = true
 hyscribe-testkit.workspace = true
 sha2.workspace = true

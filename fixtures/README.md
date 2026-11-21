@@ -2,6 +2,10 @@
 
 Generated test data. Never edit by hand; rebuild with the scripts in `reference/`.
 
+## themes
+
+Test fixture themes, embedded by `hyscribe-render` only with its `fixture-themes` feature (`themes/README.md`, Child themes). `themes/<slug>/` is the export of the theme in `reference/themes/fixtures/<slug>/`, made by `reference/themes/export.sh <slug>`; never edit it by hand.
+
 ## default-install
 
 The first test target ([docs/TESTING.md](../docs/TESTING.md#first-test-target-default-install)): a WordPress install with nothing changed, one folder per pinned WordPress version.

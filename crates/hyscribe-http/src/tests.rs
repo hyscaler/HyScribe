@@ -1603,6 +1603,30 @@ async fn served(site: &Arc<Site>, path: &str) -> [String; 5] {
     [status, content_type, sha, modified, etag]
 }
 
+/// The fixture child's files (10.3), which are not in the release: status,
+/// type and body are PHP's, and only its parent's files are not at its URL.
+#[tokio::test]
+async fn a_child_theme_s_files_match_php() {
+    let site = fixture_site(None).await;
+    let golden = include_str!("../tests/golden/theme-files-hyscribe-fixture-child.tsv");
+    for line in golden.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let ours = served(&site, fields[0]).await;
+        assert_eq!(
+            ours[..3],
+            [fields[1], fields[2], fields[3]],
+            "{}",
+            fields[0]
+        );
+    }
+    assert_eq!(golden.lines().count(), 10);
+    let parents = "/wp-content/themes/hyscribe-fixture-child/style.min.css";
+    assert_eq!(
+        request(&site, "GET", parents).await.status,
+        StatusCode::NOT_FOUND
+    );
+}
+
 /// Every file of `reference/themes/files-golden.sh`: each embedded theme's
 /// files as the web server sends them, whichever theme is active.
 #[tokio::test]
@@ -3333,6 +3357,12 @@ theme_pages!(
     twenty_twenty_two_default_pages_match_php,
     twenty_twenty_two_theme_test_data_pages_match_php,
     "tt2"
+);
+// The fixture child of Twenty Twenty-Five (10.3), built into the tests only.
+theme_pages!(
+    child_default_pages_match_php,
+    child_theme_test_data_pages_match_php,
+    "child"
 );
 
 /// A visitor's page view over the Theme Test Data, which has classic menus

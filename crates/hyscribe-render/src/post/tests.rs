@@ -208,7 +208,7 @@ fn term_archive_body_classes_match_php() {
             page: if path.ends_with("&page=2") { 2 } else { 0 },
             ..Request::default()
         };
-        let ours = body_class(&site, &request, "twentytwentyfive");
+        let ours = body_class(&site, &request, ("twentytwentyfive", "twentytwentyfive"));
         assert_eq!(String::from_utf8_lossy(&ours), php, "{path}");
     }
 }
@@ -256,7 +256,7 @@ fn pages_with_published_children_are_parents() {
             singular: true,
             ..Request::default()
         };
-        String::from_utf8(body_class(&site, &request, "t")).unwrap()
+        String::from_utf8(body_class(&site, &request, ("t", "t"))).unwrap()
     };
     assert!(class(&site.0[0]).contains(" page-id-1 page-parent "));
     assert!(class(&site.0[1]).contains(" page-id-2 page-child parent-pageid-1 "));
@@ -272,7 +272,11 @@ fn body_classes_match_php() {
         let mut fields = line.split('\t').skip(1).map(unhex);
         let request = String::from_utf8(fields.next().unwrap()).unwrap();
         let php = fields.next().unwrap();
-        let ours = body_class(&site, &site.request(&request), "twentytwentyfive");
+        let ours = body_class(
+            &site,
+            &site.request(&request),
+            ("twentytwentyfive", "twentytwentyfive"),
+        );
         assert_eq!(
             String::from_utf8_lossy(&ours),
             String::from_utf8_lossy(&php),
@@ -301,7 +305,7 @@ fn attachment_body_classes() {
             attachment,
             ..Request::default()
         };
-        String::from_utf8(body_class(&site, &request, "t")).unwrap()
+        String::from_utf8(body_class(&site, &request, ("t", "t"))).unwrap()
     };
     assert_eq!(
         class("image/jpeg", true),

@@ -84,6 +84,7 @@ fn default_install() -> GlobalStyles {
         block_styles: &styles,
         theme: Some(&theme),
         theme_styles: &theme_styles,
+        parent_theme: None,
         user: None,
     })
 }

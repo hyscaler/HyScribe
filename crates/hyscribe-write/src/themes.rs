@@ -174,12 +174,14 @@ async fn delete_pattern_caches(write: &mut Write<'_>, stylesheets: &[&str]) -> R
 }
 
 /// `switch_theme( $stylesheet )` of the embedded block theme `stylesheet`,
-/// named `name`, from the admin, when the active theme is the embedded
-/// `old` (named `old_name`): what is written at once. `theme_switched` is
-/// left for the next load, [`after_switch_theme`].
+/// named `name`, whose parent is `template` (itself for a theme that is no
+/// child), from the admin, when the active theme is the embedded `old`
+/// (named `old_name`): what is written at once. `theme_switched` is left
+/// for the next load, [`after_switch_theme`].
 pub async fn switch_theme(
     write: &mut Write<'_>,
     stylesheet: (&str, &str),
+    template: &str,
     old: (&str, &str),
 ) -> Result<(), Error> {
     let ((stylesheet, name), (old, old_name)) = (stylesheet, old);
@@ -198,7 +200,7 @@ pub async fn switch_theme(
         Some(Autoload::On),
     )
     .await?;
-    update_option(write, "template", &text_value(stylesheet), None).await?;
+    update_option(write, "template", &text_value(template), None).await?;
     update_option(write, "stylesheet", &text_value(stylesheet), None).await?;
     // A single themes folder: no roots are kept.
     delete_option(write, "template_root").await?;

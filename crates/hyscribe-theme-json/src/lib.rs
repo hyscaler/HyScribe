@@ -5,8 +5,9 @@
 //! the oracle.
 //!
 //! [`GlobalStyles::resolve`] merges the core `theme.json`, the styles blocks
-//! declare, the theme (its `theme.json` and block style variation
-//! partials) and the user's global styles, in that order. The result gives
+//! declare, the theme (its `theme.json`, merged over its parent's for a
+//! child theme, and block style variation partials) and the user's global
+//! styles, in that order. The result gives
 //! the global settings and styles as PHP arrays, the lookups block supports
 //! need, and the `global-styles-inline-css` stylesheet.
 //!
@@ -48,8 +49,13 @@ pub struct Sources<'a> {
     /// Styles registered with `register_block_style()` by PHP (plugins,
     /// the theme's `functions.php`): `(block name, style name)`, in order.
     pub block_styles: &'a [(String, String)],
-    /// The theme's `theme.json`, `None` when it has none.
+    /// The theme's `theme.json`, `None` when it has none: for a child
+    /// theme the one `WP_Theme::get_file_path()` finds, its own or else its
+    /// parent's.
     pub theme: Option<&'a [u8]>,
+    /// A child theme's parent's `theme.json`, when the child has one of its
+    /// own and so has `theme` merged over it.
+    pub parent_theme: Option<&'a [u8]>,
     /// The theme's `styles/` JSON files: `(path below styles/, contents)`.
     /// Those with `blockTypes` are block style variation partials.
     pub theme_styles: &'a [(String, Vec<u8>)],
@@ -171,6 +177,15 @@ impl GlobalStyles {
         );
         // A failed wp_json_encode() leaves wp_slash( false ): nothing.
         Some(hyscribe_phpser::json_encode_hex_amp(&config).unwrap_or_default())
+    }
+
+    /// The entries of the merged top level list `name`, such as
+    /// `customTemplates` or `templateParts`, which a child theme's lists
+    /// merge into its parent's by position.
+    pub fn list(&self, name: &str) -> &[(hyscribe_phpser::Key, Value)] {
+        php::get(&self.data, &[name])
+            .and_then(Value::as_array)
+            .unwrap_or_default()
     }
 
     /// A global setting, e.g. `["layout", "contentSize"]`; `None` where it

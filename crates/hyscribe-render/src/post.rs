@@ -204,8 +204,13 @@ pub(crate) fn page_template_slug(site: &dyn Site, post: u64) -> Option<Vec<u8>> 
     (!is_empty_string(&slug) && slug != b"default").then_some(slug)
 }
 
-/// `get_body_class()` for a visitor, with `template` as `get_template()`.
-pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8> {
+/// `get_body_class()` for a visitor, with `template` as `get_template()` and
+/// `stylesheet` as `get_stylesheet()`, which differs for a child theme.
+pub fn body_class(
+    site: &dyn Site,
+    request: &Request,
+    (template, stylesheet): (&str, &str),
+) -> Vec<u8> {
     let mut classes: Vec<Vec<u8>> = Vec::new();
     let mut push = |class: &[u8]| classes.push(class.to_vec());
     let singular = request.posts.first().filter(|_| request.singular);
@@ -353,6 +358,15 @@ pub fn body_class(site: &dyn Site, request: &Request, template: &str) -> Vec<u8>
         ]
         .concat(),
     );
+    if template != stylesheet {
+        push(
+            &[
+                b"wp-child-theme-",
+                &sanitize_html_class(stylesheet.as_bytes(), b"")[..],
+            ]
+            .concat(),
+        );
+    }
     let mut unique: Vec<Vec<u8>> = Vec::with_capacity(classes.len());
     for class in classes.iter().map(|class| esc_attr(class).into_bytes()) {
         if !unique.contains(&class) {

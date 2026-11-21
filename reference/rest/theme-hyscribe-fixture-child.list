@@ -1,0 +1,14 @@
+GET	/?rest_route=/wp/v2/templates/%theme%//child-wide&context=edit
+GET	/?rest_route=/wp/v2/templates/%theme%//child-wide&_fields=id,title,is_custom,post_types,theme,source,has_theme_file
+GET	/?rest_route=/wp/v2/templates/%theme%//404&context=edit
+GET	/?rest_route=/wp/v2/templates/twentytwentyfive//404&context=edit
+GET	/?rest_route=/wp/v2/templates&post_type=page&_fields=id,is_custom,post_types
+GET	/?rest_route=/wp/v2/templates&post_type=post&_fields=id,is_custom
+GET	/?rest_route=/wp/v2/template-parts/%theme%//child-footer&context=edit
+GET	/?rest_route=/wp/v2/template-parts/%theme%//footer&_fields=id,area,theme,source,content.raw
+GET	/?rest_route=/wp/v2/template-parts/%theme%//vertical-header&context=edit
+GET	/?rest_route=/wp/v2/template-parts&area=footer&_fields=id,area
+GET	/?rest_route=/wp/v2/template-parts&area=header&_fields=id,area
+GET	/?rest_route=/wp/v2/template-parts&area=uncategorized&_fields=id,area
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=name,title,categories,source,viewportWidth,inserter,keywords&context=edit
+GET	/?rest_route=/wp/v2/global-styles/themes/%theme%&_fields=settings.color.palette,styles.elements.link

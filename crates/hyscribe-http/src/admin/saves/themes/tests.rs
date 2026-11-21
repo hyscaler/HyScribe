@@ -67,6 +67,7 @@ async fn the_activations_answer_as_php() {
     for case in [
         "themes-activate-tt4",
         "themes-activate-tt3",
+        "themes-activate-kid",
         "themes-activate-active",
         "themes-activate-missing",
     ] {
@@ -220,7 +221,7 @@ async fn the_follow_up_writes_php_s_rows() {
     let setup = async |conn: &mut Connection| {
         let mut write = writer.begin_on(conn).await.unwrap();
         base(&mut write).await;
-        hyscribe_write::themes::switch_theme(&mut write, four, five)
+        hyscribe_write::themes::switch_theme(&mut write, four, four.0, five)
             .await
             .unwrap();
         write.commit().await.unwrap();

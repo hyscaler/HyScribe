@@ -112,7 +112,11 @@ pub fn embed_page(
     out.extend(Style::inline("wp-emoji-styles", EMOJI_CSS).print(siteurl));
     out.extend(Style::inline("wp-embed-template", TEMPLATE_CSS).print(siteurl));
     out.extend_from_slice(b"</head>\n<body class=\"");
-    out.extend(body_class(site, request, theme.slug()));
+    out.extend(body_class(
+        site,
+        request,
+        (theme.template_slug(), theme.slug()),
+    ));
     out.extend_from_slice(b"\">\n");
     out.extend(body);
     if let Some(post) = post {

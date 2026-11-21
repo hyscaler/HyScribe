@@ -86,9 +86,10 @@ fn answers_match_php() {
 fn themed(slug: &str) -> &'static Content {
     static CONTENT: OnceLock<Vec<(&str, Content)>> = OnceLock::new();
     let themes = CONTENT.get_or_init(|| {
-        let state = |slug: &str, sql: &str| {
+        // The template is the stylesheet's parent for a child theme.
+        let state = |slug: &str, template: &str, sql: &str| {
             let options = format!(
-                "INSERT INTO `wp_options` VALUES (9901,'template','{slug}','yes'),(9902,'stylesheet','{slug}','yes');\n"
+                "INSERT INTO `wp_options` VALUES (9901,'template','{template}','yes'),(9902,'stylesheet','{slug}','yes');\n"
             );
             default_install_with(&format!("{options}{sql}"))
         };
@@ -97,6 +98,7 @@ fn themed(slug: &str) -> &'static Content {
                 "twentytwentyfour",
                 state(
                     "twentytwentyfour",
+                    "twentytwentyfour",
                     include_str!("../../../../reference/rest/theme-twentytwentyfour.sql"),
                 ),
             ),
@@ -104,7 +106,16 @@ fn themed(slug: &str) -> &'static Content {
                 "twentytwentythree",
                 state(
                     "twentytwentythree",
+                    "twentytwentythree",
                     include_str!("../../../../reference/rest/theme-twentytwentythree.sql"),
+                ),
+            ),
+            (
+                "hyscribe-fixture-child",
+                state(
+                    "hyscribe-fixture-child",
+                    "twentytwentyfive",
+                    include_str!("../../../../reference/rest/theme-hyscribe-fixture-child.sql"),
                 ),
             ),
         ]
@@ -146,6 +157,14 @@ fn twenty_twenty_four_answers_match_php() {
 fn twenty_twenty_three_answers_match_php() {
     let golden = include_str!("../../tests/golden/theme-twentytwentythree.tsv");
     themed_answers("twentytwentythree", golden, 348);
+}
+
+/// The fixture child of Twenty Twenty-Five (10.3): the theme routes, its
+/// templates and parts over its parent's, the patterns of both.
+#[test]
+fn the_fixture_child_s_answers_match_php() {
+    let golden = include_str!("../../tests/golden/theme-hyscribe-fixture-child.tsv");
+    themed_answers("hyscribe-fixture-child", golden, 396);
 }
 
 fn preloads() -> &'static Content {

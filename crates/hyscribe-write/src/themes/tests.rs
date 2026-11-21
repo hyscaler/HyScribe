@@ -13,6 +13,8 @@ use crate::tests::{check, fails_at_each_step, rolled_back, text};
 const FIVE: (&str, &str) = ("twentytwentyfive", "Twenty Twenty-Five");
 const FOUR: (&str, &str) = ("twentytwentyfour", "Twenty Twenty-Four");
 const THREE: (&str, &str) = ("twentytwentythree", "Twenty Twenty-Three");
+/// The fixture child of Twenty Twenty-Five.
+const CHILD: (&str, &str) = ("hyscribe-fixture-child", "HyScribe Fixture Child");
 
 /// The site every oracle case starts from (`$themes_base`): no pattern
 /// cache, and the mods PHP's first page view writes.
@@ -26,6 +28,9 @@ async fn base(write: &mut Write<'_>) {
         }
     }
     delete_option(write, "theme_mods_twentytwentyfive")
+        .await
+        .unwrap();
+    delete_option(write, "theme_mods_hyscribe-fixture-child")
         .await
         .unwrap();
     let mods = Value::Array(vec![(
@@ -125,14 +130,14 @@ async fn a_switch_is_php_s() {
         check_case(
             name,
             async |_| {},
-            async |write, ()| switch_theme(write, to, FIVE).await.unwrap(),
+            async |write, ()| switch_theme(write, to, to.0, FIVE).await.unwrap(),
         )
         .await;
     }
     check_case(
         "admin-themes-activate-active",
         async |_| {},
-        async |write, ()| switch_theme(write, FIVE, FIVE).await.unwrap(),
+        async |write, ()| switch_theme(write, FIVE, FIVE.0, FIVE).await.unwrap(),
     )
     .await;
 }
@@ -141,14 +146,14 @@ async fn a_switch_is_php_s() {
 async fn the_next_load_is_php_s() {
     check_case(
         "admin-themes-next-load-twentytwentyfour",
-        async |write| switch_theme(write, FOUR, FIVE).await.unwrap(),
+        async |write| switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap(),
         async |write, ()| next_load(write, FOUR).await,
     )
     .await;
     check_case(
         "admin-themes-via-customizer",
         async |write| {
-            switch_theme(write, FOUR, FIVE).await.unwrap();
+            switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
             let on = Value::Bool(true);
             update_option(write, "theme_switched_via_customizer", &on, None)
                 .await
@@ -159,22 +164,78 @@ async fn the_next_load_is_php_s() {
     .await;
 }
 
+/// What the oracle's `$themes_base` leaves for the cases of a child theme:
+/// the roots PHP finds scanning its themes folder, which a switch involving
+/// a child makes it keep and which HyScribe does not (the rows only take
+/// the option IDs the golden numbers from).
+async fn roots(write: &mut Write<'_>) {
+    let found = Value::Array(vec![(Key::String(CHILD.0.into()), text("/themes"))]);
+    set_site_transient(write, "theme_roots", &found, 1800)
+        .await
+        .unwrap();
+}
+
+/// A child theme is switched to with its parent as the `template`, and
+/// switched from as any theme is.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_child_theme_is_switched_as_php_switches_it() {
+    let to_child = async |write: &mut Write<'_>| {
+        roots(write).await;
+        switch_theme(write, CHILD, FIVE.0, FIVE).await.unwrap();
+    };
+    check_case(
+        "admin-themes-activate-hyscribe-fixture-child",
+        roots,
+        async |write, ()| {
+            switch_theme(write, CHILD, FIVE.0, FIVE).await.unwrap();
+        },
+    )
+    .await;
+    let there = async |write: &mut Write<'_>| {
+        to_child(write).await;
+        next_load(write, CHILD).await;
+    };
+    check_case(
+        "admin-themes-next-load-hyscribe-fixture-child",
+        to_child,
+        async |write, ()| next_load(write, CHILD).await,
+    )
+    .await;
+    check_case("admin-themes-child-to-parent", there, async |write, ()| {
+        switch_theme(write, FIVE, FIVE.0, CHILD).await.unwrap()
+    })
+    .await;
+    check_case("admin-themes-child-to-other", there, async |write, ()| {
+        switch_theme(write, FOUR, FOUR.0, CHILD).await.unwrap()
+    })
+    .await;
+    check_case(
+        "admin-themes-next-load-child-to-parent",
+        async |write| {
+            there(write).await;
+            switch_theme(write, FIVE, FIVE.0, CHILD).await.unwrap();
+        },
+        async |write, ()| next_load(write, FIVE).await,
+    )
+    .await;
+}
+
 /// A site that switched to a theme and back gets its widgets back.
 #[tokio::test(flavor = "multi_thread")]
 async fn switching_back_is_php_s() {
     let there = async |write: &mut Write<'_>| {
-        switch_theme(write, FOUR, FIVE).await.unwrap();
+        switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
         next_load(write, FOUR).await;
     };
     check_case("admin-themes-switch-back", there, async |write, ()| {
-        switch_theme(write, FIVE, FOUR).await.unwrap()
+        switch_theme(write, FIVE, FIVE.0, FOUR).await.unwrap()
     })
     .await;
     check_case(
         "admin-themes-next-load-back",
         async |write| {
             there(write).await;
-            switch_theme(write, FIVE, FOUR).await.unwrap();
+            switch_theme(write, FIVE, FIVE.0, FOUR).await.unwrap();
         },
         async |write, ()| next_load(write, FIVE).await,
     )
@@ -190,7 +251,7 @@ async fn widgets_are_carried_as_php_carries_them() {
         "admin-themes-widgets-carried",
         widgets,
         async |write, ()| {
-            switch_theme(write, FOUR, FIVE).await.unwrap();
+            switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
             next_load(write, FOUR).await;
         },
     )
@@ -218,11 +279,11 @@ async fn widgets_are_carried_as_php_carries_them() {
         update_option(write, "sidebars_widgets", &sidebars, None)
             .await
             .unwrap();
-        switch_theme(write, FOUR, FIVE).await.unwrap();
+        switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
         next_load(write, FOUR).await;
     };
     check_case("admin-themes-widgets-revived", kept, async |write, ()| {
-        switch_theme(write, FIVE, FOUR).await.unwrap();
+        switch_theme(write, FIVE, FIVE.0, FOUR).await.unwrap();
         next_load(write, FIVE).await;
     })
     .await;
@@ -254,7 +315,7 @@ async fn pattern_caches_are_deleted_as_php_deletes_them() {
         }
     };
     check_case("admin-themes-pattern-caches", caches, async |write, ()| {
-        switch_theme(write, FOUR, FIVE).await.unwrap()
+        switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap()
     })
     .await;
 }
@@ -268,9 +329,9 @@ async fn a_site_without_sidebars_is_php_s() {
         update_option(write, "sidebars_widgets", &sidebars, None)
             .await
             .unwrap();
-        switch_theme(write, FOUR, FIVE).await.unwrap();
+        switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
         next_load(write, FOUR).await;
-        switch_theme(write, FIVE, FOUR).await.unwrap();
+        switch_theme(write, FIVE, FIVE.0, FOUR).await.unwrap();
     };
     check_case("admin-themes-no-sidebars", none, async |write, ()| {
         next_load(write, FIVE).await;
@@ -289,7 +350,7 @@ async fn widgets_the_site_changed_are_php_s() {
             ("sidebar-2", &["block-4", "block-5"]),
         ];
         sidebars(write, &all).await;
-        switch_theme(write, FOUR, FIVE).await.unwrap();
+        switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
         next_load(write, FOUR).await;
     };
     check_case(
@@ -303,7 +364,7 @@ async fn widgets_the_site_changed_are_php_s() {
             sidebars(write, &inactive).await;
         },
         async |write, ()| {
-            switch_theme(write, FIVE, FOUR).await.unwrap();
+            switch_theme(write, FIVE, FIVE.0, FOUR).await.unwrap();
             next_load(write, FIVE).await;
         },
     )
@@ -316,7 +377,7 @@ async fn widgets_the_site_changed_are_php_s() {
             sidebars(write, &none).await;
         },
         async |write, ()| {
-            switch_theme(write, FIVE, FOUR).await.unwrap();
+            switch_theme(write, FIVE, FIVE.0, FOUR).await.unwrap();
             next_load(write, FIVE).await;
         },
     )
@@ -336,7 +397,7 @@ async fn widgets_are_ordered_as_php_orders_them() {
         sidebars(write, &all).await;
     };
     check_case("admin-themes-widgets-order", mixed, async |write, ()| {
-        switch_theme(write, FOUR, FIVE).await.unwrap();
+        switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
         next_load(write, FOUR).await;
     })
     .await;
@@ -352,7 +413,7 @@ async fn a_theme_without_mods_is_php_s() {
                 .await
                 .unwrap();
         },
-        async |write, ()| switch_theme(write, FOUR, FIVE).await.unwrap(),
+        async |write, ()| switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap(),
     )
     .await;
     check_case(
@@ -365,7 +426,7 @@ async fn a_theme_without_mods_is_php_s() {
                 .await
                 .unwrap();
         },
-        async |write, ()| switch_theme(write, FOUR, FIVE).await.unwrap(),
+        async |write, ()| switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap(),
     )
     .await;
 }
@@ -391,7 +452,7 @@ async fn odd_sites_are_php_s() {
                 .unwrap();
         },
         async |write, ()| {
-            switch_theme(write, FOUR, FIVE).await.unwrap();
+            switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
             next_load(write, FOUR).await;
         },
     )
@@ -402,7 +463,7 @@ async fn odd_sites_are_php_s() {
             delete_option(write, "sidebars_widgets").await.unwrap();
         },
         async |write, ()| {
-            switch_theme(write, FOUR, FIVE).await.unwrap();
+            switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
             next_load(write, FOUR).await;
         },
     )
@@ -414,7 +475,7 @@ async fn odd_sites_are_php_s() {
                 .await
                 .unwrap();
         },
-        async |write, ()| switch_theme(write, FOUR, FIVE).await.unwrap(),
+        async |write, ()| switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap(),
     )
     .await;
 }
@@ -439,7 +500,7 @@ async fn each_statement_can_fail() {
         Ok(())
     };
     fails_at_each_step(widgets, async |write, ()| {
-        switch_theme(write, FOUR, FIVE).await?;
+        switch_theme(write, FOUR, FOUR.0, FIVE).await?;
         load(write, FOUR).await
     })
     .await;
@@ -451,7 +512,7 @@ async fn each_statement_can_fail() {
                 .unwrap();
         },
         async |write, ()| {
-            switch_theme(write, FOUR, FIVE).await?;
+            switch_theme(write, FOUR, FOUR.0, FIVE).await?;
             load(write, FOUR).await
         },
     )
@@ -465,9 +526,9 @@ async fn each_statement_can_fail() {
                 .unwrap();
         },
         async |write, ()| {
-            switch_theme(write, FOUR, FIVE).await?;
+            switch_theme(write, FOUR, FOUR.0, FIVE).await?;
             load(write, FOUR).await?;
-            switch_theme(write, FIVE, FOUR).await?;
+            switch_theme(write, FIVE, FIVE.0, FOUR).await?;
             load(write, FIVE).await
         },
     )
@@ -490,7 +551,7 @@ async fn what_is_not_ported_is_refused() {
             .await
             .unwrap();
         update_option(write, name, &value, None).await.unwrap();
-        let refused = switch_theme(write, FOUR, FIVE).await;
+        let refused = switch_theme(write, FOUR, FOUR.0, FIVE).await;
         assert!(matches!(refused, Err(Error::Unported(_))), "{mods:?}");
     })
     .await;
@@ -499,7 +560,7 @@ async fn what_is_not_ported_is_refused() {
         update_option(write, "mods_Twenty Twenty-Four", &value, None)
             .await
             .unwrap();
-        let refused = switch_theme(write, FOUR, FIVE).await;
+        let refused = switch_theme(write, FOUR, FOUR.0, FIVE).await;
         assert!(matches!(refused, Err(Error::Unported(_))));
     })
     .await;
@@ -507,7 +568,7 @@ async fn what_is_not_ported_is_refused() {
         update_option(write, "link_manager_enabled", &Value::Int(1), None)
             .await
             .unwrap();
-        switch_theme(write, FOUR, FIVE).await.unwrap();
+        switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
         let refused = after_switch_theme(write, FOUR.0, FOUR.1).await;
         assert!(matches!(refused, Err(Error::Unported(_))));
     })
@@ -516,13 +577,13 @@ async fn what_is_not_ported_is_refused() {
         update_option(write, "sidebars_widgets", &Value::Int(1), None)
             .await
             .unwrap();
-        let refused = switch_theme(write, FOUR, FIVE).await;
+        let refused = switch_theme(write, FOUR, FOUR.0, FIVE).await;
         assert!(matches!(refused, Err(Error::Unported(_))));
     })
     .await;
     // The sidebars a theme had that are not lists.
     rolled_back(async |write| {
-        switch_theme(write, FOUR, FIVE).await.unwrap();
+        switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
         let odd = Value::Array(vec![(Key::String(b"sidebar-1".to_vec()), text("x"))]);
         let data = (Key::String(b"data".to_vec()), odd);
         let kept = Value::Array(vec![(
@@ -542,7 +603,7 @@ async fn what_is_not_ported_is_refused() {
         update_option(write, "sidebars_widgets", &odd, None)
             .await
             .unwrap();
-        switch_theme(write, FOUR, FIVE).await.unwrap();
+        switch_theme(write, FOUR, FOUR.0, FIVE).await.unwrap();
         let refused = after_switch_theme(write, FOUR.0, FOUR.1).await;
         assert!(matches!(refused, Err(Error::Unported(_))));
     })

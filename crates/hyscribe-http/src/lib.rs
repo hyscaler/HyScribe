@@ -1566,7 +1566,11 @@ fn render_page(
         // Every block theme has an index template.
         let template = block_template(&site.theme, &reads, &candidates).unwrap_or_default();
         let (html, assets) = render_template(&site.theme, &reads, request, &template);
-        let classes = body_class(&reads, request, site.theme.slug());
+        let classes = body_class(
+            &reads,
+            request,
+            (site.theme.template_slug(), site.theme.slug()),
+        );
         let head = wp_head(&site.theme, &reads, request, &assets, title.as_bytes());
         let footer = wp_footer(&reads, &assets);
         layout(

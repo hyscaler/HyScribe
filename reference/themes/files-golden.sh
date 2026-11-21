@@ -6,6 +6,9 @@
 # (theme-files-<slug>.tsv for a slug but the default's):
 #   path<TAB>status<TAB>content type<TAB>sha256 of the body<TAB>Last-Modified
 #   reference/themes/files-golden.sh [slug]   (default twentytwentyfive)
+# A fixture theme of reference/themes/fixtures (10.3) is a folder of this
+# repository, whose files' times are those of the checkout: its Last-Modified
+# is not recorded.
 # Needs the default install oracle running (db.sh up, then php.sh up). Only
 # reads from it.
 set -euo pipefail
@@ -17,6 +20,8 @@ SLUG="${1:-twentytwentyfive}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/crates/hyscribe-http/tests/golden/theme-files.tsv"
 [ "$SLUG" = twentytwentyfive ] || OUT="${OUT%.tsv}-$SLUG.tsv"
+FIXTURE=
+[ ! -d "$ROOT/reference/themes/fixtures/$SLUG" ] || FIXTURE=1
 TMP=$(mktemp)
 HEADERS=$(mktemp)
 trap 'rm -f "$TMP" "$HEADERS"' EXIT
@@ -29,6 +34,7 @@ while read -r file; do
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
   type=$(grep -i '^content-type:' "$HEADERS" | cut -d ' ' -f 2- | tr -d '\r' || true)
   modified=$(grep -i '^last-modified:' "$HEADERS" | cut -d ' ' -f 2- | tr -d '\r' || true)
+  [ -z "$FIXTURE" ] || modified=
   printf '%s\t%s\t%s\t%s\t%s\n' "$path" "$status" "$type" "$(sha256sum "$TMP" | cut -d ' ' -f 1)" "$modified" >> "$OUT"
 done
 wc -l "$OUT"

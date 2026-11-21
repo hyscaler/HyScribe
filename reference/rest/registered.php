@@ -80,10 +80,10 @@ if ( 'theme' === $argv[1] ) {
 	$request->set_param( '_fields', array_keys( $controller->get_item_schema()['properties'] ) );
 	$rest = $controller->prepare_item_for_response( wp_get_theme(), $request )->get_data();
 	$rest = json_decode( str_replace( site_url(), '%siteurl%', wp_json_encode( $rest, JSON_UNESCAPED_SLASHES ) ), true );
-	$prefix   = get_stylesheet() . '/';
+	$prefixes = array( get_stylesheet() . '/', get_template() . '/' );
 	$patterns = array();
 	foreach ( $all_patterns as $pattern ) {
-		if ( str_starts_with( $pattern['name'], $prefix ) ) {
+		if ( str_starts_with( $pattern['name'], $prefixes[0] ) || str_starts_with( $pattern['name'], $prefixes[1] ) ) {
 			unset( $pattern['content'] );
 			$patterns[] = $pattern;
 		}
@@ -101,12 +101,18 @@ if ( 'theme' === $argv[1] ) {
 		}
 		return null;
 	};
+	// A child theme's stylesheet may be one of its parent's files, which is
+	// served at the parent's URL: "parent" says so (it is left out
+	// otherwise, so that no other theme's export changes).
+	$from_parent = function ( $src ) {
+		return get_template_directory_uri() !== get_stylesheet_directory_uri() && is_string( $src ) && str_starts_with( $src, get_template_directory_uri() . '/' );
+	};
 	$enqueued = array();
 	do_action( 'wp_enqueue_scripts' );
 	foreach ( wp_styles()->queue as $handle ) {
 		$style = wp_styles()->registered[ $handle ];
 		if ( null !== $own( $style->src ) ) {
-			$enqueued[] = array( 'block' => null, 'handle' => $handle, 'src' => $own( $style->src ), 'ver' => $style->ver, 'deps' => $style->deps );
+			$enqueued[] = array( 'block' => null, 'handle' => $handle, 'src' => $own( $style->src ), 'ver' => $style->ver, 'deps' => $style->deps ) + ( $from_parent( $style->src ) ? array( 'parent' => true ) : array() );
 		}
 	}
 	// wp_enqueue_block_style() hooks a closure holding the block and its arguments.
@@ -115,7 +121,7 @@ if ( 'theme' === $argv[1] ) {
 		if ( isset( $vars['block_name'], $vars['callback'] ) ) {
 			$args = ( new ReflectionFunction( $vars['callback'] ) )->getStaticVariables()['args'];
 			if ( null !== $own( $args['src'] ) ) {
-				$enqueued[] = array( 'block' => $vars['block_name'], 'handle' => $args['handle'], 'src' => $own( $args['src'] ), 'ver' => $args['ver'], 'deps' => $args['deps'] );
+				$enqueued[] = array( 'block' => $vars['block_name'], 'handle' => $args['handle'], 'src' => $own( $args['src'] ), 'ver' => $args['ver'], 'deps' => $args['deps'] ) + ( $from_parent( $args['src'] ) ? array( 'parent' => true ) : array() );
 			}
 		}
 	}

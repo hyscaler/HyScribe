@@ -257,37 +257,46 @@ impl hyscribe_ext::Site for Live {
 
 /// The plugin files of `active_plugins` as PHP walks it.
 pub(crate) fn files(listed: &[(Key, Value)]) -> Vec<String> {
-    let files = listed.iter().filter_map(|(_, file)| match file {
+    listed.iter().filter_map(file).collect()
+}
+
+/// An entry's plugin file, when it is text.
+fn file((_, entry): &(Key, Value)) -> Option<String> {
+    match entry {
         Value::String(file) => String::from_utf8(file.clone()).ok(),
         _ => None,
-    });
-    files.collect()
+    }
 }
 
 /// Logs what went wrong in the extensions to `out`, the error output as
 /// the database error page's errors are logged.
 pub(crate) fn log(reports: &[Report], out: &mut dyn std::io::Write) {
-    for report in reports {
-        let (extension, hook) = (&report.extension, &report.hook);
-        let (callback, fault) = (report.callback, &report.fault);
-        let _ = writeln!(out, "extension {extension}: {hook} {callback:?}: {fault:?}");
-    }
+    let _ = out.write_all(reports.iter().map(line).collect::<String>().as_bytes());
+}
+
+/// A report's line in the log.
+fn line(report: &Report) -> String {
+    let (extension, hook) = (&report.extension, &report.hook);
+    let (callback, fault) = (report.callback, &report.fault);
+    format!("extension {extension}: {hook} {callback:?}: {fault:?}\n")
 }
 
 /// The extensions of a page view on `site`, if any are active.
 pub(crate) fn request(site: &Site) -> Option<Arc<Request>> {
-    let runtime = site.extensions.as_ref()?;
-    let live = Live(Through::Own(site.writer.clone(), Handle::current()));
-    let stored = site.options.get("active_plugins").map(Vec::as_slice);
-    let listed = hyscribe_admin::plugins::option_array(stored).unwrap_or_default();
-    let (request, reports) = runtime.request(&files(&listed), Arc::new(live));
-    log(&reports, &mut std::io::stderr());
-    request.map(Arc::new)
+    let runtime = site.extensions.as_ref();
+    runtime.and_then(|runtime| {
+        let live = Live(Through::Own(site.writer.clone(), Handle::current()));
+        let stored = site.options.get("active_plugins").map(Vec::as_slice);
+        let listed = hyscribe_admin::plugins::option_array(stored).unwrap_or_default();
+        let (request, reports) = runtime.request(&files(&listed), Arc::new(live));
+        log(&reports, &mut std::io::stderr());
+        request.map(Arc::new)
+    })
 }
 
 /// `request` as the dispatcher of the hooks fired within it.
-pub(crate) fn dispatch(request: &Option<Arc<Request>>) -> Option<Arc<dyn Dispatch>> {
-    request.clone().map(|request| request as Arc<dyn Dispatch>)
+pub(crate) fn dispatch(request: &Arc<Request>) -> Arc<dyn Dispatch> {
+    request.clone()
 }
 
 /// Extensions run from an action: their database calls run in the action's

@@ -222,7 +222,6 @@ fn active_plugins_files() {
         (Key::Int(3), text("b.php")),
     ];
     assert_eq!(files(&listed), ["a/a.php", "b.php"]);
-    assert!(dispatch(&None).is_none());
 }
 
 /// A site without a plugins folder runs no extension.

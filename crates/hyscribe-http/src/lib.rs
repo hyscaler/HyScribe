@@ -683,7 +683,8 @@ async fn current(
             let site = State(Arc::new(now));
             let served = page(site, method, uri, headers, query, peer, body);
             let response =
-                hyscribe_model::hooks::within(extensions::dispatch(&request), served).await;
+                hyscribe_model::hooks::within(request.as_ref().map(extensions::dispatch), served)
+                    .await;
             if let Some(request) = request {
                 extensions::log(&request.reports(), &mut std::io::stderr());
             }

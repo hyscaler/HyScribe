@@ -330,6 +330,72 @@ async fn redirects_stay_on_the_allowed_hosts() {
     assert_eq!(refused, failed(Kind::Refused, 1));
 }
 
+/// A listener answering each request with a redirect whose body is the
+/// request as it came, so a test sees what was sent.
+async fn echoing() -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let mut buffer = [0; 4096];
+            let read = stream.read(&mut buffer).await.unwrap_or(0);
+            let head =
+                format!("HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: {read}\r\n\r\n");
+            let _ = stream.write_all(head.as_bytes()).await;
+            let _ = stream.write_all(&buffer[..read]).await;
+        }
+    });
+    address
+}
+
+/// An extension's request carries its method, headers and body after the
+/// client's own headers, its user agent in place of the arguments', and
+/// follows no redirect but for GET and HEAD.
+#[tokio::test]
+async fn sends_an_extension_s_request() {
+    let client = client(Table::new(echoing().await));
+    let headers = [
+        ("X-Key".to_string(), "secret".to_string()),
+        ("User-Agent".to_string(), "Ext/1".to_string()),
+    ];
+    let outgoing = Outgoing {
+        method: "POST",
+        headers: &headers,
+        body: b"a=b",
+    };
+    let sent = client
+        .send_within(
+            b"http://pages.test/verify",
+            b"",
+            (args(), outgoing),
+            &|_| true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(sent.status, 302);
+    let request = String::from_utf8(sent.body).unwrap();
+    let expected = "POST /verify HTTP/1.1\r\nhost: pages.test\r\nuser-agent: Ext/1\r\n\
+                    accept-encoding: identity\r\nconnection: close\r\nx-key: secret\r\n\
+                    content-length: 3\r\n\r\na=b";
+    assert_eq!(request, expected);
+    let head = Outgoing {
+        method: "HEAD",
+        ..outgoing
+    };
+    let followed = client
+        .send_within(b"http://pages.test/", b"", (args(), head), &|_| true)
+        .await;
+    assert_eq!(followed, failed(Kind::Redirects, 5));
+    let refused = Outgoing {
+        method: "NOT A METHOD",
+        ..outgoing
+    };
+    let refused = client
+        .send_within(b"http://pages.test/", b"", (args(), refused), &|_| true)
+        .await;
+    assert_eq!(refused, failed(Kind::Protocol, 0));
+}
+
 /// A body read to its limit stops there: no more is awaited, and the
 /// connection is closed, however much more the server says it sends.
 #[tokio::test]

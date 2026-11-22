@@ -29,8 +29,8 @@ use crate::template::Renderer;
 
 mod classic;
 
-pub use classic::Classic;
 use classic::Conversion;
+pub use classic::{Classic, NavMenu, NavMenuArgs, Printed, wp_nav_menu};
 
 /// What `WP_Navigation_Fallback::get_fallback()` finds or makes, for a
 /// request.

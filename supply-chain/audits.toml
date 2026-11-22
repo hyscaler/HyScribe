@@ -235,6 +235,12 @@ user-id = 539 # Josh Stone (cuviper)
 start = "2025-08-29"
 end = "2027-11-16"
 
+[[trusted.form_urlencoded]]
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2021-02-19"
+end = "2027-11-22"
+
 [[trusted.gimli]]
 criteria = "safe-to-deploy"
 user-id = 4415 # Philip Craig (philipc)
@@ -330,6 +336,12 @@ criteria = "safe-to-deploy"
 user-id = 4556 # Dirkjan Ochtman (djc)
 start = "2023-06-09"
 end = "2027-11-16"
+
+[[trusted.url]]
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2021-02-18"
+end = "2027-11-22"
 
 [[trusted.winapi-util]]
 criteria = "safe-to-deploy"

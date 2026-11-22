@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0 OR MIT
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The splicer of a theme's rendered page reads hostile output, markers
 //! and kept bytes without panicking (ADR 0023).

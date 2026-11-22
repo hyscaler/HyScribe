@@ -3,7 +3,7 @@
 //! The index, `index.json` (ADR 0024): the extensions and the revoked versions, signed
 //! by an index key with the comment `hyscribe-index serial=<n> expires=<unix>`.
 
-use hyscribe_ext::manifest;
+use hyscribe_ext::manifest::{self, Kind};
 use hyscribe_ext::origin::{hex64, reason_text};
 use hyscribe_ext::signature::{Signature, prehash};
 
@@ -20,6 +20,10 @@ pub const MAX_BYTES: u64 = 4 << 20;
 pub struct Entry {
     /// `id`.
     pub id: String,
+    /// `kind`.
+    pub kind: Kind,
+    /// `latest`: the newest version for each SDK, as SDKs and versions.
+    pub latest: Vec<(String, String)>,
     /// `sha256` of its version document.
     pub sha256: String,
     /// `size` of its version document, in bytes.
@@ -123,28 +127,35 @@ impl Index {
 fn extension(value: hyscribe_phpser::Value) -> Option<Entry> {
     let mut entry = Object::of(value)?;
     let id = entry.text("id").filter(|id| manifest::slug(id))?;
-    entry
-        .text("kind")
-        .filter(|kind| kind == "plugin" || kind == "theme")?;
+    let kind = match entry.text("kind")?.as_str() {
+        "plugin" => Kind::Plugin,
+        "theme" => Kind::Theme,
+        _ => return None,
+    };
     let latest = entry
         .object("latest")?
         .rest()
         .into_iter()
-        .all(|(sdk, version)| {
+        .map(|(sdk, version)| {
             let sdk = match sdk {
                 hyscribe_phpser::Key::String(sdk) => String::from_utf8(sdk).ok(),
                 hyscribe_phpser::Key::Int(_) => None,
             };
             let version = json::text(version).filter(|version| manifest::version(version));
-            sdk.is_some_and(|sdk| manifest::version(&sdk)) && version.is_some()
+            Some((sdk.filter(|sdk| manifest::version(sdk))?, version?))
         });
-    let sha256 = entry
-        .text("sha256")
-        .filter(|sha256| hex64(sha256) && latest)?;
+    let latest = latest.collect::<Option<Vec<_>>>()?;
+    let sha256 = entry.text("sha256").filter(|sha256| hex64(sha256))?;
     let size = entry
         .int("size")
         .filter(|size| (1..=versions::MAX_BYTES).contains(size))?;
-    entry.done().map(|()| Entry { id, sha256, size })
+    entry.done().map(|()| Entry {
+        id,
+        kind,
+        latest,
+        sha256,
+        size,
+    })
 }
 
 /// `{"id", "version", "sha256", "reason"}`.

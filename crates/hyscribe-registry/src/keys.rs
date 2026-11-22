@@ -3,8 +3,9 @@
 //! The key list, `keys.json` (ADR 0024): the online keys and the revoked ones,
 //! signed by two roots with the comment `hyscribe-keys serial=<n> expires=<unix>`.
 
-use hyscribe_ext::signature::{PublicKey, Signature, is_key_id, prehash};
+use hyscribe_ext::signature::{Claim, PublicKey, Signature, is_key_id, prehash};
 
+use crate::index::Index;
 use crate::json::{self, Object};
 
 /// The largest key list read, in bytes.
@@ -132,6 +133,27 @@ impl KeyList {
         }
         Ok(&found.key)
     }
+}
+
+/// The key of `keys` that made the package signature `signature`, allowed
+/// to sign packages when its trusted comment says it signed; a version
+/// `index` revokes is refused.
+pub fn package_key(
+    keys: &KeyList,
+    index: Option<&Index>,
+    signature: &Signature,
+) -> Result<PublicKey, String> {
+    let claim = Claim::parse(signature.trusted_comment());
+    let claim = claim.ok_or("its signature's trusted comment names no package")?;
+    let revoked = index.and_then(|index| index.revoked(&claim.id, &claim.version, &claim.sha256));
+    if let Some(reason) = revoked {
+        return Err(format!(
+            "{} {} is revoked: {reason}",
+            claim.id, claim.version
+        ));
+    }
+    keys.key(&signature.key_id(), Use::Packages, claim.signed)
+        .cloned()
 }
 
 /// `{"id", "public_key", "may_sign", "not_before", "not_after"}`, the id

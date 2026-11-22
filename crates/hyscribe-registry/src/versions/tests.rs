@@ -13,6 +13,8 @@ fn document() -> String {
 fn entry(text: &str) -> Entry {
     Entry {
         id: "contact-form-7".into(),
+        kind: hyscribe_ext::manifest::Kind::Plugin,
+        latest: Vec::new(),
         sha256: sha256(text.as_bytes()),
         size: text.len() as u64,
     }

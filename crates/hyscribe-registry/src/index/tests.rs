@@ -35,11 +35,16 @@ fn verifies_an_index_signed_by_an_index_key() {
     assert_eq!((index.serial, index.expires), (9, EXPIRES));
     let entry = Entry {
         id: "a-theme".into(),
+        kind: Kind::Theme,
+        latest: Vec::new(),
         sha256: HASH.into(),
         size: 1,
     };
     assert_eq!(index.extension("a-theme"), Some(&entry));
-    assert_eq!(index.extension("contact-form-7").unwrap().size, 2048);
+    let plugin = index.extension("contact-form-7").unwrap();
+    assert_eq!((plugin.kind, plugin.size), (Kind::Plugin, 2048));
+    let latest = [("0.1", "0.1.0"), ("0.2", "0.2.1")].map(|(s, v)| (s.into(), v.into()));
+    assert_eq!(plugin.latest, latest);
     assert_eq!(index.extension("contact-form"), None);
     let reason = "CVE-2026-0001: fixed in 0.2.1";
     assert_eq!(index.revoked("contact-form-7", "0.1.0", HASH), Some(reason));

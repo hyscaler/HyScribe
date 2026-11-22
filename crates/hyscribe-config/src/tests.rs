@@ -61,6 +61,7 @@ fn defaults_are_safe() {
             request_time_limit: 30,
             rss_allowed_hosts: Vec::new(),
             extension_trusted_keys: Vec::new(),
+            extension_registry: None,
             embed_allowed: EmbedAllowed {
                 providers: true,
                 hosts: Vec::new(),
@@ -287,9 +288,12 @@ fn reads_every_key() {
         ("REQUEST_TIME_LIMIT", "5"),
         ("UPLOAD_MAX_SIZE", "512k"),
         ("EXTENSION_TRUSTED_KEYS", " RWQa,, RWQb "),
+        ("EXTENSION_REGISTRY", "https://mirror.example/hyscribe"),
     ]))
     .unwrap();
     assert_eq!(config.extension_trusted_keys, ["RWQa", "RWQb"]);
+    let registry = config.extension_registry.as_deref();
+    assert_eq!(registry, Some("https://mirror.example/hyscribe/"));
     assert_eq!(config.database.host, "db.internal");
     assert_eq!(config.database.port, 3307);
     assert_eq!(config.database.password.expose(), "hunter2");
@@ -503,6 +507,27 @@ fn rejects_bad_values() {
         ("REST_PUBLIC_USERS", "public", "must be true or false"),
         ("HTTP_OUTBOUND", "enabled", "must be true or false"),
         (
+            "EXTENSION_REGISTRY",
+            "http://mirror.example/",
+            "must be an https: URL",
+        ),
+        ("EXTENSION_REGISTRY", "https://", "must be an https: URL"),
+        (
+            "EXTENSION_REGISTRY",
+            "https://a b/",
+            "must be an https: URL",
+        ),
+        (
+            "EXTENSION_REGISTRY",
+            "https://a/?b",
+            "must be an https: URL",
+        ),
+        (
+            "EXTENSION_REGISTRY",
+            "https://a/#b",
+            "must be an https: URL",
+        ),
+        (
             "RSS_ALLOWED_HOSTS",
             "https://feeds.example.org/",
             "must be host names separated by commas, without schemes, ports or paths",
@@ -714,4 +739,11 @@ fn prefixes_are_validated() {
     for bad in ["wp-", "wp_;", "wp `x`", "\u{e9}"] {
         assert_eq!(Prefix::new(bad), None, "{bad:?}");
     }
+}
+
+#[test]
+fn a_registry_url_ends_in_one_slash() {
+    let given = |url| super::registry(url).unwrap();
+    assert_eq!(given("https://r.example/v/"), "https://r.example/v/");
+    assert_eq!(given("https://r.example"), "https://r.example/");
 }

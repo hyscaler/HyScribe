@@ -16,9 +16,9 @@ const SAFE_PORTS: [u16; 3] = [80, 443, 8080];
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
     /// `https` rather than `http`.
-    pub(crate) https: bool,
+    pub https: bool,
     /// The host, as the URL gives it.
-    pub(crate) host: String,
+    pub host: String,
     /// The port connected to.
     pub(crate) port: u16,
     /// The `Host` header: the host, and the port the URL gives.

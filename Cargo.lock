@@ -1277,9 +1277,11 @@ name = "hyscribe-registry"
 version = "0.1.0"
 dependencies = [
  "hyscribe-ext",
+ "hyscribe-fetch",
  "hyscribe-phpser",
  "hyscribe-testkit",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1344,6 +1346,7 @@ dependencies = [
  "hyscribe-phpser",
  "miniz_oxide",
  "ring",
+ "rustls",
  "sqlx",
  "tokio",
 ]

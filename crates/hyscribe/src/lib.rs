@@ -68,16 +68,38 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum PluginCommand {
-    /// Install a `.hyx` package from a local file into plugins/<slug>/,
-    /// replacing an older one; activate it from the Plugins screen. Its
-    /// signature, `<file>.minisig`, must verify against the registry's key
-    /// list kept in registry/ or a key in EXTENSION_TRUSTED_KEYS.
+    /// Install a `.hyx` package into plugins/<slug>/, replacing an older
+    /// one; activate it from the Plugins screen. A local file's signature,
+    /// `<file>.minisig`, must verify against the registry's key list kept
+    /// in registry/ or a key in EXTENSION_TRUSTED_KEYS; a name is installed
+    /// from the hosted registry at EXTENSION_REGISTRY.
     Install {
-        /// The package's path.
-        file: PathBuf,
-        /// Install it without a signature this site trusts.
+        /// A package's path (ending in .hyx or holding a /), or a plugin's
+        /// name in the hosted registry, <name>[@<version>].
+        target: String,
+        /// A local file: install it without a signature this site trusts.
         #[arg(long)]
         unsigned: bool,
+        #[command(flatten)]
+        allow: AllowArgs,
+        /// From the registry: replace a plugin installed from a local file.
+        #[arg(long)]
+        replace_local: bool,
+    },
+    /// Update plugins installed from the hosted registry, or list the
+    /// updates it offers.
+    #[command(group(clap::ArgGroup::new("which").required(true).args(["ids", "check", "all"])))]
+    Update {
+        /// The plugins' ids.
+        ids: Vec<String>,
+        /// List the updates and revocations, install nothing.
+        #[arg(long)]
+        check: bool,
+        /// Every plugin installed from the registry.
+        #[arg(long)]
+        all: bool,
+        #[command(flatten)]
+        allow: AllowArgs,
     },
     /// Delete an installed plugin's folder and kept packages; an active
     /// one is refused (deactivate it from the Plugins screen first).
@@ -85,6 +107,40 @@ enum PluginCommand {
         /// The plugin's id, its folder's name in plugins/.
         id: String,
     },
+}
+
+/// What installing from the registry may do beyond the default.
+#[derive(Debug, clap::Args)]
+struct AllowArgs {
+    /// From the registry: install a version older than the installed one.
+    #[arg(long)]
+    downgrade: bool,
+    /// From the registry: install a version asking for other grants or
+    /// limits than those approved; it runs again once activated.
+    #[arg(long)]
+    allow_new_grants: bool,
+}
+
+impl AllowArgs {
+    fn allow(&self, replace_local: bool) -> hyscribe_registry::install::Allow {
+        hyscribe_registry::install::Allow {
+            downgrade: self.downgrade,
+            new_grants: self.allow_new_grants,
+            replace_local,
+        }
+    }
+}
+
+/// Which plugins `update` works on; clap allows one of the three.
+fn which(check: bool, all: bool, ids: &[String]) -> hyscribe_registry::install::Update<'_> {
+    use hyscribe_registry::install::Update;
+    if check {
+        Update::Check
+    } else if all {
+        Update::All
+    } else {
+        Update::Ids(ids)
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -200,10 +256,33 @@ pub fn run(ctx: Context<'_>) -> u8 {
         }
         Command::Service { command } => service(command, &site, &mut term),
         Command::Plugin {
-            command: PluginCommand::Install { file, unsigned },
-        } => refuse_root(euid)
-            .and_then(|()| install_plugin(&home, &env, &file, unsigned))
-            .map(Reply::text),
+            command:
+                PluginCommand::Install {
+                    target,
+                    unsigned,
+                    allow,
+                    replace_local,
+                },
+        } => refuse_root(euid).and_then(|()| {
+            if registry::is_file(&target) {
+                install_plugin(&home, &env, Path::new(&target), unsigned).map(Reply::text)
+            } else {
+                let asked = registry::Asked::Install(&target);
+                registry::command(&home, &env, &outbound(), asked, allow.allow(replace_local))
+            }
+        }),
+        Command::Plugin {
+            command:
+                PluginCommand::Update {
+                    ids,
+                    check,
+                    all,
+                    allow,
+                },
+        } => refuse_root(euid).and_then(|()| {
+            let asked = registry::Asked::Update(which(check, all, &ids));
+            registry::command(&home, &env, &outbound(), asked, allow.allow(false))
+        }),
         Command::Plugin {
             command: PluginCommand::Delete { id },
         } => refuse_root(euid)
@@ -727,6 +806,7 @@ fn describe(config: &Config) -> String {
 }
 
 mod cron;
+mod registry;
 mod setup;
 mod signed;
 

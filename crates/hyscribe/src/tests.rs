@@ -1600,3 +1600,168 @@ fn plugin_delete() {
     assert_eq!(delete("hyscribe-test", &[]).code, 0);
     assert!(!folder.exists() && !kept.exists());
 }
+
+/// `plugin install <name>` and `plugin update` need `EXTENSION_REGISTRY`,
+/// whose host must pass the outbound client's checks (ADR 0024).
+#[test]
+fn plugin_install_by_name_needs_a_registry() {
+    let home = tempfile::tempdir().unwrap();
+    let site = [("DB_NAME", "x"), ("DB_USER", "x")];
+    let unset = run_with(&["plugin", "install", "hyscribe-test"], &site, home.path());
+    assert_eq!(
+        (unset.code, unset.err.as_str()),
+        (
+            1,
+            "error: EXTENSION_REGISTRY is not set: the hosted registry has no address yet, so set it to a registry's https: URL\n"
+        )
+    );
+    let local = [
+        ("DB_NAME", "x"),
+        ("DB_USER", "x"),
+        ("EXTENSION_REGISTRY", "https://127.0.0.1/"),
+    ];
+    for args in [
+        &["plugin", "install", "hyscribe-test@0.1.0", "--downgrade"][..],
+        &["plugin", "update", "--all", "--allow-new-grants"],
+        &["plugin", "update", "--check"],
+        &["plugin", "update", "a", "b"],
+    ] {
+        let refused = run_with(args, &local, home.path());
+        let why = "error: https://127.0.0.1/ is not an https: registry URL\n";
+        assert_eq!((refused.code, refused.err.as_str()), (1, why), "{args:?}");
+    }
+    let unset = run_with(&["plugin", "update", "--all"], &[], home.path());
+    let why = "error: no configuration: run ./hyscribe setup\n";
+    assert_eq!((unset.code, unset.err.as_str()), (1, why));
+    let which = run_with(&["plugin", "update"], &local, home.path());
+    assert_eq!(which.code, 2);
+    let both = run_with(&["plugin", "update", "--check", "a"], &local, home.path());
+    assert_eq!(both.code, 2);
+}
+
+/// Resolves every name to a public address and connects to the test
+/// registry.
+struct Local(std::net::SocketAddr);
+
+impl hyscribe_fetch::Net for Local {
+    fn resolve<'a>(
+        &'a self,
+        _: &'a str,
+        port: u16,
+    ) -> hyscribe_fetch::Boxed<'a, Vec<std::net::SocketAddr>> {
+        let address = std::net::SocketAddr::new([93, 184, 215, 14].into(), port);
+        Box::pin(async move { Ok(vec![address]) })
+    }
+
+    fn dial(&self, _: std::net::SocketAddr) -> hyscribe_fetch::Boxed<'_, tokio::net::TcpStream> {
+        Box::pin(tokio::net::TcpStream::connect(self.0))
+    }
+}
+
+/// The registry commands over a test registry listing no plugin, signed
+/// by the test roots this build trusts.
+#[test]
+fn registry_commands_reach_the_registry() {
+    use hyscribe_registry::install::{Allow, Update};
+    use hyscribe_testkit::minisign::{Key, key_list, sign_keys};
+    use registry::Asked;
+
+    let served = hyscribe_testkit::registry::Served::start().unwrap();
+    let now = signed::now();
+    let keys = [(&Key(10), r#""index""#, now - 100, now + 1000)];
+    let list = key_list(1, now + 1000, &keys, &[]);
+    for (n, signature) in sign_keys(&list, 1, now + 1000, &[&Key(1), &Key(3)])
+        .into_iter()
+        .enumerate()
+    {
+        served.put(&format!("v1/keys.json.{}.minisig", n + 1), signature);
+    }
+    served.put("v1/keys.json", list);
+    let index = format!(
+        r#"{{"serial":1,"expires":{},"extensions":[],"revoked":[]}}"#,
+        now + 1000
+    );
+    let comment = format!("hyscribe-index serial=1 expires={}", now + 1000);
+    served.put(
+        "v1/index.json.minisig",
+        Key(10).sign(index.as_bytes(), &comment),
+    );
+    served.put("v1/index.json", index);
+    let net = std::sync::Arc::new(Local(served.address));
+    let roots = hyscribe_testkit::registry::roots();
+    let client = hyscribe_fetch::Client::new(roots, net, std::sync::Arc::new(()));
+    let home = tempfile::tempdir().unwrap();
+    let env = [
+        ("DB_NAME", "x"),
+        ("DB_USER", "x"),
+        ("EXTENSION_REGISTRY", "https://pages.test/"),
+    ]
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .into();
+    let run = |asked| registry::command(home.path(), &env, &client, asked, Allow::default());
+    let reply = |asked| run(asked).map(|reply| (reply.text, reply.code));
+    let check = reply(Asked::Update(Update::Check)).unwrap();
+    assert_eq!(
+        check,
+        ("Every plugin from the registry is up to date.\n".into(), 0)
+    );
+    let all = reply(Asked::Update(Update::All)).unwrap();
+    assert_eq!(all, ("No plugin installed from the registry.\n".into(), 0));
+    let ids = ["a".to_string()];
+    let missing = reply(Asked::Update(Update::Ids(&ids))).unwrap();
+    assert_eq!(missing, ("error: a is not installed\n".into(), 1));
+    for name in ["nothing", "nothing@1.0"] {
+        let refused = reply(Asked::Install(name)).unwrap_err();
+        assert_eq!(refused, "nothing is not a plugin in the registry");
+    }
+    for name in ["Bad", "bad@1 0", "@1"] {
+        let refused = reply(Asked::Install(name)).unwrap_err();
+        assert!(
+            refused.starts_with(&format!("{name:?} is neither")),
+            "{refused}"
+        );
+    }
+    assert!(registry::is_file("a/b") && registry::is_file("a.hyx"));
+    assert!(!registry::is_file("a"));
+    served.remove("v1/keys.json");
+    let gone = reply(Asked::Update(Update::Check)).unwrap_err();
+    assert_eq!(gone, "https://pages.test/v1/keys.json is not there");
+}
+
+/// `update`'s and `install`'s flags reach the registry commands as given.
+#[test]
+fn registry_flags_are_read() {
+    use hyscribe_registry::install::Update;
+    let ids = ["a".to_string()];
+    assert!(matches!(which(true, false, &ids), Update::Check));
+    assert!(matches!(which(false, true, &ids), Update::All));
+    assert!(matches!(which(false, false, &ids), Update::Ids([id]) if id == "a"));
+    let args = [
+        "hyscribe",
+        "plugin",
+        "install",
+        "a",
+        "--downgrade",
+        "--allow-new-grants",
+        "--replace-local",
+    ];
+    let Some(Command::Plugin {
+        command:
+            PluginCommand::Install {
+                allow,
+                replace_local,
+                ..
+            },
+    }) = Cli::try_parse_from(args).unwrap().command
+    else {
+        panic!("not an install");
+    };
+    let read = allow.allow(replace_local);
+    assert!(read.downgrade && read.new_grants && read.replace_local);
+    let none = AllowArgs {
+        downgrade: false,
+        allow_new_grants: false,
+    }
+    .allow(false);
+    assert!(!(none.downgrade || none.new_grants || none.replace_local));
+}

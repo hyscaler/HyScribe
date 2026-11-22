@@ -280,6 +280,9 @@ pub struct Config {
     /// for packages they build themselves, comma separated (ADR 0024);
     /// `hyscribe plugin install` reads each and refuses one that does not.
     pub extension_trusted_keys: Vec<String>,
+    /// `EXTENSION_REGISTRY`: the hosted registry's base URL, HTTPS only,
+    /// ending in `/` (ADR 0024); none until the project's own is named.
+    pub extension_registry: Option<String>,
     /// The capability constants.
     pub constants: Constants,
     /// The login rate limits.
@@ -445,6 +448,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         .map(str::trim)
         .filter(|key| !key.is_empty());
     let extension_trusted_keys = extension_trusted_keys.map(String::from).collect();
+    let extension_registry = get("EXTENSION_REGISTRY").map(registry).transpose()?;
 
     if boolean(get("MULTISITE"), "MULTISITE", false)? {
         return Err(invalid("MULTISITE", "multisite networks are not supported"));
@@ -538,6 +542,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         rss_allowed_hosts,
         embed_allowed,
         extension_trusted_keys,
+        extension_registry,
         constants,
         login_limits,
         disable_wp_cron: boolean(get("DISABLE_WP_CRON"), "DISABLE_WP_CRON", false)?,
@@ -712,6 +717,20 @@ fn embed_allowed(value: Option<&str>) -> Result<EmbedAllowed, ConfigError> {
     hosts.retain(|host| host != "providers");
     let providers = hosts.len() < listed;
     Ok(EmbedAllowed { providers, hosts })
+}
+
+/// `EXTENSION_REGISTRY`: an `https:` URL without a query or fragment,
+/// given a final `/`.
+fn registry(url: &str) -> Result<String, ConfigError> {
+    let rest = url.strip_prefix("https://").filter(|rest| {
+        !rest.is_empty()
+            && rest
+                .bytes()
+                .all(|b| b.is_ascii_graphic() && !b"?#".contains(&b))
+    });
+    let rest = rest.ok_or_else(|| invalid("EXTENSION_REGISTRY", "must be an https: URL"))?;
+    let slash = if rest.ends_with('/') { "" } else { "/" };
+    Ok(format!("https://{rest}{slash}"))
 }
 
 fn invalid(key: &'static str, reason: &str) -> ConfigError {

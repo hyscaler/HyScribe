@@ -10,6 +10,7 @@ mod json;
 pub mod kept;
 pub mod keys;
 pub mod revoke;
+pub mod versions;
 
 /// The offline root keys, as minisign prints them (ADR 0024); tests pass
 /// their own, never configuration.

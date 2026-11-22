@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! HyScribe's extension SDK 0.2 (ADR 0022): a WordPress plugin ported to
-//! Rust and built as a WebAssembly component for `wasm32-wasip2`.
+//! HyScribe's extension SDK 0.3 (ADR 0022): a WordPress plugin or classic
+//! theme (ADR 0023) ported to Rust and built as a WebAssembly component
+//! for `wasm32-wasip2`.
 //!
 //! WordPress's functions keep their names and argument order
 //! (docs/EXTENSIONS.md): [`hooks::on_filter`] is `add_filter()`,
@@ -38,14 +39,20 @@
 //! }
 //! hyscribe_sdk::plugin!(Mine);
 //! ```
+//!
+//! A classic theme takes the SDK with its `theme` feature, implements
+//! [`Theme`] beside [`Plugin`] and exports itself with `theme!`; its
+//! templates call the loop and the template tags of `template`.
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 
 extern crate alloc;
 
+mod api;
 pub mod json;
 mod value;
 
+pub use api::*;
 pub use value::Value;
 
 #[doc(hidden)]
@@ -58,6 +65,17 @@ mod guest;
 
 #[cfg(target_arch = "wasm32")]
 pub use guest::*;
+
+/// The SDK's interfaces: the host's bindings in a component.
+#[cfg(target_arch = "wasm32")]
+use guest::bindings::hyscribe::sdk as sys;
+
+/// The SDK's interfaces natively: the test host's.
+#[cfg(not(target_arch = "wasm32"))]
+mod sys;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod test;
 
 /// What the host calls in a plugin (`guest`).
 pub trait Plugin {
@@ -73,6 +91,13 @@ pub trait Plugin {
 
     /// Runs callback `callback` with its arguments.
     fn invoke(callback: u32, args: __Vec<Value>) -> Result<Value, __String>;
+}
+
+/// What the host calls in a classic theme beside [`Plugin`] (`theme-guest`).
+pub trait Theme: Plugin {
+    /// Renders a template file the theme listed, as PHP includes it: the
+    /// bytes it prints.
+    fn render(file: &str) -> Result<__Vec<u8>, __String>;
 }
 
 /// Numbers a plugin's callbacks at compile time, so a fresh instance runs

@@ -85,7 +85,8 @@ fn lists_only_plugins_in_their_own_folders() {
     );
     write("broken", "[x]");
     write("Upper", MANIFEST);
-    let theme = "[extension]\nkind = 'theme'\nid = 'theme'\nversion = '1'\nsdk = '0.1'\nlicense = 'MIT'\nname = 'T'\n";
+    let theme =
+        "[extension]\nkind = 'theme'\nid = 'theme'\nversion = '1'\nsdk = '0.3'\nlicense = 'MIT'\n";
     write("theme", theme);
     fs::write(plugins.join("loose.txt"), "").unwrap();
     fs::create_dir(plugins.join("empty")).unwrap();
@@ -108,7 +109,8 @@ fn lists_only_plugins_in_their_own_folders() {
 fn refuses_and_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let (plugins, packages) = folders(dir.path());
-    let theme = "[extension]\nkind = 'theme'\nid = 't'\nversion = '1'\nsdk = '0.1'\nlicense = 'MIT'\nname = 'T'\n";
+    let theme =
+        "[extension]\nkind = 'theme'\nid = 't'\nversion = '1'\nsdk = '0.3'\nlicense = 'MIT'\n";
     let refusals = [
         (b"not a zip".to_vec(), "not a zip archive"),
         (

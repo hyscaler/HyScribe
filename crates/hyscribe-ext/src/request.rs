@@ -3,6 +3,9 @@
 //! One request's view of the active extensions: a fresh instance per
 //! extension, made the first time a hook reaches it and dropped with the
 //! request; each call bounded by its deadline and the extension's budget.
+//! A theme has a second instance that renders its templates (ADR 0023),
+//! as a component cannot be entered twice and a template's host calls fire
+//! hooks the theme's callbacks answer; both share its budget.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
@@ -10,13 +13,13 @@ use std::time::Duration;
 
 use hyscribe_phpser::Value;
 use wasmtime::Store;
-use wasmtime::component::Func;
+use wasmtime::component::{ComponentExportIndex, ComponentNamedList, Func, Lift, Lower};
 
-use crate::extension::{Answered, Args, Done};
+use crate::extension::{Answered, Args, Done, Rendered};
 use crate::faults::{Counted, Kind};
 use crate::host::{Phase, State, begin, classify};
-use crate::value::{Crossing, Lifted, Lowered, lift, lower_all};
-use crate::{Extension, Extensions, Fault, Hook, Host, Site};
+use crate::value::{Crossing, Lowered, lift, lower_all};
+use crate::{Extension, Extensions, Fault, Hook, Host, Site, TemplateFile};
 
 /// A fault in a request, for the log and the Plugins screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,16 +45,19 @@ pub enum Rest {
     Failed,
 }
 
-/// An extension's place in the request.
-#[derive(Default)]
-struct Slot {
-    instance: Option<(Store<State>, Func)>,
+/// An instance made in the request, and the export it calls.
+type Instance = Option<(Store<State>, Func)>;
+
+/// What an extension spent of its budget in the request, and whether a
+/// fault stopped it, across its instances.
+#[derive(Clone, Copy, Default)]
+struct Ledger {
     spent: Duration,
     stopped: bool,
 }
 
 /// A call's answer, or what stopped it.
-type Outcome = Result<Result<Lifted, String>, (Kind, Fault)>;
+type Outcome<R> = Result<R, (Kind, Fault)>;
 
 /// What a callback was registered as, to honour its removal.
 #[derive(Clone, Copy)]
@@ -78,7 +84,11 @@ pub(crate) struct Shared {
     pub(crate) extensions: Arc<Extensions>,
     site: Arc<dyn Site>,
     me: Weak<Shared>,
-    slots: Vec<Mutex<Slot>>,
+    /// Each extension's instance for its callbacks.
+    slots: Vec<Mutex<Instance>>,
+    /// A theme's instance for `render`.
+    renders: Vec<Mutex<Instance>>,
+    ledgers: Vec<Mutex<Ledger>>,
     current: Mutex<Vec<String>>,
     did: Mutex<BTreeMap<String, u32>>,
     reports: Mutex<Vec<Report>>,
@@ -94,13 +104,15 @@ pub struct Request(pub(crate) Arc<Shared>);
 impl Request {
     /// A request on `site`; no instance is made until a hook reaches one.
     pub fn new(host: &Host, extensions: &Arc<Extensions>, site: Arc<dyn Site>) -> Request {
-        let slots = extensions.list.iter().map(|_| Mutex::default()).collect();
+        let each = || extensions.list.iter().map(|_| Mutex::default()).collect();
         Request(Arc::new_cyclic(|me| Shared {
             engine: host.engine.clone(),
             extensions: extensions.clone(),
             site,
             me: me.clone(),
-            slots,
+            slots: each(),
+            renders: each(),
+            ledgers: extensions.list.iter().map(|_| Mutex::default()).collect(),
             current: Mutex::default(),
             did: Mutex::default(),
             reports: Mutex::default(),
@@ -184,6 +196,19 @@ impl Request {
             Some(refused) => Rest::Forbidden(refused),
             None => Rest::Failed,
         }
+    }
+
+    /// The active theme's template files, when a theme component is active.
+    pub fn templates(&self) -> Option<&[TemplateFile]> {
+        let theme = self.0.theme().map(|(_, extension, _)| extension);
+        theme.map(Extension::templates)
+    }
+
+    /// The active theme's `render` of one of its template files, in its
+    /// instance for rendering (ADR 0023). A fault stops the theme for the
+    /// rest of the request, as in a callback.
+    pub fn render(&self, file: &str) -> Result<Vec<u8>, Fault> {
+        self.0.render(file)
     }
 
     /// The extension's `activate` export, in an instance of its own.
@@ -270,6 +295,20 @@ impl Shared {
         lock(&self.did).get(hook).copied().unwrap_or_default()
     }
 
+    /// The extension's ledger, as it stands.
+    fn ledger(&self, ext: usize) -> Ledger {
+        self.ledgers
+            .get(ext)
+            .map(|ledger| *lock(ledger))
+            .unwrap_or_default()
+    }
+
+    /// What is left for a call of `extension`, as its ledger stands.
+    fn budget(extension: &Extension, ledger: Ledger) -> Duration {
+        let left = extension.limits.request().saturating_sub(ledger.spent);
+        left.min(extension.limits.call())
+    }
+
     /// Calls one callback of an extension. None when it was not called (it
     /// is running, stopped, disabled, removed it, or an argument cannot
     /// cross) or did not answer (a fault, its own error).
@@ -286,7 +325,8 @@ impl Shared {
         let (Some(extension), Some(mut slot)) = (self.extensions.list.get(ext), slot) else {
             return None;
         };
-        if slot.stopped || extension.disabled() || removed(&slot, registered) {
+        let ledger = self.ledger(ext);
+        if ledger.stopped || extension.disabled() || removed(&slot, registered) {
             return None;
         }
         let Some(crossing) = lower_all(args) else {
@@ -299,45 +339,63 @@ impl Shared {
             return None;
         };
         let lowered: Vec<Lowered<'_>> = crossing.iter().map(Crossing::lowered).collect();
-        let budget = extension.limits.request().saturating_sub(slot.spent);
-        let budget = budget.min(extension.limits.call());
-        let (answer, used) = self.run(extension, ext, &mut slot, budget, (callback, &lowered));
-        slot.spent += used;
-        let fault = match answer {
-            Ok(Ok(answer)) => match lift(answer) {
-                Some(value) => return Some(value),
-                None => Fault::Value("its answer does not decode".into()),
-            },
-            Ok(Err(why)) => Fault::Guest(why),
-            Err((kind, fault)) => {
-                slot.stopped = true;
-                let at = self.site.now();
-                let counted = Counted {
-                    at,
-                    kind,
-                    hook: hook.to_string(),
-                };
-                if let Some(unrecorded) = extension.count(counted) {
-                    self.report(extension, hook, Some(callback), unrecorded);
-                }
-                fault
-            }
+        let budget = Shared::budget(extension, ledger);
+        let export = extension.export(None);
+        let ran = self.run::<Args<'_>, Answered>(
+            (extension, ext),
+            &mut slot,
+            (budget, export),
+            (callback, &lowered),
+        );
+        let answer = self.settle((extension, ext), hook, Some(callback), ran.map(|(a,)| a));
+        let fault = match answer.map(lift) {
+            Ok(Some(value)) => return Some(value),
+            Ok(None) => Fault::Value("its answer does not decode".into()),
+            Err(_) => return None,
         };
         self.report(extension, hook, Some(callback), fault);
         None
     }
 
-    /// The call itself, in the slot's instance, made first if need be, and
-    /// the time it ran outside host calls.
-    fn run(
+    /// The active theme: its place, itself and its `render`.
+    fn theme(&self) -> Option<(usize, &Extension, &ComponentExportIndex)> {
+        let list = self.extensions.list.iter().enumerate();
+        list.into_iter().find_map(|(ext, extension)| {
+            extension.render().map(|render| (ext, &**extension, render))
+        })
+    }
+
+    fn render(&self, file: &str) -> Result<Vec<u8>, Fault> {
+        let (ext, extension, export) = self.theme().ok_or(Fault::Refused("no theme".into()))?;
+        let slot = self.renders.get(ext).and_then(|slot| slot.try_lock().ok());
+        let mut slot = slot.ok_or(Fault::Refused("the theme is rendering".into()))?;
+        let ledger = self.ledger(ext);
+        if extension.disabled() {
+            return Err(Fault::Disabled);
+        }
+        if ledger.stopped {
+            return Err(Fault::Refused("stopped in this request".into()));
+        }
+        let budget = Shared::budget(extension, ledger);
+        let ran =
+            self.run::<(&str,), Rendered>((extension, ext), &mut slot, (budget, export), (file,));
+        self.settle((extension, ext), file, None, ran.map(|(a,)| a))
+    }
+
+    /// The call itself, in `slot`'s instance, made first if need be, its
+    /// time outside host calls added to the extension's ledger.
+    fn run<P, R>(
         &self,
-        extension: &Extension,
-        ext: usize,
-        slot: &mut Slot,
-        budget: Duration,
-        args: Args<'_>,
-    ) -> (Outcome, Duration) {
-        let (mut store, func) = match slot.instance.take() {
+        (extension, ext): (&Extension, usize),
+        slot: &mut Instance,
+        (budget, export): (Duration, &ComponentExportIndex),
+        args: P,
+    ) -> Outcome<R>
+    where
+        P: ComponentNamedList + Lower,
+        R: ComponentNamedList + Lift,
+    {
+        let (mut store, func) = match slot.take() {
             Some((mut store, func)) => {
                 begin(&mut store, budget);
                 (store, Ok(func))
@@ -345,28 +403,59 @@ impl Shared {
             None => {
                 let (mut store, instance) =
                     extension.instantiate(&self.engine, self.live(ext), budget);
-                let invoke = instance.and_then(|instance| {
-                    let export = extension.export(None);
-                    let invoke = instance.get_typed_func::<Args<'_>, Answered>(&mut store, export);
-                    invoke.map(|invoke| *invoke.func())
+                let func = instance.and_then(|instance| {
+                    let typed = instance.get_typed_func::<P, R>(&mut store, export);
+                    typed.map(|typed| *typed.func())
                 });
-                (store, invoke)
+                (store, func)
             }
         };
         let answer = func.and_then(|func| {
-            let invoke = func.typed::<Args<'_>, Answered>(&store);
-            let answer = invoke.and_then(|invoke| invoke.call(&mut store, args));
-            answer.map(|(answer,)| (func, answer))
+            let typed = func.typed::<P, R>(&store);
+            let answer = typed.and_then(|typed| typed.call(&mut store, args));
+            answer.map(|answer| (func, answer))
         });
         store.data_mut().chains.clear();
         let used = store.data().used();
+        let ledger = self.ledgers.get(ext).into_iter();
+        ledger.for_each(|ledger| lock(ledger).spent += used);
         match answer {
             Ok((func, answer)) => {
-                slot.instance = Some((store, func));
-                (Ok(answer), used)
+                *slot = Some((store, func));
+                Ok(answer)
             }
-            Err(e) => (Err(classify(&e, store.data())), used),
+            Err(e) => Err(classify(&e, store.data())),
         }
+    }
+
+    /// A call's outcome: a trap, timeout or memory fault stops the
+    /// extension for the request and counts; its own error is reported.
+    fn settle<R>(
+        &self,
+        (extension, ext): (&Extension, usize),
+        hook: &str,
+        callback: Option<u32>,
+        answer: Outcome<Result<R, String>>,
+    ) -> Result<R, Fault> {
+        let fault = match answer {
+            Ok(Ok(answer)) => return Ok(answer),
+            Ok(Err(why)) => Fault::Guest(why),
+            Err((kind, fault)) => {
+                let ledger = self.ledgers.get(ext).into_iter();
+                ledger.for_each(|ledger| lock(ledger).stopped = true);
+                let counted = Counted {
+                    at: self.site.now(),
+                    kind,
+                    hook: hook.to_string(),
+                };
+                if let Some(unrecorded) = extension.count(counted) {
+                    self.report(extension, hook, callback, unrecorded);
+                }
+                fault
+            }
+        };
+        self.report(extension, hook, callback, fault.clone());
+        Err(fault)
     }
 
     /// The phase of a store running for extension `ext` in this request.
@@ -426,8 +515,8 @@ impl Shared {
 }
 
 /// Whether the extension removed this callback in the request.
-fn removed(slot: &Slot, registered: Registered<'_>) -> bool {
-    let Some((store, _)) = &slot.instance else {
+fn removed(slot: &Instance, registered: Registered<'_>) -> bool {
+    let Some((store, _)) = slot else {
         return false;
     };
     let state = store.data();

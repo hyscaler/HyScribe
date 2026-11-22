@@ -461,7 +461,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                         config.image_limits,
                     ))
                     .with_install(install(&config, &site.server.0))
-                    .with_plugins(&home.join("plugins"))
+                    .with_extensions(&home.join("plugins"), &home.join("themes"))
                     .with_writer(writer);
             let fetch = config.http_outbound.then(outbound);
             let fetching = outbound_line(fetch.as_ref());

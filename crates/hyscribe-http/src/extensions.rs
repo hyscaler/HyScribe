@@ -432,6 +432,10 @@ impl hyscribe_ext::Site for Live {
     fn add_inline(&self, _: AssetKind, _: &str, _: &str, _: bool) -> Result<(), String> {
         Err(UNSERVED.into())
     }
+
+    fn theme(&self, _: &str, _: &hyscribe_ext::ThemeCall) -> Result<Value, String> {
+        Err(UNSERVED.into())
+    }
 }
 
 /// The plugin files of `active_plugins` as PHP walks it.
@@ -471,7 +475,12 @@ pub(crate) fn request(site: &Site) -> Option<Arc<Request>> {
         );
         let stored = site.options.get("active_plugins").map(Vec::as_slice);
         let listed = hyscribe_admin::plugins::option_array(stored).unwrap_or_default();
-        let (request, reports) = runtime.request(&files(&listed), Arc::new(live));
+        let (stylesheet, template) = (site.option("stylesheet"), site.option("template"));
+        let theme = hyscribe_ext::Active {
+            stylesheet: &stylesheet,
+            template: &template,
+        };
+        let (request, reports) = runtime.request(&files(&listed), Some(theme), Arc::new(live));
         log(&reports, &mut std::io::stderr());
         request.map(Arc::new)
     })

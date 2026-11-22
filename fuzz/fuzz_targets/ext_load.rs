@@ -11,8 +11,9 @@ use std::sync::Arc;
 
 use hyscribe_ext::{
     Asset, AssetKind, Caps, Extensions, Fault, Found, Grants, Host, Incoming, Limits, Message, ObjectKind,
-    Outgoing, Package, Post, Request, Site,
+    Outgoing, Package, Post, Request, Site, ThemeCall,
 };
+use hyscribe_ext::manifest::Kind;
 use hyscribe_phpser::Value;
 use libfuzzer_sys::fuzz_target;
 
@@ -95,6 +96,9 @@ impl Site for Empty {
     fn add_inline(&self, _: AssetKind, _: &str, _: &str, _: bool) -> Result<(), String> {
         Err("read only".into())
     }
+    fn theme(&self, _: &str, _: &ThemeCall) -> Result<Value, String> {
+        Err("read only".into())
+    }
     fn get_transient(&self, _: &str, _: bool) -> Result<Option<Value>, String> {
         Ok(None)
     }
@@ -138,22 +142,27 @@ fuzz_target!(|wasm: &[u8]| {
             options: ["fuzz".into()].into(),
             ..Grants::default()
         };
-        let package = Package {
-            sdk: "0.2",
-            slug: "fuzz",
-            wasm,
-            grants,
-            limits: Limits::default(),
-            folder: &folder,
-        };
-        match host.load(package) {
-            Ok(extension) => {
-                let extensions = Arc::new(Extensions::new(vec![Arc::new(extension)]));
-                let request = Request::new(host, &extensions, Arc::new(Empty));
-                request.filter("the_content", Value::String(b"<p>x</p>".to_vec()), &[]);
-                let _ = request.activate(0);
+        // As a plugin and as a theme (ADR 0023).
+        for kind in [Kind::Plugin, Kind::Theme] {
+            let package = Package {
+                kind,
+                sdk: "0.3",
+                slug: "fuzz",
+                wasm,
+                grants: grants.clone(),
+                limits: Limits::default(),
+                folder: &folder,
+            };
+            match host.load(package) {
+                Ok(extension) => {
+                    let extensions = Arc::new(Extensions::new(vec![Arc::new(extension)]));
+                    let request = Request::new(host, &extensions, Arc::new(Empty));
+                    request.filter("the_content", Value::String(b"<p>x</p>".to_vec()), &[]);
+                    let _ = request.activate(0);
+                    let _ = request.render("index.php");
+                }
+                Err(fault) => assert!(!matches!(fault, Fault::Guest(_) | Fault::Disabled | Fault::Value(_))),
             }
-            Err(fault) => assert!(!matches!(fault, Fault::Guest(_) | Fault::Disabled | Fault::Value(_))),
         }
     });
 });

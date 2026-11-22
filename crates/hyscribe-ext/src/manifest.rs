@@ -25,7 +25,10 @@ const MAX_NAME: usize = 255;
 const MAX_TEXT: usize = 1_000;
 
 /// The SDK versions the host links (ADR 0022).
-const SDK: [&str; 2] = ["0.1", "0.2"];
+const SDK: [&str; 3] = ["0.1", "0.2", "0.3"];
+
+/// The SDK versions without the `theme` world (ADR 0023).
+const BEFORE_THEMES: [&str; 2] = ["0.1", "0.2"];
 
 /// What a package is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,7 +58,9 @@ pub struct Manifest {
     pub compatibility: Option<String>,
     /// `license`, an SPDX expression.
     pub license: String,
-    /// `name`, the plugin's `Plugin Name` header.
+    /// `name`, the plugin's `Plugin Name` header; a theme's headers are
+    /// read from its `public/style.css`, as PHP reads them, so a theme has
+    /// none of these.
     pub name: String,
     /// `description`, its `Description` header.
     pub description: String,
@@ -116,7 +121,10 @@ impl Manifest {
             replaces_versions: extension.optional("replaces_versions", expression),
             compatibility: extension.optional("compatibility", |c| matches!(c, "full" | "partial")),
             license: extension.required("license", expression),
-            name: extension.required("name", shown),
+            name: match kind {
+                Some(Kind::Theme) => extension.optional("name", shown).unwrap_or_default(),
+                _ => extension.required("name", shown),
+            },
             description: extension.optional("description", shown).unwrap_or_default(),
             author: extension.optional("author", shown).unwrap_or_default(),
             author_uri: extension.optional("author_uri", shown).unwrap_or_default(),
@@ -188,6 +196,21 @@ impl Manifest {
                 ));
             }
             (Kind::Theme, Some(_)) => return Err("a theme replaces no plugin file".into()),
+        }
+        if self.kind == Kind::Theme {
+            let shown = [
+                &self.name,
+                &self.description,
+                &self.author,
+                &self.author_uri,
+                &self.plugin_uri,
+            ];
+            if shown.iter().any(|text| !text.is_empty()) {
+                return Err("a theme's name and headers are read from its public/style.css".into());
+            }
+            if BEFORE_THEMES.contains(&self.sdk.as_str()) {
+                return Err("a theme is built against SDK 0.3 or later".into());
+            }
         }
         if self.replaces.is_some() && matches!(self.license.as_str(), "GPL-2.0-only" | "GPL-2.0") {
             return Err("a port is never under GPL-2.0-only (ADR 0004)".into());

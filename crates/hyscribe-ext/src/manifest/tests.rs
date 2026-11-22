@@ -5,6 +5,7 @@ use super::*;
 use crate::tests::grants;
 
 const GUEST: &str = include_str!("../../guest/hyscribe.ext.toml");
+const THEME: &str = include_str!("../../guest/theme/hyscribe.ext.toml");
 
 /// The smallest plugin manifest, with `extra` after its `[extension]`.
 fn plugin(extra: &str) -> String {
@@ -24,7 +25,7 @@ fn reads_the_test_extensions_manifest() {
     assert_eq!(manifest.kind, Kind::Plugin);
     assert_eq!(manifest.id, "hyscribe-test");
     assert_eq!(manifest.version, "0.1.0");
-    assert_eq!(manifest.sdk, "0.2");
+    assert_eq!(manifest.sdk, "0.3");
     assert_eq!(
         manifest.replaces.as_deref(),
         Some("hyscribe-test/hyscribe-test.php")
@@ -61,9 +62,24 @@ fn limits_and_a_theme() {
         manifest.limits,
         Limits::asked(&[("call_ms", 200), ("memory_mib", 32)]).unwrap()
     );
-    let theme = "[extension]\nkind = 'theme'\nid = 't'\nversion = '1'\nsdk = '0.1'\nlicense = 'MIT'\nname = 'T'\n";
-    assert_eq!(Manifest::parse(theme.as_bytes()).unwrap().kind, Kind::Theme);
+    let theme =
+        "[extension]\nkind = 'theme'\nid = 't'\nversion = '1'\nsdk = '0.3'\nlicense = 'MIT'\n";
+    let read = Manifest::parse(theme.as_bytes()).unwrap();
+    assert_eq!((read.kind, read.name.as_str()), (Kind::Theme, ""));
+    assert_eq!(Manifest::parse(THEME.as_bytes()).unwrap().kind, Kind::Theme);
     assert!(refused(&format!("{theme}replaces = 't/t.php'\n")).contains("a theme replaces no"));
+    for shown in ["name", "description", "author", "author_uri", "plugin_uri"] {
+        let named = format!("{theme}{shown} = 'T'\n");
+        assert_eq!(
+            refused(&named),
+            "a theme's name and headers are read from its public/style.css"
+        );
+    }
+    for sdk in ["0.1", "0.2"] {
+        let older = theme.replace("0.3", sdk);
+        assert_eq!(refused(&older), "a theme is built against SDK 0.3 or later");
+    }
+    assert!(refused(&format!("{theme}name = 1\n")).contains("name must be a string"));
 }
 
 #[test]
@@ -92,7 +108,7 @@ fn refuses_what_the_format_does_not_allow() {
             "version must be a valid",
         ),
         (
-            "[extension]\nkind = 'plugin'\nid = 'd'\nversion = '1'\nsdk = '0.3'\n",
+            "[extension]\nkind = 'plugin'\nid = 'd'\nversion = '1'\nsdk = '0.4'\n",
             "sdk must be",
         ),
     ];

@@ -300,6 +300,8 @@ fn what_is_not_served_yet() {
     assert_eq!(live.register_asset("ext", &asset), unserved.clone());
     assert_eq!(live.enqueue(AssetKind::Style, "h"), unserved.clone());
     assert_eq!(live.add_inline(AssetKind::Script, "h", "", false), unserved);
+    let call = hyscribe_ext::ThemeCall::HavePosts;
+    assert_eq!(live.theme("t", &call), Err(UNSERVED.to_string()));
     assert!(live.public_post_type("attachment") && live.public_post_type("post"));
     assert!(live.public_post_type("page") && !live.public_post_type("ext_item"));
     assert_eq!(live.translate("ext", "Hello", Some("ctx")), "Hello");
@@ -349,7 +351,7 @@ fn faults_are_logged() {
 async fn an_action_s_extensions_report_their_faults() {
     let dir = tempfile::tempdir().unwrap();
     install(dir.path());
-    let runtime = hyscribe_ext::Runtime::new(dir.path());
+    let runtime = hyscribe_ext::Runtime::new(dir.path(), dir.path());
     let found = installed::find(dir.path(), FILE).unwrap();
     let mut acted = Acted::new(|live| runtime.activating(&[], &found, live)).unwrap();
     let writer = Writer::open(&fixture_database(), Mode::Primary).await;
@@ -380,7 +382,7 @@ async fn an_action_s_extensions_report_their_faults() {
 async fn a_panic_on_the_extensions_thread_is_the_action_s() {
     let dir = tempfile::tempdir().unwrap();
     install(dir.path());
-    let runtime = hyscribe_ext::Runtime::new(dir.path());
+    let runtime = hyscribe_ext::Runtime::new(dir.path(), dir.path());
     let found = installed::find(dir.path(), FILE).unwrap();
     let mut acted = Acted::new(|live| runtime.activating(&[], &found, live)).unwrap();
     assert_eq!(acted.reports(), Vec::new());

@@ -3515,7 +3515,7 @@ async fn a_page_view_writes_the_default_fallback() {
 /// `wp_navigation_should_create_fallback` returning false, as the page
 /// goldens' `options.php` has it unless a request sets `_fallback`.
 #[derive(Debug)]
-struct NoFallback;
+pub(crate) struct NoFallback;
 
 impl hyscribe_render::site::Hooks for NoFallback {
     fn wp_navigation_should_create_fallback(&self, _create: bool) -> bool {
@@ -3950,3 +3950,5 @@ async fn a_write_cut_off_by_the_time_limit_rolls_back() {
     tokio::time::timeout(ten, again).await.unwrap().unwrap();
     write.commit().await.unwrap();
 }
+
+mod classic;

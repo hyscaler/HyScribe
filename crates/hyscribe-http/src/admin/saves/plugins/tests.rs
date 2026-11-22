@@ -91,7 +91,11 @@ async fn case(
             ..asked("/hs-admin/plugins", &get, &[])
         };
         let handler = handler("plugins", action).unwrap();
-        let site = Unread(Default::default(), false, dir.map(Runtime::new));
+        let site = Unread(
+            Default::default(),
+            false,
+            dir.map(|dir| Runtime::new(dir, dir)),
+        );
         let answer = acted(writer, conn, (handler, &site), &asked).await;
         let to = format!("{SITE}/hs-admin/plugins?{done}=true&plugin_status=all&paged=1&s=");
         assert_eq!(answer.map_err(|e| format!("{e:?}"))?, Answer::Redirect(to));
@@ -180,7 +184,11 @@ async fn answer(
 ) -> Result<Answer, hyscribe_write::Error> {
     let get = fields(&format!("action={}&{get}", text(action)));
     let asked = asked("/hs-admin/plugins", &get, &[]);
-    let site = Unread(Default::default(), false, dir.map(|dir| Runtime::new(&dir)));
+    let site = Unread(
+        Default::default(),
+        false,
+        dir.map(|dir| Runtime::new(&dir, &dir)),
+    );
     acted(
         writer,
         conn,
@@ -442,7 +450,9 @@ async fn served(
     let (plugins, _) = plugins();
     let (site, cookies) = crate::admin::tests::logged_in(database, dir).await;
     let site = std::sync::Arc::try_unwrap(site).ok().unwrap();
-    let site = site.with_plugins(plugins.path()).with_writer(writer);
+    let site = site
+        .with_extensions(plugins.path(), plugins.path())
+        .with_writer(writer);
     (std::sync::Arc::new(site), cookies, plugins)
 }
 

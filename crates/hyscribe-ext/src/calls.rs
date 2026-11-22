@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The SDK's host functions (`hyscribe:sdk@0.2.0`, ADR 0022). Each checks
+//! The SDK's host functions (`hyscribe:sdk@0.3.0`, ADR 0022 and 0023). Each checks
 //! its grant in the store's state before it touches anything, and answers
 //! `sdk-error.denied` otherwise; registrations are taken in `init` only,
 //! and everything else in a request only.
@@ -13,12 +13,15 @@ use wasmtime::component::types::ComponentFunc;
 use wasmtime::component::{ComponentType, Lift, Linker, Lower, Val};
 use wasmtime::{AsContextMut, StoreContextMut};
 
-use crate::extension::{Block, Hook, MetaKey, Registrations, Route, Taxonomy};
+use crate::extension::{Block, Hook, MetaKey, Registrations, Route, Taxonomy, TemplateFile};
 use crate::grants::relative;
 use crate::host::{Chain, Phase, State};
 use crate::request::{Fired, Shared};
 use crate::value::{Lifted, lift, lift_all, lower};
-use crate::{Asset, AssetKind, Caps, Found, Incoming, Message, ObjectKind, Outgoing, Post, Site};
+use crate::{
+    Asset, AssetKind, Caps, CustomizeKind, Found, Incoming, Message, ObjectKind, Outgoing, Part,
+    Post, Site, ThemeCall,
+};
 
 /// Why the host refused or failed a call (`types.sdk-error`).
 #[derive(ComponentType, Lower, Debug, PartialEq, Eq)]
@@ -86,11 +89,16 @@ fn text(value: Option<&Val>) -> String {
     }
 }
 
-fn texts(value: Option<&Val>) -> Vec<String> {
+/// A list's items.
+fn items(value: Option<&Val>) -> &[Val] {
     match value {
-        Some(Val::List(items)) => items.iter().map(|item| text(Some(item))).collect(),
-        _ => Vec::new(),
+        Some(Val::List(items)) => items,
+        _ => &[],
     }
+}
+
+fn texts(value: Option<&Val>) -> Vec<String> {
+    items(value).iter().map(|item| text(Some(item))).collect()
 }
 
 fn id(value: Option<&Val>) -> u64 {
@@ -148,6 +156,23 @@ fn asset(params: &[Val]) -> Asset {
         version,
         placement: text(field(fields, 5)),
     }
+}
+
+/// `theme-setup.templates`' list of `template-file` records.
+fn template_files(params: &[Val]) -> Vec<TemplateFile> {
+    let file = |item: &Val| {
+        let fields = fields(Some(item));
+        let name = match field(fields, 1) {
+            Some(Val::Option(Some(name))) => Some(text(Some(name))),
+            _ => None,
+        };
+        TemplateFile {
+            file: text(field(fields, 0)),
+            name,
+            post_types: texts(field(fields, 2)),
+        }
+    };
+    items(params.first()).iter().map(file).collect()
 }
 
 fn post_val(post: Post) -> Val {
@@ -799,6 +824,84 @@ fn translate_plural(
     }
 }
 
+fn templates(state: &mut State, files: Vec<TemplateFile>) -> Result<(), SdkError> {
+    let php = |file: &TemplateFile| relative(&file.file) && file.file.ends_with(".php");
+    if let Some(file) = files.iter().find(|file| !php(file)) {
+        return Err(SdkError::Invalid(format!(
+            "{} is not a PHP file inside the theme",
+            file.file
+        )));
+    }
+    state.registering()?.templates.extend(files);
+    Ok(())
+}
+
+/// A theme's call, answered by the site for its stylesheet.
+fn theme_call(state: &State, call: ThemeCall) -> Result<Value, SdkError> {
+    state.site()?.theme(&state.slug, &call).map_err(failed)
+}
+
+/// Whether the site answered `true`; anything else, an error included, is false.
+fn yes(answer: Result<Value, SdkError>) -> bool {
+    matches!(answer, Ok(Value::Bool(true)))
+}
+
+/// A call whose arguments cross as PHP values.
+fn with_args(
+    state: &State,
+    args: Vec<Lifted>,
+    call: impl FnOnce(Vec<Value>) -> ThemeCall,
+) -> Result<Value, SdkError> {
+    theme_call(state, call(lifted_all(args)?))
+}
+
+/// `get_header()` and the others: the file to render, when it is text.
+fn part(
+    state: &State,
+    (kind, slug, name, args): (Part, String, Option<String>, Vec<Lifted>),
+) -> Option<String> {
+    let answer = with_args(state, args, |args| ThemeCall::Part(kind, slug, name, args));
+    match answer {
+        Ok(Value::String(file)) => String::from_utf8(file).ok(),
+        _ => None,
+    }
+}
+
+fn register_sidebar(state: &State, args: &str) -> Result<String, SdkError> {
+    let id = theme_call(state, ThemeCall::Sidebar(json(args)?))?;
+    Ok(String::from_utf8_lossy(&id.to_php_string()).into_owned())
+}
+
+fn editor_style(state: &State, files: Vec<String>) -> Result<(), SdkError> {
+    if let Some(file) = files.iter().find(|file| !relative(file)) {
+        return Err(SdkError::Invalid(format!(
+            "{file} is not a file inside public/"
+        )));
+    }
+    theme_call(state, ThemeCall::EditorStyle(files)).map(drop)
+}
+
+fn get_mod(
+    state: &State,
+    (name, default): (String, Option<Lifted>),
+) -> Result<Option<Lifted>, SdkError> {
+    let default = default.map(lifted).transpose()?;
+    let value = theme_call(state, ThemeCall::GetMod(name, default))?;
+    Some(value)
+        .filter(|value| *value != Value::Null)
+        .as_ref()
+        .map(crossed)
+        .transpose()
+}
+
+fn customize(
+    state: &State,
+    (kind, id, args, callbacks): (CustomizeKind, String, String, Vec<(String, u32)>),
+) -> Result<(), SdkError> {
+    let call = ThemeCall::Customize(kind, id, json(&args)?, callbacks);
+    theme_call(state, call).map(drop)
+}
+
 /// A host function timed as the host's: `dynamic` times its own.
 macro_rules! timed {
     (func_wrap, $body:expr) => {
@@ -811,7 +914,7 @@ macro_rules! timed {
 
 /// The SDK versions linked: each minor version only adds interfaces, so
 /// an interface of 0.1 is linked under both names (ADR 0022).
-const VERSIONS: [&str; 2] = ["0.1.0", "0.2.0"];
+const VERSIONS: [&str; 3] = ["0.1.0", "0.2.0", "0.3.0"];
 
 /// Defines one interface's functions under each version from `since` on,
 /// each a closure of the store and its arguments, without an error path
@@ -936,6 +1039,81 @@ pub(crate) fn link(linker: &mut Linker<State>) -> wasmtime::Result<()> {
             },
             func_wrap "remove-cap" => |cx: Cx<'_>, (role, cap): (String, String)| {
                 answer(role_cap(cx.data(), &role, &cap, None))
+            },
+        }),
+        interface!(linker, "template", 2, {
+            func_wrap "have-posts" => |cx: Cx<'_>, (): ()| Ok((yes(theme_call(cx.data(), ThemeCall::HavePosts)),)),
+            func_wrap "the-post" => |cx: Cx<'_>, (): ()| {
+                let _ = theme_call(cx.data(), ThemeCall::ThePost);
+                Ok(())
+            },
+            func_wrap "rewind-posts" => |cx: Cx<'_>, (): ()| {
+                let _ = theme_call(cx.data(), ThemeCall::RewindPosts);
+                Ok(())
+            },
+            func_wrap "reset-postdata" => |cx: Cx<'_>, (): ()| {
+                let _ = theme_call(cx.data(), ThemeCall::ResetPostdata);
+                Ok(())
+            },
+            func_wrap "in-the-loop" => |cx: Cx<'_>, (): ()| Ok((yes(theme_call(cx.data(), ThemeCall::InTheLoop)),)),
+            func_wrap "conditional" => |cx: Cx<'_>, (name, args): (String, Vec<Lifted>)| {
+                answer(with_args(cx.data(), args, |args| ThemeCall::Conditional(name, args)).map(|is| is == Value::Bool(true)))
+            },
+            func_wrap "print" => |cx: Cx<'_>, (name, args): (String, Vec<Lifted>)| {
+                answer(with_args(cx.data(), args, |args| ThemeCall::Print(name, args)).map(|printed| printed.to_php_string()))
+            },
+            func_wrap "get" => |cx: Cx<'_>, (name, args): (String, Vec<Lifted>)| {
+                answer(with_args(cx.data(), args, |args| ThemeCall::Get(name, args)).and_then(|value| crossed(&value)))
+            },
+            func_wrap "part" => |cx: Cx<'_>, args| Ok((part(cx.data(), args),)),
+        }),
+        interface!(linker, "theme-setup", 2, {
+            func_new "templates" => dynamic(|state, params| {
+                result_val(templates(state, template_files(params)).map(|()| None))
+            }),
+            func_wrap "add-support" => |cx: Cx<'_>, (feature, args): (String, Vec<Lifted>)| {
+                answer(with_args(cx.data(), args, |args| ThemeCall::AddSupport(feature, args)).map(drop))
+            },
+            func_wrap "remove-support" => |cx: Cx<'_>, (feature,): (String,)| {
+                Ok((yes(theme_call(cx.data(), ThemeCall::RemoveSupport(feature))),))
+            },
+            func_wrap "register-nav-menus" => |cx: Cx<'_>, (locations,): (Vec<(String, String)>,)| {
+                answer(theme_call(cx.data(), ThemeCall::NavMenus(locations)).map(drop))
+            },
+            func_wrap "register-sidebar" => |cx: Cx<'_>, (args,): (String,)| answer(register_sidebar(cx.data(), &args)),
+            func_wrap "add-image-size" => |cx: Cx<'_>, (name, width, height, crop): (String, u32, u32, Lifted)| {
+                let call = lifted(crop).and_then(|crop| theme_call(cx.data(), ThemeCall::ImageSize(name, width, height, crop)));
+                answer(call.map(drop))
+            },
+            func_wrap "set-post-thumbnail-size" => |cx: Cx<'_>, (width, height, crop): (u32, u32, Lifted)| {
+                let call = lifted(crop).and_then(|crop| theme_call(cx.data(), ThemeCall::ThumbnailSize(width, height, crop)));
+                answer(call.map(drop))
+            },
+            func_wrap "add-editor-style" => |cx: Cx<'_>, (files,): (Vec<String>,)| answer(editor_style(cx.data(), files)),
+            func_wrap "set-content-width" => |cx: Cx<'_>, (width,): (u32,)| {
+                answer(theme_call(cx.data(), ThemeCall::ContentWidth(width)).map(drop))
+            },
+            func_wrap "register-block-style" => |cx: Cx<'_>, (block, args): (String, String)| {
+                let call = json(&args).and_then(|args| theme_call(cx.data(), ThemeCall::BlockStyle(block, args)));
+                answer(call.map(drop))
+            },
+            func_wrap "register-block-pattern" => |cx: Cx<'_>, (name, args): (String, String)| {
+                let call = json(&args).and_then(|args| theme_call(cx.data(), ThemeCall::BlockPattern(name, args)));
+                answer(call.map(drop))
+            },
+            func_wrap "get-mod" => |cx: Cx<'_>, args| answer(get_mod(cx.data(), args)),
+            func_wrap "set-mod" => |cx: Cx<'_>, (name, value): (String, Lifted)| {
+                let call = lifted(value).and_then(|value| theme_call(cx.data(), ThemeCall::SetMod(name, value)));
+                answer(call.map(|set| set == Value::Bool(true)))
+            },
+            func_wrap "remove-mod" => |cx: Cx<'_>, (name,): (String,)| {
+                answer(theme_call(cx.data(), ThemeCall::RemoveMod(name)).map(|removed| removed == Value::Bool(true)))
+            },
+        }),
+        interface!(linker, "customize", 2, {
+            func_wrap "add" => |cx: Cx<'_>, args| answer(customize(cx.data(), args)),
+            func_wrap "remove" => |cx: Cx<'_>, (kind, id): (CustomizeKind, String)| {
+                Ok((yes(theme_call(cx.data(), ThemeCall::Uncustomize(kind, id))),))
             },
         }),
     ];

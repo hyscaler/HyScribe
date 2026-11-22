@@ -42,7 +42,7 @@ impl<'a> Remote<'a> {
     }
 
     /// The URL of `path` under the base.
-    pub fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base)
     }
 

@@ -1167,7 +1167,9 @@ dependencies = [
  "hyscribe-kses",
  "hyscribe-testkit",
  "openssl-probe",
+ "ring",
  "rustls",
+ "tempfile",
  "tokio",
  "tokio-rustls",
 ]

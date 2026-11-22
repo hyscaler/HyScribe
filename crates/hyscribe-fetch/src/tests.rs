@@ -537,8 +537,10 @@ fn test_roots() -> RootCertStore {
     roots
 }
 
-/// A TLS listener for `pages.test` answering every request with a page.
-async fn tls_site() -> SocketAddr {
+/// A TLS listener for `pages.test` answering its connections with
+/// `answers` in turn, the last one again and again; one ending in a body
+/// cut short is held open for a minute.
+async fn tls_answering(answers: Vec<&'static [u8]>) -> SocketAddr {
     let chain = CertificateDer::pem_slice_iter(include_bytes!("../tests/tls/leaf.pem"))
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
@@ -554,19 +556,32 @@ async fn tls_site() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     tokio::spawn(async move {
+        let mut served = 0;
         while let Ok((stream, _)) = listener.accept().await {
-            let Ok(mut stream) = acceptor.accept(stream).await else {
-                continue;
-            };
-            let mut buffer = [0; 1024];
-            let _ = stream.read(&mut buffer).await;
-            let _ = stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecure")
-                .await;
-            let _ = stream.shutdown().await;
+            let answer = answers.get(served).or(answers.last()).copied();
+            let answer = answer.unwrap_or_default();
+            served += 1;
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let Ok(mut stream) = acceptor.accept(stream).await else {
+                    return;
+                };
+                let mut buffer = [0; 1024];
+                let _ = stream.read(&mut buffer).await;
+                let _ = stream.write_all(answer).await;
+                if answer.ends_with(b"held") {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                }
+                let _ = stream.shutdown().await;
+            });
         }
     });
     address
+}
+
+/// A TLS listener for `pages.test` answering every request with a page.
+async fn tls_site() -> SocketAddr {
+    tls_answering(vec![b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecure"]).await
 }
 
 #[tokio::test]
@@ -605,4 +620,113 @@ async fn https_verifies_the_host_against_the_roots() {
         get(&trusting, "https://bad-.test/").await,
         failed(Kind::Tls, 0)
     );
+}
+
+/// A client trusting the test roots, every connection going to a TLS
+/// listener answering with `answers`.
+async fn downloading(answers: Vec<&'static [u8]>) -> Client {
+    let site = tls_answering(answers).await;
+    Client::new(test_roots(), Table::new(site), Arc::new(()))
+}
+
+const PACKAGE: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
+
+/// `hello`'s SHA-256.
+const HELLO: &str = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+
+fn fetch_failed(kind: Kind, hop: u32) -> Result<String, Download> {
+    Err(Download::Fetch(Error { kind, hop }))
+}
+
+#[tokio::test]
+async fn downloads_a_package_to_a_file() {
+    let folder = tempfile::tempdir().unwrap();
+    let to = folder.path().join(".download-a-0.1.0");
+    std::fs::write(&to, b"left over").unwrap();
+    let client = downloading(vec![PACKAGE]).await;
+    let url = b"https://pages.test/v1/packages/a/a-0.1.0.hyx";
+    let saved = client.download(url, "HyScribe/0.1.0", (5, &to)).await;
+    assert_eq!(saved.unwrap(), HELLO);
+    assert_eq!(std::fs::read(&to).unwrap(), b"hello");
+    // A redirect on the same host is followed; to another one it stops.
+    let moved = b"HTTP/1.1 302 Found\r\nLocation: /elsewhere\r\n\r\n";
+    let client = downloading(vec![moved, PACKAGE]).await;
+    assert_eq!(client.download(url, "", (5, &to)).await.unwrap(), HELLO);
+    let away = b"HTTP/1.1 302 Found\r\nLocation: https://two.test/\r\n\r\n";
+    let client = downloading(vec![away, PACKAGE]).await;
+    let stopped = client.download(url, "", (5, &to)).await;
+    assert_eq!(stopped, fetch_failed(Kind::Disallowed, 1));
+    assert!(!to.exists());
+}
+
+#[tokio::test]
+async fn refuses_a_download_of_another_size_or_status() {
+    let folder = tempfile::tempdir().unwrap();
+    let to = folder.path().join("package");
+    let url = b"https://pages.test/a.hyx";
+    let client = downloading(vec![PACKAGE]).await;
+    for size in [4, 6, MAX_DOWNLOAD + 1] {
+        assert_eq!(
+            client.download(url, "", (size, &to)).await,
+            Err(Download::Size)
+        );
+        assert!(!to.exists());
+    }
+    let missing = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+    let client = downloading(vec![missing]).await;
+    let refused = client.download(url, "", (5, &to)).await;
+    assert_eq!(refused, Err(Download::Status(404)));
+    let largest = client.download(url, "", (MAX_DOWNLOAD, &to)).await;
+    assert_eq!(largest, Err(Download::Status(404)));
+    let over = client.download(url, "", (MAX_DOWNLOAD + 1, &to)).await;
+    assert_eq!(over, Err(Download::Size));
+    // HTTPS only, and no file where none can be written.
+    let plain = client
+        .download(b"http://pages.test/a.hyx", "", (5, &to))
+        .await;
+    assert_eq!(plain, fetch_failed(Kind::Invalid, 0));
+    let client = downloading(vec![PACKAGE]).await;
+    let nowhere = folder.path().join("no/package");
+    assert_eq!(
+        client.download(url, "", (5, &nowhere)).await,
+        Err(Download::Write)
+    );
+    // A body cut short by the server.
+    let cut = b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nhello";
+    let client = downloading(vec![cut]).await;
+    let refused = client.download(url, "", (9, &to)).await;
+    assert_eq!(refused, fetch_failed(Kind::Protocol, 0));
+    assert!(!to.exists());
+}
+
+#[tokio::test]
+async fn a_download_stops_when_reads_stall_or_time_runs_out() {
+    let folder = tempfile::tempdir().unwrap();
+    let to = folder.path().join("package");
+    let url = b"https://pages.test/a.hyx";
+    let held = b"HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nheld";
+    let client = downloading(vec![held]).await;
+    let quick = Duration::from_millis(300);
+    let started = Instant::now();
+    let window = (Duration::from_secs(20), quick);
+    let stalled = client.download_within(url, "", (9, &to), window).await;
+    assert_eq!(stalled, fetch_failed(Kind::Timeout, 0));
+    let window = (quick, Duration::from_secs(20));
+    let late = client.download_within(url, "", (9, &to), window).await;
+    assert_eq!(late, fetch_failed(Kind::Timeout, 0));
+    // A page's body is read within the fetch's time too.
+    let mut quick_args = args();
+    quick_args.timeout = quick;
+    let page = client.get(b"https://pages.test/", b"", quick_args).await;
+    assert_eq!(page, failed(Kind::Timeout, 0));
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(!to.exists());
+    // A server that never answers runs into the same limits.
+    let silent = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let table = Table::new(silent.local_addr().unwrap());
+    let client = Client::new(test_roots(), table, Arc::new(()));
+    let window = (Duration::from_secs(20), quick);
+    let unanswered = client.download_within(url, "", (9, &to), window).await;
+    assert_eq!(unanswered, fetch_failed(Kind::Timeout, 0));
+    assert!(started.elapsed() < Duration::from_secs(10));
 }

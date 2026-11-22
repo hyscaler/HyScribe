@@ -10,7 +10,10 @@ use std::sync::OnceLock;
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Maybe, Value, json_decode, maybe_unserialize};
 
+use hyscribe_kses::strip_tags;
+
 use crate::excerpt::wp_trim_words;
+use crate::formatting::{CORE_SHORTCODE_TAGS, wptexturize};
 use crate::permalinks::{permalink, term_link};
 use crate::post::title_filters;
 use crate::site::{NavMenuItem, Site};
@@ -75,11 +78,18 @@ pub(super) fn setup(site: &dyn Site, post: &Post) -> Result<NavMenuItem, Skip> {
         title,
         url,
         target: meta("_menu_item_target"),
-        attr_title: hooks.nav_menu_attr_title(post.excerpt.clone()),
-        description: hooks.nav_menu_description(description),
+        attr_title: hooks.nav_menu_attr_title(title_format(&post.excerpt)),
+        description: hooks.nav_menu_description(title_format(&description)),
         classes: stored_classes(site, post),
         xfn: meta("_menu_item_xfn"),
+        current: false,
     })
+}
+
+/// Core's `wptexturize` and `strip_tags` on `nav_menu_attr_title` and
+/// `nav_menu_description`, before extensions' callbacks.
+fn title_format(text: &[u8]) -> Vec<u8> {
+    strip_tags(&wptexturize(text, &CORE_SHORTCODE_TAGS))
 }
 
 /// `#%d (no title)` for an object without a title.

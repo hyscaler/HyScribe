@@ -541,3 +541,4 @@ fn an_attachment_has_no_terms_above_it() {
     let menu = ("Attachment", "attachment");
     matches_golden("navigation-fallback-attachment", &site, &request, menu);
 }
+mod nav_menu;

@@ -16,6 +16,9 @@ use crate::site::{NavMenuItem, Request, Site};
 
 mod context;
 mod item;
+mod nav_menu;
+
+pub use nav_menu::{NavMenu, NavMenuArgs, Printed, wp_nav_menu};
 
 use item::Skip;
 
@@ -44,7 +47,7 @@ pub(super) enum Conversion {
 }
 
 /// A menu that is not ported.
-struct NotPorted;
+pub(crate) struct NotPorted;
 
 /// `get_fallback_classic_menu()` and the conversion of the menu it finds.
 pub(super) fn classic_menu(site: &dyn Site, request: &Request) -> Conversion {
@@ -80,17 +83,26 @@ fn fallback_menu(site: &dyn Site) -> Option<Term> {
     primary_location(site, &all).or_else(|| slugged().or_else(newest).cloned())
 }
 
-/// `get_nav_menu_at_primary_location()`: `wp_get_nav_menu_object()` of
-/// the menu the theme's `nav_menu_locations` assigns to `primary`, by ID,
-/// slug or name.
+/// `get_nav_menu_at_primary_location()`.
 fn primary_location(site: &dyn Site, menus: &[Term]) -> Option<Term> {
+    located_menu(site, menus, "primary")
+}
+
+/// `wp_get_nav_menu_object()` of the menu the theme's `nav_menu_locations`
+/// assigns to `location`.
+pub(crate) fn located_menu(site: &dyn Site, menus: &[Term], location: &str) -> Option<Term> {
     let mods = theme_mods(site)?;
-    let assigned = mods.get_str("nav_menu_locations")?.get_str("primary")?;
-    if assigned.is_empty() {
+    let locations = mods.get_str("nav_menu_locations")?;
+    menu_object(menus, locations.get_str(location)?)
+}
+
+/// `wp_get_nav_menu_object( $menu )` among `menus`: by ID, slug or name.
+pub(crate) fn menu_object(menus: &[Term], menu: &Value) -> Option<Term> {
+    if menu.is_empty() {
         return None;
     }
-    let name = assigned.to_php_string();
-    let id = u64::try_from(assigned.to_int()).ok();
+    let name = menu.to_php_string();
+    let id = u64::try_from(menu.to_int()).ok();
     let find = |matches: &dyn Fn(&Term) -> bool| menus.iter().find(|menu| matches(menu)).cloned();
     find(&|menu| Some(menu.id) == id)
         .or_else(|| find(&|menu| menu.slug == name))
@@ -126,7 +138,10 @@ fn convert(site: &dyn Site, request: &Request, menu: &Term) -> Result<Option<Vec
 /// `wp_get_nav_menu_items( $menu->term_id )` on the front end: the valid
 /// items in menu order, filtered; `None` for a menu that is gone or counts
 /// no items.
-fn menu_items(site: &dyn Site, menu: &Term) -> Result<Option<Vec<NavMenuItem>>, NotPorted> {
+pub(crate) fn menu_items(
+    site: &dyn Site,
+    menu: &Term,
+) -> Result<Option<Vec<NavMenuItem>>, NotPorted> {
     // The menu is fetched again by its ID, with the count the database has.
     let Some(menu) = site.term(menu.id, "nav_menu").filter(|menu| menu.count > 0) else {
         return Ok(None);

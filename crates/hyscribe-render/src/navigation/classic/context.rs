@@ -63,7 +63,7 @@ fn id_of(value: i64) -> u64 {
 }
 
 /// `_wp_menu_item_classes_by_context( $menu_items )`.
-pub(super) fn apply(site: &dyn Site, request: &Request, items: &mut [NavMenuItem]) {
+pub(crate) fn apply(site: &dyn Site, request: &Request, items: &mut [NavMenuItem]) {
     let queried = queried_object(site, request);
     let ancestry = ancestry(site, request, &queried);
     let option = |name: &str| int(&site.option(name).unwrap_or_default());
@@ -93,7 +93,7 @@ pub(super) fn apply(site: &dyn Site, request: &Request, items: &mut [NavMenuItem
         if is_post_type && privacy_policy == object_id {
             classes.push(b"menu-item-privacy-policy".to_vec());
         }
-        context.item(item, &mut classes, &mut active);
+        item.current = context.item(item, &mut classes, &mut active);
         if page_for_posts != 0 && is_post_type && !context.is_page() && page_for_posts == object_id
         {
             classes.push(b"current_page_parent".to_vec());
@@ -201,8 +201,8 @@ impl Context<'_> {
             && matches!(&self.queried, Queried::Post(post) if post.post_type == "page")
     }
 
-    /// The first loop's classes of one item.
-    fn item(&self, item: &NavMenuItem, classes: &mut Vec<Vec<u8>>, active: &mut Active) {
+    /// The first loop's classes of one item, and whether it is `current`.
+    fn item(&self, item: &NavMenuItem, classes: &mut Vec<Vec<u8>>, active: &mut Active) -> bool {
         let request = self.request;
         let object_id = int(&item.object_id);
         let is_post_type = item.kind == b"post_type";
@@ -223,6 +223,7 @@ impl Context<'_> {
             active.parent_objects.push(id_of(object_id));
             active.parent_items.push(item.id);
             active.object = queried_post_type.to_vec();
+            false
         } else if queried_here
             && ((self.page_for_posts != 0
                 && is_post_type
@@ -241,14 +242,20 @@ impl Context<'_> {
             active.parent_items.push(id_of(int(&item.menu_item_parent)));
             active.parent_objects.push(item.post_parent);
             active.object.clone_from(&item.object);
-        } else if item.object == b"custom" {
-            self.custom_link(item, classes, active);
+            true
+        } else {
+            item.object == b"custom" && self.custom_link(item, classes, active)
         }
     }
 
-    /// The classes of a custom link, which is current when it links to the
-    /// page asked for.
-    fn custom_link(&self, item: &NavMenuItem, classes: &mut Vec<Vec<u8>>, active: &mut Active) {
+    /// The classes of a custom link, and whether it is current: when it
+    /// links to the page asked for.
+    fn custom_link(
+        &self,
+        item: &NavMenuItem,
+        classes: &mut Vec<Vec<u8>>,
+        active: &mut Active,
+    ) -> bool {
         let (site, request) = (self.site, self.request);
         let home = site.home_url();
         let origin = home.strip_suffix(home_path(&String::from_utf8_lossy(&home)).as_bytes());
@@ -267,15 +274,16 @@ impl Context<'_> {
         );
         let matches = [current_url.as_slice(), indexless, root_relative];
         let decoded = matches.map(urldecode);
-        let current = matches.contains(&item_url.as_slice()) || decoded.contains(&item_url);
-        if !is_empty_string(raw) && current {
+        let current = !is_empty_string(raw)
+            && (matches.contains(&item_url.as_slice()) || decoded.contains(&item_url));
+        if current {
             classes.push(b"current-menu-item".to_vec());
             menu_ancestors(site, item.id, &mut active.ancestor_items);
-            let current = [
+            let here = [
                 untrailingslashit(&current_url),
                 untrailingslashit(indexless),
             ];
-            if current.contains(&home.as_slice()) {
+            if here.contains(&home.as_slice()) {
                 classes.push(b"current_page_item".to_vec());
             }
             active.parent_items.push(id_of(int(&item.menu_item_parent)));
@@ -287,6 +295,7 @@ impl Context<'_> {
         if untrailingslashit(&item_url) == home {
             classes.push(b"menu-item-home".to_vec());
         }
+        current
     }
 
     /// The second loop's classes of one item: those of its position

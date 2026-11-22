@@ -85,6 +85,8 @@ pub struct NavMenuItem {
     pub classes: Vec<Vec<u8>>,
     /// `xfn`.
     pub xfn: Vec<u8>,
+    /// `current`: whether the request's context made it the current item.
+    pub current: bool,
 }
 
 /// Where embeds may fetch from (`EMBED_ALLOWED_HOSTS`, an open question): the

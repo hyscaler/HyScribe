@@ -29,6 +29,7 @@ mod limits;
 pub mod manifest;
 mod request;
 mod runtime;
+pub mod signature;
 mod site;
 mod value;
 

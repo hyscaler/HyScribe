@@ -1096,12 +1096,15 @@ dependencies = [
 name = "hyscribe-ext"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
+ "blake2",
  "crc32fast",
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-testkit",
  "miniz_oxide",
+ "ring",
  "tempfile",
  "wasmtime",
 ]
@@ -1272,11 +1275,14 @@ dependencies = [
 name = "hyscribe-testkit"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
+ "blake2",
  "crc32fast",
  "hyscribe-config",
  "hyscribe-model",
  "hyscribe-phpser",
  "miniz_oxide",
+ "ring",
  "sqlx",
  "tokio",
 ]

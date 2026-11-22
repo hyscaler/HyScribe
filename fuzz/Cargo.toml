@@ -444,3 +444,10 @@ path = "fuzz_targets/ext_package.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "ext_signature"
+path = "fuzz_targets/ext_signature.rs"
+test = false
+doc = false
+bench = false

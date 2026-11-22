@@ -1009,11 +1009,14 @@ dependencies = [
 name = "hyscribe-ext"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
+ "blake2",
  "crc32fast",
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
  "miniz_oxide 0.8.9",
+ "ring",
  "wasmtime",
 ]
 

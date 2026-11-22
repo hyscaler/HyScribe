@@ -276,6 +276,10 @@ pub struct Config {
     pub rss_allowed_hosts: Vec<String>,
     /// `EMBED_ALLOWED_HOSTS`: where embeds may fetch from.
     pub embed_allowed: EmbedAllowed,
+    /// `EXTENSION_TRUSTED_KEYS`: minisign public keys the operator trusts
+    /// for packages they build themselves, comma separated (ADR 0024);
+    /// `hyscribe plugin install` reads each and refuses one that does not.
+    pub extension_trusted_keys: Vec<String>,
     /// The capability constants.
     pub constants: Constants,
     /// The login rate limits.
@@ -436,6 +440,11 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
 
     let rss_allowed_hosts = host_list("RSS_ALLOWED_HOSTS", get("RSS_ALLOWED_HOSTS"))?;
     let embed_allowed = embed_allowed(get("EMBED_ALLOWED_HOSTS"))?;
+    let extension_trusted_keys = get("EXTENSION_TRUSTED_KEYS").unwrap_or_default().split(',');
+    let extension_trusted_keys = extension_trusted_keys
+        .map(str::trim)
+        .filter(|key| !key.is_empty());
+    let extension_trusted_keys = extension_trusted_keys.map(String::from).collect();
 
     if boolean(get("MULTISITE"), "MULTISITE", false)? {
         return Err(invalid("MULTISITE", "multisite networks are not supported"));
@@ -528,6 +537,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         request_time_limit,
         rss_allowed_hosts,
         embed_allowed,
+        extension_trusted_keys,
         constants,
         login_limits,
         disable_wp_cron: boolean(get("DISABLE_WP_CRON"), "DISABLE_WP_CRON", false)?,

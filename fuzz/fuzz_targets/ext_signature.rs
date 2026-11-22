@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Reading a minisign signature file or public key (ADR 0024) never
+//! Reading a minisign signature file, public key or package claim (ADR 0024) never
 //! panics, what it reads keeps the reader's bounds, and no key made up of
 //! the input verifies it.
 
 #![no_main]
 
-use hyscribe_ext::signature::{PublicKey, Signature, prehash};
+use hyscribe_ext::signature::{Claim, PublicKey, Signature, prehash};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|bytes: &[u8]| {
@@ -14,6 +14,9 @@ fuzz_target!(|bytes: &[u8]| {
     let key = text.and_then(|text| PublicKey::parse(text.lines().next().unwrap_or(text)));
     if let Some(key) = &key {
         assert_eq!(key.id().len(), 16);
+    }
+    if let Some(claim) = text.and_then(Claim::parse) {
+        assert_eq!(claim.sha256.len(), 64);
     }
     if let Ok(signature) = Signature::parse(bytes) {
         assert!(bytes.len() <= 4 << 10);

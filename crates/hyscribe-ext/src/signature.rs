@@ -10,6 +10,8 @@ use base64::engine::general_purpose::STANDARD;
 use blake2::{Blake2b512, Digest as _};
 use ring::signature::{ED25519, UnparsedPublicKey};
 
+use crate::{manifest, origin};
+
 /// The most a signature file may hold, in bytes.
 pub const MAX_BYTES: u64 = 4 << 10;
 
@@ -139,6 +141,81 @@ fn verified(
 /// The BLAKE2b-512 of a file, which a prehashed signature signs.
 pub fn prehash(bytes: &[u8]) -> [u8; 64] {
     Blake2b512::digest(bytes).into()
+}
+
+/// The SHA-256 of a file, in lowercase hex.
+pub fn sha256(bytes: &[u8]) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
+    digest.as_ref().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// What a package's signature says of it, its trusted comment: `hyscribe-package
+/// id=<id> version=<version> sdk=<sdk> sha256=<hex> signed=<unix>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Claim {
+    /// The manifest's `id`.
+    pub id: String,
+    /// The manifest's `version`.
+    pub version: String,
+    /// The manifest's `sdk`.
+    pub sdk: String,
+    /// The package's SHA-256.
+    pub sha256: String,
+    /// When it was signed, in unix seconds.
+    pub signed: u64,
+}
+
+impl Claim {
+    /// Reads a package signature's trusted comment, each field in its place.
+    pub fn parse(comment: &str) -> Option<Claim> {
+        let fields: Vec<&str> = comment
+            .strip_prefix("hyscribe-package ")?
+            .split(' ')
+            .collect();
+        let &[id, version, sdk, sha256, signed] = fields.as_slice() else {
+            return None;
+        };
+        let signed = signed.strip_prefix("signed=")?;
+        let digits = (1..=20).contains(&signed.len()) && signed.bytes().all(|b| b.is_ascii_digit());
+        Some(Claim {
+            id: id
+                .strip_prefix("id=")
+                .filter(|id| manifest::slug(id))?
+                .into(),
+            version: version
+                .strip_prefix("version=")
+                .filter(|v| manifest::version(v))?
+                .into(),
+            sdk: sdk
+                .strip_prefix("sdk=")
+                .filter(|sdk| manifest::version(sdk))?
+                .into(),
+            sha256: sha256
+                .strip_prefix("sha256=")
+                .filter(|h| origin::hex64(h))?
+                .into(),
+            signed: digits.then(|| signed.parse().ok()).flatten()?,
+        })
+    }
+}
+
+/// What the signature file `signature` by `key` says of the package
+/// `bytes`, once both its signatures verify and its trusted comment names a
+/// package of `bytes`' SHA-256.
+pub fn vouch(bytes: &[u8], key: &PublicKey, signature: &[u8]) -> Result<Claim, String> {
+    let signature = Signature::parse(signature).map_err(|e| format!("its signature: {e}"))?;
+    if !signature.verify(key, &prehash(bytes)) {
+        return Err(format!(
+            "its signature does not verify with key {}",
+            key.id()
+        ));
+    }
+    let claim = Claim::parse(signature.trusted_comment());
+    let claim = claim.ok_or("its signature's trusted comment names no package")?;
+    if claim.sha256 != sha256(bytes) {
+        return Err("its signature is of another package".into());
+    }
+    Ok(claim)
 }
 
 #[cfg(test)]

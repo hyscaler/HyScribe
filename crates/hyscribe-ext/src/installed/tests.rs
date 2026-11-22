@@ -3,6 +3,7 @@
 use std::os::unix::fs::PermissionsExt;
 
 use hyscribe_testkit::hyx::zip;
+use hyscribe_testkit::minisign::Key;
 
 use super::*;
 use crate::tests::component;
@@ -27,7 +28,7 @@ fn installs_lists_and_approves() {
     let dir = tempfile::tempdir().unwrap();
     let (plugins, packages) = folders(dir.path());
     assert_eq!(list(&plugins), []);
-    let manifest = install((&plugins, &packages), &package(MANIFEST)).unwrap();
+    let manifest = install((&plugins, &packages), &package(MANIFEST), Vouch::Unsigned).unwrap();
     assert_eq!(manifest.id, "hyscribe-test");
     let folder = plugins.join("hyscribe-test");
     assert_eq!(fs::read(folder.join("public/css/a.css")).unwrap(), b"a {}");
@@ -55,7 +56,7 @@ fn installs_lists_and_approves() {
             "[rest]\nnamespaces = [\"ext/v1\", \"ext/v2\"]",
         );
     faults::write(&folder, &crate::faults::Record::default()).unwrap();
-    install((&plugins, &packages), &package(&more)).unwrap();
+    install((&plugins, &packages), &package(&more), Vouch::Unsigned).unwrap();
     let updated = find(&plugins, "hyscribe-test/hyscribe-test.php").unwrap();
     assert_eq!(updated.manifest.version, "0.2.0");
     assert!(!updated.approved && updated.disabled);
@@ -130,7 +131,7 @@ fn refuses_and_changes_nothing() {
         ),
     ];
     for (bytes, why) in refusals {
-        let error = install((&plugins, &packages), &bytes).unwrap_err();
+        let error = install((&plugins, &packages), &bytes, Vouch::Unsigned).unwrap_err();
         assert!(error.contains(why), "{error}");
     }
     assert_eq!(fs::read_dir(&plugins).unwrap().count(), 0);
@@ -138,13 +139,13 @@ fn refuses_and_changes_nothing() {
     fs::remove_dir(&plugins).unwrap();
     // A packages folder that is a file, then a plugins folder that is one.
     fs::write(&packages, "").unwrap();
-    let error = install((&plugins, &packages), &package(MANIFEST)).unwrap_err();
+    let error = install((&plugins, &packages), &package(MANIFEST), Vouch::Unsigned).unwrap_err();
     assert!(error.contains("cannot install into"), "{error}");
     assert_eq!(fs::read_dir(&plugins).unwrap().count(), 0);
     fs::remove_file(&packages).unwrap();
     fs::remove_dir(&plugins).unwrap();
     fs::write(&plugins, "").unwrap();
-    let error = install((&plugins, &packages), &package(MANIFEST)).unwrap_err();
+    let error = install((&plugins, &packages), &package(MANIFEST), Vouch::Unsigned).unwrap_err();
     assert!(error.contains("cannot install into"), "{error}");
 }
 
@@ -308,4 +309,112 @@ fn finishes_what_a_crash_left_and_reports_a_failure() {
     mode(&packages, 0o755);
     delete((&plugins, &packages), "hyscribe-test", &idle).unwrap();
     assert!(!package.exists());
+}
+
+/// The signature of `bytes` by test key `seed`, its comment `comment`
+/// with the package's SHA-256 in place of `%sha%`.
+fn signed(bytes: &[u8], seed: u8, comment: &str) -> Vec<u8> {
+    let comment = comment.replace("%sha%", &signature::sha256(bytes));
+    Key(seed).sign(bytes, &comment).into_bytes()
+}
+
+const CLAIM: &str = "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.3 sha256=%sha% signed=1";
+
+#[test]
+fn installs_a_signed_package_with_its_origin() {
+    let dir = tempfile::tempdir().unwrap();
+    let (plugins, packages) = folders(dir.path());
+    let bytes = package(MANIFEST);
+    let key = PublicKey::parse(&Key(7).public()).unwrap();
+    let file = signed(&bytes, 7, CLAIM);
+    let vouch = Vouch::Signed(Signer::Trusted, &key, &file);
+    install((&plugins, &packages), &bytes, vouch).unwrap();
+    let folder = plugins.join("hyscribe-test");
+    let sha256 = signature::sha256(&bytes);
+    let expected = format!("trusted {} {sha256}\n", Key(7).id());
+    assert_eq!(
+        fs::read_to_string(folder.join(origin::FILE)).unwrap(),
+        expected
+    );
+    let kept = packages.join("hyscribe-test-0.1.0.hyx.minisig");
+    assert_eq!(fs::read(&kept).unwrap(), file);
+    install((&plugins, &packages), &bytes, Vouch::Unsigned).unwrap();
+    let expected = format!("unsigned {sha256}\n");
+    assert_eq!(
+        fs::read_to_string(folder.join(origin::FILE)).unwrap(),
+        expected
+    );
+    assert!(!kept.exists());
+    install((&plugins, &packages), &bytes, vouch).unwrap();
+    delete((&plugins, &packages), "hyscribe-test", &idle).unwrap();
+    assert!(!kept.exists());
+}
+
+#[test]
+fn refuses_a_package_its_signature_does_not_vouch_for() {
+    let dir = tempfile::tempdir().unwrap();
+    let (plugins, packages) = folders(dir.path());
+    let bytes = package(MANIFEST);
+    let key = PublicKey::parse(&Key(7).public()).unwrap();
+    let refused = |file: &[u8]| {
+        let vouch = Vouch::Signed(Signer::Signed, &key, file);
+        install((&plugins, &packages), &bytes, vouch).unwrap_err()
+    };
+    let other = format!("its signature does not verify with key {}", Key(7).id());
+    assert_eq!(refused(&signed(&bytes, 8, CLAIM)), other);
+    assert_eq!(
+        refused(b"x"),
+        "its signature: a signature file has four lines"
+    );
+    let unnamed = "its signature's trusted comment names no package";
+    assert_eq!(refused(&signed(&bytes, 7, "timestamp:1")), unnamed);
+    let elsewhere = Key(7).sign(&bytes, &CLAIM.replace("%sha%", &"0".repeat(64)));
+    assert_eq!(
+        refused(elsewhere.as_bytes()),
+        "its signature is of another package"
+    );
+    let version = signed(&bytes, 7, &CLAIM.replace("0.1.0", "0.1.1"));
+    assert_eq!(
+        refused(&version),
+        "its signature is for hyscribe-test 0.1.1 of SDK 0.3"
+    );
+    let sdk = signed(&bytes, 7, &CLAIM.replace("sdk=0.3", "sdk=0.2"));
+    assert_eq!(
+        refused(&sdk),
+        "its signature is for hyscribe-test 0.1.0 of SDK 0.2"
+    );
+    let id = signed(&bytes, 7, &CLAIM.replace("id=hyscribe-test", "id=other"));
+    assert_eq!(refused(&id), "its signature is for other 0.1.0 of SDK 0.3");
+    assert!(!plugins.exists() && !packages.exists());
+}
+
+#[test]
+fn a_revoked_plugin_does_not_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let (plugins, packages) = folders(dir.path());
+    let manifest = install((&plugins, &packages), &package(MANIFEST), Vouch::Unsigned).unwrap();
+    let folder = plugins.join("hyscribe-test");
+    let host = Host::new().unwrap();
+    let load = || {
+        host.load(Package {
+            kind: manifest.kind,
+            sdk: &manifest.sdk,
+            slug: &manifest.id,
+            wasm: component(),
+            grants: manifest.grants.clone(),
+            limits: manifest.limits,
+            folder: &folder,
+        })
+        .err()
+    };
+    assert_eq!(load(), None);
+    let mut origin = origin::read(&folder).unwrap().unwrap();
+    origin.revoked = Some((5, "CVE-1".into()));
+    origin::write(&folder, &origin).unwrap();
+    assert_eq!(load(), Some(crate::Fault::Revoked("CVE-1".into())));
+    fs::write(folder.join(origin::FILE), "x").unwrap();
+    let unread = Some(crate::Fault::Revoked("origin.txt does not read".into()));
+    assert_eq!(load(), unread);
+    fs::remove_file(folder.join(origin::FILE)).unwrap();
+    assert_eq!(load(), None, "installed before ADR 0024");
 }

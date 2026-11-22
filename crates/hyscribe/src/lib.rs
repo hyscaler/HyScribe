@@ -14,6 +14,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use hyscribe_auth::sessions::Sessions;
 use hyscribe_config::{Config, ConfigError, Mode};
+use hyscribe_ext::installed::Vouch;
 use hyscribe_service::{Paths, Spawn, Status};
 
 /// Source code location, offered to every user as AGPL section 13 requires.
@@ -68,10 +69,15 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum PluginCommand {
     /// Install a `.hyx` package from a local file into plugins/<slug>/,
-    /// replacing an older one; activate it from the Plugins screen.
+    /// replacing an older one; activate it from the Plugins screen. Its
+    /// signature, `<file>.minisig`, must verify against the registry's key
+    /// list kept in registry/ or a key in EXTENSION_TRUSTED_KEYS.
     Install {
         /// The package's path.
         file: PathBuf,
+        /// Install it without a signature this site trusts.
+        #[arg(long)]
+        unsigned: bool,
     },
     /// Delete an installed plugin's folder and kept packages; an active
     /// one is refused (deactivate it from the Plugins screen first).
@@ -194,9 +200,9 @@ pub fn run(ctx: Context<'_>) -> u8 {
         }
         Command::Service { command } => service(command, &site, &mut term),
         Command::Plugin {
-            command: PluginCommand::Install { file },
+            command: PluginCommand::Install { file, unsigned },
         } => refuse_root(euid)
-            .and_then(|()| install_plugin(&home, &file))
+            .and_then(|()| install_plugin(&home, &env, &file, unsigned))
             .map(Reply::text),
         Command::Plugin {
             command: PluginCommand::Delete { id },
@@ -225,16 +231,36 @@ pub fn run(ctx: Context<'_>) -> u8 {
 }
 
 /// `hyscribe plugin install <file>`: the package read (no larger than a
-/// package may be), checked, its component loaded once, then unpacked into
-/// `plugins/` and kept in `packages/` (MVP 11.3). Where packages come from
-/// and whether they are signed are not decided: only a local file.
-fn install_plugin(home: &Path, file: &Path) -> Result<String, String> {
+/// package may be), vouched for by its signature beside it or the
+/// operator's `--unsigned` (ADR 0024), checked, its component loaded once,
+/// then unpacked into `plugins/` and kept in `packages/` (MVP 11.3).
+fn install_plugin(
+    home: &Path,
+    env: &HashMap<String, String>,
+    file: &Path,
+    unsigned: bool,
+) -> Result<String, String> {
     let read = hyscribe_ext::installed::read_at_most(file, hyscribe_ext::hyx::MAX_TOTAL);
     let bytes = read.map_err(|err| format!("cannot read {}: {err}", file.display()))?;
+    let mut path = file.as_os_str().to_owned();
+    path.push(".minisig");
+    let vouched = signed::vouched(home, env, &bytes, Path::new(&path), signed::now());
+    let (vouch, how) = match &vouched {
+        Ok((signer, key, signature)) => (
+            Vouch::Signed(*signer, key, signature),
+            signed::told(*signer, key),
+        ),
+        Err(why) if unsigned => (Vouch::Unsigned, format!("unsigned ({why})")),
+        Err(why) => {
+            return Err(format!(
+                "{why}; a package without a signature this site trusts installs only with --unsigned"
+            ));
+        }
+    };
     let folders = (home.join("plugins"), home.join("packages"));
-    let manifest = hyscribe_ext::installed::install((&folders.0, &folders.1), &bytes)?;
+    let manifest = hyscribe_ext::installed::install((&folders.0, &folders.1), &bytes, vouch)?;
     Ok(format!(
-        "Installed {} {} into plugins/{}/, standing in for {}. Activate it from the Plugins screen.\n",
+        "Installed {} {} into plugins/{}/, standing in for {}, {how}. Activate it from the Plugins screen.\n",
         manifest.name,
         manifest.version,
         manifest.id,
@@ -702,6 +728,7 @@ fn describe(config: &Config) -> String {
 
 mod cron;
 mod setup;
+mod signed;
 
 use setup::web::{Ended, SETUP_TIMEOUT, setup_mode};
 

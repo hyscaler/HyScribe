@@ -1028,6 +1028,7 @@ dependencies = [
  "hyscribe-http",
  "hyscribe-mail",
  "hyscribe-phpser",
+ "hyscribe-registry",
  "hyscribe-service",
  "hyscribe-testkit",
  "hyscribe-write",

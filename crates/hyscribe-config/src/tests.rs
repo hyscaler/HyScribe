@@ -60,6 +60,7 @@ fn defaults_are_safe() {
             trusted_proxies: crate::proxies::default_list(),
             request_time_limit: 30,
             rss_allowed_hosts: Vec::new(),
+            extension_trusted_keys: Vec::new(),
             embed_allowed: EmbedAllowed {
                 providers: true,
                 hosts: Vec::new(),
@@ -285,8 +286,10 @@ fn reads_every_key() {
         ("TRUSTED_PROXIES", "10.0.0.0/8, 2001:db8::/32"),
         ("REQUEST_TIME_LIMIT", "5"),
         ("UPLOAD_MAX_SIZE", "512k"),
+        ("EXTENSION_TRUSTED_KEYS", " RWQa,, RWQb "),
     ]))
     .unwrap();
+    assert_eq!(config.extension_trusted_keys, ["RWQa", "RWQb"]);
     assert_eq!(config.database.host, "db.internal");
     assert_eq!(config.database.port, 3307);
     assert_eq!(config.database.password.expose(), "hunter2");

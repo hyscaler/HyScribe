@@ -174,3 +174,48 @@ fn tells_key_ids() {
     assert!(!is_key_id("e7620f1842b4e81f"));
     assert!(!is_key_id("G7620F1842B4E81F"));
 }
+
+#[test]
+fn reads_a_package_claim() {
+    let sha = "0123456789abcdef".repeat(4);
+    let comment = format!(
+        "hyscribe-package id=contact-form-7 version=0.1.0 sdk=0.2 sha256={sha} signed=1795161600"
+    );
+    let expected = Claim {
+        id: "contact-form-7".into(),
+        version: "0.1.0".into(),
+        sdk: "0.2".into(),
+        sha256: sha.clone(),
+        signed: 1_795_161_600,
+    };
+    assert_eq!(Claim::parse(&comment), Some(expected));
+    let longest = comment.replace("1795161600", "18446744073709551615");
+    assert_eq!(Claim::parse(&longest).unwrap().signed, u64::MAX);
+    for refused in [
+        comment.replace("hyscribe-package ", "hyscribe-index "),
+        comment.replace("id=", "name="),
+        comment.replace("id=contact-form-7", "id=Contact"),
+        comment.replace("version=", "v="),
+        comment.replace("version=0.1.0", "version=0.1/0"),
+        comment.replace("sdk=", "s="),
+        comment.replace("sdk=0.2", "sdk=0/2"),
+        comment.replace("sha256=", "sha="),
+        comment.replace(&sha, &sha.to_uppercase()),
+        comment.replace("signed=", "at="),
+        comment.replace("signed=1795161600", "signed="),
+        comment.replace("1795161600", "1795161600x"),
+        comment.replace("1795161600", "18446744073709551616"),
+        comment.replace("1795161600", "000000000000000000001"),
+        format!("{comment} more"),
+        comment.replace(" sdk=0.2", ""),
+        comment.replace("0.2 sha", "0.2  sha"),
+    ] {
+        assert_eq!(Claim::parse(&refused), None, "{refused}");
+    }
+}
+
+#[test]
+fn hashes_with_sha256() {
+    let empty = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    assert_eq!(sha256(b""), empty);
+}

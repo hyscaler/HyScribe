@@ -1275,11 +1275,19 @@ fn plugin_install() {
     let file = home.path().join("hyscribe-test-0.1.0.hyx");
     std::fs::write(&file, package).unwrap();
     let path = file.to_str().unwrap();
-    let output = run_with(&["plugin", "install", path], &[], home.path());
+    let unsigned = run_with(&["plugin", "install", path], &[], home.path());
+    assert_eq!(unsigned.code, 1);
+    let why = format!(
+        "error: no signature {path}.minisig beside it; a package without a signature this site trusts installs only with --unsigned\n"
+    );
+    assert_eq!(unsigned.err, why);
+    let output = run_with(&["plugin", "install", "--unsigned", path], &[], home.path());
     assert_eq!((output.code, output.err.as_str()), (0, ""));
     assert_eq!(
         output.out,
-        "Installed HyScribe Test 0.1.0 into plugins/hyscribe-test/, standing in for hyscribe-test/hyscribe-test.php. Activate it from the Plugins screen.\n"
+        format!(
+            "Installed HyScribe Test 0.1.0 into plugins/hyscribe-test/, standing in for hyscribe-test/hyscribe-test.php, unsigned (no signature {path}.minisig beside it). Activate it from the Plugins screen.\n"
+        )
     );
     assert!(
         home.path()
@@ -1317,13 +1325,176 @@ fn plugin_install() {
         .unwrap()
         .set_len(hyscribe_ext::hyx::MAX_TOTAL + 1)
         .unwrap();
-    let large = run_with(&["plugin", "install", path], &[], home.path());
+    let large = run_with(&["plugin", "install", "--unsigned", path], &[], home.path());
     assert!(large.err.contains("a package is at most"), "{}", large.err);
     std::fs::write(&file, "not a package").unwrap();
-    let refused = run_with(&["plugin", "install", path], &[], home.path());
+    let refused = run_with(&["plugin", "install", "--unsigned", path], &[], home.path());
     assert_eq!(
         (refused.code, refused.err.as_str()),
         (1, "error: not a zip archive\n")
+    );
+}
+
+/// `plugin install` takes a package whose signature beside it verifies
+/// with a key `EXTENSION_TRUSTED_KEYS` lists, or with a key of the kept
+/// registry key list, applying the kept index's revocations; anything else
+/// needs `--unsigned` (ADR 0024).
+#[test]
+fn plugin_install_signatures() {
+    use hyscribe_testkit::minisign::{Key, key_list, sign_keys};
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let manifest = include_bytes!("../../hyscribe-ext/guest/hyscribe.ext.toml");
+    let package = hyscribe_testkit::hyx::zip(&[
+        ("hyscribe.ext.toml", manifest, true),
+        ("extension.wasm", guest::component(), true),
+    ]);
+    let sha = hyscribe_ext::signature::sha256(&package);
+    let file = home.join("hyscribe-test-0.1.0.hyx");
+    std::fs::write(&file, &package).unwrap();
+    let path = file.to_str().unwrap();
+    let minisig = home.join("hyscribe-test-0.1.0.hyx.minisig");
+    let claim = format!(
+        "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.3 sha256={sha} signed=1800000000"
+    );
+    let sign = |seed: u8, comment: &str| {
+        std::fs::write(&minisig, Key(seed).sign(&package, comment)).unwrap();
+    };
+    let install = |env: &[(&str, &str)], unsigned: bool| {
+        let args: &[&str] = if unsigned {
+            &["plugin", "install", "--unsigned", path]
+        } else {
+            &["plugin", "install", path]
+        };
+        let output = run_with(args, env, home);
+        if output.code == 0 {
+            output.out
+        } else {
+            output.err
+        }
+    };
+    let origin = || std::fs::read_to_string(home.join("plugins/hyscribe-test/origin.txt")).unwrap();
+    let tail = "; a package without a signature this site trusts installs only with --unsigned\n";
+    // An operator's key.
+    sign(7, &claim);
+    let keys = format!(" , {}, {}", Key(5).public(), Key(7).public());
+    let site = |keys: &'static str| {
+        [
+            ("DB_NAME", "x"),
+            ("DB_USER", "x"),
+            ("EXTENSION_TRUSTED_KEYS", keys),
+        ]
+    };
+    let keys: &'static str = Box::leak(keys.into_boxed_str());
+    let trusted = install(&site(keys), false);
+    let by = format!(
+        "signed by key {}, which EXTENSION_TRUSTED_KEYS trusts",
+        Key(7).id()
+    );
+    assert!(trusted.contains(&by), "{trusted}");
+    assert_eq!(origin(), format!("trusted {} {sha}\n", Key(7).id()));
+    let bad = install(&site("RWQx"), false);
+    assert_eq!(
+        bad,
+        format!("error: EXTENSION_TRUSTED_KEYS: RWQx is not a minisign public key{tail}")
+    );
+    let other = claim.replace(&sha, &"0".repeat(64));
+    sign(7, &other);
+    let moved = install(&site(keys), false);
+    assert_eq!(
+        moved,
+        format!("error: its signature is of another package{tail}")
+    );
+    let anyway = install(&site(keys), true);
+    let broken = install(&[("DB_NAME", "x")], false);
+    assert_eq!(broken, format!("error: DB_USER is not set{tail}"));
+    assert!(
+        anyway.contains("unsigned (its signature is of another package)"),
+        "{anyway}"
+    );
+    assert_eq!(origin(), format!("unsigned {sha}\n"));
+    // A key of the registry's key list, kept in registry/.
+    sign(10, &claim);
+    let none = install(&[], false);
+    assert!(
+        none.starts_with("error: no key list is kept in registry/"),
+        "{none}"
+    );
+    let now = crate::signed::now();
+    let registry = home.join("registry");
+    std::fs::create_dir(&registry).unwrap();
+    let online = [
+        (
+            &Key(10),
+            r#""packages""#,
+            1_800_000_000 - 100,
+            1_800_000_000 + 100,
+        ),
+        (&Key(11), r#""index""#, now - 1_000, now + 1_000),
+    ];
+    let list = key_list(1, now + 1_000, &online, &[]);
+    std::fs::write(registry.join("keys.json"), &list).unwrap();
+    for (n, signature) in sign_keys(&list, 1, now + 1_000, &[&Key(1), &Key(3)])
+        .iter()
+        .enumerate()
+    {
+        std::fs::write(
+            registry.join(format!("keys.json.{}.minisig", n + 1)),
+            signature,
+        )
+        .unwrap();
+    }
+    let signed = install(&[], false);
+    let by = format!("signed by the registry's key {}", Key(10).id());
+    assert!(signed.contains(&by), "{signed}");
+    assert_eq!(origin(), format!("signed {} {sha}\n", Key(10).id()));
+    sign(10, &claim.replace("signed=1800000000", "signed=1800000101"));
+    let late = install(&[], false);
+    let window = format!(
+        "error: key {} could not sign at 1800000101{tail}",
+        Key(10).id()
+    );
+    assert_eq!(late, window);
+    sign(10, "timestamp:1");
+    let unnamed = install(&[], false);
+    assert_eq!(
+        unnamed,
+        format!("error: its signature's trusted comment names no package{tail}")
+    );
+    // The index revokes the version: the installed plugin, and the install.
+    let index = format!(
+        r#"{{"serial":1,"expires":{},"extensions":[],"revoked":[{{"id":"hyscribe-test","version":"0.1.0","sha256":"{sha}","reason":"CVE-1"}}]}}"#,
+        now + 1_000
+    );
+    std::fs::write(registry.join("index.json"), &index).unwrap();
+    let comment = format!("hyscribe-index serial=1 expires={}", now + 1_000);
+    std::fs::write(
+        registry.join("index.json.minisig"),
+        Key(11).sign(index.as_bytes(), &comment),
+    )
+    .unwrap();
+    sign(10, &claim);
+    let revoked = install(&[], false);
+    assert_eq!(
+        revoked,
+        format!("error: hyscribe-test 0.1.0 is revoked: CVE-1{tail}")
+    );
+    let marked = origin();
+    assert!(marked.starts_with(&format!("signed {} {sha}\nrevoked ", Key(10).id())));
+    assert!(marked.ends_with(" CVE-1\n"), "{marked}");
+    // Signature files that do not read.
+    std::fs::write(&minisig, "x").unwrap();
+    let unread = install(&[], false);
+    assert_eq!(
+        unread,
+        format!("error: {path}.minisig: a signature file has four lines{tail}")
+    );
+    std::fs::remove_file(&minisig).unwrap();
+    std::fs::create_dir(&minisig).unwrap();
+    let folder = install(&[], false);
+    assert!(
+        folder.starts_with(&format!("error: cannot read {path}.minisig: ")),
+        "{folder}"
     );
 }
 
@@ -1355,7 +1526,10 @@ fn plugin_delete() {
         env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
         run_as(&["plugin", "delete", id], env, home, USER, child_server())
     };
-    let install = || assert_eq!(run_with(&["plugin", "install", path], &[], home).code, 0);
+    let install = || {
+        let output = run_with(&["plugin", "install", "--unsigned", path], &[], home);
+        assert_eq!(output.code, 0);
+    };
     let folder = home.join("plugins/hyscribe-test");
     let kept = home.join("packages/hyscribe-test-0.1.0.hyx");
     install();

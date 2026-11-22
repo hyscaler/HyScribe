@@ -62,7 +62,11 @@ async fn a_page_view_s_calls_commit_each_on_its_own() {
             .unwrap(),
     );
     let run = |call: fn(&Live) -> Result<Value, String>| {
-        let live = Live(Through::Own(Some(writer.clone()), Handle::current()), None);
+        let live = Live(
+            Through::Own(Some(writer.clone()), Handle::current()),
+            None,
+            Arc::default(),
+        );
         tokio::task::spawn_blocking(move || call(&live))
     };
     let missing = run(|live| {
@@ -127,7 +131,11 @@ async fn transients_meta_and_roles_go_through_wordpress_s_functions() {
         .await
         .unwrap();
     let writer = Writer::open(&saves(), Mode::Primary).await.unwrap();
-    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()), None);
+    let live = Live(
+        Through::Own(writer.map(Arc::new), Handle::current()),
+        None,
+        Arc::default(),
+    );
     let answers = tokio::task::spawn_blocking(move || {
         let post = ObjectKind::Post;
         let transients = [
@@ -207,7 +215,11 @@ async fn requests_go_through_the_site_s_client() {
         "http://home.test".into(),
         Handle::current(),
     );
-    let live = Live(Through::Own(None, Handle::current()), Some(outbound));
+    let live = Live(
+        Through::Own(None, Handle::current()),
+        Some(outbound),
+        Arc::default(),
+    );
     let request = |url: &str| Outgoing {
         method: "GET".into(),
         url: url.into(),
@@ -219,7 +231,7 @@ async fn requests_go_through_the_site_s_client() {
         let page = live.fetch(&request("http://pages.test/agent"), &|_| true);
         let lost = live.fetch(&request("http://nowhere.test/"), &|_| true);
         let (sender, _) = mpsc::channel(1);
-        let acting = Live(Through::Action(sender), None);
+        let acting = Live(Through::Action(sender), None, Arc::default());
         let off = acting.fetch(&request("http://pages.test/agent"), &|_| true);
         (page, lost, off)
     });
@@ -235,7 +247,7 @@ async fn requests_go_through_the_site_s_client() {
 /// Without a writer, or over a database it cannot write, a call fails.
 #[tokio::test(flavor = "multi_thread")]
 async fn calls_fail_where_nothing_can_be_written() {
-    let read_only = Live(Through::Own(None, Handle::current()), None);
+    let read_only = Live(Through::Own(None, Handle::current()), None, Arc::default());
     let answer = tokio::task::spawn_blocking(move || read_only.get_option("x"));
     assert_eq!(answer.await.unwrap(), Err(READ_ONLY.into()));
     let missing = Database {
@@ -243,7 +255,11 @@ async fn calls_fail_where_nothing_can_be_written() {
         ..fixture_database()
     };
     let writer = Writer::open(&missing, Mode::Primary).await.unwrap();
-    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()), None);
+    let live = Live(
+        Through::Own(writer.map(Arc::new), Handle::current()),
+        None,
+        Arc::default(),
+    );
     let answer = tokio::task::spawn_blocking(move || live.get_option("x"));
     assert!(answer.await.unwrap().is_err());
     let reader = Database {
@@ -252,12 +268,16 @@ async fn calls_fail_where_nothing_can_be_written() {
         ..fixture_database()
     };
     let writer = Writer::open(&reader, Mode::Primary).await.unwrap();
-    let live = Live(Through::Own(writer.map(Arc::new), Handle::current()), None);
+    let live = Live(
+        Through::Own(writer.map(Arc::new), Handle::current()),
+        None,
+        Arc::default(),
+    );
     let answer = tokio::task::spawn_blocking(move || live.add_option("x", Value::Null, None));
     assert!(answer.await.unwrap().is_err());
     let (sender, jobs) = mpsc::channel(1);
     drop(jobs);
-    let live = Live(Through::Action(sender), None);
+    let live = Live(Through::Action(sender), None, Arc::default());
     let answer = tokio::task::spawn_blocking(move || live.delete_option("x"));
     assert_eq!(answer.await.unwrap(), Err(GONE.into()));
 }
@@ -267,7 +287,7 @@ async fn calls_fail_where_nothing_can_be_written() {
 #[test]
 fn what_is_not_served_yet() {
     let (sender, _) = mpsc::channel(1);
-    let live = Live(Through::Action(sender), None);
+    let live = Live(Through::Action(sender), None, Arc::default());
     let unserved = Err(UNSERVED.to_string());
     assert_eq!(
         live.query(&Value::Null),
@@ -300,8 +320,13 @@ fn what_is_not_served_yet() {
     assert_eq!(live.register_asset("ext", &asset), unserved.clone());
     assert_eq!(live.enqueue(AssetKind::Style, "h"), unserved.clone());
     assert_eq!(live.add_inline(AssetKind::Script, "h", "", false), unserved);
-    let call = hyscribe_ext::ThemeCall::HavePosts;
+    let call = hyscribe_ext::ThemeCall::ContentWidth(800);
     assert_eq!(live.theme("t", &call), Err(UNSERVED.to_string()));
+    let call = hyscribe_ext::ThemeCall::HavePosts;
+    assert_eq!(
+        live.theme("t", &call),
+        Err("no page is being rendered".into())
+    );
     assert!(live.public_post_type("attachment") && live.public_post_type("post"));
     assert!(live.public_post_type("page") && !live.public_post_type("ext_item"));
     assert_eq!(live.translate("ext", "Hello", Some("ctx")), "Hello");

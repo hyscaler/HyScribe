@@ -129,6 +129,7 @@ impl Plugin for TestTheme {
             file("index.php", None, &[]),
             file("page-wide.php", Some("Wide"), &["page", "post"]),
             file("template-parts/header.php", None, &[]),
+            file("front-page.php", None, &[]),
         ])
         .map_err(why)?;
         let answered = rounds(&[
@@ -170,6 +171,15 @@ impl Theme for TestTheme {
                 let head = template::print("wp_head", &[]).map_err(|e| format!("{e:?}"))?;
                 let mut page = head;
                 page.extend_from_slice(b"<main>index</main>");
+                Ok(page)
+            }
+            // The tags the host answers over the page being rendered.
+            "front-page.php" => {
+                let why = |e: SdkError| format!("{e:?}");
+                let front = template::is("is_front_page", &[]).map_err(why)?;
+                let mut page = b"<body ".to_vec();
+                page.extend(template::print("body_class", &[]).map_err(why)?);
+                page.extend_from_slice(if front { b">front</body>" } else { b">other</body>" });
                 Ok(page)
             }
             "slow.php" => template::print("slow", &[]).map_err(|e| format!("{e:?}")),

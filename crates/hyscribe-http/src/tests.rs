@@ -270,6 +270,7 @@ async fn database_errors_show_no_details() {
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         uploads: None,
         extensions: None,
+        running: None,
         install: unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
@@ -1021,6 +1022,7 @@ async fn the_front_page_links_to_home() {
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         uploads: None,
         extensions: None,
+        running: None,
         install: unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
@@ -1209,6 +1211,7 @@ async fn failed_reads_answer_defaults() {
         limiter: Arc::new(login::limits::Limiter::new(Default::default())),
         uploads: None,
         extensions: None,
+        running: None,
         install: unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),
@@ -3951,4 +3954,4 @@ async fn a_write_cut_off_by_the_time_limit_rolls_back() {
     write.commit().await.unwrap();
 }
 
-mod classic;
+pub(crate) mod classic;

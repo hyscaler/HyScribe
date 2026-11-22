@@ -11,6 +11,7 @@ pub mod balance;
 mod bindings;
 pub mod blocks;
 mod categories;
+pub mod classic;
 pub mod clickable;
 mod comment_pages;
 mod comments;

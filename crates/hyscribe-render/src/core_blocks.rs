@@ -1747,6 +1747,7 @@ mod latest_comments;
 mod legacy_comments;
 mod loginout;
 mod site_logo;
+pub(crate) use site_logo::{custom_logo, logo};
 pub(crate) mod tag_cloud;
 mod term;
 mod time_to_read;

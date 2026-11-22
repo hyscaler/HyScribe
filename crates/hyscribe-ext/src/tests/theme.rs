@@ -74,6 +74,7 @@ fn a_theme_calls_its_world_in_a_request() -> Result<(), Fault> {
                 file("index.php", None, &[]),
                 file("page-wide.php", Some("Wide"), &["page", "post"]),
                 file("template-parts/header.php", None, &[]),
+                file("front-page.php", None, &[]),
             ][..]
         )
     );
@@ -158,7 +159,7 @@ fn renders_in_an_instance_of_its_own() -> Result<(), Fault> {
     let loaded = theme(Limits::default())?;
     let site = TestSite::new();
     let (request, dispatch) = dispatching(&loaded, &site);
-    assert_eq!(request.templates().map(<[_]>::len), Some(3));
+    assert_eq!(request.templates().map(<[_]>::len), Some(4));
     // `wp_head` fires a hook the theme answers while it renders.
     let page = b"<head><!-- theme hook --><main>index</main>".to_vec();
     for _ in 0..2 {

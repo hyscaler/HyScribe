@@ -75,6 +75,37 @@ impl Default for NavMenuArgs {
     }
 }
 
+impl NavMenuArgs {
+    /// `wp_parse_args( $args, $defaults )` of a theme's arguments; `echo`
+    /// and keys `wp_nav_menu()` does not read are left out.
+    pub fn parse(given: &Value) -> NavMenuArgs {
+        let mut args = NavMenuArgs::default();
+        for (key, value) in given.as_array().unwrap_or_default() {
+            let bytes = value.to_php_string();
+            match &key.to_php_string()[..] {
+                b"menu" => args.menu = value.clone(),
+                b"container" => args.container = bytes,
+                b"container_class" => args.container_class = bytes,
+                b"container_id" => args.container_id = bytes,
+                b"container_aria_label" => args.container_aria_label = bytes,
+                b"menu_class" => args.menu_class = bytes,
+                b"menu_id" => args.menu_id = bytes,
+                b"fallback_cb" => args.fallback = !value.is_empty(),
+                b"before" => args.before = bytes,
+                b"after" => args.after = bytes,
+                b"link_before" => args.link_before = bytes,
+                b"link_after" => args.link_after = bytes,
+                b"items_wrap" => args.items_wrap = bytes,
+                b"item_spacing" => args.item_spacing = bytes,
+                b"depth" => args.depth = value.to_int(),
+                b"theme_location" => args.theme_location = bytes,
+                _ => {}
+            }
+        }
+        args
+    }
+}
+
 /// What `wp_nav_menu()` answers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NavMenu {

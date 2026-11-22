@@ -28,6 +28,9 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::Site;
 
+mod theme;
+pub(crate) use theme::{Failed, Theme};
+
 /// What a host call answers that this host does not serve yet.
 const UNSERVED: &str = "not served by this host yet";
 
@@ -74,8 +77,9 @@ impl Drop for Done {
 struct Outbound(Option<Arc<Client>>, String, Handle);
 
 /// The site an extension's host calls reach, once their grants are
-/// checked: where their database calls run, and how they fetch.
-struct Live(Through, Option<Outbound>);
+/// checked: where their database calls run, how they fetch, and what the
+/// active theme's calls answer from.
+struct Live(Through, Option<Outbound>, Arc<Theme>);
 
 fn failed(err: impl std::fmt::Debug) -> String {
     format!("{err:?}")
@@ -433,8 +437,8 @@ impl hyscribe_ext::Site for Live {
         Err(UNSERVED.into())
     }
 
-    fn theme(&self, _: &str, _: &hyscribe_ext::ThemeCall) -> Result<Value, String> {
-        Err(UNSERVED.into())
+    fn theme(&self, _: &str, call: &hyscribe_ext::ThemeCall) -> Result<Value, String> {
+        self.2.answer(call)
     }
 }
 
@@ -464,31 +468,50 @@ fn line(report: &Report) -> String {
     format!("extension {extension}: {hook} {callback:?}: {fault:?}\n")
 }
 
+/// A page view's extensions, and the active theme's state their calls
+/// answer from.
+#[derive(Clone)]
+pub(crate) struct Running {
+    pub(crate) request: Arc<Request>,
+    pub(crate) theme: Arc<Theme>,
+}
+
+impl std::fmt::Debug for Running {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Running")
+    }
+}
+
 /// The extensions of a page view on `site`, if any are active.
-pub(crate) fn request(site: &Site) -> Option<Arc<Request>> {
+pub(crate) fn request(site: &Site) -> Option<Running> {
     let runtime = site.extensions.as_ref();
     runtime.and_then(|runtime| {
         let outbound = Outbound(site.fetch.clone(), site.home.clone(), Handle::current());
+        let theme = Arc::new(Theme::default());
         let live = Live(
             Through::Own(site.writer.clone(), Handle::current()),
             Some(outbound),
+            theme.clone(),
         );
         let stored = site.options.get("active_plugins").map(Vec::as_slice);
         let listed = hyscribe_admin::plugins::option_array(stored).unwrap_or_default();
         let (stylesheet, template) = (site.option("stylesheet"), site.option("template"));
-        let theme = hyscribe_ext::Active {
+        let active = hyscribe_ext::Active {
             stylesheet: &stylesheet,
             template: &template,
         };
-        let (request, reports) = runtime.request(&files(&listed), Some(theme), Arc::new(live));
+        let (request, reports) = runtime.request(&files(&listed), Some(active), Arc::new(live));
         log(&reports, &mut std::io::stderr());
-        request.map(Arc::new)
+        request.map(|request| Running {
+            request: Arc::new(request),
+            theme,
+        })
     })
 }
 
-/// `request` as the dispatcher of the hooks fired within it.
-pub(crate) fn dispatch(request: &Arc<Request>) -> Arc<dyn Dispatch> {
-    request.clone()
+/// `running`'s request as the dispatcher of the hooks fired within it.
+pub(crate) fn dispatch(running: &Running) -> Arc<dyn Dispatch> {
+    running.request.clone()
 }
 
 /// What an action runs of its extensions, and what it answers: a lifecycle
@@ -510,7 +533,8 @@ impl Acted {
         make: impl FnOnce(Arc<dyn hyscribe_ext::Site>) -> Result<Request, E>,
     ) -> Result<Acted, E> {
         let (sender, jobs) = mpsc::channel(1);
-        let request = make(Arc::new(Live(Through::Action(sender.clone()), None)))?;
+        let live = Live(Through::Action(sender.clone()), None, Arc::default());
+        let request = make(Arc::new(live))?;
         Ok(Acted {
             request: Arc::new(request),
             sender,

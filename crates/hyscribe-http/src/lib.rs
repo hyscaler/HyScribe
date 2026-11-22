@@ -138,6 +138,8 @@ pub struct Site {
     uploads: Option<Arc<Uploads>>,
     /// The extensions installed in `hyscribe/plugins/` (MVP 11.3).
     extensions: Option<Arc<hyscribe_ext::Runtime>>,
+    /// The extensions a page view runs, once the site is loaded for it.
+    running: Option<extensions::Running>,
     /// The installation as configured, which the admin shows.
     install: Arc<Install>,
     /// The outbound client, when `HTTP_OUTBOUND` is on (ADR 0019).
@@ -211,6 +213,7 @@ impl Site {
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             uploads: None,
             extensions: None,
+            running: None,
             install: unconfigured(),
             fetch: None,
             feed_hosts: Arc::default(),
@@ -265,6 +268,7 @@ impl Site {
             limiter: Arc::clone(&self.limiter),
             uploads: self.uploads.clone(),
             extensions: self.extensions.clone(),
+            running: None,
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
             feed_hosts: Arc::clone(&self.feed_hosts),
@@ -680,14 +684,18 @@ async fn current(
         Ok(now) => {
             let now = admin::saves::themes::checked(now).await;
             // The extensions answer the hooks of the request's work (ADR 0022).
-            let request = extensions::request(&now);
+            let running = extensions::request(&now);
+            let now = Site {
+                running: running.clone(),
+                ..now
+            };
             let site = State(Arc::new(now));
             let served = page(site, method, uri, headers, query, peer, body);
             let response =
-                hyscribe_model::hooks::within(request.as_ref().map(extensions::dispatch), served)
+                hyscribe_model::hooks::within(running.as_ref().map(extensions::dispatch), served)
                     .await;
-            if let Some(request) = request {
-                extensions::log(&request.reports(), &mut std::io::stderr());
+            if let Some(running) = running {
+                extensions::log(&running.request.reports(), &mut std::io::stderr());
             }
             response
         }
@@ -1521,7 +1529,7 @@ fn html(page: Rendered) -> Response {
 fn rendered(
     site: &Site,
     page: Page,
-    body: Result<Result<String, DbError>, tokio::task::JoinError>,
+    body: Result<Result<String, extensions::Failed>, tokio::task::JoinError>,
 ) -> Rendered {
     match finished(site, body) {
         Ok(document) => Rendered {
@@ -1533,10 +1541,10 @@ fn rendered(
 }
 
 /// What a rendering task made, or the 500 page when it met a database
-/// error or panicked.
-fn finished<T>(
+/// error, the theme failed or the task panicked.
+fn finished<T, E: std::fmt::Display>(
     site: &Site,
-    body: Result<Result<T, DbError>, tokio::task::JoinError>,
+    body: Result<Result<T, E>, tokio::task::JoinError>,
 ) -> Result<T, Rendered> {
     match body {
         Ok(Ok(made)) => Ok(made),
@@ -1564,12 +1572,14 @@ fn database_error(site: &Site, err: &dyn std::fmt::Display) -> Rendered {
 /// rendered for `request` with the database read on this thread, and the
 /// head its blocks enqueued styles for; or for an embed, the embed page.
 fn render_page(
-    site: &Site,
+    site: &Arc<Site>,
     candidates: &[String],
     request: &Request,
     title: &str,
-) -> Result<String, DbError> {
+) -> Result<String, extensions::Failed> {
     let reads = Reads::new(site, tokio::runtime::Handle::current());
+    let running = site.running.as_ref();
+    let classic = running.and_then(|running| Some((running, running.request.templates()?)));
     let document = if request.embed {
         lossy(&embed_page(
             &site.theme,
@@ -1578,6 +1588,13 @@ fn render_page(
             title.as_bytes(),
             &share(),
         ))
+    } else if let Some((running, files)) = classic {
+        // A classic theme's page, as the template loader includes it; a
+        // theme has `index.php`, the last of every request's candidates.
+        let candidates = with_page_template(&reads, request, candidates);
+        let file = hyscribe_ext::locate(&candidates, files).unwrap_or("index.php");
+        running.theme.begin((site, request), files);
+        lossy(&running.theme.end(running.request.render(file))?)
     } else {
         let candidates = with_page_template(&reads, request, candidates);
         // Every block theme has an index template.
@@ -1600,7 +1617,7 @@ fn render_page(
             ),
         )
     };
-    reads.finish()?;
+    reads.finish().map_err(extensions::Failed::Database)?;
     Ok(document)
 }
 

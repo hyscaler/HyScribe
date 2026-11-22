@@ -6,11 +6,14 @@
 
 use hyscribe_html::TagProcessor;
 use hyscribe_kses::{esc_html, esc_url};
+use hyscribe_model::hooks::apply_filters;
 use hyscribe_phpser::{Maybe, Value, is_empty_string, maybe_unserialize};
 
 use super::{Block, Context};
 use crate::attachment::{ImageOptions, attachment_is_image, wp_get_attachment_image};
 use crate::formatting::{CORE_SHORTCODE_TAGS, convert_chars, find, wptexturize};
+use crate::media::Loading;
+use crate::site::{Request, Site};
 
 /// `render_block_core_site_logo()`.
 pub(super) fn site_logo(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
@@ -25,7 +28,12 @@ pub(super) fn site_logo(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
         resize: width.map(|_| &resize as &dyn Fn(i64, i64) -> (i64, i64)),
         ..ImageOptions::default()
     };
-    let logo = custom_logo(context, &options);
+    let logo = custom_logo(
+        (context.site, context.request),
+        context.theme.slug(),
+        &context.loading,
+        &options,
+    );
     if logo.is_empty() {
         return Vec::new();
     }
@@ -60,16 +68,27 @@ pub(super) fn site_logo(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     .concat()
 }
 
-/// `get_custom_logo()` for a theme without `unlink-homepage-logo`.
-fn custom_logo(context: &Context<'_>, options: &ImageOptions<'_>) -> Vec<u8> {
-    let site = context.site;
-    let id = u64::try_from(logo_id(context).to_int()).unwrap_or(0);
-    let image = site
-        .post(id)
-        .is_some_and(|post| attachment_is_image(site, &post));
-    if !image {
+/// `get_custom_logo()` for the theme `stylesheet` without
+/// `unlink-homepage-logo`.
+pub(crate) fn custom_logo(
+    page: (&dyn Site, &Request),
+    stylesheet: &str,
+    loading: &Loading,
+    options: &ImageOptions<'_>,
+) -> Vec<u8> {
+    let logo = unfiltered_logo(page, stylesheet, loading, options);
+    apply_filters("get_custom_logo", logo, &[&0_i64])
+}
+
+fn unfiltered_logo(
+    (site, request): (&dyn Site, &Request),
+    stylesheet: &str,
+    loading: &Loading,
+    options: &ImageOptions<'_>,
+) -> Vec<u8> {
+    let Some(id) = logo(site, stylesheet) else {
         return Vec::new();
-    }
+    };
     let mut attr: Vec<(&str, Vec<u8>)> =
         vec![("class", b"custom-logo".to_vec()), ("loading", Vec::new())];
     let alt = site
@@ -81,11 +100,10 @@ fn custom_logo(context: &Context<'_>, options: &ImageOptions<'_>) -> Vec<u8> {
         let name = convert_chars(&wptexturize(&name, &CORE_SHORTCODE_TAGS));
         attr.push(("alt", esc_html(&name).into_bytes()));
     }
-    let image = wp_get_attachment_image(site, &context.loading, id, "full", &attr, options);
+    let image = wp_get_attachment_image(site, loading, id, "full", &attr, options);
     if image.is_empty() {
         return image;
     }
-    let request = context.request;
     let current = !request.is_paged() && request.is_site_home(site);
     let home = esc_url(&[&site.home_url()[..], b"/"].concat());
     [
@@ -104,14 +122,21 @@ fn custom_logo(context: &Context<'_>, options: &ImageOptions<'_>) -> Vec<u8> {
     .concat()
 }
 
+/// `has_custom_logo()`: the logo's attachment, when it is an image.
+pub(crate) fn logo(site: &dyn Site, stylesheet: &str) -> Option<u64> {
+    let id = u64::try_from(logo_id(site, stylesheet).to_int()).unwrap_or(0);
+    let post = site.post(id)?;
+    attachment_is_image(site, &post).then_some(id)
+}
+
 /// The `site_logo` option, which `_override_custom_logo_theme_mod()` puts
 /// before the theme's `custom_logo` mod.
-fn logo_id(context: &Context<'_>) -> Value {
-    if let Some(logo) = context.site.option("site_logo") {
+fn logo_id(site: &dyn Site, stylesheet: &str) -> Value {
+    if let Some(logo) = site.option("site_logo") {
         return Value::String(logo);
     }
-    let name = format!("theme_mods_{}", context.theme.slug());
-    let mods = context.site.option(&name).unwrap_or_default();
+    let name = format!("theme_mods_{stylesheet}");
+    let mods = site.option(&name).unwrap_or_default();
     match maybe_unserialize(&mods) {
         Maybe::Value(mods) => mods.get_str("custom_logo").cloned().unwrap_or(Value::Null),
         _ => Value::Null,

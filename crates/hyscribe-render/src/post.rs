@@ -205,12 +205,21 @@ pub(crate) fn page_template_slug(site: &dyn Site, post: u64) -> Option<Vec<u8>> 
     (!is_empty_string(&slug) && slug != b"default").then_some(slug)
 }
 
-/// `get_body_class()` for a visitor, with `template` as `get_template()` and
-/// `stylesheet` as `get_stylesheet()`, which differs for a child theme.
-pub fn body_class(
+/// `get_body_class()` for a visitor of a block theme, with `template` as
+/// `get_template()` and `stylesheet` as `get_stylesheet()`, which differs
+/// for a child theme.
+pub fn body_class(site: &dyn Site, request: &Request, theme: (&str, &str)) -> Vec<u8> {
+    body_classes(site, request, theme, true)
+}
+
+/// `body_class()`'s classes, escaped and joined, for a theme without
+/// `custom-background`; `responsive_embeds` is whether the theme supports
+/// them, as block themes do.
+pub fn body_classes(
     site: &dyn Site,
     request: &Request,
     (template, stylesheet): (&str, &str),
+    responsive_embeds: bool,
 ) -> Vec<u8> {
     let mut classes: Vec<Vec<u8>> = Vec::new();
     let mut push = |class: &[u8]| classes.push(class.to_vec());
@@ -328,8 +337,12 @@ pub fn body_class(
             push(format!("{prefix}-{}", term.id).as_bytes());
         }
     }
-    // Block themes support responsive embeds.
-    push(b"wp-embed-responsive");
+    if crate::core_blocks::logo(site, stylesheet).is_some() {
+        push(b"wp-custom-logo");
+    }
+    if responsive_embeds {
+        push(b"wp-embed-responsive");
+    }
     // `page`, or `paged` when `page` is not past the first page.
     let page = if request.page > 1 {
         request.page

@@ -7,6 +7,8 @@ use axum::extract::Query;
 use axum::http::{HeaderMap, Uri};
 
 use hyscribe_ext::{TemplateFile, locate};
+use hyscribe_render::site::Request;
+use hyscribe_render::site_templates::with_page_template;
 
 use super::{NoFallback, fixture_config};
 use crate::preview_nonce::{self, Entry};
@@ -22,7 +24,12 @@ fn file(name: &str) -> TemplateFile {
 
 /// The site a golden line's options describe, as the page goldens build it.
 async fn site_of(options: &str) -> Arc<Site> {
-    let db = hyscribe_db::Db::connect(&fixture_config()).await.unwrap();
+    site_on(&fixture_config(), options).await
+}
+
+/// The site on the database `config` that `options` describe.
+pub(crate) async fn site_on(config: &hyscribe_config::Database, options: &str) -> Arc<Site> {
+    let db = hyscribe_db::Db::connect(config).await.unwrap();
     let oracle = Some("http://127.0.0.1:8081".to_string());
     let mut site = Site::load(db, oracle.clone(), oracle).await.unwrap();
     let named = options.split('&').filter_map(|o| o.split_once('='));
@@ -43,6 +50,15 @@ async fn site_of(options: &str) -> Arc<Site> {
 /// The template `path` resolves to over `files`, as the front end asks
 /// for it, `-` when the loader is not reached.
 async fn resolved(site: &Arc<Site>, path: &str, files: &[TemplateFile]) -> String {
+    let Some((_, candidates)) = page_of(site, path).await else {
+        return "-".into();
+    };
+    locate(&candidates, files).unwrap_or("-").to_string()
+}
+
+/// The page `path` shows and its templates' candidates, as the front end
+/// asks for them, none when the loader is not reached.
+pub(crate) async fn page_of(site: &Arc<Site>, path: &str) -> Option<(Request, Vec<String>)> {
     let uri: Uri = path.parse().unwrap();
     let Query(mut query) = Query::<HashMap<String, String>>::try_from_uri(&uri).unwrap_or_default();
     // As the front end, a search given as an array is an empty search.
@@ -53,20 +69,23 @@ async fn resolved(site: &Arc<Site>, path: &str, files: &[TemplateFile]) -> Strin
     let headers = HeaderMap::new();
     let refused = preview_nonce::refuse(site, &headers, uri.query(), false, Entry::Page);
     if refused.await.is_some() {
-        return "-".into();
+        return None;
     }
     let (asked, query) = pretty_request(site, uri.clone(), query).await.unwrap();
     let Ok((Outcome::Page(page), _)) = outcome(site, (&asked, &uri), &query).await else {
-        return "-".into();
+        return None;
     };
+    // The query vars and the request as the front end sets them.
+    let page = crate::requested(*page, &uri, &asked);
     let (site, request) = (site.clone(), page.request.clone());
-    let candidates = tokio::task::spawn_blocking(move || {
+    let found = tokio::task::spawn_blocking(move || {
         let reads = crate::reads::Reads::new(&site, tokio::runtime::Handle::current());
-        hyscribe_render::site_templates::with_page_template(&reads, &request, &page.candidates)
+        let found = with_page_template(&reads, &request, &page.candidates);
+        (request, found)
     })
     .await
     .unwrap();
-    locate(&candidates, files).unwrap_or("-").to_string()
+    Some(found)
 }
 
 /// Twenty Twenty-One's templates for the default install's requests of

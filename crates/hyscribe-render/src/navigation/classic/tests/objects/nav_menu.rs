@@ -81,32 +81,7 @@ fn golden_site() -> Menus {
 
 /// The arguments of a case, as `wp_parse_args()` leaves them.
 fn args_of(json_args: &str) -> NavMenuArgs {
-    let given = json(json_args);
-    let mut args = NavMenuArgs::default();
-    for (key, value) in given.as_array().unwrap() {
-        let bytes = value.to_php_string();
-        match &key.to_php_string()[..] {
-            b"menu" => args.menu = value.clone(),
-            b"container" => args.container = bytes,
-            b"container_class" => args.container_class = bytes,
-            b"container_id" => args.container_id = bytes,
-            b"container_aria_label" => args.container_aria_label = bytes,
-            b"menu_class" => args.menu_class = bytes,
-            b"menu_id" => args.menu_id = bytes,
-            b"fallback_cb" => args.fallback = !value.is_empty(),
-            b"before" => args.before = bytes,
-            b"after" => args.after = bytes,
-            b"link_before" => args.link_before = bytes,
-            b"link_after" => args.link_after = bytes,
-            b"items_wrap" => args.items_wrap = bytes,
-            b"item_spacing" => args.item_spacing = bytes,
-            b"depth" => args.depth = value.to_int(),
-            b"theme_location" => args.theme_location = bytes,
-            b"echo" => {}
-            other => panic!("{}", String::from_utf8_lossy(other)),
-        }
-    }
-    args
+    NavMenuArgs::parse(&json(json_args))
 }
 
 fn request_of(page: &str) -> Request {

@@ -226,7 +226,7 @@ fn loads_the_active_theme_after_the_plugins() {
     assert_eq!(both.1, Vec::new());
     assert_eq!(request.index("hyscribe-test"), Some(0));
     assert_eq!(request.index("hyscribe-theme"), Some(1));
-    assert_eq!(request.templates().map(<[_]>::len), Some(3));
+    assert_eq!(request.templates().map(<[_]>::len), Some(4));
     let child = runtime
         .request(&[], theme("hyscribe-theme", "parent"), site())
         .0;
@@ -247,7 +247,7 @@ fn loads_the_active_theme_after_the_plugins() {
         alone
             .0
             .and_then(|request| request.templates().map(<[_]>::len)),
-        Some(3)
+        Some(4)
     );
     assert!(format!("{runtime:?}").contains("themes: "));
 }

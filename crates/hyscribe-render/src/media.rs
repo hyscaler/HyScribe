@@ -4,8 +4,8 @@
 //! media count and high priority flag, which every image of the request
 //! shares.
 
-use std::cell::Cell;
-use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 
 /// Where in the request a block renders, and the counts so far.
 #[derive(Clone, Default)]
@@ -21,15 +21,15 @@ pub(crate) struct Loading {
     /// The context `template_part_header`, whose elements count as in the
     /// viewport.
     pub(crate) in_header: bool,
-    shared: Rc<Shared>,
+    shared: Arc<Shared>,
 }
 
 #[derive(Default)]
 struct Shared {
     /// `wp_increase_content_media_count( 0 )`.
-    media_count: Cell<u64>,
+    media_count: AtomicU64,
     /// `! wp_high_priority_element_flag()`.
-    high_priority_taken: Cell<bool>,
+    high_priority_taken: AtomicBool,
 }
 
 /// The filter a `$context` of `wp_get_loading_optimization_attributes()`
@@ -133,7 +133,7 @@ impl Loading {
             counted_when_large = true;
         } else if in_viewport.is_none() && self.in_the_loop {
             // wp_omit_loading_attr_threshold()
-            in_viewport = Some(self.shared.media_count.get() < 3);
+            in_viewport = Some(self.shared.media_count.load(Relaxed) < 3);
             counted = true;
         }
         if in_viewport == Some(true) {
@@ -142,14 +142,14 @@ impl Loading {
             match given.fetchpriority {
                 Some(b"auto") | None => {
                     let flag = &self.shared.high_priority_taken;
-                    if !flag.get() && width.saturating_mul(height) >= 50_000 {
+                    if !flag.load(Relaxed) && width.saturating_mul(height) >= 50_000 {
                         if given.fetchpriority.is_none() {
                             attributes.fetchpriority = Some("high");
                         }
-                        flag.set(true);
+                        flag.store(true, Relaxed);
                     }
                 }
-                Some(b"high") => self.shared.high_priority_taken.set(true),
+                Some(b"high") => self.shared.high_priority_taken.store(true, Relaxed),
                 _ => {}
             }
         } else if !low {
@@ -158,8 +158,7 @@ impl Loading {
         // wp_min_priority_img_pixels
         let large = width.saturating_mul(height) >= 50_000;
         if (counted || counted_when_large && large) && given.fetchpriority != Some(b"auto") {
-            let count = &self.shared.media_count;
-            count.set(count.get() + 1);
+            self.shared.media_count.fetch_add(1, Relaxed);
         }
         attributes
     }

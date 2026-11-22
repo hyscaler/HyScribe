@@ -503,6 +503,7 @@ async fn a_failed_read_is_the_database_error_page() {
         limiter: Arc::new(crate::login::limits::Limiter::new(Default::default())),
         uploads: None,
         extensions: None,
+        running: None,
         install: crate::unconfigured(),
         fetch: None,
         feed_hosts: Arc::default(),

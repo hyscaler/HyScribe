@@ -275,16 +275,19 @@ impl Host {
     }
 }
 
+/// An SDK import's interface and version.
+fn sdk_import(name: &str) -> Option<(&str, &str)> {
+    name.strip_prefix(SDK).and_then(|name| name.split_once('@'))
+}
+
 /// Whether an import is the SDK's interface `interface`, any version.
 pub(crate) fn of(name: &str, interface: &str) -> bool {
-    let named = name.strip_prefix(SDK).and_then(|name| name.split_once('@'));
-    named.is_some_and(|(named, _)| named == interface)
+    sdk_import(name).is_some_and(|(named, _)| named == interface)
 }
 
 /// Whether an import is one of SDK `sdk`'s interfaces, any patch version.
 pub(crate) fn of_sdk(name: &str, sdk: &str) -> bool {
-    let version = name.strip_prefix(SDK).and_then(|name| name.split_once('@'));
-    version.is_some_and(|(_, version)| {
+    sdk_import(name).is_some_and(|(_, version)| {
         version
             .strip_prefix(sdk)
             .is_some_and(|patch| patch.starts_with('.'))
@@ -346,7 +349,7 @@ impl Extension {
     }
 
     /// A theme's template files.
-    pub fn templates(&self) -> &[TemplateFile] {
+    pub(crate) fn templates(&self) -> &[TemplateFile] {
         &self.registered.templates
     }
 

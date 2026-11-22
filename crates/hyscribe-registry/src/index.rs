@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The index, `index.json` (ADR 0024): every extension with its latest
-//! version for each SDK and the hash and size of its version document, and
-//! the revoked versions; signed by an online key allowed to sign `index`,
-//! its trusted comment `hyscribe-index serial=<n> expires=<unix>`.
+//! The index, `index.json` (ADR 0024): the extensions and the revoked versions, signed
+//! by an index key with the comment `hyscribe-index serial=<n> expires=<unix>`.
 
 use hyscribe_ext::manifest::{self, Kind};
 use hyscribe_ext::origin::{hex64, reason_text};

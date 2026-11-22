@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Whose signature vouches for a local package (ADR 0024): a key in
-//! `EXTENSION_TRUSTED_KEYS`, or an online key of the registry's key list
-//! kept in `registry/`, verified against the compiled-in roots, the kept
-//! index's revocations applied to the installed plugins first.
+//! `EXTENSION_TRUSTED_KEYS`, or one of the registry key list kept in `registry/`.
 
 use std::collections::HashMap;
 use std::io::ErrorKind;

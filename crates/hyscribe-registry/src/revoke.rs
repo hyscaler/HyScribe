@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Revocation of installed extensions (ADR 0024): one whose signing key the
-//! key list revokes, or whose version the index revokes, gets a `revoked`
-//! line in its `origin.txt`, and stops loading. Packages an operator's key
-//! signed, or none did, are not the registry's, so nothing revokes them.
+//! Revocation (ADR 0024): an installed version or signing key the registry revokes gets a
+//! `revoked` line in `origin.txt` and stops loading; unsigned and trusted packages are not its.
 
 use std::path::Path;
 

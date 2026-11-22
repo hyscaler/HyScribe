@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The key list, `keys.json` (ADR 0024): the online keys, what each may
-//! sign and when, and the revoked ones; signed by two distinct roots, its
-//! trusted comment `hyscribe-keys serial=<n> expires=<unix>`.
+//! The key list, `keys.json` (ADR 0024): the online keys and the revoked ones,
+//! signed by two roots with the comment `hyscribe-keys serial=<n> expires=<unix>`.
 
 use hyscribe_ext::signature::{PublicKey, Signature, is_key_id, prehash};
 

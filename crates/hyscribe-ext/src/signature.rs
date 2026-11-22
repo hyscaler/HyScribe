@@ -63,9 +63,8 @@ pub struct Signature {
 }
 
 impl Signature {
-    /// Reads a signature file: an untrusted comment, the signature, a
-    /// trusted comment and the global signature, the comments printable
-    /// ASCII; anything else, the legacy form among it, refuses it.
+    /// Reads a signature file's four lines, the comments printable ASCII;
+    /// anything else, the legacy form among it, refuses it.
     pub fn parse(bytes: &[u8]) -> Result<Signature, &'static str> {
         if u64::try_from(bytes.len()).map_or(true, |len| len > MAX_BYTES) {
             return Err("a signature file is at most 4 KiB");

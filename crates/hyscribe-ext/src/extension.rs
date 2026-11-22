@@ -167,12 +167,8 @@ pub struct Extension {
 }
 
 impl Host {
-    /// Checks the grants, reads the fault record (a disabled extension, or
-    /// one whose record does not read, is not loaded) and `origin.txt` (a
-    /// revoked extension, or one whose file does not read, is not loaded,
-    /// ADR 0024), compiles the
-    /// component, links it against the SDK only (no WASI) and runs its
-    /// `init` once, keeping what it registers.
+    /// Loads an extension that is neither disabled nor revoked (fault record, `origin.txt`):
+    /// checks its grants, links it against the SDK only and runs its `init` once.
     pub fn load(&self, package: Package<'_>) -> Result<Extension, Fault> {
         package.grants.check().map_err(Fault::Refused)?;
         let record = faults::read(package.folder).ok_or(Fault::Disabled)?;

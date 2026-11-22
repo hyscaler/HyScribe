@@ -152,13 +152,8 @@ pub enum Vouch<'a> {
     Unsigned,
 }
 
-/// `hyscribe plugin install`: checks the package's signature, reads it and
-/// checks its manifest is the one signed for, loads its component with its
-/// grants (its `init` run once), so a refused package changes nothing;
-/// keeps the package (and its signature) in `packages/` as
-/// `<id>-<version>.hyx`, then unpacks it into `plugins/<id>/` with its
-/// `origin.txt`, in place of an older one, keeping that one's fault record
-/// and approval.
+/// `hyscribe plugin install`: checks the signature and manifest, loads the component once, then
+/// keeps the package in `packages/` and swaps it into `plugins/<id>/` with `origin.txt`.
 pub fn install(
     (plugins, packages): (&Path, &Path),
     bytes: &[u8],

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The verified copies kept in `hyscribe/registry/` (ADR 0024): the key
-//! list and its root signatures, the index and its signature, each verified
-//! again when read, and `state`, the highest serials accepted, so neither
-//! can go back. An offline server can copy them in by hand.
+//! The key list and index kept in `hyscribe/registry/` (ADR 0024), verified again
+//! when read, and `state`, the highest serials accepted, so neither goes back.
 
 use std::io::ErrorKind;
 use std::path::Path;

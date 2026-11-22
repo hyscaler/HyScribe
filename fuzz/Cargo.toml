@@ -19,6 +19,7 @@ hyscribe-auth = { path = "../crates/hyscribe-auth" }
 hyscribe-phpser = { path = "../crates/hyscribe-phpser" }
 hyscribe-config = { path = "../crates/hyscribe-config" }
 hyscribe-ext = { path = "../crates/hyscribe-ext" }
+hyscribe-sdk = { path = "../crates/hyscribe-sdk" }
 hyscribe-render = { path = "../crates/hyscribe-render" }
 hyscribe-rest = { path = "../crates/hyscribe-rest" }
 hyscribe-model = { path = "../crates/hyscribe-model" }
@@ -441,6 +442,13 @@ bench = false
 [[bin]]
 name = "ext_package"
 path = "fuzz_targets/ext_package.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sdk_template_splice"
+path = "fuzz_targets/sdk_template_splice.rs"
 test = false
 doc = false
 bench = false

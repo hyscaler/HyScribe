@@ -446,6 +446,13 @@ user-id = 64539
 user-login = "kennykerr"
 user-name = "Kenny Kerr"
 
+[[publisher.winnow]]
+version = "1.0.4"
+when = "2026-07-13"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
 [[publisher.wit-bindgen]]
 version = "0.57.1"
 when = "2026-04-17"
@@ -1693,6 +1700,101 @@ aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/mai
 who = "Mike Hommey <mh+mozilla@glandium.org>"
 criteria = "safe-to-deploy"
 delta = "0.2.20 -> 0.2.21"
+aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama]]
+who = "Ben Dean-Kawamura <bdk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.13.1"
+notes = """
+Template crate.  This is only used to generate the Rust/JS code for UniFFI.
+
+We used to use askama, then we switched to rinja which was a fork.  Now rinja and
+askama have merged again.
+
+The differences from askama 0.12, are pretty straightforward and don't seem risky to me.  There's
+some unsafe code and macros, but nothing that complicated.
+"""
+aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.13.1 -> 0.14.0"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama]]
+who = "Ben Dean-Kawamura <bdk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.14.0 -> 0.16.0"
+notes = """
+Most of the changes were refactors to the filter code.
+No dependency changes, except updates the criterion dev-dependency.
+"""
+aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama_derive]]
+who = "Ben Dean-Kawamura <bdk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.13.1"
+notes = """
+Template crate.  This is only used to generate the Rust/JS code for UniFFI.
+
+We used to use askama, then we switched to rinja which was a fork.  Now rinja and
+askama have merged again.
+
+I did a quick scan of the current code and couldn't find any issues.
+"""
+aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama_derive]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.13.1 -> 0.14.0"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama_derive]]
+who = "Ben Dean-Kawamura <bdk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.14.0 -> 0.16.0"
+notes = """
+The generated code contains a couple new `unsafe` blocks, but nothing too dangerous.
+This brings in several new dependencies and updates existing ones.
+"""
+aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama_macros]]
+who = "Ben Dean-Kawamura <bdk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.16.0"
+notes = "This crate contains almost no code, it just defines the macros from `askama_derive`."
+aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama_parser]]
+who = "Ben Dean-Kawamura <bdk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.13.0"
+notes = """
+Template crate.  This is only used to generate the Rust/JS code for UniFFI.
+
+We used to use askama, then we switched to rinja which was a fork.  Now rinja and
+askama have merged again.
+
+I did a quick scan of the current code and couldn't find any issues.
+"""
+aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama_parser]]
+who = "Jan-Erik Rediger <jrediger@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.13.0 -> 0.14.0"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.askama_parser]]
+who = "Ben Dean-Kawamura <bdk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.14.0 -> 0.16.0"
+notes = "Several new dependencies and dependency upgrades.  There were a ton of changes here, but it felt safe to me because it's just parsing code."
 aggregated-from = "https://raw.githubusercontent.com/mozilla-firefox/firefox/main/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.bit-set]]

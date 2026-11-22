@@ -50,6 +50,8 @@ extern crate alloc;
 
 mod api;
 pub mod json;
+#[cfg(any(feature = "theme", not(target_arch = "wasm32")))]
+pub mod page;
 mod value;
 
 pub use api::*;

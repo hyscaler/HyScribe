@@ -261,7 +261,8 @@ impl Client {
         let deadline = Instant::now() + args.timeout.min(MAX_TIME);
         let limit = args.limit_response_size.unwrap_or(MAX_BYTES).min(MAX_BYTES);
         let sent = (&args, outgoing);
-        let (response, hop) = self.follow(url, home, sent, allowed, &|| deadline).await?;
+        let checks = (allowed, false);
+        let (response, hop) = self.follow(url, home, sent, checks, &|| deadline).await?;
         match timeout_at(deadline, fetched(response, limit)).await {
             Err(_) => Err(Error {
                 kind: Kind::Timeout,
@@ -310,7 +311,8 @@ impl Client {
         let deadline = || end.min(Instant::now() + gap);
         let args = Args::new(user_agent.into());
         let allowed = |hop: &str| hop == host;
-        let followed = self.follow(url, b"", (&args, GET), &allowed, &deadline);
+        let checks = (&allowed as &Allowed<'_>, true);
+        let followed = self.follow(url, b"", (&args, GET), checks, &deadline);
         let (response, hop) = followed.await.map_err(Download::Fetch)?;
         let saved = save(response, (size, to), &deadline).await;
         saved.map_err(|failed| {
@@ -323,14 +325,15 @@ impl Client {
     }
 
     /// Follows `url` and the redirects it leads to, as many as `args`
-    /// allow, each hop within `deadline`: the answer, its body unread, and
+    /// allow, each to a host `allowed` accepts and, when `https`, over
+    /// HTTPS, each hop within `deadline`: the answer, its body unread, and
     /// its hop.
     async fn follow(
         &self,
         url: &[u8],
         home: &[u8],
         (args, outgoing): (&Args, Outgoing<'_>),
-        allowed: &Allowed<'_>,
+        (allowed, https): (&Allowed<'_>, bool),
         deadline: &(dyn Fn() -> Instant + Sync),
     ) -> Result<(Response<Incoming>, u32), Error> {
         let fail = |kind, hop| Err(Error { kind, hop });
@@ -351,7 +354,7 @@ impl Client {
                     ..outgoing
                 }
             };
-            let hop_sent = self.hop(&url, home, (args, sent), check);
+            let hop_sent = self.hop(&url, home, (args, sent), (check, https));
             match timeout_at(deadline(), hop_sent).await {
                 Err(_) => return fail(Kind::Timeout, hop),
                 Ok(Err(kind)) => return fail(kind, hop),
@@ -369,10 +372,10 @@ impl Client {
         url: &[u8],
         home: &[u8],
         (args, outgoing): (&Args, Outgoing<'_>),
-        allowed: Option<&Allowed<'_>>,
+        (allowed, https): (Option<&Allowed<'_>>, bool),
     ) -> Result<Hop, Kind> {
         let target = validate_url(url, home).ok_or(Kind::Invalid)?;
-        if allowed.is_some_and(|allowed| !allowed(&target.host)) {
+        if allowed.is_some_and(|allowed| !allowed(&target.host)) || (https && !target.https) {
             return Err(Kind::Disallowed);
         }
         let addresses = self

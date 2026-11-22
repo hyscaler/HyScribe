@@ -657,6 +657,11 @@ async fn downloads_a_package_to_a_file() {
     let stopped = client.download(url, "", (5, &to)).await;
     assert_eq!(stopped, fetch_failed(Kind::Disallowed, 1));
     assert!(!to.exists());
+    // Nor is one to plain HTTP on the same host.
+    let plain = b"HTTP/1.1 302 Found\r\nLocation: http://pages.test/a.hyx\r\n\r\n";
+    let client = downloading(vec![plain, PACKAGE]).await;
+    let stopped = client.download(url, "", (5, &to)).await;
+    assert_eq!(stopped, fetch_failed(Kind::Disallowed, 1));
 }
 
 #[tokio::test]

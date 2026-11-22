@@ -222,8 +222,13 @@ impl One<'_> {
         let key = package_key(self.keys, Some(self.index), &read)?;
         signature::vouch(&bytes, &key, &file)?;
         let manifest = Hyx::read(&bytes)?.manifest;
-        let described = (&manifest.version, &manifest.sdk, &manifest.replaces);
-        let listed = (&chosen.version, &chosen.sdk, &chosen.replaces);
+        let described = (
+            &manifest.id,
+            &manifest.version,
+            &manifest.sdk,
+            &manifest.replaces,
+        );
+        let listed = (&versions.id, &chosen.version, &chosen.sdk, &chosen.replaces);
         if described != listed || manifest.replaces_versions != chosen.replaces_versions {
             return Err(format!(
                 "{name} {}'s manifest is not what its version document says",

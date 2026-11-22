@@ -61,6 +61,15 @@ pub(crate) fn package(version: &str, more: &str) -> Vec<u8> {
     if more == "broken" {
         return b"not a package".to_vec();
     }
+    if more == "renamed" {
+        let manifest = include_str!("../../hyscribe-ext/guest/hyscribe.ext.toml")
+            .replace("id = \"hyscribe-test\"", "id = \"renamed\"")
+            .replace("\"hyscribe-test/", "\"renamed/");
+        return hyscribe_testkit::hyx::zip(&[
+            ("hyscribe.ext.toml", manifest.as_bytes(), true),
+            ("extension.wasm", guest::component(), true),
+        ]);
+    }
     let more = if more.is_empty() {
         String::new()
     } else {

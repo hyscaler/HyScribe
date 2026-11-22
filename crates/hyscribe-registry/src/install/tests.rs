@@ -194,6 +194,17 @@ async fn refuses_a_package_its_document_does_not_describe() {
         refused.unwrap_err(),
         "hyscribe-test 0.1.0's manifest is not what its version document says"
     );
+    // Listed as hyscribe-test, its manifest names another plugin.
+    let renamed = Release {
+        option: "renamed",
+        ..release("0.1.0")
+    };
+    let test = Test::new(&[renamed], &[]);
+    let refused = test.install("hyscribe-test", None, Allow::default()).await;
+    assert_eq!(
+        refused.unwrap_err(),
+        "hyscribe-test 0.1.0's manifest is not what its version document says"
+    );
     // A package signature that names no package.
     let test = Test::new(&[release("0.1.0")], &[]);
     let path = "v1/packages/hyscribe-test/hyscribe-test-0.1.0.hyx";

@@ -3,18 +3,32 @@
 //! The index, `index.json` (ADR 0024): the extensions and the revoked versions, signed
 //! by an index key with the comment `hyscribe-index serial=<n> expires=<unix>`.
 
-use hyscribe_ext::manifest;
+use hyscribe_ext::manifest::{self, Kind};
 use hyscribe_ext::origin::{hex64, reason_text};
 use hyscribe_ext::signature::{Signature, prehash};
 
 use crate::json::{self, Object};
 use crate::keys::{KeyList, Use};
+use crate::versions;
 
 /// The largest index read, ADR 0019's cap, in bytes.
 pub const MAX_BYTES: u64 = 4 << 20;
 
-/// The largest version document, in bytes.
-const MAX_DOCUMENT: u64 = 1 << 20;
+/// An extension the index lists, with the size and SHA-256 of its version
+/// document.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entry {
+    /// `id`.
+    pub id: String,
+    /// `kind`.
+    pub kind: Kind,
+    /// `latest`: the newest version for each SDK, as SDKs and versions.
+    pub latest: Vec<(String, String)>,
+    /// `sha256` of its version document.
+    pub sha256: String,
+    /// `size` of its version document, in bytes.
+    pub size: u64,
+}
 
 /// A revoked version.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +50,8 @@ pub struct Index {
     pub serial: u64,
     /// `expires`: from this second on it is refused.
     pub expires: u64,
+    /// `extensions`.
+    pub extensions: Vec<Entry>,
     /// `revoked`.
     pub revoked: Vec<Revoked>,
 }
@@ -51,12 +67,13 @@ impl Index {
         let revoked = index.list("revoked")?.into_iter().map(revoked);
         let revoked = revoked.collect::<Option<Vec<_>>>()?;
         index.done()?;
-        let mut ids = extensions.clone();
+        let mut ids: Vec<&str> = extensions.iter().map(|entry| entry.id.as_str()).collect();
         ids.sort_unstable();
         ids.dedup();
         (ids.len() == extensions.len()).then_some(Index {
             serial,
             expires,
+            extensions,
             revoked,
         })
     }
@@ -88,6 +105,11 @@ impl Index {
         Ok(index)
     }
 
+    /// The extension `id`, if the index lists it.
+    pub fn extension(&self, id: &str) -> Option<&Entry> {
+        self.extensions.iter().find(|entry| entry.id == id)
+    }
+
     /// Why the package `sha256` of `id` at `version` is revoked, if it is.
     pub fn revoked(&self, id: &str, version: &str, sha256: &str) -> Option<&str> {
         let found = self.revoked.iter().find(|revoked| {
@@ -101,33 +123,39 @@ impl Index {
     }
 }
 
-/// `{"id", "kind", "latest": {<sdk>: <version>}, "sha256", "size"}`, checked
-/// until install by name reads it; its id.
-fn extension(value: hyscribe_phpser::Value) -> Option<String> {
+/// `{"id", "kind", "latest": {<sdk>: <version>}, "sha256", "size"}`.
+fn extension(value: hyscribe_phpser::Value) -> Option<Entry> {
     let mut entry = Object::of(value)?;
     let id = entry.text("id").filter(|id| manifest::slug(id))?;
-    entry
-        .text("kind")
-        .filter(|kind| kind == "plugin" || kind == "theme")?;
+    let kind = match entry.text("kind")?.as_str() {
+        "plugin" => Kind::Plugin,
+        "theme" => Kind::Theme,
+        _ => return None,
+    };
     let latest = entry
         .object("latest")?
         .rest()
         .into_iter()
-        .all(|(sdk, version)| {
+        .map(|(sdk, version)| {
             let sdk = match sdk {
                 hyscribe_phpser::Key::String(sdk) => String::from_utf8(sdk).ok(),
                 hyscribe_phpser::Key::Int(_) => None,
             };
             let version = json::text(version).filter(|version| manifest::version(version));
-            sdk.is_some_and(|sdk| manifest::version(&sdk)) && version.is_some()
+            Some((sdk.filter(|sdk| manifest::version(sdk))?, version?))
         });
-    entry
-        .text("sha256")
-        .filter(|sha256| hex64(sha256) && latest)?;
-    entry
+    let latest = latest.collect::<Option<Vec<_>>>()?;
+    let sha256 = entry.text("sha256").filter(|sha256| hex64(sha256))?;
+    let size = entry
         .int("size")
-        .filter(|size| (1..=MAX_DOCUMENT).contains(size))?;
-    entry.done().map(|()| id)
+        .filter(|size| (1..=versions::MAX_BYTES).contains(size))?;
+    entry.done().map(|()| Entry {
+        id,
+        kind,
+        latest,
+        sha256,
+        size,
+    })
 }
 
 /// `{"id", "version", "sha256", "reason"}`.

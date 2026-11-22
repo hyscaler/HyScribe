@@ -1088,6 +1088,7 @@ dependencies = [
  "hyper-util",
  "hyscribe-kses",
  "openssl-probe",
+ "ring",
  "rustls",
  "tokio",
  "tokio-rustls",
@@ -1202,6 +1203,7 @@ name = "hyscribe-registry"
 version = "0.1.0"
 dependencies = [
  "hyscribe-ext",
+ "hyscribe-fetch",
  "hyscribe-phpser",
 ]
 

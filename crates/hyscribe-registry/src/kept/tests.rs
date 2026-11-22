@@ -180,3 +180,62 @@ fn reads_and_writes_the_state() {
     let padded = State::parse(b"keys 00000000000000000001\nindex 2\n");
     assert_eq!(padded, Some(State { keys: 1, index: 2 }));
 }
+
+#[test]
+fn keeps_what_was_fetched_unless_it_goes_back() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("registry");
+    let signatures = [Some(b"one".to_vec()), None, None];
+    let verified = |keys, index| Verified {
+        keys: (b"keys", &signatures),
+        index: (b"index", b"signature"),
+        serials: State { keys, index },
+    };
+    keep(&path, &verified(2, 3)).unwrap();
+    assert_eq!(fs::read(path.join("keys.json.1.minisig")).unwrap(), b"one");
+    assert_eq!(
+        fs::read(path.join("index.json.minisig")).unwrap(),
+        b"signature"
+    );
+    assert_eq!(kept_state(&path), "keys 2\nindex 3\n");
+    for (keys, index) in [(1, 3), (2, 2)] {
+        let refused = keep(&path, &verified(keys, index)).unwrap_err();
+        assert_eq!(
+            refused,
+            format!(
+                "the registry's files are older than those kept (keys {keys} < 2 or index {index} < 3)"
+            )
+        );
+    }
+    keep(&path, &verified(2, 3)).unwrap();
+    // A place that cannot be emptied, then a folder that cannot be written.
+    fs::create_dir_all(path.join("keys.json.2.minisig/x")).unwrap();
+    let refused = keep(&path, &verified(2, 3)).unwrap_err();
+    assert!(
+        refused.starts_with("registry/ cannot be written: "),
+        "{refused}"
+    );
+    fs::remove_dir_all(path.join("keys.json.2.minisig")).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o555)).unwrap();
+    let refused = keep(&path, &verified(2, 4)).unwrap_err();
+    writable(&path);
+    assert!(
+        refused.starts_with("registry/ cannot be written: "),
+        "{refused}"
+    );
+    assert_eq!(kept_state(&path), "keys 2\nindex 3\n");
+}
+
+#[test]
+fn keeps_nothing_over_a_state_that_does_not_read() {
+    let folder = tempfile::tempdir().unwrap();
+    fs::write(folder.path().join("state"), "x").unwrap();
+    let verified = Verified {
+        keys: (b"keys", &[]),
+        index: (b"index", b"signature"),
+        serials: State { keys: 1, index: 1 },
+    };
+    let refused = keep(folder.path(), &verified).unwrap_err();
+    assert_eq!(refused, "registry/state does not read");
+    assert!(!folder.path().join("keys.json").exists());
+}

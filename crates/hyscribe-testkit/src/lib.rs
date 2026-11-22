@@ -10,6 +10,7 @@ pub mod hooks;
 pub mod hyx;
 pub mod minisign;
 pub mod pages;
+pub mod registry;
 pub mod unshuffle;
 pub mod writes;
 

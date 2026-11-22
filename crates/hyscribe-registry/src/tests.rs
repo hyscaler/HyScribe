@@ -15,6 +15,11 @@ pub(crate) fn test_roots() -> Vec<PublicKey> {
         .collect()
 }
 
+/// `text` with the first member `name` renamed, so it is missing and unknown.
+pub(crate) fn without(text: &str, name: &str) -> String {
+    text.replacen(&format!("\"{name}\":"), "\"gone\":", 1)
+}
+
 #[test]
 fn the_placeholder_roots_verify_nothing() {
     let list = key_list(1, NOW + 1, &[], &[]);

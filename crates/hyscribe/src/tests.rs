@@ -1468,12 +1468,28 @@ fn plugin_install_signatures() {
     );
     std::fs::write(registry.join("index.json"), &index).unwrap();
     let comment = format!("hyscribe-index serial=1 expires={}", now + 1_000);
+    std::fs::write(registry.join("index.json.minisig"), "x").unwrap();
+    sign(10, &claim);
+    let bad_index = install(&[], false);
+    let expected = "error: index.json: a signature file has four lines";
+    assert!(bad_index.starts_with(expected), "{bad_index}");
     std::fs::write(
         registry.join("index.json.minisig"),
         Key(11).sign(index.as_bytes(), &comment),
     )
     .unwrap();
-    sign(10, &claim);
+    let plugin = home.join("plugins/hyscribe-test");
+    let mode = |mode| {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&plugin, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    mode(0o555);
+    let unmarked = install(&[], false);
+    mode(0o755);
+    assert!(
+        unmarked.starts_with("error: cannot mark hyscribe-test revoked: "),
+        "{unmarked}"
+    );
     let revoked = install(&[], false);
     assert_eq!(
         revoked,
@@ -1482,7 +1498,11 @@ fn plugin_install_signatures() {
     let marked = origin();
     assert!(marked.starts_with(&format!("signed {} {sha}\nrevoked ", Key(10).id())));
     assert!(marked.ends_with(" CVE-1\n"), "{marked}");
-    // Signature files that do not read.
+    // A key list that does not verify, and signature files that do not read.
+    std::fs::write(registry.join("keys.json.1.minisig"), "x").unwrap();
+    let unsigned_list = install(&[], false);
+    let expected = format!("error: keys.json is not signed by two of the root keys{tail}");
+    assert_eq!(unsigned_list, expected);
     std::fs::write(&minisig, "x").unwrap();
     let unread = install(&[], false);
     assert_eq!(

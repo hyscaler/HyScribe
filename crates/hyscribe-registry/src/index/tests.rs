@@ -124,6 +124,11 @@ fn refuses_members_out_of_their_bounds() {
         "\"sha256\":\"x\",\"reason",
     ));
     refused(&good.replace("0.2.1\"}]", "0.2.1\",\"x\":1}]"));
+    for member in ["expires", "extensions", "revoked", "latest"] {
+        refused(&crate::tests::without(&good, member));
+    }
+    refused(&good.replace("\"extensions\":[{", "\"extensions\":[1,{"));
+    refused(&good.replace("\"revoked\":[{", "\"revoked\":[1,{"));
     refused("1");
     let size = good.replace("\"size\":2048", &format!("\"size\":{MAX_DOCUMENT}"));
     assert_eq!(

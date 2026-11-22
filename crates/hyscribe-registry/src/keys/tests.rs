@@ -3,7 +3,7 @@
 use hyscribe_testkit::minisign::{Key, key_list, sign_keys};
 
 use super::*;
-use crate::tests::{NOW, test_roots};
+use crate::tests::{NOW, test_roots, without};
 
 const EXPIRES: u64 = NOW + 1_000;
 
@@ -136,6 +136,19 @@ fn refuses_members_out_of_their_bounds() {
         &format!("{}\",\"public_key\":\"{}", Key(11).id(), Key(11).public()),
         &format!("{}\",\"public_key\":\"{}", Key(10).id(), Key(10).public()),
     ));
+    for member in [
+        "expires",
+        "keys",
+        "revoked",
+        "id",
+        "public_key",
+        "may_sign",
+        "not_before",
+        "not_after",
+    ] {
+        refused(&without(&good, member));
+    }
+    refused(&good.replace("\"keys\":[{", "\"keys\":[1,{"));
     refused("[1]");
     refused("1");
     refused("{");

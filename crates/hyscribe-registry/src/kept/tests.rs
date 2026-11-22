@@ -129,6 +129,32 @@ fn refuses_what_does_not_verify_or_read() {
 }
 
 #[test]
+fn reports_files_that_cannot_be_read() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path();
+    keep_keys(path, 3);
+    let list = keys(path, &test_roots(), NOW).unwrap().unwrap();
+    keep_index(path, 5);
+    let unread = |name: &str, read: &dyn Fn() -> String| {
+        let file = path.join(name);
+        let kept = fs::read(&file).unwrap();
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap();
+        let error = read();
+        fs::remove_dir(&file).unwrap();
+        fs::write(&file, kept).unwrap();
+        let expected = format!("registry/{name} cannot be read: ");
+        assert!(error.contains(&expected), "{error}");
+    };
+    unread("state", &|| keys(path, &test_roots(), NOW).unwrap_err());
+    unread("keys.json", &|| keys(path, &test_roots(), NOW).unwrap_err());
+    unread("index.json", &|| index(path, &list, NOW).unwrap_err());
+    unread("index.json.minisig", &|| {
+        index(path, &list, NOW).unwrap_err()
+    });
+}
+
+#[test]
 fn reads_and_writes_the_state() {
     let state = State {
         keys: 7,

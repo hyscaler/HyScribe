@@ -31,20 +31,20 @@ pub(crate) struct Theme(Mutex<State>);
 struct State {
     /// `add_theme_support()`'s features, in the order added.
     supports: Vec<String>,
-    page: Option<Page>,
+    page: Option<Arc<Page>>,
 }
 
-/// What a page's template tags read.
-struct Shared {
+/// The page a classic theme renders: what its template tags read, and
+/// where its loop is.
+struct Page {
     site: Arc<Site>,
     request: Request,
     files: Vec<TemplateFile>,
     handle: Handle,
+    progress: Mutex<Progress>,
 }
 
-/// The page a classic theme renders.
-struct Page {
-    shared: Arc<Shared>,
+struct Progress {
     classic: Classic,
     /// The first database error a tag's reads met, which fails the page.
     error: Option<DbError>,
@@ -79,22 +79,23 @@ impl Theme {
                 }
                 Ok(Value::Null)
             }
-            ThemeCall::HavePosts => self
-                .on_page(|classic, _, shared| Ok(Value::Bool(classic.have_posts(&shared.request)))),
-            ThemeCall::ThePost => self.on_page(|classic, _, _| {
+            ThemeCall::HavePosts => self.on_page(&|classic, _, shared| {
+                Ok(Value::Bool(classic.have_posts(&shared.request)))
+            }),
+            ThemeCall::ThePost => self.on_page(&|classic, _, _| {
                 classic.the_post();
                 Ok(Value::Null)
             }),
-            ThemeCall::RewindPosts => self.on_page(|classic, _, _| {
+            ThemeCall::RewindPosts => self.on_page(&|classic, _, _| {
                 classic.rewind_posts();
                 Ok(Value::Null)
             }),
             // The global post follows the main loop: no other query sets it.
-            ThemeCall::ResetPostdata => self.on_page(|_, _, _| Ok(Value::Null)),
+            ThemeCall::ResetPostdata => self.on_page(&|_, _, _| Ok(Value::Null)),
             ThemeCall::InTheLoop => {
-                self.on_page(|classic, _, _| Ok(Value::Bool(classic.in_the_loop())))
+                self.on_page(&|classic, _, _| Ok(Value::Bool(classic.in_the_loop())))
             }
-            ThemeCall::Conditional(name, args) => self.on_page(|classic, reads, shared| {
+            ThemeCall::Conditional(name, args) => self.on_page(&|classic, reads, shared| {
                 classic
                     .is(reads, &shared.request, name, args)
                     .map(Value::Bool)
@@ -102,38 +103,35 @@ impl Theme {
             ThemeCall::Print(name, args) => {
                 let supports = lock(&self.0).supports.clone();
                 let supported = move |feature: &str| supports.iter().any(|s| s == feature);
-                self.on_page(|classic, reads, shared| {
+                self.on_page(&|classic, reads, shared| {
                     let printed = classic.print(reads, &shared.request, (name, args), &supported);
                     printed.map(Value::String)
                 })
             }
             ThemeCall::Get(name, args) => self
-                .on_page(|classic, reads, shared| classic.get(reads, &shared.request, name, args)),
+                .on_page(&|classic, reads, shared| classic.get(reads, &shared.request, name, args)),
             ThemeCall::Part(kind, slug, name, args) => {
-                self.on_page(|_, _, shared| Ok(part(&shared.files, (*kind, slug, name, args))))
+                self.on_page(&|_, _, shared| Ok(part(&shared.files, (*kind, slug, name, args))))
             }
             _ => Err(UNSERVED.to_string()),
         }
     }
 
-    /// `tag` over the page being rendered, its loop's place kept after.
+    /// `tag` over the page being rendered, its loop's place kept after;
+    /// one instance, so the coverage of its paths is counted together.
     fn on_page(
         &self,
-        tag: impl FnOnce(&mut Classic, &Reads<'_>, &Shared) -> Result<Value, Unserved>,
+        tag: &dyn Fn(&mut Classic, &Reads<'_>, &Page) -> Result<Value, Unserved>,
     ) -> Result<Value, String> {
-        let taken = lock(&self.0)
-            .page
-            .as_ref()
-            .map(|page| (page.shared.clone(), page.classic.clone()));
-        let (shared, mut classic) = taken.ok_or(NO_PAGE)?;
-        let reads = Reads::new(&shared.site, shared.handle.clone());
-        let answer = tag(&mut classic, &reads, &shared);
+        let page = lock(&self.0).page.clone().ok_or(NO_PAGE)?;
+        let mut classic = lock(&page.progress).classic.clone();
+        let reads = Reads::new(&page.site, page.handle.clone());
+        let answer = tag(&mut classic, &reads, &page);
         let failed = reads.finish().err();
-        if let Some(page) = lock(&self.0).page.as_mut() {
-            page.classic = classic;
-            if let Some(failed) = failed {
-                page.error.get_or_insert(failed);
-            }
+        let mut progress = lock(&page.progress);
+        progress.classic = classic;
+        if let Some(failed) = failed {
+            progress.error.get_or_insert(failed);
         }
         answer.map_err(|Unserved| UNSERVED.to_string())
     }
@@ -142,17 +140,17 @@ impl Theme {
     /// theme's calls answer over it until [`Theme::end`].
     pub(crate) fn begin(&self, (site, request): (&Arc<Site>, &Request), files: &[TemplateFile]) {
         let theme = (site.option("template"), site.option("stylesheet"));
-        let shared = Shared {
+        let progress = Progress {
+            classic: Classic::new((&theme.0, &theme.1)),
+            error: None,
+        };
+        lock(&self.0).page = Some(Arc::new(Page {
             site: site.clone(),
             request: request.clone(),
             files: files.to_vec(),
             handle: Handle::current(),
-        };
-        lock(&self.0).page = Some(Page {
-            shared: Arc::new(shared),
-            classic: Classic::new((&theme.0, &theme.1)),
-            error: None,
-        });
+            progress: Mutex::new(progress),
+        }));
     }
 
     /// Ends the page with what the theme `rendered`, which fails with
@@ -162,7 +160,7 @@ impl Theme {
         rendered: Result<Vec<u8>, hyscribe_ext::Fault>,
     ) -> Result<Vec<u8>, Failed> {
         let page = lock(&self.0).page.take();
-        if let Some(failed) = page.and_then(|page| page.error) {
+        if let Some(failed) = page.and_then(|page| lock(&page.progress).error.take()) {
             return Err(Failed::Database(failed));
         }
         rendered.map_err(Failed::Theme)

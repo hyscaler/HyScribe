@@ -209,7 +209,8 @@ fn language_attributes_follow_the_document_type() {
     assert_eq!(attributes(Some(xhtml), Some("x")), "xml:lang=\"en-US\"");
 }
 
-/// `body_class( $css_class )` and the tags not served answer so.
+/// `body_class( $css_class )`, a menu falling back and the tags not served
+/// answer so.
 #[test]
 fn unported_arguments_are_unserved() {
     let site = Fixture::default();
@@ -225,4 +226,6 @@ fn unported_arguments_are_unserved() {
     let classes = print(&mut page, "body_class", &[text("")]).unwrap();
     assert_eq!(classes, b"class=\"wp-embed-responsive wp-theme-t\"");
     assert_eq!(page.get(&site, &request, "the_title", &[]), Err(Unserved));
+    // No menu falls back to `wp_page_menu()`, which is not ported.
+    assert_eq!(page.get(&site, &request, "wp_nav_menu", &[]), Err(Unserved));
 }

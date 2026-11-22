@@ -280,6 +280,11 @@ async fn parts_are_found_as_locate_template_finds_them() {
                 ))
             })
         });
+        // No menu falls back to `wp_page_menu()`, which is not ported.
+        let menu = theme.answer(&ThemeCall::Get("wp_nav_menu".into(), Vec::new()));
+        assert_eq!(menu, Err(UNSERVED.into()));
+        let none = theme.answer(&ThemeCall::Conditional("is_none".into(), Vec::new()));
+        assert_eq!(none, Err(UNSERVED.into()));
         assert!(theme.end(Ok(Vec::new())).is_ok());
         assert_eq!(theme.answer(&ThemeCall::ThePost), Err(NO_PAGE.into()));
         (answers, fired)

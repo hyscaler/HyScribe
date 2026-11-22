@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "hyscribe-registry"
+description = "The hosted registry as HyScribe reads it: the signed key list and index, kept verified (ADR 0024)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+hyscribe-ext.workspace = true
+hyscribe-phpser.workspace = true
+
+[dev-dependencies]
+hyscribe-testkit.workspace = true
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -27,8 +27,10 @@ pub mod hyx;
 pub mod installed;
 mod limits;
 pub mod manifest;
+pub mod origin;
 mod request;
 mod runtime;
+pub mod signature;
 mod site;
 mod value;
 
@@ -65,6 +67,8 @@ pub enum Fault {
     Value(String),
     /// Disabled after too many faults, or its fault record does not read.
     Disabled,
+    /// Revoked by the registry, or its `origin.txt` does not read: the reason.
+    Revoked(String),
     /// The fault record could not be written; the count holds in memory.
     Unrecorded(String),
 }

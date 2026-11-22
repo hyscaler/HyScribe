@@ -16,6 +16,7 @@ use wasmtime::component::{Component, ComponentExportIndex, Instance, InstancePre
 use crate::faults::{self, Counted, Record};
 use crate::host::{Phase, State, classify, refused};
 use crate::manifest::Kind;
+use crate::origin;
 use crate::value::{Lifted, Lowered};
 use crate::{Fault, Grants, Host, Limits, ObjectKind};
 
@@ -166,15 +167,17 @@ pub struct Extension {
 }
 
 impl Host {
-    /// Checks the grants, reads the fault record (a disabled extension, or
-    /// one whose record does not read, is not loaded), compiles the
-    /// component, links it against the SDK only (no WASI) and runs its
-    /// `init` once, keeping what it registers.
+    /// Loads an extension that is neither disabled nor revoked (fault record, `origin.txt`):
+    /// checks its grants, links it against the SDK only and runs its `init` once.
     pub fn load(&self, package: Package<'_>) -> Result<Extension, Fault> {
         package.grants.check().map_err(Fault::Refused)?;
         let record = faults::read(package.folder).ok_or(Fault::Disabled)?;
         if record.disabled().is_some() {
             return Err(Fault::Disabled);
+        }
+        let origin = origin::read(package.folder).map_err(Fault::Revoked)?;
+        if let Some((_, reason)) = origin.and_then(|origin| origin.revoked) {
+            return Err(Fault::Revoked(reason));
         }
         let (component, pre) = Component::new(&self.engine, package.wasm)
             .and_then(|component| {

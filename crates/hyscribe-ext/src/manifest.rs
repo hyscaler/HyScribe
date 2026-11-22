@@ -229,7 +229,7 @@ impl Manifest {
 }
 
 /// A WordPress slug as HyScribe names a folder after it.
-pub(crate) fn slug(text: &str) -> bool {
+pub fn slug(text: &str) -> bool {
     (1..=100).contains(&text.len())
         && text
             .bytes()
@@ -243,7 +243,7 @@ fn visible(text: &str) -> bool {
 
 /// A version as a file name may hold it: ASCII letters, digits, `.`, `+`,
 /// `_` and `-`, at most 64.
-fn version(text: &str) -> bool {
+pub fn version(text: &str) -> bool {
     (1..=64).contains(&text.len())
         && text
             .bytes()

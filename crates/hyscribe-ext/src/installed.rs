@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use crate::hyx::{COMPONENT, Hyx};
 use crate::manifest::{self, Kind, Manifest};
+use crate::origin::{self, Origin, Signer};
+use crate::signature::{self, PublicKey};
 use crate::{Host, Package, faults};
 
 /// The manifest as the administrator approved it at activation, beside
@@ -123,8 +125,9 @@ fn gone(done: std::io::Result<()>) -> std::io::Result<()> {
     }
 }
 
-/// Writes `bytes` to a new file beside `path`, flushed, then renamed over it.
-fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Writes `bytes` to a new file beside `path`, mode 0644, flushed, then
+/// renamed over it.
+pub fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut new = path.as_os_str().to_owned();
     new.push(".new");
     let mut options = OpenOptions::new();
@@ -140,16 +143,37 @@ fn write_with(options: &mut OpenOptions, path: &Path, bytes: &[u8]) -> std::io::
     opened.and_then(|mut file| file.write_all(bytes).map(|()| file))
 }
 
-/// `hyscribe plugin install`: reads the package, loads its component with
-/// its grants (its `init` run once), so a refused package changes nothing;
-/// keeps the package in `packages/` as `<id>-<version>.hyx`, then unpacks
-/// it into `plugins/<id>/` in place of an older one, keeping that one's
-/// fault record and approval.
-pub fn install((plugins, packages): (&Path, &Path), bytes: &[u8]) -> Result<Manifest, String> {
+/// What vouches for a package to install (ADR 0024).
+#[derive(Clone, Copy, Debug)]
+pub enum Vouch<'a> {
+    /// Its signature file, by a key whose standing the signer names.
+    Signed(Signer, &'a PublicKey, &'a [u8]),
+    /// The operator's `--unsigned`.
+    Unsigned,
+}
+
+/// `hyscribe plugin install`: checks the signature and manifest, loads the component once, then
+/// keeps the package in `packages/` and swaps it into `plugins/<id>/` with `origin.txt`.
+pub fn install(
+    (plugins, packages): (&Path, &Path),
+    bytes: &[u8],
+    vouch: Vouch<'_>,
+) -> Result<Manifest, String> {
+    let claim = match vouch {
+        Vouch::Signed(_, key, file) => Some(signature::vouch(bytes, key, file)?),
+        Vouch::Unsigned => None,
+    };
     let hyx = Hyx::read(bytes)?;
     let manifest = &hyx.manifest;
     if manifest.kind != Kind::Plugin {
         return Err("not a plugin package".into());
+    }
+    if let Some(claim) = claim {
+        let signed = (&claim.id, &claim.version, &claim.sdk);
+        if signed != (&manifest.id, &manifest.version, &manifest.sdk) {
+            let (id, version, sdk) = signed;
+            return Err(format!("its signature is for {id} {version} of SDK {sdk}"));
+        }
     }
     let id = manifest.id.as_str();
     let staging = plugins.join(format!(".{id}.new"));
@@ -166,10 +190,23 @@ pub fn install((plugins, packages): (&Path, &Path), bytes: &[u8]) -> Result<Mani
     fs::create_dir_all(plugins).map_err(cannot)?;
     let loaded = Host::new().and_then(|host| host.load(package));
     loaded.map_err(|fault| format!("the component does not load: {fault:?}"))?;
-    let name = format!("{id}-{}.hyx", manifest.version);
+    let kept = packages.join(format!("{id}-{}.hyx", manifest.version));
+    let signature = kept.with_extension("hyx.minisig");
+    let origin = Origin {
+        signer: match vouch {
+            Vouch::Signed(signer, key, _) => Some((signer, key.id())),
+            Vouch::Unsigned => None,
+        },
+        sha256: signature::sha256(bytes),
+        revoked: None,
+    };
     let unpacked = fs::create_dir_all(packages)
-        .and_then(|()| replace(&packages.join(name), bytes))
-        .and_then(|()| unpack(plugins, &staging, &hyx));
+        .and_then(|()| replace(&kept, bytes))
+        .and_then(|()| match vouch {
+            Vouch::Signed(_, _, file) => replace(&signature, file),
+            Vouch::Unsigned => gone(fs::remove_file(&signature)),
+        })
+        .and_then(|()| unpack(plugins, &staging, &hyx, &origin));
     unpacked.map_err(|e| {
         let _ = fs::remove_dir_all(&staging);
         cannot(e)
@@ -177,9 +214,9 @@ pub fn install((plugins, packages): (&Path, &Path), bytes: &[u8]) -> Result<Mani
     Ok(hyx.manifest)
 }
 
-/// Writes the package's files into `staging`, then swaps it in for the
-/// plugin's folder.
-fn unpack(plugins: &Path, staging: &Path, hyx: &Hyx) -> std::io::Result<()> {
+/// Writes the package's files and `origin` into `staging`, then swaps it in
+/// for the plugin's folder.
+fn unpack(plugins: &Path, staging: &Path, hyx: &Hyx, origin: &Origin) -> std::io::Result<()> {
     let folder = plugins.join(&hyx.manifest.id);
     let old = plugins.join(format!(".{}.old", hyx.manifest.id));
     let write = |(name, data): &(String, Vec<u8>)| {
@@ -193,6 +230,7 @@ fn unpack(plugins: &Path, staging: &Path, hyx: &Hyx) -> std::io::Result<()> {
         .and_then(|()| gone(fs::remove_dir_all(&old)))
         .and_then(|()| fs::create_dir_all(staging))
         .and_then(|()| hyx.files.iter().try_for_each(write))
+        .and_then(|()| origin::write(staging, origin))
         .and_then(|()| [faults::FILE, APPROVED].iter().try_for_each(keep))
         .and_then(|()| gone(fs::rename(&folder, &old)))
         .and_then(|()| fs::rename(staging, &folder))
@@ -205,7 +243,8 @@ fn unpack(plugins: &Path, staging: &Path, hyx: &Hyx) -> std::io::Result<()> {
 /// leaves no plugin that loads; a symlink in its place, or in `packages/`,
 /// is removed itself, and nothing is followed out of the folders. A failure
 /// is reported once the rest is done, and running the command again
-/// finishes the removal. It answers the file names of the packages removed.
+/// finishes the removal. It answers the file names of the packages removed;
+/// each package's signature beside it goes with it.
 pub fn delete(
     (plugins, packages): (&Path, &Path),
     id: &str,
@@ -245,6 +284,8 @@ pub fn delete(
     }
     let mut deleted = Vec::new();
     for path in owned {
+        let signature = path.with_extension("hyx.minisig");
+        note(&signature, remove_tree(&signature));
         match remove_tree(&path) {
             Ok(()) => deleted.extend(
                 path.file_name()

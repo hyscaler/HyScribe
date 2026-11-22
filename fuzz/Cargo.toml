@@ -22,6 +22,7 @@ hyscribe-ext = { path = "../crates/hyscribe-ext" }
 hyscribe-render = { path = "../crates/hyscribe-render" }
 hyscribe-rest = { path = "../crates/hyscribe-rest" }
 hyscribe-model = { path = "../crates/hyscribe-model" }
+hyscribe-registry = { path = "../crates/hyscribe-registry" }
 hyscribe-http = { path = "../crates/hyscribe-http" }
 hyscribe-html = { path = "../crates/hyscribe-html" }
 hyscribe-image = { path = "../crates/hyscribe-image" }
@@ -441,6 +442,20 @@ bench = false
 [[bin]]
 name = "ext_package"
 path = "fuzz_targets/ext_package.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ext_signature"
+path = "fuzz_targets/ext_signature.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "registry_index"
+path = "fuzz_targets/registry_index.rs"
 test = false
 doc = false
 bench = false

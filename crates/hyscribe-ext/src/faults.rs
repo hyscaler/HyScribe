@@ -151,8 +151,8 @@ impl Record {
     }
 }
 
-/// An integer of at most 20 digits.
-fn seconds(field: &str) -> Option<u64> {
+/// An integer of at most 20 digits, as the files the host keeps write one.
+pub fn seconds(field: &str) -> Option<u64> {
     let digits =
         !field.is_empty() && field.len() <= 20 && field.bytes().all(|b| b.is_ascii_digit());
     digits.then(|| field.parse().ok()).flatten()

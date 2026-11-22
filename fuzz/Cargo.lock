@@ -953,6 +953,7 @@ dependencies = [
  "hyscribe-http",
  "hyscribe-mail",
  "hyscribe-phpser",
+ "hyscribe-registry",
  "hyscribe-service",
  "hyscribe-write",
  "rustix",
@@ -1009,11 +1010,14 @@ dependencies = [
 name = "hyscribe-ext"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
+ "blake2",
  "crc32fast",
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
  "miniz_oxide 0.8.9",
+ "ring",
  "wasmtime",
 ]
 
@@ -1047,6 +1051,7 @@ dependencies = [
  "hyscribe-mail",
  "hyscribe-model",
  "hyscribe-phpser",
+ "hyscribe-registry",
  "hyscribe-render",
  "hyscribe-rest",
  "hyscribe-theme-json",
@@ -1132,6 +1137,14 @@ dependencies = [
 [[package]]
 name = "hyscribe-phpser"
 version = "0.1.0"
+
+[[package]]
+name = "hyscribe-registry"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-ext",
+ "hyscribe-phpser",
+]
 
 [[package]]
 name = "hyscribe-render"

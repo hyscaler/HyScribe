@@ -217,7 +217,9 @@ impl Server {
     }
 
     /// `hyscribe plugin install` of the test extension (MVP 11.3), its
-    /// component built from source, packaged with its manifest.
+    /// component built from source, packaged with its manifest and signed
+    /// by a test key the site trusts through `EXTENSION_TRUSTED_KEYS` (ADR
+    /// 0024), so the signed path is the one exercised.
     fn install(&self) -> String {
         let script = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -236,9 +238,20 @@ impl Server {
             ("extension.wasm", &wasm, true),
         ]);
         let file = self.home.join("hyscribe-test.hyx");
+        let sha256 = hyscribe_ext::signature::sha256(&package);
+        let key = hyscribe_testkit::minisign::Key(7);
+        let claim = format!(
+            "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.3 sha256={sha256} signed=1800000000"
+        );
+        std::fs::write(
+            self.home.join("hyscribe-test.hyx.minisig"),
+            key.sign(&package, &claim),
+        )
+        .unwrap();
         std::fs::write(&file, package).unwrap();
         let output = Command::new(self.home.join("hyscribe"))
             .env_clear()
+            .env("EXTENSION_TRUSTED_KEYS", key.public())
             .arg("plugin")
             .arg("install")
             .arg(&file)

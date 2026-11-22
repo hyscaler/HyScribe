@@ -1028,6 +1028,7 @@ dependencies = [
  "hyscribe-http",
  "hyscribe-mail",
  "hyscribe-phpser",
+ "hyscribe-registry",
  "hyscribe-service",
  "hyscribe-testkit",
  "hyscribe-write",
@@ -1096,12 +1097,15 @@ dependencies = [
 name = "hyscribe-ext"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
+ "blake2",
  "crc32fast",
  "hyscribe-kses",
  "hyscribe-model",
  "hyscribe-phpser",
  "hyscribe-testkit",
  "miniz_oxide",
+ "ring",
  "tempfile",
  "wasmtime",
 ]
@@ -1220,6 +1224,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyscribe-registry"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-ext",
+ "hyscribe-phpser",
+ "hyscribe-testkit",
+ "tempfile",
+]
+
+[[package]]
 name = "hyscribe-render"
 version = "0.1.0"
 dependencies = [
@@ -1272,11 +1286,14 @@ dependencies = [
 name = "hyscribe-testkit"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
+ "blake2",
  "crc32fast",
  "hyscribe-config",
  "hyscribe-model",
  "hyscribe-phpser",
  "miniz_oxide",
+ "ring",
  "sqlx",
  "tokio",
 ]

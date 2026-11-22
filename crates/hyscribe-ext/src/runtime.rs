@@ -13,10 +13,10 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use crate::hyx::{COMPONENT, MAX_ENTRY};
 use crate::installed::{self, APPROVED, Installed};
-use crate::{Extension, Extensions, Fault, Host, Package, Report, Request, Site, manifest};
+use crate::{Extension, Extensions, Fault, Host, Package, Report, Request, Site, manifest, origin};
 
 /// The files an extension loads from; a change to any is a new version.
-const FILES: [&str; 3] = [manifest::FILE, APPROVED, COMPONENT];
+const FILES: [&str; 4] = [manifest::FILE, APPROVED, COMPONENT, origin::FILE];
 
 /// Each of [`FILES`] as it stands: device, inode, size and modification
 /// time, none for a missing one.

@@ -25,5 +25,16 @@ A theme WordPress 7.1.3 no longer bundles is pinned from wordpress.org at its la
 | --- | --- | --- | --- |
 | `twentytwentytwo` | 2.2 | GPL-2.0-or-later; fonts SIL OFL 1.1, images CC0 | `twentytwentytwo/` (10.1) |
 | `twentytwentyone` | 2.9 | GPL-2.0-or-later (its `style.css` and `readme.txt`); bundled normalize.css is MIT | pinned only, ported in 10.6 |
+| `hello-elementor` | 3.5.2 | GPL-3.0-or-later (its `style.css` and `readme.txt`); see below for what it bundles | pinned, its port under way (10.5) |
+
+Hello Elementor's bundled parts, checked before porting any of it (ADR 0004, ADR 0023):
+
+- The theme's own PHP, CSS, `theme.json` and front end scripts (`assets/js/hello-frontend.js`, `hello-editor.js`): GPL-3.0-or-later, the theme's licence; this is what the port takes, and GPL-3.0-or-later code may be ported under AGPL-3.0-or-later (GPLv3 section 13)
+- `vendor/composer/`: Composer's autoloader, MIT (its `LICENSE`); not ported, as a port has no PHP to load
+- `vendor/elementor/wp-notifications-package` 1.2.0: no licence file, its example plugin's header says GPL-3 and it ships inside the GPL-3.0-or-later theme; it fetches remote notices for the theme's admin, and is not ported (ADR 0023)
+- The admin app bundles (`hello-elementor-settings.js`, `hello-elementor-topbar.js`, `hello-conversion-banner.js` and `271.js`): webpack builds carrying MUI and Emotion (MIT) with no licence comments kept; they serve Hello's own admin page, which stays absent (ADR 0023 owner question 10), so none is served or ported
+- `screenshot.png`: a CC0 photograph and Font Awesome icons (SIL OFL 1.1), as its `readme.txt` lists; the admin images of `assets/images` are Elementor's marks for the admin page and are not served
+
+Nothing it bundles is GPL-2.0-only or non-free, so the port may go ahead.
 
 A new pin is a row in `pinned.tsv`: take the version from the wordpress.org theme API, download the archive once and record its `sha256sum`.

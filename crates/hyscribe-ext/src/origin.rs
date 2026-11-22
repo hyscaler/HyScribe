@@ -20,7 +20,7 @@ pub const FILE: &str = "origin.txt";
 const MAX_BYTES: u64 = 4 << 10;
 
 /// The longest reason for a revocation, in bytes.
-pub const MAX_REASON: usize = 1_000;
+const MAX_REASON: usize = 1_000;
 
 /// Who signed the package: the first word of the file's first line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

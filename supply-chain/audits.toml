@@ -1,6 +1,30 @@
 
 # cargo-vet audits file
 
+[[audits.askama]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+notes = "Version bumps of itself and askama_macros, and one argument of EscapeDisplay's write! passed by value rather than by reference. No unsafe, build script, or I/O added."
+
+[[audits.askama_derive]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+notes = "Version bumps (syn 3, prettyplease 0.3, which is optional and off here, askama_parser 0.16.1), a filter's generic default reported as an error instead of an assertion, and the type of a `let` written into the generated code. Runs at build time only; no unsafe, filesystem, network, process or environment access added."
+
+[[audits.askama_macros]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+notes = "Version bumps of itself and askama_derive only."
+
+[[audits.askama_parser]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+notes = "Parses an optional type after a `let` variable and gives clearer errors for a missing expression or `=`; a format! of a constant message replaced by the string. No unsafe or I/O added."
+
 [[audits.async-trait]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"
@@ -408,3 +432,9 @@ criteria = "safe-to-deploy"
 user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2021-10-27"
 end = "2027-11-16"
+
+[[trusted.winnow]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2023-02-01"
+end = "2027-11-22"

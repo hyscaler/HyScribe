@@ -3,7 +3,7 @@
 //! The index, `index.json` (ADR 0024): the extensions and the revoked versions, signed
 //! by an index key with the comment `hyscribe-index serial=<n> expires=<unix>`.
 
-use hyscribe_ext::manifest::{self, Kind};
+use hyscribe_ext::manifest;
 use hyscribe_ext::origin::{hex64, reason_text};
 use hyscribe_ext::signature::{Signature, prehash};
 
@@ -14,22 +14,7 @@ use crate::keys::{KeyList, Use};
 pub const MAX_BYTES: u64 = 4 << 20;
 
 /// The largest version document, in bytes.
-pub const MAX_DOCUMENT: u64 = 1 << 20;
-
-/// One extension of the index.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Extension {
-    /// `id`, a slug.
-    pub id: String,
-    /// `kind`.
-    pub kind: Kind,
-    /// `latest`: for each SDK, its newest version.
-    pub latest: Vec<(String, String)>,
-    /// `sha256` of its version document.
-    pub sha256: String,
-    /// `size` of its version document, in bytes.
-    pub size: u64,
-}
+const MAX_DOCUMENT: u64 = 1 << 20;
 
 /// A revoked version.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,8 +36,6 @@ pub struct Index {
     pub serial: u64,
     /// `expires`: from this second on it is refused.
     pub expires: u64,
-    /// `extensions`.
-    pub extensions: Vec<Extension>,
     /// `revoked`.
     pub revoked: Vec<Revoked>,
 }
@@ -68,13 +51,12 @@ impl Index {
         let revoked = index.list("revoked")?.into_iter().map(revoked);
         let revoked = revoked.collect::<Option<Vec<_>>>()?;
         index.done()?;
-        let mut ids: Vec<&str> = extensions.iter().map(|e| e.id.as_str()).collect();
+        let mut ids = extensions.clone();
         ids.sort_unstable();
         ids.dedup();
         (ids.len() == extensions.len()).then_some(Index {
             serial,
             expires,
-            extensions,
             revoked,
         })
     }
@@ -119,41 +101,33 @@ impl Index {
     }
 }
 
-/// `{"id", "kind", "latest": {<sdk>: <version>}, "sha256", "size"}`.
-fn extension(value: hyscribe_phpser::Value) -> Option<Extension> {
+/// `{"id", "kind", "latest": {<sdk>: <version>}, "sha256", "size"}`, checked
+/// until install by name reads it; its id.
+fn extension(value: hyscribe_phpser::Value) -> Option<String> {
     let mut entry = Object::of(value)?;
     let id = entry.text("id").filter(|id| manifest::slug(id))?;
-    let kind = match entry.text("kind")?.as_str() {
-        "plugin" => Kind::Plugin,
-        "theme" => Kind::Theme,
-        _ => return None,
-    };
+    entry
+        .text("kind")
+        .filter(|kind| kind == "plugin" || kind == "theme")?;
     let latest = entry
         .object("latest")?
         .rest()
         .into_iter()
-        .map(|(sdk, version)| {
+        .all(|(sdk, version)| {
             let sdk = match sdk {
                 hyscribe_phpser::Key::String(sdk) => String::from_utf8(sdk).ok(),
                 hyscribe_phpser::Key::Int(_) => None,
             };
-            let version = json::text(version).filter(|version| manifest::version(version))?;
-            sdk.filter(|sdk| manifest::version(sdk))
-                .map(|sdk| (sdk, version))
+            let version = json::text(version).filter(|version| manifest::version(version));
+            sdk.is_some_and(|sdk| manifest::version(&sdk)) && version.is_some()
         });
-    let latest = latest.collect::<Option<Vec<_>>>()?;
-    let sha256 = entry.text("sha256").filter(|sha256| hex64(sha256))?;
-    let size = entry
+    entry
+        .text("sha256")
+        .filter(|sha256| hex64(sha256) && latest)?;
+    entry
         .int("size")
         .filter(|size| (1..=MAX_DOCUMENT).contains(size))?;
-    entry.done()?;
-    Some(Extension {
-        id,
-        kind,
-        latest,
-        sha256,
-        size,
-    })
+    entry.done().map(|()| id)
 }
 
 /// `{"id", "version", "sha256", "reason"}`.

@@ -13,6 +13,9 @@ pub const MAX_BYTES: u64 = 64 << 10;
 /// The longest an online key may sign: a year, a leap year's.
 const YEAR: u64 = 366 * 86_400;
 
+/// The furthest a key list's expiry may lie ahead: 13 months of 31 days.
+const THIRTEEN_MONTHS: u64 = 13 * 31 * 86_400;
+
 /// What an online key may sign.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Use {
@@ -103,6 +106,12 @@ impl KeyList {
         }
         if now >= list.expires {
             return Err(format!("keys.json expired at {}", list.expires));
+        }
+        if list.expires - now > THIRTEEN_MONTHS {
+            return Err(format!(
+                "keys.json expires more than 13 months ahead, at {}",
+                list.expires
+            ));
         }
         Ok(list)
     }

@@ -49,15 +49,15 @@ fn marks_what_the_registry_revokes_only() {
     let dir = tempfile::tempdir().unwrap();
     let plugins = dir.path();
     let (ten, eleven) = (Key(10).id(), Key(11).id());
-    plugin(plugins, "a", Some(format!("registry {ten} {HASH}\n")));
+    plugin(plugins, "a", Some(format!("signed {ten} {HASH}\n")));
     plugin(plugins, "b", Some(format!("signed {eleven} {HASH}\n")));
     plugin(plugins, "c", Some(format!("trusted {eleven} {HASH}\n")));
     plugin(plugins, "d", Some(format!("unsigned {HASH}\n")));
-    let earlier = format!("registry {eleven} {HASH}\nrevoked 5 earlier\n");
+    let earlier = format!("signed {eleven} {HASH}\nrevoked 5 earlier\n");
     plugin(plugins, "e", Some(earlier.clone()));
     plugin(plugins, "f", None);
     plugin(plugins, "g", Some("nonsense".into()));
-    plugin(plugins, "h", Some(format!("registry {ten} {HASH}\n")));
+    plugin(plugins, "h", Some(format!("signed {ten} {HASH}\n")));
     let marked = revoke(plugins, &keys(), Some(&index()), NOW).unwrap();
     let key = format!("its signing key {eleven} was revoked");
     assert_eq!(marked, ["a: CVE-1".to_string(), format!("b: {key}")]);
@@ -84,7 +84,7 @@ fn needs_the_index_for_a_revoked_version() {
     plugin(
         plugins,
         "a",
-        Some(format!("registry {} {HASH}\n", Key(10).id())),
+        Some(format!("signed {} {HASH}\n", Key(10).id())),
     );
     assert_eq!(revoke(plugins, &keys(), None, NOW), Ok(vec![]));
     let folder = plugins.join("a");

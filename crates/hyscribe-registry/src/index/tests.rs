@@ -32,20 +32,6 @@ fn verifies_an_index_signed_by_an_index_key() {
     let text = index(9);
     let index = Index::verify(text.as_bytes(), &sign(&text, 10, 9), &keys(), NOW).unwrap();
     assert_eq!((index.serial, index.expires), (9, EXPIRES));
-    let cf7 = &index.extensions[0];
-    assert_eq!(
-        (cf7.id.as_str(), cf7.kind, cf7.size),
-        ("contact-form-7", Kind::Plugin, 2048)
-    );
-    assert_eq!(
-        cf7.latest,
-        [
-            ("0.1".into(), "0.1.0".into()),
-            ("0.2".into(), "0.2.1".into())
-        ]
-    );
-    assert_eq!(cf7.sha256, HASH);
-    assert_eq!(index.extensions[1].kind, Kind::Theme);
     let reason = "CVE-2026-0001: fixed in 0.2.1";
     assert_eq!(index.revoked("contact-form-7", "0.1.0", HASH), Some(reason));
     assert_eq!(index.revoked("contact-form-7", "0.2.1", HASH), None);
@@ -131,8 +117,5 @@ fn refuses_members_out_of_their_bounds() {
     refused(&good.replace("\"revoked\":[{", "\"revoked\":[1,{"));
     refused("1");
     let size = good.replace("\"size\":2048", &format!("\"size\":{MAX_DOCUMENT}"));
-    assert_eq!(
-        Index::parse(size.as_bytes()).unwrap().extensions[0].size,
-        MAX_DOCUMENT
-    );
+    assert!(Index::parse(size.as_bytes()).is_some());
 }

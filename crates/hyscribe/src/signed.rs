@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use hyscribe_ext::installed::read_at_most;
 use hyscribe_ext::origin::Signer;
@@ -16,8 +15,7 @@ use hyscribe_registry::{kept, revoke};
 
 /// The clock, in unix seconds.
 pub(crate) fn now() -> u64 {
-    let since = SystemTime::now().duration_since(UNIX_EPOCH);
-    since.map_or(0, |since| since.as_secs())
+    u64::try_from(crate::setup::now()).unwrap_or_default()
 }
 
 /// The compiled-in root keys; tests swap in their own, never configuration.

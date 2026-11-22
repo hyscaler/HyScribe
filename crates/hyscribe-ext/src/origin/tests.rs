@@ -7,11 +7,7 @@ const KEY: &str = "E7620F1842B4E81F";
 
 #[test]
 fn reads_each_signer_and_writes_it_back() {
-    for (word, signer) in [
-        ("registry", Signer::Registry),
-        ("signed", Signer::Signed),
-        ("trusted", Signer::Trusted),
-    ] {
+    for (word, signer) in [("signed", Signer::Signed), ("trusted", Signer::Trusted)] {
         let text = format!("{word} {KEY} {HASH}\n");
         let origin = Origin::parse(text.as_bytes()).unwrap();
         assert_eq!(origin.signer, Some((signer, KEY.to_string())));
@@ -28,13 +24,14 @@ fn reads_each_signer_and_writes_it_back() {
 
 #[test]
 fn refuses_anything_else() {
-    let line = format!("registry {KEY} {HASH}");
+    let line = format!("signed {KEY} {HASH}");
     for refused in [
         line.clone(),
         format!("{line}\n\n"),
-        format!("Registry {KEY} {HASH}\n"),
-        format!("registry {} {HASH}\n", KEY.to_lowercase()),
-        format!("registry {HASH}\n"),
+        format!("Signed {KEY} {HASH}\n"),
+        format!("registry {KEY} {HASH}\n"),
+        format!("signed {} {HASH}\n", KEY.to_lowercase()),
+        format!("signed {HASH}\n"),
         format!("unsigned {KEY} {HASH}\n"),
         format!("unsigned {}\n", HASH.to_uppercase()),
         format!("unsigned {HASH}0\n"),

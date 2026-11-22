@@ -6,6 +6,7 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
+use hyscribe_ext::faults::seconds;
 use hyscribe_ext::installed::{read_at_most, replace};
 use hyscribe_ext::signature::{MAX_BYTES as MAX_SIGNATURE, PublicKey};
 
@@ -26,12 +27,7 @@ impl State {
     pub fn parse(bytes: &[u8]) -> Option<State> {
         let text = std::str::from_utf8(bytes).ok()?;
         let (keys, index) = text.strip_suffix('\n')?.split_once('\n')?;
-        let serial = |line: &str, name: &str| -> Option<u64> {
-            let digits = line.strip_prefix(name)?.strip_prefix(' ')?;
-            let plain =
-                (1..=20).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit());
-            plain.then(|| digits.parse().ok()).flatten()
-        };
+        let serial = |line: &str, name: &str| seconds(line.strip_prefix(name)?.strip_prefix(' ')?);
         Some(State {
             keys: serial(keys, "keys")?,
             index: serial(index, "index")?,

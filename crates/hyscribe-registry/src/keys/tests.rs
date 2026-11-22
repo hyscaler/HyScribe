@@ -88,6 +88,26 @@ fn refuses_an_expired_or_unreadable_list() {
 }
 
 #[test]
+fn refuses_a_list_expiring_more_than_13_months_ahead() {
+    let far = |expires: u64| {
+        let text = key_list(4, expires, &[], &[]);
+        let roots: Vec<Key> = [1, 2].map(Key).into();
+        let signatures = sign_keys(&text, 4, expires, &[&roots[0], &roots[1]]);
+        let signatures: Vec<Vec<u8>> = signatures.into_iter().map(String::into_bytes).collect();
+        verify(&text, &signatures, NOW)
+    };
+    assert!(far(NOW + 34_819_200).is_ok());
+    let refused = far(NOW + 34_819_201).unwrap_err();
+    assert_eq!(
+        refused,
+        format!(
+            "keys.json expires more than 13 months ahead, at {}",
+            NOW + 34_819_201
+        )
+    );
+}
+
+#[test]
 fn reads_at_most_64_kibibytes() {
     let text = list(4, &[]);
     let full = format!("{text}{}", " ".repeat(MAX_BYTES as usize - text.len()));

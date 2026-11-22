@@ -6,7 +6,7 @@
 #![no_main]
 
 use hyscribe_ext::origin::{Origin, hex64};
-use hyscribe_registry::index::{Index, MAX_DOCUMENT};
+use hyscribe_registry::index::Index;
 use hyscribe_registry::kept::State;
 use hyscribe_registry::keys::KeyList;
 use libfuzzer_sys::fuzz_target;
@@ -16,8 +16,8 @@ fuzz_target!(|bytes: &[u8]| {
         assert!(list.keys.iter().all(|key| key.not_before <= key.not_after));
     }
     if let Some(index) = Index::parse(bytes) {
-        for extension in &index.extensions {
-            assert!(hex64(&extension.sha256) && (1..=MAX_DOCUMENT).contains(&extension.size));
+        for revoked in &index.revoked {
+            assert!(hex64(&revoked.sha256));
         }
     }
     if let Some(state) = State::parse(bytes) {

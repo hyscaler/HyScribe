@@ -10,7 +10,7 @@ use base64::engine::general_purpose::STANDARD;
 use blake2::{Blake2b512, Digest as _};
 use ring::signature::{ED25519, UnparsedPublicKey};
 
-use crate::{manifest, origin};
+use crate::{faults, manifest, origin};
 
 /// The most a signature file may hold, in bytes.
 pub const MAX_BYTES: u64 = 4 << 10;
@@ -174,8 +174,6 @@ impl Claim {
         let &[id, version, sdk, sha256, signed] = fields.as_slice() else {
             return None;
         };
-        let signed = signed.strip_prefix("signed=")?;
-        let digits = (1..=20).contains(&signed.len()) && signed.bytes().all(|b| b.is_ascii_digit());
         Some(Claim {
             id: id
                 .strip_prefix("id=")
@@ -193,7 +191,7 @@ impl Claim {
                 .strip_prefix("sha256=")
                 .filter(|h| origin::hex64(h))?
                 .into(),
-            signed: digits.then(|| signed.parse().ok()).flatten()?,
+            signed: faults::seconds(signed.strip_prefix("signed=")?)?,
         })
     }
 }

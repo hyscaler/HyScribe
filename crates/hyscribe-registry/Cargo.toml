@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 [package]
 name = "hyscribe-registry"
-description = "The hosted registry as HyScribe reads it: the signed key list and index, kept verified (ADR 0024)"
+description = "The hosted registry as HyScribe reads it: the signed key list and index, kept verified, and installs by name (ADR 0024)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,11 +11,13 @@ publish.workspace = true
 
 [dependencies]
 hyscribe-ext.workspace = true
+hyscribe-fetch.workspace = true
 hyscribe-phpser.workspace = true
 
 [dev-dependencies]
 hyscribe-testkit.workspace = true
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "net", "rt"] }
 
 [lints]
 workspace = true

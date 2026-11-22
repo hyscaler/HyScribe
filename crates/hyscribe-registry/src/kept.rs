@@ -3,6 +3,7 @@
 //! The key list and index kept in `hyscribe/registry/` (ADR 0024), verified again
 //! when read, and `state`, the highest serials accepted, so neither goes back.
 
+use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
 
@@ -106,6 +107,49 @@ pub fn index(folder: &Path, keys: &KeyList, now: u64) -> Result<Option<Index>, S
     let raised = raise(folder, index.serial, |state| &mut state.index);
     raised.map_err(|e| format!("registry/index.json: {e}"))?;
     Ok(Some(index))
+}
+
+/// A fetched key list and index with their signatures, verified: the key
+/// list's three places, none where the registry has no signature.
+pub struct Verified<'a> {
+    /// `keys.json` and its signatures.
+    pub keys: (&'a [u8], &'a [Option<Vec<u8>>]),
+    /// `index.json` and its signature.
+    pub index: (&'a [u8], &'a [u8]),
+    /// Their serials.
+    pub serials: State,
+}
+
+/// Keeps a verified key list and index in place of the kept ones, unless
+/// either goes back; `state` is written last, so a failure leaves nothing
+/// that reads as accepted but was not.
+pub fn keep(folder: &Path, verified: &Verified<'_>) -> Result<(), String> {
+    let kept = state(folder)?;
+    let serials = verified.serials;
+    if serials.keys < kept.keys || serials.index < kept.index {
+        return Err(format!(
+            "the registry's files are older than those kept (keys {} < {} or index {} < {})",
+            serials.keys, kept.keys, serials.index, kept.index
+        ));
+    }
+    let (keys, signatures) = verified.keys;
+    let state = serials.text();
+    let mut files = vec![("keys.json".to_string(), Some(keys))];
+    let places = signatures.iter().zip(1..);
+    files.extend(places.map(|(s, n)| (format!("keys.json.{n}.minisig"), s.as_deref())));
+    files.push(("index.json".into(), Some(verified.index.0)));
+    files.push(("index.json.minisig".into(), Some(verified.index.1)));
+    files.push(("state".into(), Some(state.as_bytes())));
+    let written = fs::create_dir_all(folder).and_then(|()| {
+        files.iter().try_for_each(|(name, bytes)| match bytes {
+            Some(bytes) => replace(&folder.join(name), bytes),
+            None => match fs::remove_file(folder.join(name)) {
+                Err(e) if e.kind() != ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            },
+        })
+    });
+    written.map_err(|e| format!("registry/ cannot be written: {e}"))
 }
 
 #[cfg(test)]

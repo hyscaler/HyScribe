@@ -4,6 +4,7 @@ use hyscribe_testkit::minisign::{Key, key_list};
 
 use super::*;
 use crate::tests::NOW;
+use crate::versions::MAX_BYTES as MAX_DOCUMENT;
 
 const EXPIRES: u64 = NOW + 7 * 86_400;
 const HASH: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -32,6 +33,19 @@ fn verifies_an_index_signed_by_an_index_key() {
     let text = index(9);
     let index = Index::verify(text.as_bytes(), &sign(&text, 10, 9), &keys(), NOW).unwrap();
     assert_eq!((index.serial, index.expires), (9, EXPIRES));
+    let entry = Entry {
+        id: "a-theme".into(),
+        kind: Kind::Theme,
+        latest: Vec::new(),
+        sha256: HASH.into(),
+        size: 1,
+    };
+    assert_eq!(index.extension("a-theme"), Some(&entry));
+    let plugin = index.extension("contact-form-7").unwrap();
+    assert_eq!((plugin.kind, plugin.size), (Kind::Plugin, 2048));
+    let latest = [("0.1", "0.1.0"), ("0.2", "0.2.1")].map(|(s, v)| (s.into(), v.into()));
+    assert_eq!(plugin.latest, latest);
+    assert_eq!(index.extension("contact-form"), None);
     let reason = "CVE-2026-0001: fixed in 0.2.1";
     assert_eq!(index.revoked("contact-form-7", "0.1.0", HASH), Some(reason));
     assert_eq!(index.revoked("contact-form-7", "0.2.1", HASH), None);

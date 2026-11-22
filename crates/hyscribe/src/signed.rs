@@ -9,8 +9,8 @@ use std::path::Path;
 
 use hyscribe_ext::installed::read_at_most;
 use hyscribe_ext::origin::Signer;
-use hyscribe_ext::signature::{self, Claim, MAX_BYTES, PublicKey, Signature};
-use hyscribe_registry::keys::Use;
+use hyscribe_ext::signature::{self, MAX_BYTES, PublicKey, Signature};
+use hyscribe_registry::keys::package_key;
 use hyscribe_registry::{kept, revoke};
 
 /// The clock, in unix seconds.
@@ -29,6 +29,11 @@ const ROOTS: &[&str] = &[
     "RWQCAgICAgICAoE5dw6ofRdfVqNUZsNMfszLjYqRtO43ol32D1uPybOU",
     "RWQDAwMDAwMDA+1JKMYo0cLG6ukDOJBZlWEpWSc6XGP5NjbBRhSshzfR",
 ];
+
+/// The root keys a key list must be signed by.
+pub(crate) fn roots() -> Vec<PublicKey> {
+    ROOTS.iter().copied().filter_map(PublicKey::parse).collect()
+}
 
 /// Who vouches for `bytes` by the signature file at `path`: the signer,
 /// the key and the file, once it verifies.
@@ -75,24 +80,12 @@ fn trusted_keys(home: &Path, env: &HashMap<String, String>) -> Result<Vec<Public
 /// revokes is refused.
 fn registry_key(home: &Path, signature: &Signature, now: u64) -> Result<PublicKey, String> {
     let folder = home.join("registry");
-    let roots: Vec<PublicKey> = ROOTS.iter().copied().filter_map(PublicKey::parse).collect();
-    let keys = kept::keys(&folder, &roots, now)?.ok_or(
+    let keys = kept::keys(&folder, &roots(), now)?.ok_or(
         "no key list is kept in registry/ to check its signature against: copy the registry's v1/keys.json and its signatures there",
     )?;
     let index = kept::index(&folder, &keys, now)?;
     revoke::revoke(&home.join("plugins"), &keys, index.as_ref(), now)?;
-    let claim = Claim::parse(signature.trusted_comment());
-    let claim = claim.ok_or("its signature's trusted comment names no package")?;
-    let revoked = index.as_ref();
-    let revoked = revoked.and_then(|index| index.revoked(&claim.id, &claim.version, &claim.sha256));
-    if let Some(reason) = revoked {
-        return Err(format!(
-            "{} {} is revoked: {reason}",
-            claim.id, claim.version
-        ));
-    }
-    keys.key(&signature.key_id(), Use::Packages, claim.signed)
-        .cloned()
+    package_key(&keys, index.as_ref(), signature)
 }
 
 /// How the install tells who signed the package.

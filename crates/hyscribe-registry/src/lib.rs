@@ -2,14 +2,18 @@
 
 //! The hosted registry as HyScribe reads it (ADR 0024): the key list two of
 //! the compiled-in root keys sign, the index an online key of that list
-//! signs, and their verified copies kept in `hyscribe/registry/`. Nothing
-//! here reaches the network or the database.
+//! signs, their verified copies kept in `hyscribe/registry/`, the version
+//! documents, and installs by name. Only `remote` reaches the network, and
+//! only the registry's host; nothing here reaches the database.
 
 pub mod index;
+pub mod install;
 mod json;
 pub mod kept;
 pub mod keys;
+pub mod remote;
 pub mod revoke;
+pub mod versions;
 
 /// The offline root keys, as minisign prints them (ADR 0024); tests pass
 /// their own, never configuration.

@@ -25,6 +25,8 @@ const MAX_REASON: usize = 1_000;
 /// Who signed the package: the first word of the file's first line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Signer {
+    /// A key of the registry's key list, for a package installed by name.
+    Registry,
     /// A key of the registry's key list, for a local file with its signature.
     Signed,
     /// A key in `EXTENSION_TRUSTED_KEYS`.
@@ -34,6 +36,7 @@ pub enum Signer {
 impl Signer {
     fn word(self) -> &'static str {
         match self {
+            Signer::Registry => "registry",
             Signer::Signed => "signed",
             Signer::Trusted => "trusted",
         }
@@ -63,7 +66,7 @@ impl Origin {
         let (signer, sha256) = match fields.as_slice() {
             ["unsigned", sha256] => (None, *sha256),
             [word, key, sha256] if is_key_id(key) => {
-                let signer = [Signer::Signed, Signer::Trusted];
+                let signer = [Signer::Registry, Signer::Signed, Signer::Trusted];
                 let signer = signer.into_iter().find(|signer| signer.word() == *word)?;
                 (Some((signer, key.to_string())), *sha256)
             }

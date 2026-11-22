@@ -22,7 +22,8 @@ impl Object {
         }
     }
 
-    fn take(&mut self, name: &str) -> Option<Value> {
+    /// A member of any type.
+    pub(crate) fn take(&mut self, name: &str) -> Option<Value> {
         let at = self.0.iter().position(|(key, _)| match key {
             Key::String(key) => key == name.as_bytes(),
             Key::Int(_) => false,

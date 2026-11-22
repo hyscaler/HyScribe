@@ -202,3 +202,19 @@ fn finds_a_key_allowed_to_sign() {
         format!("key {twelve} is not in the key list")
     );
 }
+
+#[test]
+fn a_package_key_signs_versions_the_index_does_not_revoke() {
+    let keys = [(&Key(11), r#""packages""#, NOW - 10, NOW + 10)];
+    let keys = KeyList::parse(key_list(1, NOW + 100, &keys, &[]).as_bytes()).unwrap();
+    let hash = "0".repeat(64);
+    let comment = format!("hyscribe-package id=a version=1 sdk=0.3 sha256={hash} signed={NOW}");
+    let signature = Signature::parse(Key(11).sign(b"a", &comment).as_bytes()).unwrap();
+    assert!(package_key(&keys, None, &signature).is_ok());
+    let index = format!(
+        r#"{{"serial":1,"expires":1,"extensions":[],"revoked":[{{"id":"a","version":"1","sha256":"{hash}","reason":"bad"}}]}}"#
+    );
+    let index = Index::parse(index.as_bytes()).unwrap();
+    let refused = package_key(&keys, Some(&index), &signature);
+    assert_eq!(refused.unwrap_err(), "a 1 is revoked: bad");
+}

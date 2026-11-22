@@ -7,6 +7,13 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # basic-toml runs only at build time, inside askama's proc macro, reading
+    # a theme port's own askama.toml (ADR 0023, 2026-11-22). It is
+    # unmaintained, not vulnerable. Remove this when askama drops it. The
+    # advisory names basic-toml alone, so the entry covers no other crate.
+    { id = "RUSTSEC-2026-0374", reason = "build time only, unmaintained not vulnerable; remove when askama drops it" },
+]
 
 [licenses]
 version = 2

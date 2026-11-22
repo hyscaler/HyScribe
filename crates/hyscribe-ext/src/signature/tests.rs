@@ -165,3 +165,12 @@ fn refuses_public_keys_of_another_form() {
     );
 }
 
+#[test]
+fn tells_key_ids() {
+    assert!(is_key_id("E7620F1842B4E81F"));
+    assert!(is_key_id("0123456789ABCDEF"));
+    assert!(!is_key_id("E7620F1842B4E81"));
+    assert!(!is_key_id("E7620F1842B4E81F0"));
+    assert!(!is_key_id("e7620f1842b4e81f"));
+    assert!(!is_key_id("G7620F1842B4E81F"));
+}

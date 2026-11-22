@@ -46,6 +46,11 @@ fn key_id(id: [u8; 8]) -> String {
     format!("{:016X}", u64::from_le_bytes(id))
 }
 
+/// Whether `text` is a key id as minisign prints it: 16 uppercase hex digits.
+pub fn is_key_id(text: &str) -> bool {
+    text.len() == 16 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'A'..=b'F'))
+}
+
 /// A signature file, read but not yet verified.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Signature {

@@ -48,3 +48,36 @@ impl Key {
     }
 }
 
+/// An online key of a key list: a key, what it may sign
+/// (`"index","packages"`), and its first and last second.
+pub type Online<'a> = (&'a Key, &'a str, u64, u64);
+
+/// A key list (`keys.json`) of `serial` and `expires`.
+pub fn key_list(serial: u64, expires: u64, keys: &[Online<'_>], revoked: &[&str]) -> String {
+    let keys: Vec<String> = keys
+        .iter()
+        .map(|(key, uses, not_before, not_after)| {
+            format!(
+                r#"{{"id":"{}","public_key":"{}","may_sign":[{uses}],"not_before":{not_before},"not_after":{not_after}}}"#,
+                key.id(),
+                key.public()
+            )
+        })
+        .collect();
+    let revoked: Vec<String> = revoked.iter().map(|id| format!("\"{id}\"")).collect();
+    format!(
+        r#"{{"serial":{serial},"expires":{expires},"keys":[{}],"revoked":[{}]}}"#,
+        keys.join(","),
+        revoked.join(",")
+    )
+}
+
+/// The signatures of a key list by `roots`, with the trusted comment the
+/// registry signs it with.
+pub fn sign_keys(list: &str, serial: u64, expires: u64, roots: &[&Key]) -> Vec<String> {
+    let comment = format!("hyscribe-keys serial={serial} expires={expires}");
+    roots
+        .iter()
+        .map(|root| root.sign(list.as_bytes(), &comment))
+        .collect()
+}

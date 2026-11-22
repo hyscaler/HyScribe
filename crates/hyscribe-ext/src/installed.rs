@@ -123,8 +123,9 @@ fn gone(done: std::io::Result<()>) -> std::io::Result<()> {
     }
 }
 
-/// Writes `bytes` to a new file beside `path`, flushed, then renamed over it.
-fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Writes `bytes` to a new file beside `path`, mode 0644, flushed, then
+/// renamed over it.
+pub fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut new = path.as_os_str().to_owned();
     new.push(".new");
     let mut options = OpenOptions::new();

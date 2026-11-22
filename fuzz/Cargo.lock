@@ -1050,6 +1050,7 @@ dependencies = [
  "hyscribe-mail",
  "hyscribe-model",
  "hyscribe-phpser",
+ "hyscribe-registry",
  "hyscribe-render",
  "hyscribe-rest",
  "hyscribe-theme-json",
@@ -1135,6 +1136,14 @@ dependencies = [
 [[package]]
 name = "hyscribe-phpser"
 version = "0.1.0"
+
+[[package]]
+name = "hyscribe-registry"
+version = "0.1.0"
+dependencies = [
+ "hyscribe-ext",
+ "hyscribe-phpser",
+]
 
 [[package]]
 name = "hyscribe-render"

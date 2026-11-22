@@ -27,6 +27,7 @@ pub mod hyx;
 pub mod installed;
 mod limits;
 pub mod manifest;
+pub mod origin;
 mod request;
 mod runtime;
 pub mod signature;

@@ -418,3 +418,48 @@ fn a_revoked_plugin_does_not_load() {
     fs::remove_file(folder.join(origin::FILE)).unwrap();
     assert_eq!(load(), None, "installed before ADR 0024");
 }
+
+/// A theme the binary carries is put in its folder as a package would be,
+/// rewritten only when a file differs, its approval kept; a plugin, a
+/// manifest that does not read or a folder that cannot be made is refused.
+#[test]
+fn embeds_a_first_party_theme() {
+    let theme = include_str!("../../guest/theme/hyscribe.ext.toml");
+    let files = |css: &[u8]| {
+        vec![
+            (manifest::FILE.to_string(), theme.as_bytes().to_vec()),
+            (COMPONENT.to_string(), b"wasm".to_vec()),
+            ("public/style.css".to_string(), css.to_vec()),
+        ]
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let themes = dir.path().join("themes");
+    embed(&themes, files(b"a")).unwrap();
+    let folder = themes.join("hyscribe-theme");
+    assert_eq!(fs::read(folder.join("public/style.css")).unwrap(), b"a");
+    assert!(!folder.join(origin::FILE).exists());
+    let found = theme_in(&themes);
+    approve(&found).unwrap();
+    // The same files leave the folder untouched.
+    fs::write(folder.join("kept.txt"), b"").unwrap();
+    embed(&themes, files(b"a")).unwrap();
+    assert!(folder.join("kept.txt").is_file());
+    embed(&themes, files(b"b")).unwrap();
+    assert!(!folder.join("kept.txt").exists());
+    assert_eq!(fs::read(folder.join("public/style.css")).unwrap(), b"b");
+    assert!(theme_in(&themes).approved);
+    let plugin = vec![(manifest::FILE.to_string(), MANIFEST.as_bytes().to_vec())];
+    assert_eq!(
+        embed(&themes, plugin),
+        Err("hyscribe-test is not a theme".into())
+    );
+    assert!(embed(&themes, Vec::new()).is_err());
+    let file = dir.path().join("file");
+    fs::write(&file, b"").unwrap();
+    let refused = embed(&file, files(b"a")).unwrap_err();
+    assert!(refused.starts_with("cannot install into"), "{refused}");
+}
+
+fn theme_in(themes: &Path) -> Installed {
+    theme(themes, "hyscribe-theme", "hyscribe-theme").unwrap()
+}

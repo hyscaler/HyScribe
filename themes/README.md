@@ -25,7 +25,7 @@ A theme WordPress 7.1.3 no longer bundles is pinned from wordpress.org at its la
 | --- | --- | --- | --- |
 | `twentytwentytwo` | 2.2 | GPL-2.0-or-later; fonts SIL OFL 1.1, images CC0 | `twentytwentytwo/` (10.1) |
 | `twentytwentyone` | 2.9 | GPL-2.0-or-later (its `style.css` and `readme.txt`); bundled normalize.css is MIT | pinned only, ported in 10.6 |
-| `hello-elementor` | 3.5.2 | GPL-3.0-or-later (its `style.css` and `readme.txt`); see below for what it bundles | pinned, its port under way (10.5) |
+| `hello-elementor` | 3.5.2 | GPL-3.0-or-later (its `style.css` and `readme.txt`); see below for what it bundles | ported as `crates/hyscribe-theme-hello-elementor` (10.5, under way): the binary carries its component and the public files of its archive, installed into `themes/hello-elementor/` at start |
 
 Hello Elementor's bundled parts, checked before porting any of it (ADR 0004, ADR 0023):
 

@@ -9,7 +9,10 @@
 //! (`themes/pinned.tsv`, an open question), checked the same way before it is unpacked
 //! (`HYSCRIBE_THEME_ZIPS` is a folder of them for offline builds). Each file served
 //! from the release, the embedded themes' too, keeps its modification time
-//! and SHA-256 for `Last-Modified` and `ETag`.
+//! and SHA-256 for `Last-Modified` and `ETag`. A pinned theme ported as a
+//! component (ADR 0023) is carried as its package: its manifest, its public
+//! files from the archive and, from `HYSCRIBE_THEME_COMPONENTS`, its
+//! component, built by `scripts/themes.sh` before the binary.
 
 use sha2::{Digest, Sha256};
 use std::io;
@@ -22,6 +25,23 @@ const SHA256: &str = "d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e2
 const TARBALL_ENV: &str = "HYSCRIBE_WORDPRESS_TARBALL";
 const THEME_ZIPS_ENV: &str = "HYSCRIBE_THEME_ZIPS";
 const THEMES: &str = "wp-content/themes";
+/// The folder of built theme components, `<slug>.wasm` each
+/// (`scripts/themes.sh`); without it no ported theme is carried.
+const COMPONENTS_ENV: &str = "HYSCRIBE_THEME_COMPONENTS";
+/// The pinned themes ported as components (ADR 0023), with the files of
+/// their archives their packages leave out of `public/`: PHP, the bundled
+/// libraries and the admin page's images and bundles, which are not served.
+const PORTS: [(&str, &[&str]); 1] = [(
+    "hello-elementor",
+    &[
+        "vendor/",
+        "assets/images/",
+        "assets/js/271.js",
+        "assets/js/hello-conversion-banner.js",
+        "assets/js/hello-elementor-settings.js",
+        "assets/js/hello-elementor-topbar.js",
+    ],
+)];
 /// Files with a `.min` twin, so not served, that PHP reads as they are.
 const READ: [&str; 1] = ["css/dist/block-editor/default-editor-styles.css"];
 /// As the web server sends them; a file with no extension gets no type.
@@ -55,6 +75,7 @@ fn main() -> io::Result<()> {
     println!("cargo::rerun-if-changed=../../themes/pinned.tsv");
     println!("cargo::rerun-if-env-changed={TARBALL_ENV}");
     println!("cargo::rerun-if-env-changed={THEME_ZIPS_ENV}");
+    println!("cargo::rerun-if-env-changed={COMPONENTS_ENV}");
     let pinned = std::fs::read_to_string("../../wordpress/VERSION")?;
     let pinned = pinned.trim();
     if pinned != VERSION {
@@ -156,6 +177,7 @@ fn main() -> io::Result<()> {
                 .map(|f| format!("{theme}/{f}")),
         );
     }
+    ports(&out, &pinned_themes)?;
     release.sort();
     let mut dates = String::new();
     for path in &release {
@@ -169,6 +191,50 @@ fn main() -> io::Result<()> {
         dates.push_str(&format!("    ({path:?}, {modified}, {digest:?}),\n"));
     }
     std::fs::write(out.join("release.rs"), format!("&[\n{dates}]\n"))
+}
+
+/// `ported.rs`: each ported theme's manifest, its component when
+/// `HYSCRIBE_THEME_COMPONENTS` names a folder holding it, and its public
+/// files, from its verified archive.
+fn ports(out: &Path, pinned: &[(String, String, String)]) -> io::Result<()> {
+    let components = std::env::var_os(COMPONENTS_ENV).map(PathBuf::from);
+    let tree = out.join("ported");
+    if tree.exists() {
+        std::fs::remove_dir_all(&tree)?;
+    }
+    let mut entries = String::new();
+    for (slug, left_out) in PORTS {
+        let (_, version, sha) = pinned
+            .iter()
+            .find(|(pinned, _, _)| pinned == slug)
+            .ok_or_else(|| io::Error::other(format!("{slug} is not pinned")))?;
+        unpack_theme(&theme_zip(out, slug, version, sha)?, slug, &tree)?;
+        let root = tree.join(slug);
+        let mut files = Vec::new();
+        collect(&root, "", &mut files)?;
+        files.sort();
+        let public: String = files
+            .iter()
+            .filter(|f| !f.ends_with(".php") && !left_out.iter().any(|o| f.starts_with(o)))
+            .map(|f| format!("({f:?}, include_bytes!({:?})), ", root.join(f)))
+            .collect();
+        let manifest = format!("../hyscribe-theme-{slug}/hyscribe.ext.toml");
+        println!("cargo::rerun-if-changed={manifest}");
+        let manifest = std::fs::canonicalize(manifest)?;
+        let component = match &components {
+            Some(dir) => {
+                let wasm = std::fs::canonicalize(dir.join(format!("{slug}.wasm")))?;
+                println!("cargo::rerun-if-changed={}", wasm.display());
+                format!("Some(include_bytes!({wasm:?}))")
+            }
+            None => "None".into(),
+        };
+        entries.push_str(&format!(
+            "    Port {{ slug: {slug:?}, manifest: include_bytes!({manifest:?}), \
+             component: {component}, public: &[{public}] }},\n"
+        ));
+    }
+    std::fs::write(out.join("ported.rs"), format!("&[\n{entries}]\n"))
 }
 
 fn hex(bytes: &[u8]) -> String {

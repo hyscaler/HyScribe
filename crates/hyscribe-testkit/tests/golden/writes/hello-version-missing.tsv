@@ -1,0 +1,7 @@
+# The rows PHP WordPress writes for the action hello-version-missing (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-23 08:40:19 to 2026-11-23 08:40:19 UTC.
+# %wp_options:1% is 130.
+wp_options	hello_theme_version	+	autoload	auto
+wp_options	hello_theme_version	+	option_id	%wp_options:1%
+wp_options	hello_theme_version	+	option_name	hello_theme_version
+wp_options	hello_theme_version	+	option_value	3.5.2

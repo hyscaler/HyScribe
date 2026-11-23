@@ -147,6 +147,19 @@ impl Classic {
                 let options = ImageOptions::default();
                 custom_logo((site, request), theme.1, &self.loading, &options)
             }
+            // The queried post's excerpt, the one field and post served.
+            "get_post_field" => match args {
+                [field, id] if field.to_php_string() == b"post_excerpt" => {
+                    let post = request.posts.first().filter(|_| request.singular);
+                    let post = post.filter(|post| id.to_int() == post.id as i64);
+                    post.ok_or(Unserved)?.excerpt.clone()
+                }
+                _ => return Err(Unserved),
+            },
+            "wp_strip_all_tags" => match args {
+                [text] => hyscribe_kses::wp_strip_all_tags(&text.to_php_string(), false),
+                _ => return Err(Unserved),
+            },
             _ => return Err(Unserved),
         })
     }
@@ -168,6 +181,9 @@ impl Classic {
                     NavMenu::False => Ok(Value::Bool(false)),
                     NavMenu::NotPorted => Err(Unserved),
                 }
+            }
+            "get_queried_object_id" if args.is_empty() => {
+                Ok(Value::Int(request.queried_object_id as i64))
             }
             _ => Err(Unserved),
         }

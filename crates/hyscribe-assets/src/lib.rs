@@ -44,6 +44,33 @@ pub fn wp_includes(path: &str) -> Option<(&'static str, &'static [u8])> {
     lookup(FILES, path)
 }
 
+/// A pinned theme ported as a component (ADR 0023), as the binary carries
+/// its package.
+#[derive(Debug)]
+pub struct Port {
+    /// Its stylesheet slug, its folder under `themes/`.
+    pub slug: &'static str,
+    /// Its `hyscribe.ext.toml`.
+    pub manifest: &'static [u8],
+    /// Its `extension.wasm`, when the build was given it (release builds).
+    pub component: Option<&'static [u8]>,
+    /// The files of its `public/`, by path, from the pinned archive.
+    pub public: &'static [(&'static str, &'static [u8])],
+}
+
+/// The ported themes the binary carries.
+pub const PORTED: &[Port] = include!(concat!(env!("OUT_DIR"), "/ported.rs"));
+
+/// The file `path` of the ported theme `slug`'s `public/`.
+pub fn ported_file(slug: &str, path: &str) -> Option<&'static [u8]> {
+    let port = PORTED.iter().find(|port| port.slug == slug)?;
+    let found = port.public.binary_search_by(|(name, _)| name.cmp(&path));
+    found
+        .ok()
+        .and_then(|i| port.public.get(i))
+        .map(|(_, bytes)| *bytes)
+}
+
 fn lookup(
     files: &'static [(&str, &str, &[u8])],
     path: &str,
@@ -57,7 +84,34 @@ fn lookup(
 
 #[cfg(test)]
 mod tests {
-    use super::{release_file, wp_includes, wp_includes_read};
+    use super::{PORTED, ported_file, release_file, wp_includes, wp_includes_read};
+
+    /// Hello Elementor's package: its manifest and the public files of its
+    /// archive, without its PHP, libraries and admin page.
+    #[test]
+    fn ported_themes() {
+        let hello = &PORTED[0];
+        assert_eq!(hello.slug, "hello-elementor");
+        assert!(hello.manifest.starts_with(b"# SPDX-License-Identifier"));
+        let style = ported_file("hello-elementor", "style.css").unwrap_or_default();
+        assert!(style.starts_with(b"/*\n\tTheme Name: Hello Elementor"));
+        assert!(ported_file("hello-elementor", "theme.json").is_some());
+        assert!(ported_file("hello-elementor", "assets/css/reset.css").is_some());
+        assert!(ported_file("hello-elementor", "assets/js/hello-frontend.js").is_some());
+        for missing in [
+            "functions.php",
+            "vendor/autoload.php",
+            "assets/images/plus.svg",
+            "assets/js/271.js",
+            "nope.css",
+        ] {
+            assert!(
+                ported_file("hello-elementor", missing).is_none(),
+                "{missing}"
+            );
+        }
+        assert!(ported_file("twentytwentyone", "style.css").is_none());
+    }
 
     #[test]
     fn release_dates_and_digests() {

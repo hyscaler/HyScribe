@@ -11,6 +11,9 @@ use crate::manifest::Kind as Of;
 fn theme_grants() -> Grants {
     Grants {
         filters: ["ext_theme", "ext_theme_head"].map(String::from).into(),
+        actions: ["wp_enqueue_scripts", "wp_head", "wp_footer"]
+            .map(String::from)
+            .into(),
         ..Grants::default()
     }
 }
@@ -72,6 +75,7 @@ fn a_theme_calls_its_world_in_a_request() -> Result<(), Fault> {
         Some(
             &[
                 file("index.php", None, &[]),
+                file("single.php", None, &[]),
                 file("page-wide.php", Some("Wide"), &["page", "post"]),
                 file("template-parts/header.php", None, &[]),
                 file("front-page.php", None, &[]),
@@ -159,9 +163,10 @@ fn renders_in_an_instance_of_its_own() -> Result<(), Fault> {
     let loaded = theme(Limits::default())?;
     let site = TestSite::new();
     let (request, dispatch) = dispatching(&loaded, &site);
-    assert_eq!(request.templates().map(<[_]>::len), Some(4));
+    assert_eq!(request.templates().map(<[_]>::len), Some(5));
     // `wp_head` fires a hook the theme answers while it renders.
-    let page = b"<head><!-- theme hook --><main>index</main>".to_vec();
+    let page =
+        b"<head>\n<head><!-- theme hook --></head>\n<main>index</main>\n<wp_footer>".to_vec();
     for _ in 0..2 {
         assert_eq!(
             scoped(&dispatch, || request.render("index.php")),
@@ -181,6 +186,42 @@ fn renders_in_an_instance_of_its_own() -> Result<(), Fault> {
         request.filter("ext_theme_head", text("h"), &[]),
         text("h<!-- theme hook -->")
     );
+    Ok(())
+}
+
+/// An action that prints prints what each callback answers, core's
+/// callbacks running before those of the same priority and after the rest.
+#[test]
+fn callbacks_print_what_they_answer_on_an_action_that_prints() -> Result<(), Fault> {
+    let loaded = theme(Limits::default())?;
+    let request = loaded.request(&TestSite::new());
+    let mut asked = Vec::new();
+    let mut core = |upto: Option<i32>| {
+        asked.push(upto);
+        format!("[core {upto:?}]").into_bytes()
+    };
+    let printed = request.printing("ext_theme_head", &[text("h")], &mut core);
+    let expected = "[core Some(10)]h<!-- theme hook -->[core None]";
+    assert_eq!(String::from_utf8_lossy(&printed), expected);
+    assert_eq!(asked, [Some(10), None]);
+    // A hook no callback is on prints core's only, and counts as fired.
+    let printed = request.printing("wp_body_open", &[], &mut |_| b"core".to_vec());
+    assert_eq!(printed, b"core");
+    assert_eq!(request.0.did_action("wp_body_open"), 1);
+    // An answer that is no string, or none, prints nothing.
+    let plugins = load(&["ext"], Limits::default())?;
+    let request = plugins.request(&TestSite::new());
+    for hook in ["ext_count", "ext_error"] {
+        assert_eq!(request.printing(hook, &[], &mut |_| Vec::new()), b"");
+    }
+    // Callbacks at two priorities: core's run before each.
+    let mut asked = Vec::new();
+    let mut core = |upto: Option<i32>| {
+        asked.push(upto);
+        Vec::new()
+    };
+    request.printing("ext_chain", &[text("x")], &mut core);
+    assert_eq!(asked, [Some(10), Some(20), None]);
     Ok(())
 }
 

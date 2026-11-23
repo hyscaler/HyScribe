@@ -6,7 +6,7 @@
 //! `loop_end` and `loop_no_results` pass the query object and cross to no
 //! extension yet.
 
-use hyscribe_model::hooks::{apply_filters, do_action};
+use hyscribe_model::hooks::{apply_filters, do_action_printing};
 use hyscribe_phpser::{Value, is_empty_string};
 
 use crate::attachment::ImageOptions;
@@ -141,10 +141,7 @@ impl Classic {
                 let classes = body_classes(site, request, theme, supports("responsive-embeds"));
                 [&b"class=\""[..], &classes, b"\""].concat()
             }
-            "wp_body_open" => {
-                do_action("wp_body_open", &[]);
-                Vec::new()
-            }
+            "wp_body_open" => do_action_printing("wp_body_open", &[], Vec::new()),
             // Its `loading` is given, so where it prints does not count.
             "the_custom_logo" => {
                 let options = ImageOptions::default();

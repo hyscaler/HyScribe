@@ -248,3 +248,75 @@ fn a_future_within_a_dispatcher_has_it_at_each_poll_only() {
     let polled = Pin::new(&mut plain).poll(&mut cx);
     assert_eq!(polled, Poll::Ready(vec![0, 0]));
 }
+
+/// Prints an extension's callback at 10 and at 20, between core's.
+struct Printing;
+
+impl Dispatch for Printing {
+    fn attached(&self, hook: &str) -> bool {
+        hook != "unattached"
+    }
+
+    fn filter(&self, _: &str, value: Value, _: &[Value]) -> Value {
+        value
+    }
+
+    fn action(&self, _: &str, _: &[Value]) {}
+
+    fn printing(
+        &self,
+        _: &str,
+        args: &[Value],
+        core: &mut dyn FnMut(Option<i32>) -> Vec<u8>,
+    ) -> Vec<u8> {
+        let given = args.first().map(Value::to_php_string).unwrap_or_default();
+        let mut printed = core(Some(10));
+        printed.extend([&b"[ext10:"[..], &given, b"]"].concat());
+        printed.extend(core(Some(20)));
+        printed.extend_from_slice(b"[ext20]");
+        printed.extend(core(None));
+        printed
+    }
+}
+
+/// Core's callbacks, out of order: `wp_head`'s priorities.
+fn core_callbacks() -> Vec<Core<'static>> {
+    let at = |priority: i32, printed: &'static str| -> Core<'static> {
+        (priority, Box::new(move || printed.as_bytes().to_vec()))
+    };
+    vec![
+        at(10, "c10a"),
+        at(1, "c1"),
+        at(10, "c10b"),
+        at(20, "c20"),
+        at(99, "c99"),
+    ]
+}
+
+#[test]
+fn printing_actions_run_core_among_the_extensions_by_priority() {
+    let printed = do_action_printing("wp_head", &[], core_callbacks());
+    assert_eq!(printed, b"c1c10ac10bc20c99");
+    let dispatch: Arc<dyn Dispatch> = Arc::new(Printing);
+    let printed = scoped(&dispatch, || {
+        do_action_printing("wp_head", &[&"a"], core_callbacks())
+    });
+    assert_eq!(printed, b"c1c10ac10b[ext10:a]c20[ext20]c99");
+    // Unattached, or with an argument that does not cross: core's only.
+    for printed in scoped(&dispatch, || {
+        [
+            do_action_printing("unattached", &[], core_callbacks()),
+            do_action_printing("wp_head", &[&1_u8], core_callbacks()),
+        ]
+    }) {
+        assert_eq!(printed, b"c1c10ac10bc20c99");
+    }
+    // A dispatcher that does not print runs the action, core's after.
+    let (fixed, dispatch) = fixed(Value::Null);
+    let printed = scoped(&dispatch, || {
+        do_action_printing("wp_footer", &[&2_i64], core_callbacks())
+    });
+    assert_eq!(printed, b"c1c10ac10bc20c99");
+    let fired = ("wp_footer".to_string(), Value::Null, vec![Value::Int(2)]);
+    assert_eq!(seen(&fixed), [fired]);
+}

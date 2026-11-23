@@ -68,13 +68,15 @@ pub(crate) enum Registered<'a> {
 }
 
 /// How a chain's answers carry: `apply_filters()` takes each callback's
-/// answer, `do_action()` none. A step of a chain an extension fired takes
-/// the answers of callbacks added as filters, as the host cannot tell
-/// which of the two the extension runs.
+/// answer, `do_action()` none, and an action that prints prints the
+/// strings answered. A step of a chain an extension fired takes the
+/// answers of callbacks added as filters, as the host cannot tell which of
+/// the two the extension runs.
 #[derive(Clone, Copy)]
 pub(crate) enum Fired {
     Filter,
     Action,
+    Print,
     Step,
 }
 
@@ -147,6 +149,33 @@ impl Request {
         *lock(&self.0.did).entry(hook.to_string()).or_default() += 1;
         self.0
             .fire(hook, self.0.chain(hook), &mut args.to_vec(), Fired::Action);
+    }
+
+    /// [`Request::action`] of an action that prints: before the callbacks
+    /// of each priority, `core( Some( $priority ) )` prints core's up to
+    /// it, then `core( None )` the rest; a callback prints the string it
+    /// answers. What all print, in order.
+    pub fn printing(
+        &self,
+        hook: &str,
+        args: &[Value],
+        core: &mut dyn FnMut(Option<i32>) -> Vec<u8>,
+    ) -> Vec<u8> {
+        *lock(&self.0.did).entry(hook.to_string()).or_default() += 1;
+        let at = |entry: &(usize, usize)| self.0.extensions.hook(*entry).map(|h| h.priority);
+        let mut printed = Vec::new();
+        for entries in self.0.chain(hook).chunk_by(|a, b| at(a) == at(b)) {
+            let priority = entries.first().and_then(at);
+            printed.extend(
+                priority
+                    .map(|priority| core(Some(priority)))
+                    .unwrap_or_default(),
+            );
+            let mut given = args.to_vec();
+            printed.extend(self.0.fire(hook, entries, &mut given, Fired::Print));
+        }
+        printed.extend(core(None));
+        printed
     }
 
     /// `do_shortcode_tag()` for a tag an extension added, the last to add
@@ -241,6 +270,15 @@ impl hyscribe_model::hooks::Dispatch for Request {
     fn action(&self, hook: &str, args: &[Value]) {
         Request::action(self, hook, args);
     }
+
+    fn printing(
+        &self,
+        hook: &str,
+        args: &[Value],
+        core: &mut dyn FnMut(Option<i32>) -> Vec<u8>,
+    ) -> Vec<u8> {
+        Request::printing(self, hook, args, core)
+    }
 }
 
 impl Shared {
@@ -250,14 +288,16 @@ impl Shared {
     }
 
     /// Runs `entries` of `hook`'s chain over `args`; a callback's answer
-    /// becomes the first argument of the next as `fired` says.
+    /// becomes the first argument of the next as `fired` says. What the
+    /// callbacks of an action that prints print.
     pub(crate) fn fire(
         &self,
         hook: &str,
         entries: &[(usize, usize)],
         args: &mut [Value],
         fired: Fired,
-    ) {
+    ) -> Vec<u8> {
+        let mut printed = Vec::new();
         lock(&self.current).push(hook.to_string());
         let found = entries.iter().filter_map(|&entry| {
             let registered = self.extensions.hook(entry);
@@ -276,6 +316,12 @@ impl Shared {
             let replaces = match fired {
                 Fired::Filter => true,
                 Fired::Action => false,
+                Fired::Print => {
+                    if let Some(Value::String(text)) = &answer {
+                        printed.extend_from_slice(text);
+                    }
+                    false
+                }
                 Fired::Step => !registered.action,
             };
             if let (Some(answer), true, Some(first)) = (answer, replaces, args.first_mut()) {
@@ -283,6 +329,7 @@ impl Shared {
             }
         }
         lock(&self.current).pop();
+        printed
     }
 
     /// The hook the request is running, innermost first.

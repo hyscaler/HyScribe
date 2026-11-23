@@ -100,6 +100,11 @@ impl Runtime {
         &self.plugins
     }
 
+    /// The themes folder, `hyscribe/themes/`.
+    pub fn themes(&self) -> &Path {
+        &self.themes
+    }
+
     /// The extension of `installed`, with the grants and limits of
     /// `manifest`, its component read no larger than a package's entry,
     /// and the host it loaded in, made at the first load.

@@ -10,7 +10,9 @@
 //! What an answer gives goes through the same checks as the value it
 //! replaced. The embedder enters the scope for each request: [`within`] for
 //! its future, wherever it is polled, and [`carry`] for work it hands to a
-//! blocking thread.
+//! blocking thread. An action that prints runs core's callbacks among the
+//! extensions' by priority, and an extension's callback prints the string
+//! it answers there (ADR 0023's 2026-11-23 amendment).
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -29,7 +31,23 @@ pub trait Dispatch: Send + Sync {
     fn filter(&self, hook: &str, value: Value, args: &[Value]) -> Value;
     /// `do_action( $hook, ...$args )` over the extensions' callbacks.
     fn action(&self, hook: &str, args: &[Value]);
+    /// [`Dispatch::action`] of an action that prints: before the callbacks
+    /// of each priority, `core( Some( $priority ) )` prints core's up to it,
+    /// and `core( None )` the rest after the last; what all print, in order.
+    fn printing(
+        &self,
+        hook: &str,
+        args: &[Value],
+        core: &mut dyn FnMut(Option<i32>) -> Vec<u8>,
+    ) -> Vec<u8> {
+        self.action(hook, args);
+        core(None)
+    }
 }
+
+/// A callback core adds to an action that prints, at its priority: what it
+/// prints when it runs.
+pub type Core<'a> = (i32, Box<dyn FnOnce() -> Vec<u8> + 'a>);
 
 thread_local! {
     static DISPATCH: RefCell<Option<Arc<dyn Dispatch>>> = const { RefCell::new(None) };
@@ -253,6 +271,34 @@ pub fn do_action(hook: &str, args: &[&dyn Any]) {
         .collect::<Option<Vec<_>>>();
     if let (Some(dispatch), Some(given)) = (attached(hook), given) {
         dispatch.action(hook, &given);
+    }
+}
+
+/// `do_action( $hook, ...$args )` of an action that prints, core having
+/// added `core` in that order: the extensions' callbacks run among them by
+/// priority, after core's of the same priority; what all print, in order.
+pub fn do_action_printing(hook: &str, args: &[&dyn Any], mut core: Vec<Core<'_>>) -> Vec<u8> {
+    #[cfg(feature = "hook-log")]
+    FIRED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(hook.to_string());
+    core.sort_by_key(|(priority, _)| *priority);
+    let mut core = core.into_iter().peekable();
+    let mut run = |upto: Option<i32>| {
+        let mut printed = Vec::new();
+        while let Some((_, print)) = core.next_if(|(at, _)| upto.is_none_or(|upto| *at <= upto)) {
+            printed.extend(print());
+        }
+        printed
+    };
+    let given = args
+        .iter()
+        .map(|arg| to_php(*arg))
+        .collect::<Option<Vec<_>>>();
+    match (attached(hook), given) {
+        (Some(dispatch), Some(given)) => dispatch.printing(hook, &given, &mut run),
+        _ => run(None),
     }
 }
 

@@ -110,6 +110,9 @@ pub struct Site {
     /// The theme as built for the site's global styles post's content,
     /// shared by the site as reloaded, so a change rebuilds it once.
     styled: Arc<tokio::sync::Mutex<Styled>>,
+    /// The global styles of the active classic theme's `theme.json` and
+    /// the site's own, as built for them, shared as `styled` is.
+    classic_styled: Arc<std::sync::Mutex<Option<ClassicStyled>>>,
     /// The rewrite rules of the permalink options.
     rewriter: Arc<rewrite::Rewriter>,
     /// The rules compiled for an earlier request.
@@ -168,6 +171,10 @@ fn mail_off() -> hyscribe_mail::Mailer {
 /// built with them.
 type Styled = (String, Option<Vec<u8>>, Arc<Theme>);
 
+/// A classic theme's `theme.json` and the site's global styles, and the
+/// global styles built from them.
+type ClassicStyled = (Vec<u8>, Option<Vec<u8>>, Arc<theme::GlobalStyles>);
+
 /// The address a connection comes from.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Peer(pub(crate) std::net::IpAddr);
@@ -203,6 +210,7 @@ impl Site {
                 Arc::clone(&theme),
             ))),
             theme,
+            classic_styled: Arc::default(),
             rewriter: Arc::default(),
             compiled: Arc::default(),
             salts: Vec::new(),
@@ -259,6 +267,7 @@ impl Site {
             home,
             theme,
             styled: Arc::clone(&self.styled),
+            classic_styled: Arc::clone(&self.classic_styled),
             rewriter: Arc::default(),
             compiled: Arc::clone(&self.compiled),
             salts: self.salts.clone(),
@@ -1542,13 +1551,16 @@ fn html(page: Rendered) -> Response {
         .into_response()
 }
 
-/// `page` with its rendered body, or the 500 page when rendering met a
-/// database error or panicked.
+/// `page` with its rendered body, the critical error page when the theme
+/// failed, or the 500 page when rendering met a database error or panicked.
 fn rendered(
     site: &Site,
     page: Page,
     body: Result<Result<String, extensions::Failed>, tokio::task::JoinError>,
 ) -> Rendered {
+    if let Ok(Err(extensions::Failed::Theme(fault))) = &body {
+        return critical_error(site, fault);
+    }
     match finished(site, body) {
         Ok(document) => Rendered {
             status: page.status,
@@ -1568,6 +1580,20 @@ fn finished<T, E: std::fmt::Display>(
         Ok(Ok(made)) => Ok(made),
         Ok(Err(err)) => Err(database_error(site, &err)),
         Err(err) => Err(database_error(site, &err)),
+    }
+}
+
+/// `WP_Fatal_Error_Handler::display_default_error_template()` on the front
+/// end, PHP's page for a fatal error, as a theme's fault answers (ADR 0023);
+/// the fault goes to the log. `wp_php_error_message` passes an array and
+/// crosses to no extension.
+fn critical_error(site: &Site, fault: &hyscribe_ext::Fault) -> Rendered {
+    eprintln!("the theme failed: {fault:?}");
+    let message = "<p>There has been a critical error on this website.</p><p><a href=\"https://wordpress.org/documentation/article/faq-troubleshooting/\">Learn more about troubleshooting WordPress.</a></p>";
+    let page = hyscribe_admin::die::page(site.public(), "WordPress &rsaquo; Error", message);
+    Rendered {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        document: lossy(&page),
     }
 }
 
@@ -1611,7 +1637,8 @@ fn render_page(
         // theme has `index.php`, the last of every request's candidates.
         let candidates = with_page_template(&reads, request, candidates);
         let file = hyscribe_ext::locate(&candidates, files).unwrap_or("index.php");
-        running.theme.begin((site, request), files);
+        let global = classic_global_styles(site, &reads, &running.themes);
+        running.theme.begin((site, request), files, (title, global));
         lossy(&running.theme.end(running.request.render(file))?)
     } else {
         let candidates = with_page_template(&reads, request, candidates);
@@ -1637,6 +1664,30 @@ fn render_page(
     };
     reads.finish().map_err(extensions::Failed::Database)?;
     Ok(document)
+}
+
+/// The global styles of the active classic theme's `theme.json`, read from
+/// its package's `public/`, with the site's own for it; none without one.
+fn classic_global_styles(
+    site: &Site,
+    reads: &Reads<'_>,
+    themes: &std::path::Path,
+) -> Option<Arc<theme::GlobalStyles>> {
+    let stylesheet = site.option("stylesheet");
+    let path = themes.join(&stylesheet).join("public/theme.json");
+    let json = std::fs::read(path).ok()?;
+    let posts = reads.wait(site.db.theme_posts("wp_global_styles", &stylesheet));
+    let user = posts.into_iter().next().map(|post| post.content);
+    let mut built = site
+        .classic_styled
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((_, _, global)) = built.as_ref().filter(|(j, u, _)| (j, u) == (&json, &user)) {
+        return Some(global.clone());
+    }
+    let global = Arc::new(theme::classic_global_styles(&json, user.as_deref()));
+    *built = Some((json, user, global.clone()));
+    Some(global)
 }
 
 /// The embed sharing dialog's secret and ID suffix, as large as

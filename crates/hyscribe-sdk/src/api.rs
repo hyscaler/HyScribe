@@ -68,6 +68,8 @@ pub mod hooks {
     }
 
     /// `add_action( $hook, $callback, $priority, $accepted_args )`, in `init`.
+    /// On an action that prints (`wp_head`, `wp_footer`, `wp_body_open`),
+    /// the host prints the string a callback answers where it runs (0.3).
     pub fn on_action(
         hook: &str,
         callback: impl Into<u32>,

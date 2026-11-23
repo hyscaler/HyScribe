@@ -312,4 +312,16 @@ return array(
 		},
 		fn() => $themes_activate( 'twentytwentyfour' )
 	),
+	// A visitor's page view with a classic theme active (ADR 0023), whose
+	// mods are not yet written: wp_head()'s `wp_custom_css_cb` looks up the
+	// custom CSS post and keeps -1 for none (reference/themes/pin.sh first).
+	'theme-classic-page-view'                 => $themes_case(
+		function () {
+			update_option( 'template', 'hello-elementor' );
+			update_option( 'stylesheet', 'hello-elementor' );
+			update_option( 'current_theme', 'Hello Elementor' );
+			wp_set_current_user( 0 );
+		},
+		fn() => wp_custom_css_cb()
+	),
 );

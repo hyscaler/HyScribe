@@ -14,8 +14,10 @@ use hyscribe_db::DbError;
 use hyscribe_model::{
     CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, TermQuery, User,
 };
+use hyscribe_phpser::Value;
 use hyscribe_render::outbound::{Get, Response};
 use hyscribe_render::site::Site as RenderSite;
+use hyscribe_write::posts::custom_css_none_kept;
 use tokio::runtime::Handle;
 
 use crate::Site;
@@ -139,6 +141,20 @@ impl RenderSite for Reads<'_> {
 
     fn insert_navigation_fallback(&self, title: &[u8], name: &[u8], content: &[u8]) {
         write(self.site, self, Write::Navigation(title, name, content));
+    }
+
+    /// Written once: not when the mods keep -1, and not without
+    /// `current_theme`, where PHP names the theme from its headers.
+    fn custom_css_post_lookup(&self, stylesheet: &str) {
+        let mods = self.option(&format!("theme_mods_{stylesheet}"));
+        let mods = mods.and_then(|mods| hyscribe_phpser::unserialize(&mods));
+        let mods = mods.as_ref().and_then(Value::as_array);
+        let kept = mods.is_some_and(custom_css_none_kept);
+        let name = self.option("current_theme");
+        if let (false, Some(name)) = (kept, name) {
+            let name = String::from_utf8_lossy(&name);
+            write(self.site, self, Write::CustomCss(stylesheet, &name));
+        }
     }
 
     fn wp_hash(&self, data: &[u8]) -> Option<String> {

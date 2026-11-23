@@ -485,6 +485,7 @@ async fn a_failed_read_is_the_database_error_page() {
         options: std::collections::HashMap::new(),
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        classic_styled: Arc::default(),
         styled: Arc::new(tokio::sync::Mutex::new((
             "twentytwentyfive".to_owned(),
             None,

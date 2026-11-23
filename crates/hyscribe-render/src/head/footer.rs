@@ -21,9 +21,21 @@ const COMMENT_REPLY: &str = "/wp-includes/js/comment-reply.min.js";
 
 /// What `wp_footer()` prints after the template.
 pub fn wp_footer(site: &dyn Site, assets: &Assets) -> Vec<u8> {
-    let siteurl = String::from_utf8_lossy(&site.option("siteurl").unwrap_or_default()).into_owned();
-    let registry = registered_modules(&siteurl);
-    let mut out = speculation_rules(site, &siteurl);
+    let siteurl = siteurl(site);
+    let mut out = footer_actions(site, &siteurl, assets);
+    out.extend(footer_scripts(&siteurl, assets));
+    out
+}
+
+pub(crate) fn siteurl(site: &dyn Site) -> String {
+    String::from_utf8_lossy(&site.option("siteurl").unwrap_or_default()).into_owned()
+}
+
+/// What `wp_footer()`'s callbacks at priority 10 print: the speculation
+/// rules, the blocks' footer markup and the script modules.
+pub(crate) fn footer_actions(site: &dyn Site, siteurl: &str, assets: &Assets) -> Vec<u8> {
+    let registry = registered_modules(siteurl);
+    let mut out = speculation_rules(site, siteurl);
     out.extend_from_slice(&assets.footer);
     let modules = Modules {
         registry: &registry,
@@ -31,7 +43,14 @@ pub fn wp_footer(site: &dyn Site, assets: &Assets) -> Vec<u8> {
     };
     out.extend(modules.footer());
     out.extend(modules.data(&assets.state));
-    // wp_print_footer_scripts(), in the order the scripts were enqueued.
+    out
+}
+
+/// `wp_print_footer_scripts()`, at priority 20: the scripts in the order
+/// they were enqueued, then the emoji detection script.
+pub(crate) fn footer_scripts(siteurl: &str, assets: &Assets) -> Vec<u8> {
+    let siteurl = siteurl.to_owned();
+    let mut out = Vec::new();
     let at = |handles: &[&str]| {
         let wanted = |h: &String| handles.contains(&h.as_str());
         assets.scripts.iter().position(wanted)

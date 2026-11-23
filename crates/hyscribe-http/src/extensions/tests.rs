@@ -318,7 +318,8 @@ fn what_is_not_served_yet() {
         placement: String::new(),
     };
     assert_eq!(live.register_asset("ext", &asset), unserved.clone());
-    assert_eq!(live.enqueue(AssetKind::Style, "h"), unserved.clone());
+    let no_page = Err("no page is being rendered".to_string());
+    assert_eq!(live.enqueue(AssetKind::Style, "h"), no_page);
     assert_eq!(live.add_inline(AssetKind::Script, "h", "", false), unserved);
     let call = hyscribe_ext::ThemeCall::ContentWidth(800);
     assert_eq!(live.theme("t", &call), Err(UNSERVED.to_string()));

@@ -85,6 +85,52 @@ async fn editor_views_match_php() {
     check("admin-site-editor", nothing, site).await;
 }
 
+/// A classic theme's page view, its mods not yet written, keeps the lookup
+/// as PHP's head does (`theme-classic-page-view` of actions-themes.php).
+#[tokio::test]
+async fn a_classic_page_view_keeps_the_lookup_as_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let hello = ("hello-elementor", "Hello Elementor");
+    // `$themes_base` and the theme made active by its options.
+    let active = async |conn: &mut Connection| {
+        let writer = writer().await;
+        let mut write = writer.begin_on(conn).await.map_err(|e| format!("{e:?}"))?;
+        let css = (crate::themes::key("custom_css_post_id"), Value::Int(-1));
+        // `search_theme_directories()` keeps the roots it scanned.
+        let roots = Value::Array(Vec::new());
+        crate::options::set_site_transient(&mut write, "theme_roots", &roots, 1800)
+            .await
+            .unwrap();
+        crate::options::delete_option(&mut write, "theme_mods_twentytwentyfive")
+            .await
+            .unwrap();
+        let mods = Value::Array(vec![css]);
+        crate::options::update_option(&mut write, "theme_mods_twentytwentyfive", &mods, None)
+            .await
+            .unwrap();
+        for (name, value) in [
+            ("template", hello.0),
+            ("stylesheet", hello.0),
+            ("current_theme", hello.1),
+        ] {
+            let value = Value::String(value.into());
+            crate::options::update_option(&mut write, name, &value, None)
+                .await
+                .unwrap();
+        }
+        write.commit().await.map_err(|e| format!("{e:?}"))
+    };
+    let view = async |conn: &mut Connection, ()| {
+        let writer = writer().await;
+        let mut write = writer.begin_on(conn).await.map_err(|e| format!("{e:?}"))?;
+        custom_css_post_lookup(&mut write, hello.0, hello.1)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        write.commit().await.map_err(|e| format!("{e:?}"))
+    };
+    check("theme-classic-page-view", active, view).await;
+}
+
 /// A database error at any statement of the site editor's first view ends it.
 #[tokio::test]
 async fn database_errors_end_site_editor_views() {

@@ -374,9 +374,11 @@ impl<P: Plugin> Host<P> {
     }
 
     /// Runs `hook`'s callbacks over `args` as core fires them; a filter
-    /// takes each answer as the next first argument.
-    fn fire(&self, hook: &str, mut args: Vec<Value>, filter: bool) -> Vec<Value> {
+    /// takes each answer as the next first argument, and an action prints
+    /// the strings answered.
+    fn fire(&self, hook: &str, mut args: Vec<Value>, filter: bool) -> (Vec<Value>, String) {
         let entries = with(|state| state.entries(hook));
+        let mut printed = String::new();
         fired(hook, || {
             for entry in entries {
                 let answer = match entry.added {
@@ -390,12 +392,14 @@ impl<P: Plugin> Host<P> {
                     }
                     Added::Other(other) => Some(other(args.clone())),
                 };
-                if let (Some(answer), true, Some(first)) = (answer, filter, args.first_mut()) {
-                    *first = answer;
+                match (answer, filter, args.first_mut()) {
+                    (Some(answer), true, Some(first)) => *first = answer,
+                    (Some(Value::Text(text)), false, _) => printed.push_str(&text),
+                    _ => {}
                 }
             }
         });
-        args
+        (args, printed)
     }
 
     /// `apply_filters( $hook, $value, ...$args )` as core runs it.
@@ -403,13 +407,15 @@ impl<P: Plugin> Host<P> {
         let mut all = Vec::with_capacity(args.len() + 1);
         all.push(value);
         all.extend_from_slice(args);
-        self.fire(hook, all, true).swap_remove(0)
+        self.fire(hook, all, true).0.swap_remove(0)
     }
 
-    /// `do_action( $hook, ...$args )` as core runs it.
-    pub fn action(&self, hook: &str, args: &[Value]) {
+    /// `do_action( $hook, ...$args )` as core runs it, and what its
+    /// callbacks print where it is an action that prints (`wp_head`,
+    /// `wp_footer`, `wp_body_open`): the strings they answer.
+    pub fn action(&self, hook: &str, args: &[Value]) -> String {
         with(|state| *state.did.entry(hook.into()).or_default() += 1);
-        self.fire(hook, args.to_vec(), false);
+        self.fire(hook, args.to_vec(), false).1
     }
 }
 

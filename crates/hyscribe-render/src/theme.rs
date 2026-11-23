@@ -9,7 +9,8 @@
 use std::collections::HashMap;
 
 use hyscribe_phpser::{Key, Value, json_decode};
-use hyscribe_theme_json::{BlockType as Metadata, GlobalStyles, Sources};
+pub use hyscribe_theme_json::GlobalStyles;
+use hyscribe_theme_json::{BlockType as Metadata, Sources};
 
 /// A theme port's data, embedded at build time from its folder in
 /// `themes/` (build.rs).
@@ -211,6 +212,21 @@ pub fn twentytwentyfive() -> Theme {
 /// its `wp_global_styles` post if it has one.
 pub fn load(slug: &str, user: Option<&[u8]>) -> Theme {
     with_user_styles(slug, user, &[])
+}
+
+/// The global styles of a classic theme whose `theme.json` is `theme_json`,
+/// with `user` as the site's global styles (ADR 0023).
+pub fn classic_global_styles(theme_json: &[u8], user: Option<&[u8]>) -> GlobalStyles {
+    let blocks = registered_blocks(REGISTERED_BLOCKS);
+    GlobalStyles::resolve(&Sources {
+        core: CORE_THEME_JSON,
+        blocks: &blocks,
+        block_styles: &[],
+        theme: Some(theme_json),
+        parent_theme: None,
+        theme_styles: &[],
+        user,
+    })
 }
 
 /// The default theme with `user` as the site's global styles and `styles`

@@ -210,7 +210,8 @@ fn themes(dir: &tempfile::TempDir) -> PathBuf {
 fn loads_the_active_theme_after_the_plugins() {
     let (dir, _, runtime) = installed();
     approve(&runtime);
-    themes(&dir);
+    let folder = themes(&dir);
+    assert_eq!(runtime.themes(), folder);
     let theme = |stylesheet, template| {
         Some(Active {
             stylesheet,
@@ -226,7 +227,7 @@ fn loads_the_active_theme_after_the_plugins() {
     assert_eq!(both.1, Vec::new());
     assert_eq!(request.index("hyscribe-test"), Some(0));
     assert_eq!(request.index("hyscribe-theme"), Some(1));
-    assert_eq!(request.templates().map(<[_]>::len), Some(4));
+    assert_eq!(request.templates().map(<[_]>::len), Some(5));
     let child = runtime
         .request(&[], theme("hyscribe-theme", "parent"), site())
         .0;
@@ -247,7 +248,7 @@ fn loads_the_active_theme_after_the_plugins() {
         alone
             .0
             .and_then(|request| request.templates().map(<[_]>::len)),
-        Some(4)
+        Some(5)
     );
     assert!(format!("{runtime:?}").contains("themes: "));
 }

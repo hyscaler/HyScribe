@@ -11,7 +11,7 @@ use hyscribe_fetch::{Args, Kind};
 use hyscribe_phpser::{Value, decode};
 use hyscribe_render::outbound::{Get, NOT_ALLOWED, Redirects, Response};
 use hyscribe_write::options::{Meta, expire_site_transient, set_site_transient, update_metadata};
-use hyscribe_write::posts::{Context, PostArgs, wp_insert_post};
+use hyscribe_write::posts::{Context, PostArgs, custom_css_post_lookup, wp_insert_post};
 
 use crate::Site;
 use crate::reads::Reads;
@@ -79,6 +79,9 @@ pub(crate) enum Write<'a> {
     /// `wp_insert_post()` of the navigation fallback's post (a classic
     /// menu's or the default page list's), from its title, slug and content.
     Navigation(&'a [u8], &'a [u8], &'a [u8]),
+    /// `wp_get_custom_css_post()`'s lookup for a theme, by its stylesheet
+    /// and name.
+    CustomCss(&'a str, &'a str),
 }
 
 /// Makes `write` on `site`'s writer, if it has one.
@@ -110,6 +113,10 @@ pub(crate) fn write(site: &Site, reads: &Reads<'_>, write: Write<'_>) {
                     let post = [title, name, content];
                     let inserted = insert_navigation(&mut tx, &ctx, post).await;
                     inserted.map(|_| ()).map_err(|_| ())
+                }
+                Write::CustomCss(stylesheet, name) => {
+                    let looked = custom_css_post_lookup(&mut tx, stylesheet, name).await;
+                    looked.map_err(drop)
                 }
             };
             let _ = tx.commit().await;

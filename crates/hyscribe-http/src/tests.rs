@@ -252,6 +252,7 @@ async fn database_errors_show_no_details() {
         ]),
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        classic_styled: Arc::default(),
         styled: Arc::new(tokio::sync::Mutex::new((
             "twentytwentyfive".to_owned(),
             None,
@@ -1004,6 +1005,7 @@ async fn the_front_page_links_to_home() {
         options,
         home: base.home.clone(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        classic_styled: Arc::default(),
         styled: Arc::new(tokio::sync::Mutex::new((
             "twentytwentyfive".to_owned(),
             None,
@@ -1193,6 +1195,7 @@ async fn failed_reads_answer_defaults() {
         options: HashMap::new(),
         home: String::new(),
         theme: Arc::new(hyscribe_render::theme::twentytwentyfive()),
+        classic_styled: Arc::default(),
         styled: Arc::new(tokio::sync::Mutex::new((
             "twentytwentyfive".to_owned(),
             None,
@@ -2298,7 +2301,7 @@ fn generator_names() -> [(&'static str, String); 7] {
 /// PHP's page, feed or sitemap as HyScribe sends it: HyScribe as the
 /// generator and in the footer credit, and without the RSD tag.
 #[allow(clippy::string_slice)]
-fn as_hyscribe(mut php: String) -> String {
+pub(crate) fn as_hyscribe(mut php: String) -> String {
     while let Some(start) = php.find("<link rel=\"EditURI\"") {
         let end = start + php[start..].find("/>\n").unwrap() + 3;
         php.replace_range(start..end, "");
@@ -2326,7 +2329,7 @@ fn as_wordpress(mut ours: String) -> String {
 }
 
 /// Where two pages first differ, with the text around it.
-fn first_difference(php: &str, ours: &str) -> String {
+pub(crate) fn first_difference(php: &str, ours: &str) -> String {
     let at = ours
         .bytes()
         .zip(php.bytes())

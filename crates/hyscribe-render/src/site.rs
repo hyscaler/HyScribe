@@ -204,6 +204,11 @@ pub trait Site {
     /// only.
     fn insert_navigation_fallback(&self, _title: &[u8], _name: &[u8], _content: &[u8]) {}
 
+    /// `wp_get_custom_css_post()`'s lookup for the active theme `stylesheet`,
+    /// which keeps `custom_css_post_id` -1 in its mods for none, written in
+    /// primary mode only: what a classic head's `wp_custom_css_cb` writes.
+    fn custom_css_post_lookup(&self, _stylesheet: &str) {}
+
     /// The filters the embeds and the RSS block run, under WordPress's
     /// names; none attached by default.
     fn hooks(&self) -> &dyn Hooks {

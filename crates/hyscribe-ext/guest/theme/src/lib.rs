@@ -16,6 +16,7 @@ use alloc::vec::Vec;
 use core::fmt::Debug;
 use core::hint::black_box;
 
+use hyscribe_sdk::assets::{self, Asset, AssetKind};
 use hyscribe_sdk::customize::{self, CustomizeKind};
 use hyscribe_sdk::theme::{self, TemplateFile};
 use hyscribe_sdk::{Plugin, SdkError, Theme, Value, hooks, template};
@@ -24,6 +25,9 @@ hyscribe_sdk::callbacks! {
     enum Cb {
         Calls => calls,
         Head => head,
+        Styles => styles,
+        Meta => meta,
+        Late => late,
     }
 }
 
@@ -109,6 +113,45 @@ fn head(args: Vec<Value>) -> Answer {
     Ok(Value::Text(format!("{head}<!-- theme hook -->")))
 }
 
+/// `wp_enqueue_scripts`: its stylesheet and core's `comment-reply`.
+fn styles(_: Vec<Value>) -> Answer {
+    let style = Asset {
+        kind: AssetKind::Style,
+        handle: "hyscribe-theme".into(),
+        src: "style.css".into(),
+        deps: Vec::new(),
+        version: Some("1.0".into()),
+        placement: "all".into(),
+    };
+    let why = |e: SdkError| format!("{e:?}");
+    assets::register(&style).map_err(why)?;
+    assets::enqueue(AssetKind::Style, "hyscribe-theme").map_err(why)?;
+    assets::enqueue(AssetKind::Script, "comment-reply").map_err(why)?;
+    Ok(Value::Null)
+}
+
+/// `wp_footer`: a stylesheet enqueued after the head, which the host moves
+/// into it.
+fn late(_: Vec<Value>) -> Answer {
+    let style = Asset {
+        kind: AssetKind::Style,
+        handle: "hyscribe-late".into(),
+        src: "late.css".into(),
+        deps: Vec::new(),
+        version: None,
+        placement: String::new(),
+    };
+    let why = |e: SdkError| format!("{e:?}");
+    assets::register(&style).map_err(why)?;
+    assets::enqueue(AssetKind::Style, "hyscribe-late").map_err(why)?;
+    Ok(Value::Null)
+}
+
+/// `wp_head`, an action that prints what its callback answers.
+fn meta(_: Vec<Value>) -> Answer {
+    Ok(Value::Text("<meta name=\"theme\">\n".into()))
+}
+
 /// What the calls answer in `init`, which has no request.
 const IN_INIT: &str = r#"false Err(SdkError::Failed("runs in a request, not in init")) Err(SdkError::Failed("runs in a request, not in init")) Err(SdkError::Failed("runs in a request, not in init")) Err(SdkError::Failed("runs in a request, not in init")) None Err(SdkError::Invalid("../x.php is not a PHP file inside the theme")) Err(SdkError::Invalid("x.html is not a PHP file inside the theme"))"#;
 
@@ -125,8 +168,12 @@ impl Plugin for TestTheme {
         let why = |e: SdkError| format!("{e:?}");
         hooks::on_filter("ext_theme", Cb::Calls, 10, 1).map_err(why)?;
         hooks::on_filter("ext_theme_head", Cb::Head, 10, 1).map_err(why)?;
+        hooks::on_action("wp_enqueue_scripts", Cb::Styles, 10, 0).map_err(why)?;
+        hooks::on_action("wp_head", Cb::Meta, 10, 0).map_err(why)?;
+        hooks::on_action("wp_footer", Cb::Late, 10, 0).map_err(why)?;
         theme::templates(&[
             file("index.php", None, &[]),
+            file("single.php", None, &[]),
             file("page-wide.php", Some("Wide"), &["page", "post"]),
             file("template-parts/header.php", None, &[]),
             file("front-page.php", None, &[]),
@@ -165,14 +212,17 @@ impl Plugin for TestTheme {
 impl Theme for TestTheme {
     fn render(file: &str) -> Result<Vec<u8>, String> {
         match file {
-            // The head comes from the host, whose hook reaches this theme's
-            // callback in its other instance.
+            // The head and footer come from the host, whose hooks reach
+            // this theme's callbacks in its other instance.
             "index.php" => {
-                let head = template::print("wp_head", &[]).map_err(|e| format!("{e:?}"))?;
-                let mut page = head;
-                page.extend_from_slice(b"<main>index</main>");
+                let why = |e: SdkError| format!("{e:?}");
+                let mut page = b"<head>\n".to_vec();
+                page.extend(template::print("wp_head", &[]).map_err(why)?);
+                page.extend_from_slice(b"</head>\n<main>index</main>\n");
+                page.extend(template::print("wp_footer", &[]).map_err(why)?);
                 Ok(page)
             }
+            "single.php" => core::arch::wasm32::unreachable(),
             // The tags the host answers over the page being rendered.
             "front-page.php" => {
                 let why = |e: SdkError| format!("{e:?}");

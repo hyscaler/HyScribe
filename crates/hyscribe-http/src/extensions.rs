@@ -425,12 +425,12 @@ impl hyscribe_ext::Site for Live {
         if number == 1 { single } else { plural }.into()
     }
 
-    fn register_asset(&self, _: &str, _: &Asset) -> Result<(), String> {
-        Err(UNSERVED.into())
+    fn register_asset(&self, slug: &str, asset: &Asset) -> Result<(), String> {
+        self.2.register_asset(slug, asset)
     }
 
-    fn enqueue(&self, _: AssetKind, _: &str) -> Result<(), String> {
-        Err(UNSERVED.into())
+    fn enqueue(&self, kind: AssetKind, handle: &str) -> Result<(), String> {
+        self.2.enqueue(kind, handle)
     }
 
     fn add_inline(&self, _: AssetKind, _: &str, _: &str, _: bool) -> Result<(), String> {
@@ -474,6 +474,8 @@ fn line(report: &Report) -> String {
 pub(crate) struct Running {
     pub(crate) request: Arc<Request>,
     pub(crate) theme: Arc<Theme>,
+    /// The themes folder, where the active theme's files are.
+    pub(crate) themes: std::path::PathBuf,
 }
 
 impl std::fmt::Debug for Running {
@@ -505,6 +507,7 @@ pub(crate) fn request(site: &Site) -> Option<Running> {
         request.map(|request| Running {
             request: Arc::new(request),
             theme,
+            themes: runtime.themes().to_path_buf(),
         })
     })
 }

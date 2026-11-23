@@ -50,15 +50,18 @@ pub(crate) async fn site_on(config: &hyscribe_config::Database, options: &str) -
 /// The template `path` resolves to over `files`, as the front end asks
 /// for it, `-` when the loader is not reached.
 async fn resolved(site: &Arc<Site>, path: &str, files: &[TemplateFile]) -> String {
-    let Some((_, candidates)) = page_of(site, path).await else {
+    let Some((_, candidates, _)) = page_of(site, path).await else {
         return "-".into();
     };
     locate(&candidates, files).unwrap_or("-").to_string()
 }
 
-/// The page `path` shows and its templates' candidates, as the front end
-/// asks for them, none when the loader is not reached.
-pub(crate) async fn page_of(site: &Arc<Site>, path: &str) -> Option<(Request, Vec<String>)> {
+/// The page `path` shows, its templates' candidates and its title, as the
+/// front end asks for them, none when the loader is not reached.
+pub(crate) async fn page_of(
+    site: &Arc<Site>,
+    path: &str,
+) -> Option<(Request, Vec<String>, String)> {
     let uri: Uri = path.parse().unwrap();
     let Query(mut query) = Query::<HashMap<String, String>>::try_from_uri(&uri).unwrap_or_default();
     // As the front end, a search given as an array is an empty search.
@@ -81,7 +84,7 @@ pub(crate) async fn page_of(site: &Arc<Site>, path: &str) -> Option<(Request, Ve
     let found = tokio::task::spawn_blocking(move || {
         let reads = crate::reads::Reads::new(&site, tokio::runtime::Handle::current());
         let found = with_page_template(&reads, &request, &page.candidates);
-        (request, found)
+        (request, found, page.title)
     })
     .await
     .unwrap();

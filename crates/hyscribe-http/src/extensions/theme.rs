@@ -2,18 +2,21 @@
 
 //! What a classic theme's calls reach in a request (ADR 0023): the features
 //! it adds, request state as PHP's globals are, and the page it renders,
-//! whose template tags `hyscribe_render::classic` answers. No lock is held
+//! whose template tags `hyscribe_render::classic` answers, with its head
+//! and footer, the styles the extensions enqueue among them. No lock is held
 //! while a tag runs, so the hooks it fires may call back: such a call sees
 //! the page as it was before the tag.
 
 use std::sync::{Arc, Mutex};
 
 use hyscribe_db::DbError;
-use hyscribe_ext::{Part, TemplateFile, ThemeCall, locate};
+use hyscribe_ext::{Asset, AssetKind, Part, TemplateFile, ThemeCall, locate};
 use hyscribe_model::hooks::do_action;
 use hyscribe_phpser::{Key, Value};
 use hyscribe_render::classic::{Classic, Unserved};
+use hyscribe_render::head::classic::{ClassicPage, Enqueued, Link, hoist};
 use hyscribe_render::site::Request;
+use hyscribe_render::theme::GlobalStyles;
 use tokio::runtime::Handle;
 
 use super::{UNSERVED, lock};
@@ -31,6 +34,8 @@ pub(crate) struct Theme(Mutex<State>);
 struct State {
     /// `add_theme_support()`'s features, in the order added.
     supports: Vec<String>,
+    /// The styles registered, and by which extension.
+    assets: Vec<(String, Asset)>,
     page: Option<Arc<Page>>,
 }
 
@@ -42,6 +47,13 @@ struct Page {
     files: Vec<TemplateFile>,
     handle: Handle,
     progress: Mutex<Progress>,
+    /// The global styles of the theme's `theme.json`, none without one.
+    global: Option<Arc<GlobalStyles>>,
+    /// `wp_get_document_title()`.
+    title: Vec<u8>,
+    enqueued: Mutex<Enqueued>,
+    /// Where the head leaves the global styles, unique to the page.
+    hole: String,
 }
 
 struct Progress {
@@ -100,6 +112,12 @@ impl Theme {
                     .is(reads, &shared.request, name, args)
                     .map(Value::Bool)
             }),
+            ThemeCall::Print(name, args) if args.is_empty() && name == "wp_head" => {
+                self.printed(true)
+            }
+            ThemeCall::Print(name, args) if args.is_empty() && name == "wp_footer" => {
+                self.printed(false)
+            }
             ThemeCall::Print(name, args) => {
                 let supports = lock(&self.0).supports.clone();
                 let supported = move |feature: &str| supports.iter().any(|s| s == feature);
@@ -136,9 +154,90 @@ impl Theme {
         answer.map_err(|Unserved| UNSERVED.to_string())
     }
 
-    /// Starts the page `request` of `site`, whose theme lists `files`: the
-    /// theme's calls answer over it until [`Theme::end`].
-    pub(crate) fn begin(&self, (site, request): (&Arc<Site>, &Request), files: &[TemplateFile]) {
+    /// `wp_head()` or `wp_footer()` of the page, for a theme with a
+    /// `theme.json`; no lock is held while it runs.
+    fn printed(&self, head: bool) -> Result<Value, String> {
+        let page = lock(&self.0).page.clone().ok_or(NO_PAGE)?;
+        let global = page.global.clone().ok_or(UNSERVED)?;
+        let supports = lock(&self.0).supports.clone();
+        let supported = |feature: &str| supports.iter().any(|s| s == feature);
+        let reads = Reads::new(&page.site, page.handle.clone());
+        let stylesheet = page.site.option("stylesheet");
+        let classic = ClassicPage {
+            theme: &page.site.theme,
+            global: &global,
+            site: &reads,
+            request: &page.request,
+            title: &page.title,
+            supports: &supported,
+            stylesheet: &stylesheet,
+            enqueued: &page.enqueued,
+            hole: &page.hole,
+        };
+        let printed = if head {
+            classic.wp_head()
+        } else {
+            classic.wp_footer()
+        };
+        if let Err(failed) = reads.finish() {
+            lock(&page.progress).error.get_or_insert(failed);
+        }
+        Ok(Value::String(printed))
+    }
+
+    /// `wp_register_style()` of the extension `slug`: a stylesheet for every
+    /// medium that depends on nothing, as far as this host serves them.
+    pub(crate) fn register_asset(&self, slug: &str, asset: &Asset) -> Result<(), String> {
+        let served = asset.kind == AssetKind::Style
+            && asset.deps.is_empty()
+            && ["", "all"].contains(&asset.placement.as_str());
+        if !served {
+            return Err(UNSERVED.into());
+        }
+        lock(&self.0).assets.push((slug.into(), asset.clone()));
+        Ok(())
+    }
+
+    /// `wp_enqueue_style()` of a style an extension registered, or
+    /// `wp_enqueue_script()` of a script core registers, on the page; as
+    /// in PHP, a handle no one registered prints nothing.
+    pub(crate) fn enqueue(&self, kind: AssetKind, handle: &str) -> Result<(), String> {
+        let (page, registered) = {
+            let state = lock(&self.0);
+            let found = state.assets.iter().rev().find(|(_, a)| a.handle == handle);
+            (state.page.clone().ok_or(NO_PAGE)?, found.cloned())
+        };
+        let mut enqueued = lock(&page.enqueued);
+        match (kind, registered) {
+            (AssetKind::Script, _) => enqueued.enqueue_script(handle),
+            (AssetKind::Style, Some((slug, asset))) => {
+                let siteurl = page.site.option("siteurl");
+                let theme = [page.site.option("stylesheet"), page.site.option("template")];
+                let folder = if theme.contains(&slug) {
+                    "themes"
+                } else {
+                    "plugins"
+                };
+                enqueued.enqueue_style(Link {
+                    handle: handle.into(),
+                    href: format!("{siteurl}/wp-content/{folder}/{slug}/{}", asset.src),
+                    version: asset.version,
+                });
+            }
+            (AssetKind::Style, None) => {}
+        }
+        Ok(())
+    }
+
+    /// Starts the page `request` of `site`, whose theme lists `files`, its
+    /// document `title` and `global` styles: the theme's calls answer over
+    /// it until [`Theme::end`].
+    pub(crate) fn begin(
+        &self,
+        (site, request): (&Arc<Site>, &Request),
+        files: &[TemplateFile],
+        (title, global): (&str, Option<Arc<GlobalStyles>>),
+    ) {
         let theme = (site.option("template"), site.option("stylesheet"));
         let progress = Progress {
             classic: Classic::new((&theme.0, &theme.1)),
@@ -150,20 +249,28 @@ impl Theme {
             files: files.to_vec(),
             handle: Handle::current(),
             progress: Mutex::new(progress),
+            global,
+            title: title.as_bytes().to_vec(),
+            enqueued: Mutex::default(),
+            hole: format!("<!-- {} -->", hyscribe_render::head::embed_secret()),
         }));
     }
 
-    /// Ends the page with what the theme `rendered`, which fails with
-    /// the first database error its tags met.
+    /// Ends the page with what the theme `rendered`, its late styles moved
+    /// into its head; it fails with the first database error its tags met.
     pub(crate) fn end(
         &self,
         rendered: Result<Vec<u8>, hyscribe_ext::Fault>,
     ) -> Result<Vec<u8>, Failed> {
         let page = lock(&self.0).page.take();
-        if let Some(failed) = page.and_then(|page| lock(&page.progress).error.take()) {
+        let Some(page) = page else {
+            return rendered.map_err(Failed::Theme);
+        };
+        if let Some(failed) = lock(&page.progress).error.take() {
             return Err(Failed::Database(failed));
         }
-        rendered.map_err(Failed::Theme)
+        let rendered = rendered.map_err(Failed::Theme)?;
+        Ok(hoist(&rendered, &page.enqueued, &page.hole))
     }
 }
 

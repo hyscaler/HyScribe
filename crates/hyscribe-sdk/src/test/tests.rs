@@ -233,13 +233,17 @@ fn fires_hooks_as_core_and_as_the_plugin() {
     });
     hooks::fire::<Demo>("demo_fired", &[text("a")]);
     assert_eq!(ran.get(), 1);
-    host.action("demo_seen", &[]);
-    host.action("demo_seen", &[]);
+    // An action prints the strings its callbacks answer, no other answer.
+    assert_eq!(host.action("demo_fired", &[]), "");
+    for _ in 0..2 {
+        assert_eq!(host.action("demo_seen", &[]), "");
+    }
     assert_eq!(hooks::did_action("demo_seen"), 2);
     assert_eq!(hooks::did_action("demo_other"), 0);
     host.add("demo_seen", 20, |_| {
         text(&hooks::current().unwrap_or_default())
     });
+    assert_eq!(host.action("demo_seen", &[]), "demo_seen");
     assert_eq!(
         host.filter("demo_seen", Value::Null, &[]),
         text("demo_seen")

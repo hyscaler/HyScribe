@@ -22,6 +22,7 @@ use crate::template::Renderer;
 use crate::theme::{OwnStyle, Theme};
 
 mod block_styles;
+pub mod classic;
 mod embed;
 mod footer;
 
@@ -142,6 +143,7 @@ pub fn wp_head(
     }
     out.extend([&b"<title>"[..], title, b"</title>\n"].concat());
     out.extend(head.feed_links());
+    out.extend(head.feed_links_extra());
     out.extend(head.oembed_links());
     let siteurl = head.siteurl();
     for style in head.styles(assets) {
@@ -149,14 +151,7 @@ pub fn wp_head(
     }
     out.extend(footer::head_scripts(&siteurl, &assets.scripts));
     out.extend(head.rest_links());
-    // wp_generator(), with HyScribe's name and version.
-    out.extend(
-        format!(
-            "<meta name=\"generator\" content=\"HyScribe {}\" />\n",
-            env!("CARGO_PKG_VERSION")
-        )
-        .into_bytes(),
-    );
+    out.extend(generator());
     out.extend(head.canonical(true, assets.cpage));
     let registry = registered_modules(&head.siteurl());
     out.extend(
@@ -169,6 +164,12 @@ pub fn wp_head(
     out.extend(head.font_faces());
     out.extend_from_slice(b"</head>");
     out
+}
+
+/// `wp_generator()`, with HyScribe's name and version.
+fn generator() -> Vec<u8> {
+    let version = env!("CARGO_PKG_VERSION");
+    format!("<meta name=\"generator\" content=\"HyScribe {version}\" />\n").into_bytes()
 }
 
 /// `wp_post_preview_js()` for the global post `id`.
@@ -237,24 +238,32 @@ impl Head<'_> {
         .into_bytes()
     }
 
-    /// `feed_links()` and `feed_links_extra()`.
+    /// A feed's `<link>`.
+    fn feed_link(title: &str, href: &[u8]) -> String {
+        format!(
+            "<link rel=\"alternate\" type=\"application/rss+xml\" title=\"{}\" href=\"{}\" />\n",
+            esc_attr(title.as_bytes()),
+            String::from_utf8_lossy(&esc_url(href))
+        )
+    }
+
+    /// `feed_links()`.
     fn feed_links(&self) -> Vec<u8> {
         let name = String::from_utf8_lossy(&self.option("blogname")).into_owned();
-        let link = |title: &str, href: &[u8]| {
-            format!(
-                "<link rel=\"alternate\" type=\"application/rss+xml\" title=\"{}\" href=\"{}\" />\n",
-                esc_attr(title.as_bytes()),
-                String::from_utf8_lossy(&esc_url(href))
-            )
-        };
-        let mut out = link(
+        let mut out = Head::feed_link(
             &format!("{name} &raquo; Feed"),
             &permalinks::feed_link(self.site, "rss2"),
         );
-        out.push_str(&link(
+        out.push_str(&Head::feed_link(
             &format!("{name} &raquo; Comments Feed"),
             &permalinks::feed_link(self.site, "comments_rss2"),
         ));
+        out.into_bytes()
+    }
+
+    /// `feed_links_extra()`.
+    fn feed_links_extra(&self) -> Vec<u8> {
+        let name = String::from_utf8_lossy(&self.option("blogname")).into_owned();
         let extra = if let Some(post) = self.queried_post() {
             // comments_open(), pings_open() or comments: none has a side effect.
             let open = [
@@ -285,10 +294,9 @@ impl Head<'_> {
                 )
             })
         };
-        if let Some((title, href)) = extra {
-            out.push_str(&link(&title, &href));
-        }
-        out.into_bytes()
+        extra
+            .map(|(title, href)| Head::feed_link(&title, &href).into_bytes())
+            .unwrap_or_default()
     }
 
     /// `feed_links_extra()` of a term archive: the feed's name and

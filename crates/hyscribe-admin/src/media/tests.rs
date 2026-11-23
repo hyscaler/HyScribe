@@ -185,8 +185,8 @@ fn uploads_follow_the_device() {
     assert!(can(b"Macintosh; iPhone OS 5_1 like Mac OS X"));
 }
 
-/// `UPLOAD_MAX_SIZE`'s default, 64 MB, where PHP prints `wp_max_upload_size()`
-///: Add New Media's uploader, plupload's settings and the media
+/// `UPLOAD_MAX_SIZE`'s default, 64 MB, where PHP prints `wp_max_upload_size()`:
+/// Add New Media's uploader, plupload's settings and the media
 /// templates.
 #[test]
 fn uploads_are_limited_to_the_configured_size() {

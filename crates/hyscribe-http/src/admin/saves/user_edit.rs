@@ -359,7 +359,7 @@ pub(super) fn color_scheme<'a>(
 }
 
 /// `admin-ajax.php`'s `destroy-sessions` past its checks, which write no
-/// row: HyScribe's own sessions of the user (an open question, ADR 0011) end, all but
+/// row: HyScribe's own sessions of the user (ADR 0011) end, all but
 /// the one of `token` for the current user. `name` gives a display name.
 pub(in crate::admin) fn destroy_sessions(
     sessions: Option<&Sessions>,

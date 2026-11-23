@@ -5,8 +5,7 @@
 // patterns the active theme registers (its parent's too), as JSON {slug: {title, content,
 // and description and categories where registered}},
 // with their PHP already run (en_US). Theme ports store this output, so
-// HyScribe never needs PHP for patterns. The footer credit names HyScribe
-//.
+// HyScribe never needs PHP for patterns. The footer credit names HyScribe.
 
 require '/var/www/html/wp-load.php';
 

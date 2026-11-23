@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! `/hs-login`: `wp-login.php`'s login action (hyscribe-admin) over the
-//! database, with HyScribe's own cookies and sessions (an open question, ADR 0011).
+//! database, with HyScribe's own cookies and sessions (ADR 0011).
 
 use std::cell::{Cell, RefCell};
 use std::net::IpAddr;

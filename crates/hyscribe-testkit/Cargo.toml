@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "hyscribe-testkit"
+description = "Fixtures and helpers shared by HyScribe tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64 = { version = "0.23.1", default-features = false, features = ["alloc"] }
+blake2 = { version = "0.10.6", default-features = false }
+crc32fast = "1.4"
+hyscribe-config.workspace = true
+hyscribe-model.workspace = true
+hyscribe-phpser.workspace = true
+miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
+ring = { version = "0.17.14", default-features = false }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

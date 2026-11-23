@@ -1,0 +1,469 @@
+{
+    "post_types": {
+        "attachment": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_posts",
+                "edit_others_posts": "edit_others_posts",
+                "delete_posts": "delete_posts",
+                "publish_posts": "publish_posts",
+                "read_private_posts": "read_private_posts",
+                "read": "read",
+                "delete_private_posts": "delete_private_posts",
+                "delete_published_posts": "delete_published_posts",
+                "delete_others_posts": "delete_others_posts",
+                "edit_private_posts": "edit_private_posts",
+                "edit_published_posts": "edit_published_posts",
+                "create_posts": "upload_files"
+            }
+        },
+        "custom_css": {
+            "map_meta_cap": false,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_css",
+                "read_post": "read",
+                "delete_post": "edit_theme_options",
+                "edit_posts": "edit_css",
+                "edit_others_posts": "edit_css",
+                "delete_posts": "edit_theme_options",
+                "publish_posts": "edit_theme_options",
+                "read_private_posts": "read",
+                "delete_published_posts": "edit_theme_options",
+                "delete_private_posts": "edit_theme_options",
+                "delete_others_posts": "edit_theme_options",
+                "edit_published_posts": "edit_css",
+                "create_posts": "edit_css"
+            }
+        },
+        "customize_changeset": {
+            "map_meta_cap": true,
+            "capability_type": "customize_changeset",
+            "cap": {
+                "edit_post": "customize",
+                "read_post": "customize",
+                "delete_post": "customize",
+                "edit_posts": "customize",
+                "edit_others_posts": "customize",
+                "delete_posts": "customize",
+                "publish_posts": "customize",
+                "read_private_posts": "customize",
+                "read": "read",
+                "delete_private_posts": "customize",
+                "delete_published_posts": "customize",
+                "delete_others_posts": "customize",
+                "edit_private_posts": "customize",
+                "edit_published_posts": "do_not_allow",
+                "create_posts": "customize"
+            }
+        },
+        "nav_menu_item": {
+            "map_meta_cap": true,
+            "capability_type": "edit_theme_options",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_theme_options",
+                "edit_others_posts": "edit_theme_options",
+                "delete_posts": "edit_theme_options",
+                "publish_posts": "edit_theme_options",
+                "read_private_posts": "edit_theme_options",
+                "read": "read",
+                "delete_private_posts": "edit_theme_options",
+                "delete_published_posts": "edit_theme_options",
+                "delete_others_posts": "edit_theme_options",
+                "edit_private_posts": "edit_theme_options",
+                "edit_published_posts": "edit_theme_options",
+                "create_posts": "edit_theme_options"
+            }
+        },
+        "oembed_cache": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_posts",
+                "edit_others_posts": "edit_others_posts",
+                "delete_posts": "delete_posts",
+                "publish_posts": "publish_posts",
+                "read_private_posts": "read_private_posts",
+                "read": "read",
+                "delete_private_posts": "delete_private_posts",
+                "delete_published_posts": "delete_published_posts",
+                "delete_others_posts": "delete_others_posts",
+                "edit_private_posts": "edit_private_posts",
+                "edit_published_posts": "edit_published_posts",
+                "create_posts": "edit_posts"
+            }
+        },
+        "page": {
+            "map_meta_cap": true,
+            "capability_type": "page",
+            "cap": {
+                "edit_post": "edit_page",
+                "read_post": "read_page",
+                "delete_post": "delete_page",
+                "edit_posts": "edit_pages",
+                "edit_others_posts": "edit_others_pages",
+                "delete_posts": "delete_pages",
+                "publish_posts": "publish_pages",
+                "read_private_posts": "read_private_pages",
+                "read": "read",
+                "delete_private_posts": "delete_private_pages",
+                "delete_published_posts": "delete_published_pages",
+                "delete_others_posts": "delete_others_pages",
+                "edit_private_posts": "edit_private_pages",
+                "edit_published_posts": "edit_published_pages",
+                "create_posts": "edit_pages"
+            }
+        },
+        "post": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_posts",
+                "edit_others_posts": "edit_others_posts",
+                "delete_posts": "delete_posts",
+                "publish_posts": "publish_posts",
+                "read_private_posts": "read_private_posts",
+                "read": "read",
+                "delete_private_posts": "delete_private_posts",
+                "delete_published_posts": "delete_published_posts",
+                "delete_others_posts": "delete_others_posts",
+                "edit_private_posts": "edit_private_posts",
+                "edit_published_posts": "edit_published_posts",
+                "create_posts": "edit_posts"
+            }
+        },
+        "revision": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_posts",
+                "edit_others_posts": "edit_others_posts",
+                "delete_posts": "delete_posts",
+                "publish_posts": "publish_posts",
+                "read_private_posts": "read_private_posts",
+                "read": "read",
+                "delete_private_posts": "delete_private_posts",
+                "delete_published_posts": "delete_published_posts",
+                "delete_others_posts": "delete_others_posts",
+                "edit_private_posts": "edit_private_posts",
+                "edit_published_posts": "edit_published_posts",
+                "create_posts": "edit_posts"
+            }
+        },
+        "user_request": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_posts",
+                "edit_others_posts": "edit_others_posts",
+                "delete_posts": "delete_posts",
+                "publish_posts": "publish_posts",
+                "read_private_posts": "read_private_posts",
+                "read": "read",
+                "delete_private_posts": "delete_private_posts",
+                "delete_published_posts": "delete_published_posts",
+                "delete_others_posts": "delete_others_posts",
+                "edit_private_posts": "edit_private_posts",
+                "edit_published_posts": "edit_published_posts",
+                "create_posts": "edit_posts"
+            }
+        },
+        "wp_block": {
+            "map_meta_cap": true,
+            "capability_type": "block",
+            "cap": {
+                "edit_post": "edit_block",
+                "read_post": "read_block",
+                "delete_post": "delete_block",
+                "edit_posts": "edit_posts",
+                "edit_others_posts": "edit_others_posts",
+                "delete_posts": "delete_posts",
+                "publish_posts": "publish_blocks",
+                "read_private_posts": "read_private_blocks",
+                "read": "edit_posts",
+                "delete_private_posts": "delete_private_blocks",
+                "delete_published_posts": "delete_published_posts",
+                "delete_others_posts": "delete_others_posts",
+                "edit_private_posts": "edit_private_blocks",
+                "edit_published_posts": "edit_published_posts",
+                "create_posts": "publish_posts"
+            }
+        },
+        "wp_font_face": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_theme_options",
+                "edit_others_posts": "edit_theme_options",
+                "delete_posts": "edit_theme_options",
+                "publish_posts": "edit_theme_options",
+                "read_private_posts": "edit_theme_options",
+                "read": "edit_theme_options",
+                "delete_private_posts": "delete_private_posts",
+                "delete_published_posts": "edit_theme_options",
+                "delete_others_posts": "edit_theme_options",
+                "edit_private_posts": "edit_private_posts",
+                "edit_published_posts": "edit_theme_options",
+                "create_posts": "edit_theme_options"
+            }
+        },
+        "wp_font_family": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_theme_options",
+                "edit_others_posts": "edit_theme_options",
+                "delete_posts": "edit_theme_options",
+                "publish_posts": "edit_theme_options",
+                "read_private_posts": "edit_theme_options",
+                "read": "edit_theme_options",
+                "delete_private_posts": "delete_private_posts",
+                "delete_published_posts": "edit_theme_options",
+                "delete_others_posts": "edit_theme_options",
+                "edit_private_posts": "edit_private_posts",
+                "edit_published_posts": "edit_theme_options",
+                "create_posts": "edit_theme_options"
+            }
+        },
+        "wp_global_styles": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_theme_options",
+                "edit_others_posts": "edit_theme_options",
+                "delete_posts": "delete_posts",
+                "publish_posts": "publish_posts",
+                "read_private_posts": "read_private_posts",
+                "read": "edit_posts",
+                "delete_private_posts": "delete_private_posts",
+                "delete_published_posts": "edit_theme_options",
+                "delete_others_posts": "edit_theme_options",
+                "edit_private_posts": "edit_private_posts",
+                "edit_published_posts": "edit_theme_options",
+                "create_posts": "edit_theme_options"
+            }
+        },
+        "wp_navigation": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_theme_options",
+                "edit_others_posts": "edit_theme_options",
+                "delete_posts": "edit_theme_options",
+                "publish_posts": "edit_theme_options",
+                "read_private_posts": "edit_theme_options",
+                "read": "read",
+                "delete_private_posts": "edit_theme_options",
+                "delete_published_posts": "edit_theme_options",
+                "delete_others_posts": "edit_theme_options",
+                "edit_private_posts": "edit_theme_options",
+                "edit_published_posts": "edit_theme_options",
+                "create_posts": "edit_theme_options"
+            }
+        },
+        "wp_template": {
+            "map_meta_cap": true,
+            "capability_type": "template",
+            "cap": {
+                "edit_post": "edit_template",
+                "read_post": "read_template",
+                "delete_post": "delete_template",
+                "edit_posts": "edit_theme_options",
+                "edit_others_posts": "edit_theme_options",
+                "delete_posts": "edit_theme_options",
+                "publish_posts": "edit_theme_options",
+                "read_private_posts": "edit_theme_options",
+                "read": "edit_theme_options",
+                "delete_private_posts": "edit_theme_options",
+                "delete_published_posts": "edit_theme_options",
+                "delete_others_posts": "edit_theme_options",
+                "edit_private_posts": "edit_theme_options",
+                "edit_published_posts": "edit_theme_options",
+                "create_posts": "edit_theme_options"
+            }
+        },
+        "wp_template_part": {
+            "map_meta_cap": true,
+            "capability_type": "post",
+            "cap": {
+                "edit_post": "edit_post",
+                "read_post": "read_post",
+                "delete_post": "delete_post",
+                "edit_posts": "edit_theme_options",
+                "edit_others_posts": "edit_theme_options",
+                "delete_posts": "edit_theme_options",
+                "publish_posts": "edit_theme_options",
+                "read_private_posts": "edit_theme_options",
+                "read": "edit_theme_options",
+                "delete_private_posts": "edit_theme_options",
+                "delete_published_posts": "edit_theme_options",
+                "delete_others_posts": "edit_theme_options",
+                "edit_private_posts": "edit_theme_options",
+                "edit_published_posts": "edit_theme_options",
+                "create_posts": "edit_theme_options"
+            }
+        }
+    },
+    "post_type_meta_caps": {
+        "customize": "delete_post",
+        "delete_block": "delete_post",
+        "delete_page": "delete_post",
+        "delete_post": "delete_post",
+        "delete_template": "delete_post",
+        "edit_block": "edit_post",
+        "edit_page": "edit_post",
+        "edit_post": "edit_post",
+        "edit_template": "edit_post",
+        "read_block": "read_post",
+        "read_page": "read_post",
+        "read_post": "read_post",
+        "read_template": "read_post"
+    },
+    "taxonomies": {
+        "category": {
+            "cap": {
+                "manage_terms": "manage_categories",
+                "edit_terms": "edit_categories",
+                "delete_terms": "delete_categories",
+                "assign_terms": "assign_categories"
+            }
+        },
+        "link_category": {
+            "cap": {
+                "manage_terms": "manage_links",
+                "edit_terms": "manage_links",
+                "delete_terms": "manage_links",
+                "assign_terms": "manage_links"
+            }
+        },
+        "nav_menu": {
+            "cap": {
+                "manage_terms": "edit_theme_options",
+                "edit_terms": "edit_theme_options",
+                "delete_terms": "edit_theme_options",
+                "assign_terms": "edit_theme_options"
+            }
+        },
+        "post_format": {
+            "cap": {
+                "manage_terms": "manage_categories",
+                "edit_terms": "manage_categories",
+                "delete_terms": "manage_categories",
+                "assign_terms": "edit_posts"
+            }
+        },
+        "post_tag": {
+            "cap": {
+                "manage_terms": "manage_post_tags",
+                "edit_terms": "edit_post_tags",
+                "delete_terms": "delete_post_tags",
+                "assign_terms": "assign_post_tags"
+            }
+        },
+        "wp_pattern_category": {
+            "cap": {
+                "manage_terms": "manage_categories",
+                "edit_terms": "manage_categories",
+                "delete_terms": "manage_categories",
+                "assign_terms": "edit_posts"
+            }
+        },
+        "wp_template_part_area": {
+            "cap": {
+                "manage_terms": "manage_categories",
+                "edit_terms": "manage_categories",
+                "delete_terms": "manage_categories",
+                "assign_terms": "edit_posts"
+            }
+        },
+        "wp_theme": {
+            "cap": {
+                "manage_terms": "manage_categories",
+                "edit_terms": "manage_categories",
+                "delete_terms": "manage_categories",
+                "assign_terms": "edit_posts"
+            }
+        }
+    },
+    "post_statuses": {
+        "auto-draft": {
+            "public": false,
+            "private": false
+        },
+        "draft": {
+            "public": false,
+            "private": false
+        },
+        "future": {
+            "public": false,
+            "private": false
+        },
+        "inherit": {
+            "public": false,
+            "private": false
+        },
+        "pending": {
+            "public": false,
+            "private": false
+        },
+        "private": {
+            "public": false,
+            "private": true
+        },
+        "publish": {
+            "public": true,
+            "private": false
+        },
+        "request-completed": {
+            "public": false,
+            "private": false
+        },
+        "request-confirmed": {
+            "public": false,
+            "private": false
+        },
+        "request-failed": {
+            "public": false,
+            "private": false
+        },
+        "request-pending": {
+            "public": false,
+            "private": false
+        },
+        "trash": {
+            "public": false,
+            "private": false
+        }
+    }
+}

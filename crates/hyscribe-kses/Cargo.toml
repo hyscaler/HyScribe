@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "hyscribe-kses"
+description = "WordPress escaping and sanitizing: esc_html, esc_attr, esc_url, safecss_filter_attr, wp_kses_bad_protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+hyscribe-testkit.workspace = true
+
+[lints]
+workspace = true

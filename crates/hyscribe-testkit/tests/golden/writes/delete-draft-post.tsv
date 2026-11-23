@@ -1,0 +1,29 @@
+# The rows PHP WordPress writes for the action delete-draft-post (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 03:05:34 to 2026-11-15 03:05:34 UTC.
+# %wp_posts:1% is 35.
+wp_posts	%wp_posts:1%	-	ID	%wp_posts:1%
+wp_posts	%wp_posts:1%	-	comment_count	0
+wp_posts	%wp_posts:1%	-	comment_status	open
+wp_posts	%wp_posts:1%	-	guid	http://127.0.0.1:8081/?p=%wp_posts:1%
+wp_posts	%wp_posts:1%	-	menu_order	0
+wp_posts	%wp_posts:1%	-	ping_status	open
+wp_posts	%wp_posts:1%	-	pinged	
+wp_posts	%wp_posts:1%	-	post_author	1
+wp_posts	%wp_posts:1%	-	post_content	Its content.
+wp_posts	%wp_posts:1%	-	post_content_filtered	
+wp_posts	%wp_posts:1%	-	post_date	%now%
+wp_posts	%wp_posts:1%	-	post_date_gmt	0000-00-00 00:00:00
+wp_posts	%wp_posts:1%	-	post_excerpt	
+wp_posts	%wp_posts:1%	-	post_mime_type	
+wp_posts	%wp_posts:1%	-	post_modified	%now%
+wp_posts	%wp_posts:1%	-	post_modified_gmt	0000-00-00 00:00:00
+wp_posts	%wp_posts:1%	-	post_name	
+wp_posts	%wp_posts:1%	-	post_parent	0
+wp_posts	%wp_posts:1%	-	post_password	
+wp_posts	%wp_posts:1%	-	post_status	draft
+wp_posts	%wp_posts:1%	-	post_title	A write oracle post
+wp_posts	%wp_posts:1%	-	post_type	post
+wp_posts	%wp_posts:1%	-	to_ping	
+wp_term_relationships	%wp_posts:1%,1	-	object_id	%wp_posts:1%
+wp_term_relationships	%wp_posts:1%,1	-	term_order	0
+wp_term_relationships	%wp_posts:1%,1	-	term_taxonomy_id	1

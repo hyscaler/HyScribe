@@ -1,0 +1,244 @@
+
+<div class="wrap">
+	<h1 class="wp-heading-inline">Themes		<span class="title-count theme-count">%count%</span>
+	</h1>
+		<hr class="wp-header-end">
+	<form class="search-form search-themes"><p class="search-box"></p></form>
+
+%notice%<div class="theme-browser">
+	<div class="themes wp-clearfix">
+%theme%
+	</div>
+</div>
+<div class="theme-overlay" tabindex="0" role="dialog" aria-label="Theme Details"></div>
+
+<p class="no-themes">No themes found. Try a different search.</p>
+
+</div><!-- .wrap -->
+
+<script id="tmpl-theme" type="text/template">
+	<# if ( data.screenshot[0] ) { #>
+		<div class="theme-screenshot">
+			<img src="{{ data.screenshot[0] }}?ver={{ data.version }}" alt="" />
+		</div>
+	<# } else { #>
+		<div class="theme-screenshot blank"></div>
+	<# } #>
+
+	<# if ( data.hasUpdate ) { #>
+		<# if ( data.updateResponse.compatibleWP && data.updateResponse.compatiblePHP ) { #>
+			<div class="update-message notice inline notice-warning notice-alt"><p>
+				<# if ( data.hasPackage ) { #>
+					New version available. <button class="button-link" type="button">Update now</button>				<# } else { #>
+					New version available.				<# } #>
+			</p></div>
+		<# } else { #>
+			<div class="update-message notice inline notice-error notice-alt"><p>
+				<# if ( ! data.updateResponse.compatibleWP && ! data.updateResponse.compatiblePHP ) { #>
+					There is a new version of {{{ data.name }}} available, but it does not work with your versions of HyScribe and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.				<# } else if ( ! data.updateResponse.compatibleWP ) { #>
+					There is a new version of {{{ data.name }}} available, but it does not work with your version of HyScribe.				<# } else if ( ! data.updateResponse.compatiblePHP ) { #>
+					There is a new version of {{{ data.name }}} available, but it does not work with your version of PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.				<# } #>
+			</p></div>
+		<# } #>
+	<# } #>
+
+	<# if ( ! data.compatibleWP || ! data.compatiblePHP ) { #>
+		<div class="notice notice-error notice-alt"><p>
+			<# if ( ! data.compatibleWP && ! data.compatiblePHP ) { #>
+				This theme does not work with your versions of HyScribe and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.			<# } else if ( ! data.compatibleWP ) { #>
+				This theme does not work with your version of HyScribe.			<# } else if ( ! data.compatiblePHP ) { #>
+				This theme does not work with your version of PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.			<# } #>
+		</p></div>
+	<# } #>
+
+		<button type="button" class="more-details" id="{{ data.id }}-action"
+		aria-label="View Theme Details for {{ data.name }}"
+	>Theme Details</button>
+	<div class="theme-author">
+		By {{{ data.author }}}	</div>
+
+	<div class="theme-id-container">
+		<# if ( data.active ) { #>
+			<h2 class="theme-name" id="{{ data.id }}-name">
+				<span>Active:</span> {{{ data.name }}}
+			</h2>
+		<# } else { #>
+			<h2 class="theme-name" id="{{ data.id }}-name">{{{ data.name }}}</h2>
+		<# } #>
+
+		<div class="theme-actions">
+			<# if ( data.active ) { #>
+				<# if ( data.actions.customize ) { #>
+										<a class="button button-compact button-primary customize load-customize hide-if-no-customize"
+						href="{{{ data.actions.customize }}}"
+						aria-label="Customize {{ data.name }}"
+					>Customize</a>
+				<# } #>
+			<# } else { #>
+				<# if ( data.compatibleWP && data.compatiblePHP ) { #>
+										<a class="button button-compact activate"
+						href="{{{ data.actions.activate }}}"
+						aria-label="Activate {{ data.name }}"
+					>Activate</a>
+
+										<a class="button button-compact button-primary load-customize hide-if-no-customize"
+						href="{{{ data.actions.customize }}}"
+						aria-label="Live Preview {{ data.name }}"
+					>Live Preview</a>
+				<# } else { #>
+										<a class="button button-compact disabled"
+						aria-label="Cannot Activate {{ data.name }}"
+					>Cannot Activate</a>
+
+										<a class="button button-compact button-primary hide-if-no-customize disabled"
+						aria-label="Live Preview {{ data.name }}"
+					>Live Preview</a>
+				<# } #>
+			<# } #>
+		</div>
+	</div>
+</script>
+
+<script id="tmpl-theme-single" type="text/template">
+	<div class="theme-backdrop"></div>
+	<div class="theme-wrap wp-clearfix" role="document">
+		<div class="theme-header">
+			<button class="left dashicons dashicons-no"><span class="screen-reader-text">
+				Show previous theme			</span></button>
+			<button class="right dashicons dashicons-no"><span class="screen-reader-text">
+				Show next theme			</span></button>
+			<button class="close dashicons dashicons-no"><span class="screen-reader-text">
+				Close details dialog			</span></button>
+		</div>
+		<div class="theme-about wp-clearfix">
+			<div class="theme-screenshots">
+			<# if ( data.screenshot[0] ) { #>
+				<div class="screenshot"><img src="{{ data.screenshot[0] }}?ver={{ data.version }}" alt="" /></div>
+			<# } else { #>
+				<div class="screenshot blank"></div>
+			<# } #>
+			</div>
+
+			<div class="theme-info">
+				<# if ( data.active ) { #>
+					<span class="current-label">Active Theme</span>
+				<# } #>
+				<h2 class="theme-name">{{{ data.name }}}<span class="theme-version">
+					Version: {{ data.version }}				</span></h2>
+				<p class="theme-author">
+					By {{{ data.authorAndUri }}}				</p>
+
+				<# if ( ! data.compatibleWP || ! data.compatiblePHP ) { #>
+					<div class="notice notice-error notice-alt notice-large"><p>
+						<# if ( ! data.compatibleWP && ! data.compatiblePHP ) { #>
+							This theme does not work with your versions of HyScribe and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.						<# } else if ( ! data.compatibleWP ) { #>
+							This theme does not work with your version of HyScribe.						<# } else if ( ! data.compatiblePHP ) { #>
+							This theme does not work with your version of PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.						<# } #>
+					</p></div>
+				<# } #>
+
+				<# if ( data.hasUpdate ) { #>
+					<# if ( data.updateResponse.compatibleWP && data.updateResponse.compatiblePHP ) { #>
+						<div class="notice notice-warning notice-alt notice-large">
+							<h3 class="notice-title">Update Available</h3>
+							{{{ data.update }}}
+						</div>
+					<# } else { #>
+						<div class="notice notice-error notice-alt notice-large">
+							<h3 class="notice-title">Update Incompatible</h3>
+							<p>
+								<# if ( ! data.updateResponse.compatibleWP && ! data.updateResponse.compatiblePHP ) { #>
+									There is a new version of {{{ data.name }}} available, but it does not work with your versions of HyScribe and PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.								<# } else if ( ! data.updateResponse.compatibleWP ) { #>
+									There is a new version of {{{ data.name }}} available, but it does not work with your version of HyScribe.								<# } else if ( ! data.updateResponse.compatiblePHP ) { #>
+									There is a new version of {{{ data.name }}} available, but it does not work with your version of PHP. <a href="https://wordpress.org/support/update-php/">Learn more about updating PHP</a>.								<# } #>
+							</p>
+						</div>
+					<# } #>
+				<# } #>
+
+				<# if ( data.actions.autoupdate ) { #>
+					
+		<div class="theme-autoupdate">
+			<# if ( data.autoupdate.supported ) { #>
+				<# if ( data.autoupdate.forced === false ) { #>
+					Auto-updates disabled
+				<# } else if ( data.autoupdate.forced ) { #>
+					Auto-updates enabled
+				<# } else if ( data.autoupdate.enabled ) { #>
+					<button type="button" class="toggle-auto-update button-link" data-slug="{{ data.id }}" data-wp-action="disable">
+						<span class="dashicons dashicons-update spin hidden" aria-hidden="true"></span><span class="label">Disable auto-updates</span>
+					</button>
+				<# } else { #>
+					<button type="button" class="toggle-auto-update button-link" data-slug="{{ data.id }}" data-wp-action="enable">
+						<span class="dashicons dashicons-update spin hidden" aria-hidden="true"></span><span class="label">Enable auto-updates</span>
+					</button>
+				<# } #>
+			<# } #>
+			<# if ( data.hasUpdate ) { #>
+				<# if ( data.autoupdate.supported && data.autoupdate.enabled ) { #>
+					<span class="auto-update-time">
+				<# } else { #>
+					<span class="auto-update-time hidden">
+				<# } #>
+				<br />%auto_update%</span>
+			<# } #>
+			<div class="notice notice-error notice-alt inline hidden"><p></p></div>
+		</div>
+					<# } #>
+
+				<p class="theme-description">{{{ data.description }}}</p>
+
+				<# if ( data.parent ) { #>
+					<p class="parent-theme">
+						This is a child theme of <strong>{{{ data.parent }}}</strong>.					</p>
+				<# } #>
+
+				<# if ( data.tags ) { #>
+					<p class="theme-tags"><span>Tags:</span> {{{ data.tags }}}</p>
+				<# } #>
+			</div>
+		</div>
+
+		<div class="theme-actions">
+			<div class="active-theme">
+				<a class="button button-compact button-primary customize load-customize hide-if-no-customize"
+					href="{{{ data.actions.customize }}}"
+				>Customize</a>
+				%actions%			</div>
+
+			<div class="inactive-theme">
+				<# if ( data.compatibleWP && data.compatiblePHP ) { #>
+										<a class="button button-compact button-primary load-customize hide-if-no-customize"
+						href="{{{ data.actions.customize }}}"
+						aria-label="Live Preview {{ data.name }}"
+					>Live Preview</a>
+
+					<# if ( data.actions.activate ) { #>
+												<a class="button button-compact activate"
+							href="{{{ data.actions.activate }}}"
+							aria-label="Activate {{ data.name }}"
+						>Activate</a>
+					<# } #>
+				<# } else { #>
+										<a class="button button-compact button-primary hide-if-no-customize disabled"
+						aria-label="Live Preview {{ data.name }}"
+					>Live Preview</a>
+
+					<# if ( data.actions.activate ) { #>
+												<a class="button button-compact disabled"
+							aria-label="Cannot Activate {{ data.name }}"
+						>Cannot Activate</a>
+					<# } #>
+				<# } #>
+			</div>
+
+			<# if ( ! data.active && data.actions['delete'] ) { #>
+								<a class="button button-compact delete-theme"
+					href="{{{ data.actions['delete'] }}}"
+					aria-label="Delete {{ data.name }}"
+				>Delete</a>
+			<# } #>
+		</div>
+	</div>
+</script>
+

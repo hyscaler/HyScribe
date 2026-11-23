@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# cargo-mutants: mutants no input tells apart, each reviewed and listed in
+# coverage-exclusions.md.
+exclude_re = [
+    # text_diff: the chunks of `_diag()` only change its speed (searched).
+    "text_diff\\.rs:.*(in chunks|replace chunks )",
+    # text_diff: `$corresponding`'s two ends move a run alike when `$j` meets `$other_len`.
+    "text_diff\\.rs:.*(in corresponding_end|replace corresponding_end )",
+    # text_diff: blank rows before a match up a ways, past the first row never reached (searched).
+    "text_diff\\.rs:.*(in up$|replace up )",
+    # hyscribe-image: a resampling window's edges hold weights of 0 (searched).
+    "pixels\\.rs:.*(in window$|replace window )",
+]

@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The comments' writes (MVP 4.3) that reference/rest/golden.sh records as
+# comment-writes.tsv, over the default install with comment-writes.sql's
+# comments: each request sent with its body as every identity, the
+# database put back after each. comment-writes.php gives every request the
+# client address 127.0.0.1 and no user agent, as HyScribe's tests send
+# them. Creates (a visitor's refused, as rest_allow_anonymous_comments
+# refuses them by default), updates and status changes, trashes and
+# deletes, with the checks of the permission checks, create_item(),
+# update_item() and wp_allow_comment(), and the arguments HyScribe does not
+# port (none: author_ip, notes and meta are in comment-notes.list).
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"A REST comment"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"<p onclick=\"x()\">Hi</p> <a href=\"https://example.test/\">link</a>","author_name":"Named <b>one</b>","author_email":"named@example.test","author_url":"https://named.example.test/","date":"2026-01-02T03:04:05","parent":1}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Held","status":"hold","date_gmt":"2026-01-02T03:04:05Z"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Spam","status":"spam","author_user_agent":"Agent/1.0"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Theirs","author":704}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Nobody","author":999}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":3,"content":"Draft"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":2,"content":"Closed"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":999,"content":"Missing"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"content":"No post"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"   "}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Hi, this is a comment.\nTo get started with moderating, editing, and deleting comments, please visit the Comments screen in the dashboard.\nCommenter avatars come from <a href=\"https://gravatar.com/\">Gravatar</a>.","author_name":"A WordPress Commenter","author_email":"wapuu@wordpress.example"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Typed","type":"pingback"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Note","type":"note"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Addressed","author_ip":"10.0.0.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Same address","author_ip":"127.0.0.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Six","author_ip":"2001:db8::1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Mapped","author_ip":"::ffff:10.0.0.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Not an address","author_ip":"10.0.0"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Not an address","author_ip":"999.1.1.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Padded","author_ip":"010.001.1.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Empty","author_ip":""}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Listed","author_ip":["10.0.0.1"]}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Long six","author_ip":"2001:0db8:0000:0000:0000:0000:0000:0001"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Bad six","author_ip":"2001:db8:::1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Bad six","author_ip":"12345::1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Whole","author_ip":"::"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Spaced","author_ip":" 10.0.0.1"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Bad email","author_email":"not-an-email"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":{"raw":"Raw content"},"author_name":"","author_email":""}
+POST	/?rest_route=/wp/v2/comments	form,restore	post=1&content=Form+comment
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Too long","author_name":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","author_email":"long@example.test"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"id":5,"post":1,"content":"Again"}
+POST	/?rest_route=/wp/v2/comments	json,restore	{"post":1,"content":"Meta","meta":{"_wp_note_status":"resolved"}}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"content":"Edited <script>x()</script>","author_name":"Renamed","status":"hold","date_gmt":"2026-02-03T04:05:06Z"}
+PUT	/?rest_route=/wp/v2/comments/1	json,restore	{"status":"spam"}
+PATCH	/?rest_route=/wp/v2/comments/1	json,restore	{"post":2,"author_url":"https://moved.example.test/"}
+PATCH	/?rest_route=/wp/v2/comments/1	json,restore	{"post":999}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"author":702,"date":"2026-03-04T05:06:07"}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"type":"note"}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"author_ip":"10.0.0.2"}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"author_ip":"127.0.0.1","content":"Same"}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"author_ip":"nope"}
+POST	/?rest_route=/wp/v2/comments/2	json,restore	{"author_ip":"10.0.0.3","status":"approve"}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{"content":""}
+POST	/?rest_route=/wp/v2/comments/1	json,restore	{}
+POST	/?rest_route=/wp/v2/comments/2	json,restore	{"status":"approve"}
+POST	/?rest_route=/wp/v2/comments/3	form,restore	status=untrash
+POST	/?rest_route=/wp/v2/comments/999	json,restore	{"content":"Gone"}
+DELETE	/?rest_route=/wp/v2/comments/1	restore
+DELETE	/?rest_route=/wp/v2/comments/1&force=true	restore
+DELETE	/?rest_route=/wp/v2/comments/2&force=1	restore
+DELETE	/?rest_route=/wp/v2/comments/3	restore
+DELETE	/?rest_route=/wp/v2/comments/999	restore

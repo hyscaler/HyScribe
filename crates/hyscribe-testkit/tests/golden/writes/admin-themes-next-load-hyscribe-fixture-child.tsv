@@ -1,0 +1,11 @@
+# The rows PHP WordPress writes for the action admin-themes-next-load-hyscribe-fixture-child (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-20 19:11:33 to 2026-11-20 19:11:33 UTC.
+# %wp_options:1% is 136.
+# %wp_options:2% is 137.
+# %wp_options:3% is 138.
+# %wp_options:4% is 139.
+# %wp_options:5% is 140.
+# %wp_options:6% is 141.
+wp_options	sidebars_widgets	~	option_value	a:4:{s:19:"wp_inactive_widgets";a:0:{}s:9:"sidebar-1";a:3:{i:0;s:7:"block-2";i:1;s:7:"block-3";i:2;s:7:"block-4";}s:9:"sidebar-2";a:2:{i:0;s:7:"block-5";i:1;s:7:"block-6";}s:13:"array_version";i:3;}	a:2:{s:19:"wp_inactive_widgets";a:5:{i:0;s:7:"block-2";i:1;s:7:"block-3";i:2;s:7:"block-4";i:3;s:7:"block-5";i:4;s:7:"block-6";}s:13:"array_version";i:3;}
+wp_options	theme_mods_hyscribe-fixture-child	~	option_value	a:2:{i:0;b:0;s:19:"wp_classic_sidebars";a:0:{}}	a:3:{i:0;b:0;s:19:"wp_classic_sidebars";a:0:{}s:18:"nav_menu_locations";a:0:{}}
+wp_options	theme_switched	~	option_value	twentytwentyfive	

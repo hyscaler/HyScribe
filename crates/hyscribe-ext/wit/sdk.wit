@@ -1,0 +1,479 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+/// HyScribe's extension SDK 0.3 (ADR 0022): what a plugin or theme component
+/// imports from the host and exports to it. Every import is checked against
+/// the extension's manifest on every call; nothing is granted by default.
+/// Each minor version only adds to the one before, whose interfaces the
+/// host links under every later version too: 0.2 added transients, roles
+/// and outbound requests, 0.3 the `theme` world (ADR 0023).
+package hyscribe:sdk@0.3.0;
+
+interface types {
+    /// The kind of a PHP value.
+    enum value-kind {
+        null,
+        boolean,
+        int,
+        float,
+        text,
+        json,
+    }
+
+    /// A PHP value crossing a hook: its kind, then the field that kind
+    /// reads, the others zero. `int` holds integers and booleans (0 or 1),
+    /// `float` floats, `text` strings and arrays and objects as JSON, as
+    /// `wp_json_encode()` writes them. One layout for every kind, so the
+    /// host lowers a string where it lies, without copying it first.
+    type value = tuple<value-kind, s64, f64, string>;
+
+    /// Why the host refused or failed a call.
+    variant sdk-error {
+        /// The manifest does not grant this.
+        denied(string),
+        /// An argument the host does not accept.
+        invalid(string),
+        /// The host could not do it (a database error, a full queue).
+        failed(string),
+    }
+
+    /// The four kinds of object WordPress keeps meta for.
+    enum object-kind {
+        post,
+        user,
+        term,
+        comment,
+    }
+}
+
+/// `add_action()`, `add_filter()`, `apply_filters()`, `do_action()`.
+interface hooks {
+    use types.{value, sdk-error};
+
+    enum hook-kind {
+        action,
+        filter,
+    }
+
+    /// `add_filter( $hook, $callback, $priority, $accepted_args )`, where
+    /// `callback` is the guest's own number for it, handed back to
+    /// `guest.invoke`; only during `guest.init`, and only to a hook the
+    /// manifest declares.
+    add: func(hook: string, kind: hook-kind, callback: u32, priority: s32, accepted-args: u32) -> result<_, sdk-error>;
+
+    /// `remove_action()` and `remove_filter()` of the extension's own callbacks.
+    remove: func(hook: string, callback: u32, priority: s32) -> bool;
+
+    /// A hook's chain as the calling extension sees it: its own callbacks
+    /// (`mine`) by number, every other run of callbacks as one opaque step. A component
+    /// cannot be entered while it is running, so the SDK runs its own
+    /// callbacks itself and hands each other step back to `run-step`.
+    variant link {
+        mine(u32),
+        others(u32),
+    }
+
+    /// `apply_filters()` and `do_action()` fired by the extension: the chain
+    /// for `hook`, with a token valid for this call only.
+    chain: func(hook: string) -> result<tuple<u64, list<link>>, sdk-error>;
+
+    /// Runs one `others` step of a chain with the values so far.
+    run-step: func(token: u64, step: u32, args: list<value>) -> result<value, sdk-error>;
+
+    /// `doing_filter()`, `current_filter()` and `did_action()`.
+    current: func() -> option<string>;
+    did-action: func(hook: string) -> u32;
+}
+
+/// `get_option()`, `update_option()`, `add_option()`, `delete_option()`, for
+/// the option names the manifest grants.
+interface options {
+    use types.{value, sdk-error};
+
+    get: func(name: string) -> result<option<value>, sdk-error>;
+    update: func(name: string, value: value, autoload: option<bool>) -> result<bool, sdk-error>;
+    add: func(name: string, value: value, autoload: option<bool>) -> result<bool, sdk-error>;
+    delete: func(name: string) -> result<bool, sdk-error>;
+}
+
+/// `get_metadata()` and friends, for the meta keys the manifest grants.
+interface meta {
+    use types.{value, object-kind, sdk-error};
+
+    get: func(kind: object-kind, id: u64, key: string) -> result<list<value>, sdk-error>;
+    add: func(kind: object-kind, id: u64, key: string, value: value, unique: bool) -> result<option<u64>, sdk-error>;
+    update: func(kind: object-kind, id: u64, key: string, value: value, previous: option<value>) -> result<bool, sdk-error>;
+    delete: func(kind: object-kind, id: u64, key: string, value: option<value>) -> result<bool, sdk-error>;
+    /// `register_meta()`: its arguments as JSON.
+    register: func(kind: object-kind, subtype: string, key: string, args: string) -> result<_, sdk-error>;
+}
+
+/// `register_post_type()` and `register_taxonomy()`, their arguments as JSON.
+interface content {
+    use types.{sdk-error};
+
+    register-post-type: func(name: string, args: string) -> result<_, sdk-error>;
+    register-taxonomy: func(name: string, object-types: list<string>, args: string) -> result<_, sdk-error>;
+}
+
+/// `WP_Query` and `get_post()`, through the host's typed queries.
+interface query {
+    use types.{sdk-error};
+
+    record post {
+        id: u64,
+        post-type: string,
+        status: string,
+        author: u64,
+        parent: u64,
+        menu-order: s32,
+        name: string,
+        title: string,
+        content: string,
+        excerpt: string,
+        date-gmt: string,
+        modified-gmt: string,
+    }
+
+    record found {
+        posts: list<post>,
+        total: u64,
+        max-pages: u32,
+    }
+
+    /// `new WP_Query( $args )`: the query variables as JSON; the post types
+    /// it may read are those the manifest grants and the public ones.
+    posts: func(args: string) -> result<found, sdk-error>;
+    get-post: func(id: u64) -> result<option<post>, sdk-error>;
+}
+
+/// `register_rest_route()`. Requests reach `guest.invoke` as one JSON value
+/// (method, route, params, headers, body) and answer one JSON value
+/// (status, headers, data).
+interface rest {
+    use types.{sdk-error};
+
+    record route {
+        namespace: string,
+        path: string,
+        methods: list<string>,
+        callback: u32,
+        /// The `permission_callback`; none is refused, as WordPress warns.
+        permission: u32,
+        /// The `args` schema as JSON.
+        args: string,
+    }
+
+    register: func(route: route) -> result<_, sdk-error>;
+}
+
+/// `add_shortcode()`; the callback gets the attributes as JSON, the content
+/// and the tag.
+interface shortcodes {
+    use types.{sdk-error};
+
+    add: func(tag: string, callback: u32) -> result<_, sdk-error>;
+    remove: func(tag: string) -> bool;
+}
+
+/// `register_block_type()` from the package's `block.json`.
+interface blocks {
+    use types.{sdk-error};
+
+    /// `path` is the block's folder inside the package; `render` the
+    /// callback for a dynamic block.
+    register: func(path: string, render: option<u32>) -> result<_, sdk-error>;
+}
+
+/// `wp_register_script()`, `wp_enqueue_style()` and friends, for files of
+/// the package's `public/` folder or registered handles.
+interface assets {
+    use types.{sdk-error};
+
+    enum asset-kind {
+        script,
+        style,
+    }
+
+    record asset {
+        kind: asset-kind,
+        handle: string,
+        /// A path inside `public/`, empty for a handle with no file.
+        src: string,
+        deps: list<string>,
+        version: option<string>,
+        /// `in_footer` for a script, `media` for a style.
+        placement: string,
+    }
+
+    register: func(asset: asset) -> result<_, sdk-error>;
+    enqueue: func(kind: asset-kind, handle: string) -> result<_, sdk-error>;
+    /// `wp_add_inline_script()` and `wp_add_inline_style()`.
+    add-inline: func(kind: asset-kind, handle: string, data: string, before: bool) -> result<_, sdk-error>;
+}
+
+/// `wp_schedule_event()` and friends, for the hooks the manifest declares.
+interface cron {
+    use types.{value, sdk-error};
+
+    schedule: func(timestamp: s64, recurrence: option<string>, hook: string, args: list<value>) -> result<_, sdk-error>;
+    unschedule: func(hook: string, args: list<value>) -> result<u32, sdk-error>;
+    next: func(hook: string, args: list<value>) -> option<s64>;
+}
+
+/// `wp_mail()`, when the manifest grants mail.
+interface mail {
+    use types.{sdk-error};
+
+    record message {
+        to: list<string>,
+        subject: string,
+        body: string,
+        headers: list<string>,
+        /// Files inside a folder the manifest grants.
+        attachments: list<string>,
+    }
+
+    send: func(message: message) -> result<bool, sdk-error>;
+}
+
+/// The current user, `current_user_can()` and nonces.
+interface auth {
+    use types.{value};
+
+    current-user: func() -> u64;
+    user-can: func(capability: string, args: list<value>) -> bool;
+    create-nonce: func(action: string) -> string;
+    /// 1 or 2 as `wp_verify_nonce()` answers, 0 for a bad nonce.
+    verify-nonce: func(nonce: string, action: string) -> u8;
+}
+
+/// `__()`, `_x()`, `_n()` in the extension's own text domain, from its
+/// `languages/` folder.
+interface i18n {
+    translate: func(text: string, context: option<string>) -> string;
+    translate-plural: func(single: string, plural: string, number: u64, context: option<string>) -> string;
+}
+
+/// `get_transient()`, `set_transient()` and `delete_transient()`, or their
+/// `_site_transient` forms when `site` is true, for the transient names
+/// the manifest grants (0.2).
+interface transients {
+    use types.{value, sdk-error};
+
+    /// None for a missing or expired transient, as `false` answers in PHP.
+    get: func(name: string, site: bool) -> result<option<value>, sdk-error>;
+    /// `expiration` in seconds, 0 for none.
+    set: func(name: string, value: value, expiration: s64, site: bool) -> result<bool, sdk-error>;
+    delete: func(name: string, site: bool) -> result<bool, sdk-error>;
+}
+
+/// `get_role()`, `add_role()`, `remove_role()` and a role's `add_cap()`
+/// and `remove_cap()`, for the roles and capabilities the manifest grants
+/// (0.2). Any role may be read.
+interface roles {
+    use types.{sdk-error};
+
+    /// A capability and whether it is granted.
+    type capability = tuple<string, bool>;
+
+    /// `get_role( $role )->capabilities`: none for no such role.
+    get: func(role: string) -> result<option<list<capability>>, sdk-error>;
+    /// `add_role( $role, $display_name, $capabilities )`: false when the
+    /// role exists.
+    add: func(role: string, display-name: string, capabilities: list<capability>) -> result<bool, sdk-error>;
+    /// `remove_role( $role )`: false for no such role.
+    remove: func(role: string) -> result<bool, sdk-error>;
+    /// `get_role( $role )->add_cap( $cap, $grant )`: false for no such role.
+    add-cap: func(role: string, capability: string, grant: bool) -> result<bool, sdk-error>;
+    /// `get_role( $role )->remove_cap( $cap )`: false for no such role.
+    remove-cap: func(role: string, capability: string) -> result<bool, sdk-error>;
+}
+
+/// `wp_safe_remote_request()` to the hosts the manifest grants, through
+/// the host's outbound client (ADR 0019): every hop's addresses checked, a
+/// redirect followed for `GET` and `HEAD` only and only to a granted host,
+/// at most 30 seconds and 4 MiB of answer (0.2). Its time is the host's,
+/// not the call's.
+interface http {
+    use types.{sdk-error};
+
+    /// A request header: its name and its value.
+    type header = tuple<string, string>;
+
+    /// The status, the headers (names in lower case) and the body.
+    type response = tuple<u16, list<tuple<string, list<u8>>>, list<u8>>;
+
+    /// `$args`' `method`, `headers`, `body` and `timeout` (seconds).
+    send: func(method: string, url: string, headers: list<header>, body: list<u8>, timeout: u32) -> result<response, sdk-error>;
+}
+
+/// What the host calls in the extension.
+interface guest {
+    use types.{value};
+
+    /// Runs once when the package is loaded: registers hooks, routes,
+    /// shortcodes, blocks and assets. Never per request.
+    init: func() -> result<_, string>;
+
+    /// `register_activation_hook()` and `register_deactivation_hook()`.
+    activate: func() -> result<_, string>;
+    deactivate: func() -> result<_, string>;
+
+    /// Runs one callback the extension registered, with its arguments.
+    invoke: func(callback: u32, args: list<value>) -> result<value, string>;
+}
+
+/// The loop and the template tags a theme's templates call (0.3, ADR 0023),
+/// over the request's query, which the host keeps as PHP keeps `$wp_query`
+/// and `$post`. Tags are named as WordPress names them, so the interface
+/// grows by name, never by changing a type.
+interface template {
+    use types.{value, sdk-error};
+
+    /// `have_posts()`.
+    have-posts: func() -> bool;
+    /// `the_post()`: the next post set up as the current one.
+    the-post: func();
+    /// `rewind_posts()`.
+    rewind-posts: func();
+    /// `wp_reset_postdata()`.
+    reset-postdata: func();
+    /// `in_the_loop()`.
+    in-the-loop: func() -> bool;
+
+    /// A conditional tag (`is_home`, `is_singular`, `is_page_template`,
+    /// `is_active_sidebar` and the rest) with its arguments; `invalid` for
+    /// a name the host does not serve.
+    conditional: func(name: string, args: list<value>) -> result<bool, sdk-error>;
+
+    /// A template tag that prints (`the_title`, `the_content`, `wp_head`,
+    /// `body_class`, `wp_nav_menu` and the rest): the bytes PHP prints.
+    print: func(name: string, args: list<value>) -> result<list<u8>, sdk-error>;
+
+    /// A template tag that answers a value (`get_the_ID`, `get_bloginfo`,
+    /// `parse_blocks` and the rest).
+    get: func(name: string, args: list<value>) -> result<value, sdk-error>;
+
+    /// The template part functions.
+    enum part-kind {
+        header,
+        footer,
+        sidebar,
+        template-part,
+    }
+
+    /// `get_header()`, `get_footer()`, `get_sidebar()` and
+    /// `get_template_part( $slug, $name, $args )`: fires their actions and
+    /// answers the template file the theme renders, none when PHP would
+    /// include none.
+    part: func(kind: part-kind, slug: string, name: option<string>, args: list<value>) -> option<string>;
+}
+
+/// What a theme's `functions.php` sets up (0.3, ADR 0023's `theme`
+/// interface, named apart from the world): its features, menu locations
+/// and widget areas, request state taken in any action of the request, and
+/// its own theme mods.
+interface theme-setup {
+    use types.{value, sdk-error};
+
+    /// A template file of the theme, by its path (`index.php`,
+    /// `template-parts/content/content-single.php`); a page template has
+    /// its `Template Name` and `Template Post Type` too.
+    record template-file {
+        file: string,
+        name: option<string>,
+        post-types: list<string>,
+    }
+
+    /// The template files the theme has, which the host resolves the
+    /// template hierarchy over as `locate_template()` does; in `init` only.
+    templates: func(files: list<template-file>) -> result<_, sdk-error>;
+
+    /// `add_theme_support( $feature, ...$args )`.
+    add-support: func(feature: string, args: list<value>) -> result<_, sdk-error>;
+    /// `remove_theme_support( $feature )`.
+    remove-support: func(feature: string) -> bool;
+    /// `register_nav_menus( $locations )`: each location and its description.
+    register-nav-menus: func(locations: list<tuple<string, string>>) -> result<_, sdk-error>;
+    /// `register_sidebar( $args )`, its arguments as JSON: the sidebar's id.
+    register-sidebar: func(args: string) -> result<string, sdk-error>;
+    /// `add_image_size( $name, $width, $height, $crop )`.
+    add-image-size: func(name: string, width: u32, height: u32, crop: value) -> result<_, sdk-error>;
+    /// `set_post_thumbnail_size( $width, $height, $crop )`.
+    set-post-thumbnail-size: func(width: u32, height: u32, crop: value) -> result<_, sdk-error>;
+    /// `add_editor_style( $stylesheets )`, files of the package's `public/`.
+    add-editor-style: func(files: list<string>) -> result<_, sdk-error>;
+    /// `$content_width`.
+    set-content-width: func(width: u32) -> result<_, sdk-error>;
+    /// `register_block_style( $block_name, $style_properties )`, as JSON.
+    register-block-style: func(block: string, args: string) -> result<_, sdk-error>;
+    /// `register_block_pattern( $pattern_name, $pattern_properties )`, as JSON.
+    register-block-pattern: func(name: string, args: string) -> result<_, sdk-error>;
+    /// `get_theme_mod( $name, $default )` of its own `theme_mods_<stylesheet>`.
+    get-mod: func(name: string, default: option<value>) -> result<option<value>, sdk-error>;
+    /// `set_theme_mod( $name, $value )`.
+    set-mod: func(name: string, value: value) -> result<bool, sdk-error>;
+    /// `remove_theme_mod( $name )`.
+    remove-mod: func(name: string) -> result<bool, sdk-error>;
+}
+
+/// `customize_register`'s `$wp_customize` (0.3, ADR 0023).
+interface customize {
+    use types.{sdk-error};
+
+    /// What `$wp_customize` adds.
+    enum customize-kind {
+        panel,
+        section,
+        setting,
+        control,
+        partial,
+    }
+
+    /// `add_panel()`, `add_section()`, `add_setting()`, `add_control()` or
+    /// `selective_refresh->add_partial()`: its id, its arguments as JSON,
+    /// and its callbacks (`sanitize_callback`, `validate_callback`,
+    /// `active_callback`, `render_callback` and the rest) by number.
+    add: func(kind: customize-kind, id: string, args: string, callbacks: list<tuple<string, u32>>) -> result<_, sdk-error>;
+    /// `remove_panel()` and the others: false for none of that id.
+    remove: func(kind: customize-kind, id: string) -> bool;
+}
+
+/// What the host calls in a theme beside `guest`.
+interface theme-guest {
+    /// Renders a template file the theme listed, as PHP includes it: the
+    /// bytes it prints.
+    render: func(file: string) -> result<list<u8>, string>;
+}
+
+/// A plugin. Nothing else is imported: no WASI, so no files, clocks,
+/// sockets or environment but through these interfaces.
+world plugin {
+    import hooks;
+    import options;
+    import meta;
+    import content;
+    import query;
+    import rest;
+    import shortcodes;
+    import blocks;
+    import assets;
+    import cron;
+    import mail;
+    import auth;
+    import i18n;
+    import transients;
+    import roles;
+    import http;
+    export guest;
+}
+
+/// A classic theme (ADR 0023): a plugin's interfaces, the loop and template
+/// tags, its setup and the Customizer, and the template files it renders.
+world theme {
+    include plugin;
+    import template;
+    import theme-setup;
+    import customize;
+    export theme-guest;
+}

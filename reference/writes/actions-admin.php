@@ -1,0 +1,394 @@
+<?php
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// The write oracle's admin actions (MVP phase 3), loaded beside actions.php:
+// a case of a wp-admin screen's switch, taken from WordPress's own source
+// and run over the request hs-admin's handler gets, past the checks, with
+// the case's `exit` a return. docs/ADMIN.md, "Actions", says how to add one.
+
+// The case `$name` of `wp-admin/$screen`, up to the next case or the default.
+$admin_case = function ( $screen, $name ) use ( $admin_code ) {
+	return $admin_code( $screen, "/\n\tcase '$name':\n(.*?)\n\t(case '|default:)/s" );
+};
+
+// edit-comments.php's bulk actions, from its `if ( $doaction )` to its end,
+// over the request in $_GET, with what the screen sets before them.
+$comments_bulk = function ( $get ) use ( $admin_code ) {
+	$_GET     = $get;
+	$_REQUEST = $_GET;
+	set_current_screen( 'edit-comments' );
+	$wp_list_table = _get_list_table( 'WP_Comments_List_Table' );
+	$pagenum       = $wp_list_table->get_pagenum();
+	$doaction      = $wp_list_table->current_action();
+	eval( $admin_code( 'edit-comments.php', "/\nif \( \\\$doaction \) \{\n(.*?)\n\} elseif/s" ) );
+};
+
+// `wp_ajax_$action()` over `$post` (unslashed, as sent), its answer
+// thrown away.
+$admin_ajax = function ( $action, $post ) use ( $admin_run ) {
+	$_POST    = wp_slash( $post + array( 'action' => $action ) );
+	$_REQUEST = $_POST;
+	// do_action() passes an empty argument when given none.
+	$admin_run( fn() => call_user_func( 'wp_ajax_' . str_replace( '-', '_', $action ), '' ), true );
+};
+
+// The case `$name` of edit-tags.php over `$request` (unslashed), with the
+// globals the screen sets before its switch.
+$terms_case = function ( $name, $request, $post = true ) use ( $admin_case ) {
+	$request  = wp_slash( $request );
+	$_POST    = $post ? $request : array();
+	$_GET     = $post ? array() : $request;
+	$_REQUEST = $request;
+	$taxonomy = $request['taxonomy'];
+	$tax      = get_taxonomy( $taxonomy );
+	$referer  = '/wp-admin/edit-tags.php?taxonomy=' . $taxonomy;
+	$location = false;
+	// The case's `break` leaves this switch.
+	eval( 'switch ( 1 ) { default: ' . $admin_case( 'edit-tags.php', $name ) . ' }' );
+};
+
+$oracle_term = function ( $name, $taxonomy, $args = array() ) {
+	return wp_insert_term( $name, $taxonomy, $args )['term_id'];
+};
+
+return array(
+	// edit-comments.php's bulk Spam of comment 1 and of a comment missing,
+	// which is left out.
+	'admin-comments-spam'       => array(
+		'action' => function () use ( $comments_bulk ) {
+			$comments_bulk(
+				array(
+					'action'           => 'spam',
+					'delete_comments'  => array( '1', (string) HYSCRIBE_MISSING_ID ),
+					'_wp_http_referer' => '/wp-admin/edit-comments.php',
+					'_wpnonce'         => wp_create_nonce( 'bulk-comments' ),
+				)
+			);
+		},
+	),
+	// Comment 1 moved to the Trash, then the Trash emptied.
+	'admin-comments-empty-trash' => array(
+		'action' => function () use ( $comments_bulk ) {
+			$nonce = wp_create_nonce( 'bulk-comments' );
+			$comments_bulk(
+				array(
+					'action'   => 'trash',
+					'ids'      => '1',
+					'_wpnonce' => $nonce,
+				)
+			);
+			$comments_bulk(
+				array(
+					'action'            => '-1',
+					'delete_all'        => 'Empty Trash',
+					'comment_status'    => 'trash',
+					'pagegen_timestamp' => '2099-01-01 00:00:00',
+					'_wpnonce'          => $nonce,
+				)
+			);
+		},
+	),
+	// comment.php's Unapprove of comment 1.
+	'admin-comment-unapprove'   => array(
+		'action' => function () use ( $admin_case ) {
+			$_GET     = array(
+				'action'   => 'unapprovecomment',
+				'c'        => '1',
+				'_wpnonce' => wp_create_nonce( 'approve-comment_1' ),
+			);
+			$_REQUEST = $_GET;
+			$action   = 'unapprovecomment';
+			eval( str_replace( 'die;', 'return;', $admin_case( 'comment.php', 'unapprovecomment' ) ) );
+		},
+	),
+	// The list's Unapprove of comment 1, through admin-ajax.php.
+	'admin-comment-dim'         => array(
+		'action' => function () use ( $admin_ajax ) {
+			$admin_ajax(
+				'dim-comment',
+				array(
+					'id'          => '1',
+					'new'         => 'unapproved',
+					'_ajax_nonce' => wp_create_nonce( 'approve-comment_1' ),
+				)
+			);
+		},
+	),
+	// A comment of a trashed post moved to the Trash through admin-ajax.php,
+	// which cannot take it out again: `post-trashed` is no status to set.
+	'admin-comment-ajax-untrash-kept' => array(
+		'setup'  => function () {
+			return wp_insert_comment(
+				array(
+					'comment_post_ID'  => 1,
+					'comment_author'   => 'A reader',
+					'comment_content'  => 'A comment.',
+					'comment_approved' => 'post-trashed',
+				)
+			);
+		},
+		'action' => function ( $id ) use ( $admin_ajax ) {
+			foreach ( array( 'trash', 'untrash' ) as $flag ) {
+				$admin_ajax(
+					'delete-comment',
+					array(
+						'id'          => (string) $id,
+						$flag         => '1',
+						'_ajax_nonce' => wp_create_nonce( "delete-comment_$id" ),
+					)
+				);
+			}
+		},
+	),
+	// The list's Reply to comment 1 by user 1, held, which the reply
+	// approves, with markup kses keeps and drops, through admin-ajax.php.
+	'admin-comment-reply'       => array(
+		'setup'  => function () {
+			wp_set_comment_status( 1, 'hold' );
+		},
+		'action' => function () use ( $admin_ajax ) {
+			$admin_ajax(
+				'replyto-comment',
+				array(
+					'comment_ID'                  => '1',
+					'comment_post_ID'             => '1',
+					'content'                     => ' A <b>reply</b> <script>x</script>. ',
+					'approve_parent'              => '1',
+					'_ajax_nonce-replyto-comment' => wp_create_nonce( 'replyto-comment' ),
+				)
+			);
+		},
+	),
+	// Quick Edit of comment 1: its author, status and text.
+	'admin-comment-quick-edit'  => array(
+		'action' => function () use ( $admin_ajax ) {
+			$admin_ajax(
+				'edit-comment',
+				array(
+					'comment_ID'                  => '1',
+					'comment_post_ID'             => '1',
+					'newcomment_author'           => 'Ann',
+					'newcomment_author_email'     => 'ann@example.test',
+					'newcomment_author_url'       => 'https://example.test',
+					'status'                      => '0',
+					'content'                     => 'Edited <b>reply</b>.',
+					'checkbox'                    => '1',
+					'_ajax_nonce-replyto-comment' => wp_create_nonce( 'replyto-comment' ),
+				)
+			);
+		},
+	),
+	// comment.php's Update of comment 1 from its edit screen, with a date.
+	'admin-comment-edited'      => array(
+		'action' => function () use ( $admin_case ) {
+			$_POST    = array(
+				'action'           => 'editedcomment',
+				'comment_ID'       => '1',
+				'comment_post_ID'  => '1',
+				'newcomment_author' => 'Ann B',
+				'comment_status'   => 'spam',
+				'content'          => 'On the screen.',
+				'aa'               => '2026',
+				'mm'               => '02',
+				'jj'               => '03',
+				'hh'               => '04',
+				'mn'               => '05',
+				'ss'               => '06',
+				'hidden_aa'        => '2025',
+				'_wpnonce'         => wp_create_nonce( 'update-comment_1' ),
+			);
+			$_REQUEST = $_POST;
+			$_POST    = wp_slash( $_POST );
+			eval( $admin_case( 'comment.php', 'editedcomment' ) );
+		},
+	),
+	// The list's Trash of comment 1, through admin-ajax.php.
+	'admin-comment-ajax-trash'  => array(
+		'action' => function () use ( $admin_ajax ) {
+			$admin_ajax(
+				'delete-comment',
+				array(
+					'id'          => '1',
+					'trash'       => '1',
+					'_ajax_nonce' => wp_create_nonce( 'delete-comment_1' ),
+				)
+			);
+		},
+	),
+	// users.php's bulk role change of another user and of user 1, an
+	// administrator given a role that cannot promote users. A second user is
+	// left as it is: HyScribe's test rolls back a change of its role.
+	'admin-users-promote' => array(
+		'setup'  => function () use ( $oracle_user ) {
+			return array( $oracle_user( 'oracle-promoted' ), $oracle_user( 'oracle-kept' ) );
+		},
+		'action' => function ( $ids ) use ( $admin_case ) {
+			$_GET     = array(
+				'changeit' => 'Change',
+				'new_role' => 'editor',
+				'users'    => array( (string) $ids[0], '1' ),
+				'_wpnonce' => wp_create_nonce( 'bulk-users' ),
+			);
+			$_REQUEST = $_GET;
+			// What users.php sets before its switch.
+			$redirect     = 'users.php';
+			$current_user = wp_get_current_user();
+			$wp_roles     = wp_roles();
+			eval( $admin_case( 'users.php', 'promote' ) );
+		},
+	),
+	// edit-tags.php's add form, a category with slashes in its texts.
+	'admin-terms-add'        => array(
+		'action' => function () use ( $terms_case ) {
+			$terms_case(
+				'add-tag',
+				array(
+					'action'           => 'add-tag',
+					'taxonomy'         => 'category',
+					'tag-name'         => "Oracle's added",
+					'slug'             => '',
+					'parent'           => '-1',
+					'description'      => 'Some <b>text</b> \ here',
+					'_wpnonce_add-tag' => wp_create_nonce( 'add-tag' ),
+				)
+			);
+		},
+	),
+	// The add form through admin-ajax.php: a child category, then Quick Edit
+	// giving its parent the child's slug, which fails.
+	'admin-terms-add-child'  => array(
+		'action' => function () use ( $admin_ajax ) {
+			$admin_ajax(
+				'add-tag',
+				array(
+					'screen'           => 'edit-category',
+					'taxonomy'         => 'category',
+					'tag-name'         => 'Child category',
+					'slug'             => '',
+					'parent'           => '1',
+					'description'      => '',
+					'_wpnonce_add-tag' => wp_create_nonce( 'add-tag' ),
+				)
+			);
+			$admin_ajax(
+				'inline-save-tax',
+				array(
+					'taxonomy'     => 'category',
+					'tax_ID'       => '1',
+					'name'         => 'Uncategorized',
+					'slug'         => 'child-category',
+					'_inline_edit' => wp_create_nonce( 'taxinlineeditnonce' ),
+				)
+			);
+		},
+	),
+	// The add form through admin-ajax.php: a tag.
+	'admin-terms-add-tag'    => array(
+		'action' => function () use ( $admin_ajax ) {
+			$admin_ajax(
+				'add-tag',
+				array(
+					'screen'           => 'edit-post_tag',
+					'taxonomy'         => 'post_tag',
+					'tag-name'         => 'Fresh tag',
+					'slug'             => '',
+					'description'      => 'About it',
+					'_wpnonce_add-tag' => wp_create_nonce( 'add-tag' ),
+				)
+			);
+		},
+	),
+	// Quick Edit of a category whose description has a backslash, which the
+	// save strips as it passes the description unslashed.
+	'admin-terms-inline'     => array(
+		'setup'  => function () use ( $oracle_term ) {
+			return $oracle_term( 'Oracle inline', 'category', array( 'description' => wp_slash( 'Kept \ text' ) ) );
+		},
+		'action' => function ( $id ) use ( $admin_ajax ) {
+			$admin_ajax(
+				'inline-save-tax',
+				array(
+					'taxonomy'     => 'category',
+					'tax_ID'       => (string) $id,
+					'name'         => 'Quick & named',
+					'slug'         => '',
+					'_inline_edit' => wp_create_nonce( 'taxinlineeditnonce' ),
+				)
+			);
+		},
+	),
+	// The edit screen's save of a category, given a parent.
+	'admin-terms-edited'     => array(
+		'setup'  => function () use ( $oracle_term ) {
+			return array( $oracle_term( 'Oracle parent', 'category' ), $oracle_term( 'Oracle edited', 'category' ) );
+		},
+		'action' => function ( $ids ) use ( $terms_case ) {
+			$terms_case(
+				'editedtag',
+				array(
+					'action'      => 'editedtag',
+					'tag_ID'      => (string) $ids[1],
+					'taxonomy'    => 'category',
+					'name'        => 'Oracle "edited"',
+					'slug'        => 'Oracle Edited Slug',
+					'description' => 'Line <script>x</script>',
+					'parent'      => (string) $ids[0],
+					'_wpnonce'    => wp_create_nonce( 'update-tag_' . $ids[1] ),
+				)
+			);
+		},
+	),
+	// A row's Delete of a category with a child.
+	'admin-terms-delete'     => array(
+		'setup'  => function () use ( $oracle_term ) {
+			$parent = $oracle_term( 'Oracle doomed', 'category' );
+			$oracle_term( 'Oracle orphan', 'category', array( 'parent' => $parent ) );
+			return $parent;
+		},
+		'action' => function ( $id ) use ( $terms_case ) {
+			$terms_case(
+				'delete',
+				array(
+					'action'   => 'delete',
+					'taxonomy' => 'category',
+					'tag_ID'   => (string) $id,
+					'_wpnonce' => wp_create_nonce( 'delete-tag_' . $id ),
+				),
+				false
+			);
+		},
+	),
+	// The bulk Delete of two tags and a term no row has.
+	'admin-terms-bulk-delete' => array(
+		'setup'  => function () use ( $oracle_term ) {
+			return array( $oracle_term( 'Oracle one', 'post_tag' ), $oracle_term( 'Oracle two', 'post_tag' ) );
+		},
+		'action' => function ( $ids ) use ( $terms_case ) {
+			$terms_case(
+				'bulk-delete',
+				array(
+					'action'      => 'delete',
+					'taxonomy'    => 'post_tag',
+					'delete_tags' => array( (string) $ids[0], (string) $ids[1], (string) HYSCRIBE_MISSING_ID ),
+					'_wpnonce'    => wp_create_nonce( 'bulk-tags' ),
+				)
+			);
+		},
+	),
+	// A row's Delete through admin-ajax.php.
+	'admin-terms-delete-ajax' => array(
+		'setup'  => function () use ( $oracle_term ) {
+			return $oracle_term( 'Oracle ajax doomed', 'post_tag' );
+		},
+		'action' => function ( $id ) use ( $admin_ajax ) {
+			$admin_ajax(
+				'delete-tag',
+				array(
+					'tag_ID'      => (string) $id,
+					'taxonomy'    => 'post_tag',
+					'_ajax_nonce' => wp_create_nonce( 'delete-tag_' . $id ),
+				)
+			);
+		},
+	),
+);

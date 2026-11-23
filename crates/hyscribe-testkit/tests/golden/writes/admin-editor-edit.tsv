@@ -1,0 +1,10 @@
+# The rows PHP WordPress writes for the action admin-editor-edit (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-16 10:33:03 to 2026-11-16 10:33:03 UTC.
+# %wp_posts:1% is 11.
+# %wp_postmeta:1% is 6.
+# %wp_terms:1% is 5.
+# %wp_term_taxonomy:1% is 5.
+wp_postmeta	%wp_postmeta:1%	+	meta_id	%wp_postmeta:1%
+wp_postmeta	%wp_postmeta:1%	+	meta_key	_edit_lock
+wp_postmeta	%wp_postmeta:1%	+	meta_value	%unix%:1
+wp_postmeta	%wp_postmeta:1%	+	post_id	1

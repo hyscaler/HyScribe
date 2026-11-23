@@ -1,0 +1,71 @@
+# The rows PHP WordPress writes for the action set-post-tags (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 04:35:50 to 2026-11-15 04:35:51 UTC.
+# %wp_terms:1% is 960.
+# %wp_terms:2% is 961.
+# %wp_terms:3% is 962.
+# %wp_terms:4% is 963.
+# %wp_term_taxonomy:1% is 960.
+# %wp_term_taxonomy:2% is 961.
+# %wp_term_taxonomy:3% is 962.
+# %wp_term_taxonomy:4% is 963.
+wp_term_relationships	1,%wp_term_taxonomy:1%	+	object_id	1
+wp_term_relationships	1,%wp_term_taxonomy:1%	+	term_order	0
+wp_term_relationships	1,%wp_term_taxonomy:1%	+	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_relationships	1,%wp_term_taxonomy:2%	+	object_id	1
+wp_term_relationships	1,%wp_term_taxonomy:2%	+	term_order	0
+wp_term_relationships	1,%wp_term_taxonomy:2%	+	term_taxonomy_id	%wp_term_taxonomy:2%
+wp_term_relationships	1,%wp_term_taxonomy:3%	+	object_id	1
+wp_term_relationships	1,%wp_term_taxonomy:3%	+	term_order	0
+wp_term_relationships	1,%wp_term_taxonomy:3%	+	term_taxonomy_id	%wp_term_taxonomy:3%
+wp_term_relationships	1,%wp_term_taxonomy:4%	+	object_id	1
+wp_term_relationships	1,%wp_term_taxonomy:4%	+	term_order	0
+wp_term_relationships	1,%wp_term_taxonomy:4%	+	term_taxonomy_id	%wp_term_taxonomy:4%
+wp_term_relationships	2,%wp_term_taxonomy:1%	+	object_id	2
+wp_term_relationships	2,%wp_term_taxonomy:1%	+	term_order	0
+wp_term_relationships	2,%wp_term_taxonomy:1%	+	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_relationships	2,%wp_term_taxonomy:3%	+	object_id	2
+wp_term_relationships	2,%wp_term_taxonomy:3%	+	term_order	0
+wp_term_relationships	2,%wp_term_taxonomy:3%	+	term_taxonomy_id	%wp_term_taxonomy:3%
+wp_term_relationships	2,%wp_term_taxonomy:4%	+	object_id	2
+wp_term_relationships	2,%wp_term_taxonomy:4%	+	term_order	0
+wp_term_relationships	2,%wp_term_taxonomy:4%	+	term_taxonomy_id	%wp_term_taxonomy:4%
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	count	1
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	term_id	%wp_terms:1%
+wp_term_taxonomy	%wp_term_taxonomy:1%	+	term_taxonomy_id	%wp_term_taxonomy:1%
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	count	1
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	term_id	%wp_terms:2%
+wp_term_taxonomy	%wp_term_taxonomy:2%	+	term_taxonomy_id	%wp_term_taxonomy:2%
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	count	1
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	term_id	%wp_terms:3%
+wp_term_taxonomy	%wp_term_taxonomy:3%	+	term_taxonomy_id	%wp_term_taxonomy:3%
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	count	1
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	description	
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	parent	0
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	taxonomy	post_tag
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	term_id	%wp_terms:4%
+wp_term_taxonomy	%wp_term_taxonomy:4%	+	term_taxonomy_id	%wp_term_taxonomy:4%
+wp_terms	%wp_terms:1%	+	name	alpha
+wp_terms	%wp_terms:1%	+	slug	alpha
+wp_terms	%wp_terms:1%	+	term_group	0
+wp_terms	%wp_terms:1%	+	term_id	%wp_terms:1%
+wp_terms	%wp_terms:2%	+	name	Beta
+wp_terms	%wp_terms:2%	+	slug	beta
+wp_terms	%wp_terms:2%	+	term_group	0
+wp_terms	%wp_terms:2%	+	term_id	%wp_terms:2%
+wp_terms	%wp_terms:3%	+	name	gamma
+wp_terms	%wp_terms:3%	+	slug	gamma
+wp_terms	%wp_terms:3%	+	term_group	0
+wp_terms	%wp_terms:3%	+	term_id	%wp_terms:3%
+wp_terms	%wp_terms:4%	+	name	delta
+wp_terms	%wp_terms:4%	+	slug	delta
+wp_terms	%wp_terms:4%	+	term_group	0
+wp_terms	%wp_terms:4%	+	term_id	%wp_terms:4%

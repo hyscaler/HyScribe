@@ -1,0 +1,33 @@
+# The rows PHP WordPress writes for the action insert-over-existing-post (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 20:05:02 to 2026-11-14 20:05:02 UTC.
+# %wp_posts:1% is 11.
+# %wp_posts:2% is 12.
+# %wp_postmeta:1% is 17.
+# %wp_postmeta:2% is 18.
+# %wp_options:1% is 133.
+wp_posts	%wp_posts:1%	~	comment_status	open	closed
+wp_posts	%wp_posts:1%	~	post_content	Its content.	New.
+wp_posts	%wp_posts:1%	~	post_title	A write oracle post	Rewritten
+wp_posts	%wp_posts:2%	+	ID	%wp_posts:2%
+wp_posts	%wp_posts:2%	+	comment_count	0
+wp_posts	%wp_posts:2%	+	comment_status	closed
+wp_posts	%wp_posts:2%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:2%
+wp_posts	%wp_posts:2%	+	menu_order	0
+wp_posts	%wp_posts:2%	+	ping_status	closed
+wp_posts	%wp_posts:2%	+	pinged	
+wp_posts	%wp_posts:2%	+	post_author	1
+wp_posts	%wp_posts:2%	+	post_content	New.
+wp_posts	%wp_posts:2%	+	post_content_filtered	
+wp_posts	%wp_posts:2%	+	post_date	%now%
+wp_posts	%wp_posts:2%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:2%	+	post_excerpt	
+wp_posts	%wp_posts:2%	+	post_mime_type	
+wp_posts	%wp_posts:2%	+	post_modified	%now%
+wp_posts	%wp_posts:2%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:2%	+	post_name	%wp_posts:1%-revision-v1
+wp_posts	%wp_posts:2%	+	post_parent	%wp_posts:1%
+wp_posts	%wp_posts:2%	+	post_password	
+wp_posts	%wp_posts:2%	+	post_status	inherit
+wp_posts	%wp_posts:2%	+	post_title	Rewritten
+wp_posts	%wp_posts:2%	+	post_type	revision
+wp_posts	%wp_posts:2%	+	to_ping	

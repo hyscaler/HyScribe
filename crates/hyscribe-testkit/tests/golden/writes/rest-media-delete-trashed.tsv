@@ -1,0 +1,77 @@
+# The rows PHP WordPress writes for the action rest-media-delete-trashed (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 20:31:37 to 2026-11-18 20:31:37 UTC.
+# %wp_posts:1% is 9301.
+# %wp_postmeta:1% is 40.
+# %wp_postmeta:2% is 41.
+# %wp_postmeta:3% is 42.
+# %wp_postmeta:4% is 43.
+# %wp_postmeta:5% is 44.
+# %wp_postmeta:6% is 45.
+# %wp_postmeta:7% is 46.
+# %wp_comments:1% is 3.
+wp_comments	%wp_comments:1%	-	comment_ID	%wp_comments:1%
+wp_comments	%wp_comments:1%	-	comment_agent	
+wp_comments	%wp_comments:1%	-	comment_approved	1
+wp_comments	%wp_comments:1%	-	comment_author	A reader
+wp_comments	%wp_comments:1%	-	comment_author_IP	
+wp_comments	%wp_comments:1%	-	comment_author_email	
+wp_comments	%wp_comments:1%	-	comment_author_url	
+wp_comments	%wp_comments:1%	-	comment_content	A comment.
+wp_comments	%wp_comments:1%	-	comment_date	2026-01-01 00:00:00
+wp_comments	%wp_comments:1%	-	comment_date_gmt	2026-01-01 00:00:00
+wp_comments	%wp_comments:1%	-	comment_karma	0
+wp_comments	%wp_comments:1%	-	comment_parent	0
+wp_comments	%wp_comments:1%	-	comment_post_ID	%wp_posts:1%
+wp_comments	%wp_comments:1%	-	comment_type	comment
+wp_comments	%wp_comments:1%	-	user_id	0
+wp_postmeta	%wp_postmeta:1%	-	meta_id	%wp_postmeta:1%
+wp_postmeta	%wp_postmeta:1%	-	meta_key	_wp_attached_file
+wp_postmeta	%wp_postmeta:1%	-	meta_value	%ym%/oracle.jpg
+wp_postmeta	%wp_postmeta:1%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:2%	-	meta_id	%wp_postmeta:2%
+wp_postmeta	%wp_postmeta:2%	-	meta_key	_wp_attachment_metadata
+wp_postmeta	%wp_postmeta:2%	-	meta_value	a:6:{s:5:"width";i:1200;s:6:"height";i:800;s:4:"file";s:18:"%ym%/oracle.jpg";s:8:"filesize";i:%filesize%;s:5:"sizes";a:2:{s:6:"medium";a:5:{s:4:"file";s:18:"oracle-300x200.jpg";s:5:"width";i:300;s:6:"height";i:200;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:%filesize%;}s:9:"thumbnail";a:5:{s:4:"file";s:18:"oracle-150x150.jpg";s:5:"width";i:150;s:6:"height";i:150;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:%filesize%;}}s:10:"image_meta";a:12:{s:8:"aperture";s:1:"0";s:6:"credit";s:0:"";s:6:"camera";s:0:"";s:7:"caption";s:0:"";s:17:"created_timestamp";s:1:"0";s:9:"copyright";s:0:"";s:12:"focal_length";s:1:"0";s:3:"iso";s:1:"0";s:13:"shutter_speed";s:1:"0";s:5:"title";s:0:"";s:11:"orientation";s:1:"0";s:8:"keywords";a:0:{}}}
+wp_postmeta	%wp_postmeta:2%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:3%	-	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	-	meta_key	_wp_attachment_image_alt
+wp_postmeta	%wp_postmeta:3%	-	meta_value	Old alt
+wp_postmeta	%wp_postmeta:3%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:4%	-	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	-	meta_key	_wp_attachment_backup_sizes
+wp_postmeta	%wp_postmeta:4%	-	meta_value	a:1:{s:9:"full-orig";a:3:{s:5:"width";i:1200;s:6:"height";i:800;s:4:"file";s:15:"oracle-orig.jpg";}}
+wp_postmeta	%wp_postmeta:4%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:5%	-	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	-	meta_key	_thumbnail_id
+wp_postmeta	%wp_postmeta:5%	-	meta_value	9301
+wp_postmeta	%wp_postmeta:5%	-	post_id	1
+wp_postmeta	%wp_postmeta:6%	-	meta_id	%wp_postmeta:6%
+wp_postmeta	%wp_postmeta:6%	-	meta_key	_wp_trash_meta_status
+wp_postmeta	%wp_postmeta:6%	-	meta_value	inherit
+wp_postmeta	%wp_postmeta:6%	-	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:7%	-	meta_id	%wp_postmeta:7%
+wp_postmeta	%wp_postmeta:7%	-	meta_key	_wp_trash_meta_time
+wp_postmeta	%wp_postmeta:7%	-	meta_value	%unix%
+wp_postmeta	%wp_postmeta:7%	-	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	-	ID	%wp_posts:1%
+wp_posts	%wp_posts:1%	-	comment_count	0
+wp_posts	%wp_posts:1%	-	comment_status	open
+wp_posts	%wp_posts:1%	-	guid	http://127.0.0.1:8081/?attachment_id=%wp_posts:1%
+wp_posts	%wp_posts:1%	-	menu_order	0
+wp_posts	%wp_posts:1%	-	ping_status	closed
+wp_posts	%wp_posts:1%	-	pinged	
+wp_posts	%wp_posts:1%	-	post_author	1
+wp_posts	%wp_posts:1%	-	post_content	Its description
+wp_posts	%wp_posts:1%	-	post_content_filtered	
+wp_posts	%wp_posts:1%	-	post_date	%now%
+wp_posts	%wp_posts:1%	-	post_date_gmt	%now%
+wp_posts	%wp_posts:1%	-	post_excerpt	Its caption
+wp_posts	%wp_posts:1%	-	post_mime_type	image/jpeg
+wp_posts	%wp_posts:1%	-	post_modified	%now%
+wp_posts	%wp_posts:1%	-	post_modified_gmt	%now%
+wp_posts	%wp_posts:1%	-	post_name	a-write-oracle-picture
+wp_posts	%wp_posts:1%	-	post_parent	1
+wp_posts	%wp_posts:1%	-	post_password	
+wp_posts	%wp_posts:1%	-	post_status	trash
+wp_posts	%wp_posts:1%	-	post_title	A write oracle picture
+wp_posts	%wp_posts:1%	-	post_type	attachment
+wp_posts	%wp_posts:1%	-	to_ping	

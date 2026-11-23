@@ -1,0 +1,34 @@
+<?php
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Run by export.sh inside the PHP WordPress container: prints the block
+// patterns the active theme registers (its parent's too), as JSON {slug: {title, content,
+// and description and categories where registered}},
+// with their PHP already run (en_US). Theme ports store this output, so
+// HyScribe never needs PHP for patterns. The footer credit names HyScribe
+//.
+
+require '/var/www/html/wp-load.php';
+
+$patterns = array();
+foreach ( WP_Block_Patterns_Registry::get_instance()->get_all_registered() as $pattern ) {
+	// The theme's own patterns, and its parent's when it is a child theme.
+	if ( ! str_starts_with( $pattern['name'], get_stylesheet() . '/' ) && ! str_starts_with( $pattern['name'], get_template() . '/' ) ) {
+		continue;
+	}
+	$patterns[ $pattern['name'] ] = array(
+		'title'   => $pattern['title'],
+		'content' => str_replace(
+			'Designed with <a href="https://wordpress.org" rel="nofollow">WordPress</a>',
+			'Designed with <a href="https://github.com/hyscaler/HyScribe" rel="nofollow">HyScribe</a>',
+			$pattern['content']
+		),
+	);
+	foreach ( array( 'description', 'categories' ) as $key ) {
+		if ( isset( $pattern[ $key ] ) ) {
+			$patterns[ $pattern['name'] ][ $key ] = $pattern[ $key ];
+		}
+	}
+}
+ksort( $patterns );
+echo wp_json_encode( $patterns, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ), "\n";

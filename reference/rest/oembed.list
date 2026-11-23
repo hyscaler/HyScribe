@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The oEmbed provider for reference/rest/golden.sh (method, target, flags):
+# this site's posts as oEmbed (oembed/1.0/embed) in JSON and XML, the sizes,
+# the URLs url_to_postid() reads, the arguments' checks; then the proxy's
+# permission check and its answers for this site's own posts, which fetch
+# nothing. The embed HTML's random secret is masked (secret).
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fpage_id%3D2	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format=xml	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fpage_id%3D2&format=xml&maxwidth=300	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&maxwidth=100	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&maxwidth=1000	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&maxwidth=-450	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&maxwidth=abc	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&maxwidth=333	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&maxwidth[]=3	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format=bogus	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format[]=xml	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D3
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D4
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D999
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D0
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D999&format=xml
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2Fexample.test%2F%3Fp%3D1
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2Fwww.127.0.0.1%3A8081%2F%3Fp%3D1	secret
+GET	/?rest_route=/oembed/1.0/embed&url=%2F%3Fp%3D1	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fx%3D1%26p%3D1	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fattachment_id%3D2	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%23%3Fp%3D1	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2Fhello-world%2F
+GET	/?rest_route=/oembed/1.0/embed
+GET	/?rest_route=/oembed/1.0/embed&url=
+GET	/?rest_route=/oembed/1.0/embed&url[]=x
+GET	/?rest_route=/oembed/1.0/embed&url=javascript:alert(1)
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&_fields=title,type,width
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&_jsonp=cb	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format=xml&_jsonp=cb	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format=xml&_envelope	secret
+GET	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format=xml&_fields=title	secret
+HEAD	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1
+HEAD	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format=xml
+GET	/wp-json/oembed/1.0/embed?url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1	pretty,secret
+GET	/wp-json/oembed/1.0/embed?url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format=xml	pretty,secret
+GET	/wp-json/oembed/1.0/embed?url=http%3A%2F%2F127.0.0.1%3A8081%2Fhello-world%2F	pretty,secret
+GET	/wp-json/oembed/1.0/embed?url=http%3A%2F%2F127.0.0.1%3A8081%2Fsample-page%2F	pretty,secret
+GET	/wp-json/oembed/1.0/embed?url=http%3A%2F%2F127.0.0.1%3A8081%2Fnope%2F	pretty
+OPTIONS	/?rest_route=/oembed/1.0/embed
+POST	/?rest_route=/oembed/1.0/embed&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1
+GET	/?rest_route=/oembed/1.0/proxy&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1	secret
+GET	/?rest_route=/oembed/1.0/proxy&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fpage_id%3D2&maxwidth=300&maxheight=100	secret
+GET	/?rest_route=/oembed/1.0/proxy&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format=xml	secret
+GET	/?rest_route=/oembed/1.0/proxy&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&maxwidth=abc&discover=0	secret
+GET	/?rest_route=/oembed/1.0/proxy&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&format=bogus
+GET	/?rest_route=/oembed/1.0/proxy&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&discover=maybe
+GET	/?rest_route=/oembed/1.0/proxy
+GET	/?rest_route=/oembed/1.0/proxy&url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1&_fields=title	secret
+GET	/wp-json/oembed/1.0/proxy?url=http%3A%2F%2F127.0.0.1%3A8081%2F%3Fp%3D1	pretty,secret
+OPTIONS	/?rest_route=/oembed/1.0/proxy

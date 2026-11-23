@@ -1,0 +1,14 @@
+<div class="wrap">
+	<h1>Upload Media</h1>
+
+	<form enctype="multipart/form-data" method="post" action="%action%" class="%class%" id="file-form">
+
+	%uploader%
+	<script>
+	var post_id = %post_id%, shortform = 3;
+	</script>
+	<input type="hidden" name="post_id" id="post_id" value="%post_id%" />
+	<input type="hidden" id="_wpnonce" name="_wpnonce" value="%nonce%" /><input type="hidden" name="_wp_http_referer" value="%referer%" />	<div id="media-items" class="hide-if-no-js"></div>
+	</form>
+</div>
+

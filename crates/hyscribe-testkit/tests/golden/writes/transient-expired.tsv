@@ -1,0 +1,21 @@
+# The rows PHP WordPress writes for the action transient-expired (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-21 16:17:18 to 2026-11-21 16:17:18 UTC.
+# %wp_options:1% is 130.
+# %wp_options:2% is 131.
+# %wp_options:3% is 132.
+# %wp_options:4% is 133.
+# %wp_options:5% is 134.
+# %wp_options:6% is 135.
+# %wp_options:7% is 136.
+wp_options	_transient_oracle_old	-	autoload	off
+wp_options	_transient_oracle_old	-	option_id	%wp_options:2%
+wp_options	_transient_oracle_old	-	option_name	_transient_oracle_old
+wp_options	_transient_oracle_old	-	option_value	old
+wp_options	_transient_timeout_oracle_lone	-	autoload	off
+wp_options	_transient_timeout_oracle_lone	-	option_id	%wp_options:6%
+wp_options	_transient_timeout_oracle_lone	-	option_name	_transient_timeout_oracle_lone
+wp_options	_transient_timeout_oracle_lone	-	option_value	%expiry%
+wp_options	_transient_timeout_oracle_old	-	autoload	off
+wp_options	_transient_timeout_oracle_old	-	option_id	%wp_options:1%
+wp_options	_transient_timeout_oracle_old	-	option_name	_transient_timeout_oracle_old
+wp_options	_transient_timeout_oracle_old	-	option_value	%expiry%

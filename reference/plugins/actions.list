@@ -1,0 +1,17 @@
+# The actions reference/plugins/golden.sh sends to plugins.php, each from the
+# options as they were:
+# case	variant	role	query (without its nonce)	nonce action (- for none, bad for a wrong nonce)
+activate	x13inactive	administrator	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	activate-plugin_%file%
+activate-sorted	x13other	administrator	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	activate-plugin_%file%
+activate-active	x13active	administrator	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=active&paged=1&s=	activate-plugin_%file%
+activate-recent	x13recent	administrator	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=recently_activated&paged=1&s=	activate-plugin_%file%
+activate-bad-nonce	x13inactive	administrator	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	bad
+activate-missing	x13inactive	administrator	action=activate&plugin=missing%2Fmissing.php&plugin_status=all&paged=1&s=	activate-plugin_missing/missing.php
+activate-invalid	x13inactive	administrator	action=activate&plugin=..%2Fx.php&plugin_status=all&paged=1&s=	activate-plugin_../x.php
+activate-fails	x13fail	administrator	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	activate-plugin_%file%
+activate-editor	x13inactive	editor	action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	activate-plugin_%file%
+deactivate	x13active	administrator	action=deactivate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	deactivate-plugin_%file%
+deactivate-kept	x13both	administrator	action=deactivate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	deactivate-plugin_%file%
+deactivate-inactive	x13recent	administrator	action=deactivate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	deactivate-plugin_%file%
+deactivate-bad-nonce	x13active	administrator	action=deactivate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	bad
+delete	x13inactive	administrator	action=delete-selected&checked%5B0%5D=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	bulk-plugins

@@ -1,0 +1,21 @@
+/*
+Theme Name: HyScribe Fixture Child
+Theme URI: https://github.com/hyscaler/HyScribe
+Author: HyScaler
+Author URI: https://hyscaler.com
+Description: A child of Twenty Twenty-Five that HyScribe's tests use to check the lookup of a child block theme: its own templates, parts, patterns and style variations over the parent's.
+Template: twentytwentyfive
+Version: 1.0
+Requires at least: 6.7
+Requires PHP: 7.2
+License: AGPL-3.0-or-later
+License URI: https://www.gnu.org/licenses/agpl-3.0.html
+Text Domain: hyscribe-fixture-child
+Tags: block-patterns, full-site-editing, style-variations
+SPDX-License-Identifier: AGPL-3.0-or-later
+*/
+
+.wp-block-group.is-child-note {
+	border-left: 4px solid currentColor;
+	padding-left: 1rem;
+}

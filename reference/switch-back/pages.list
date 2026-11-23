@@ -1,0 +1,85 @@
+# The screens and pages reference/switch-back/run.sh asks PHP WordPress for
+# once HyScribe has written reference/switch-back/actions.list, and a text
+# each must show (as the HTML has it):
+# user (admin, switchback or visitor)	path	status	text
+admin	/wp-admin/	200	Switch back draft
+admin	/wp-admin/edit.php?s=Hello	200	Hello again
+admin	/wp-admin/edit.php?post_status=draft	200	Switch back draft
+admin	/wp-admin/edit.php?post_type=page	200	Sample Page Edited
+admin	/wp-admin/edit.php?post_type=page&post_status=draft	200	Privacy Policy
+admin	/wp-admin/edit-tags.php?taxonomy=category	200	Switch Category
+admin	/wp-admin/edit-tags.php?taxonomy=post_tag	200	Renamed tag
+admin	/wp-admin/term.php?taxonomy=category&tag_ID=2	200	Described in HyScribe
+admin	/wp-admin/edit-comments.php	200	edited on the screen
+admin	/wp-admin/edit-comments.php?comment_status=moderated	200	A reply edited in Quick Edit.
+admin	/wp-admin/comment.php?action=editcomment&c=2	200	Ann B
+admin	/wp-admin/users.php	200	switchback
+admin	/wp-admin/user-edit.php?user_id=2	200	Edited in HyScribe.
+admin	/wp-admin/profile.php	200	Saved in HyScribe.
+admin	/wp-admin/options-general.php	200	Switch Back Site
+admin	/wp-admin/options-writing.php	200	mail.example.com
+admin	/wp-admin/options-reading.php	200	id="posts_per_rss" value="7"
+admin	/wp-admin/options-discussion.php	200	identicon
+admin	/wp-admin/options-media.php	200	value="160"
+admin	/wp-admin/options-permalink.php	200	/%postname%/
+admin	/wp-admin/options-privacy.php	200	Privacy Policy
+switchback	/wp-admin/profile.php	200	Switcher
+visitor	/	200	Sample Page Edited
+visitor	/hello-again/	200	edited on the screen
+visitor	/category/switch-category/	200	Hello again
+visitor	/tag/bulk-tag/	200	Hello again
+visitor	/feed/	200	Hello again
+visitor	/comments/feed/	200	edited on the screen
+visitor	/tag/switch/	200	Hello again
+# What the REST API wrote: the synced pattern in the post, the page under
+# Sample Page, the navigation menu in the theme's header.
+visitor	/a-rest-post/	200	Synced from REST.
+visitor	/a-rest-post/	200	A REST post, updated
+visitor	/sample-page/a-rest-page/	200	A page written over REST.
+visitor	/	200	REST link
+visitor	/tag/bulk-tag/	200	A REST post, updated
+visitor	/revised-over-rest/	200	Second version.
+visitor	/scratch-c/	404	Page not found
+admin	/wp-admin/edit.php?post_status=draft	200	Scratch B
+admin	/wp-admin/edit.php?post_type=wp_block	200	A REST pattern, renamed
+admin	/wp-admin/edit.php?post_type=wp_block&post_status=trash	200	Trashed pattern
+admin	/wp-admin/edit.php?post_status=trash	200	Trashed over REST
+admin	/wp-admin/edit.php?post_status=future	200	A REST future post
+admin	/wp-admin/edit.php?post_status=draft	200	A REST draft
+admin	/wp-admin/edit.php?post_type=page	200	A REST page, updated
+admin	/wp-admin/edit.php?show_sticky=1	200	A REST post, updated
+admin	/wp-admin/post.php?post=1&action=edit	200	Hello again
+# The administrator's list mode, the comments moderated, the pending email.
+admin	/wp-admin/edit.php	200	table-view-excerpt
+admin	/wp-admin/edit-comments.php?comment_status=moderated	200	Moderated twice.
+admin	/wp-admin/edit-comments.php?comment_status=approved	200	Spammed and back.
+admin	/wp-admin/options-general.php	200	new-admin@example.test
+admin	/wp-admin/edit-tags.php?taxonomy=post_tag	200	Bulk tag
+# Uploads: the library, the attachment's screen and page, the files and their sizes.
+admin	/wp-admin/upload.php?mode=list	200	REST image
+admin	/wp-admin/upload.php?mode=list	200	REST png
+admin	/wp-admin/upload.php?mode=list	200	orient-6
+admin	/wp-admin/upload.php?mode=list	200	Edited by REST
+admin	/wp-admin/post.php?post=%rest-media-edit%&action=edit	200	Alt after
+admin	/wp-admin/post.php?post=%rest-media%&action=edit	200	A wide REST picture
+admin	/wp-admin/post.php?post=%async-plain%&action=edit	200	small
+visitor	/a-rest-post/rest-image/	301	-
+visitor	/a-rest-post/	200	wide-768x256.jpg
+visitor	/wp-content/uploads/%ym%/wide.jpg	200	-
+visitor	/wp-content/uploads/%ym%/wide-160x160.jpg	200	-
+visitor	/wp-content/uploads/%ym%/small.jpg	200	-
+# The site editor's saves: customised templates and parts, the new template, global styles.
+visitor	/a-rest-post/	200	Single template saved from HyScribe.
+visitor	/a-rest-post/	200	Footer saved from HyScribe.
+visitor	/	200	Footer saved from HyScribe.
+visitor	/templated-page/	200	Custom template saved from HyScribe.
+visitor	/templated-page/	200	A part made in HyScribe.
+visitor	/templated-page/	200	A page in the new template.
+visitor	/	200	#fdf2d0
+admin	/wp-admin/site-editor.php	200	site-editor
+# Cron: the scheduled post it published, the trashed post it deleted.
+visitor	/a-cron-scheduled-post/	200	Published by HyScribe cron.
+visitor	/a-cron-trashed-post/	404	Page not found
+# Plugins: Hello Dolly and the plugin the test extension stands in for, both active.
+admin	/wp-admin/plugins.php	200	aria-label="Deactivate Hello Dolly"
+admin	/wp-admin/plugins.php	200	aria-label="Deactivate HyScribe Test"

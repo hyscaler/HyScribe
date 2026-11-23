@@ -1,0 +1,607 @@
+<?php
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Prints the comment blocks over comments inserted into the fixture
+// database inside a transaction that is rolled back. The first line is
+// hex(json) of every comment row, the users and the site URL; then lines are
+//   hex(markup)<TAB>hex(json state)<TAB>hex(html)
+// where the state has the options set, the post and the request.
+
+require '/var/www/html/wp-load.php';
+
+global $wpdb;
+$wpdb->query( 'START TRANSACTION' );
+$_SERVER['REQUEST_URI'] = '/';
+$_GET                   = array();
+
+$insert = function ( $fields ) {
+	return wp_insert_comment(
+		$fields + array(
+			'comment_post_ID'      => 1,
+			'comment_author'       => 'Reader',
+			'comment_author_email' => 'reader@example.test',
+			'comment_author_url'   => '',
+			'comment_content'      => 'Text',
+			'comment_approved'     => 1,
+			'comment_date'         => '2026-10-27 09:00:00',
+			'comment_date_gmt'     => '2026-10-27 09:00:00',
+		)
+	);
+};
+$a = $insert( array( 'comment_author' => 'A' ) );
+$parent = $a;
+foreach ( array( 'B', 'C', 'D', 'E', 'F', 'G' ) as $n => $name ) {
+	$parent = $insert( array( 'comment_author' => $name, 'comment_parent' => $parent, 'comment_date_gmt' => "2026-10-27 09:1$n:00" ) );
+}
+$insert( array( 'comment_author' => 'H same date' ) );
+$i = $insert( array( 'comment_author' => 'I unapproved', 'comment_approved' => 0, 'comment_date_gmt' => '2026-10-27 08:30:00' ) );
+$spam = $insert( array( 'comment_author' => 'J spam', 'comment_approved' => 'spam', 'comment_parent' => $a ) );
+$insert( array( 'comment_author' => 'K orphan', 'comment_parent' => $i ) );
+$insert( array( 'comment_author' => 'L pingback', 'comment_type' => 'pingback', 'comment_date_gmt' => '2026-10-27 07:00:00' ) );
+$insert( array( 'comment_author' => 'M author', 'user_id' => 1, 'comment_date_gmt' => '2026-10-27 10:00:00' ) );
+$note = $insert( array( 'comment_author' => 'N note', 'comment_type' => 'note' ) );
+$insert( array( 'comment_author' => 'O trash', 'comment_approved' => 'trash' ) );
+$insert( array( 'comment_author' => 'P second reply', 'comment_parent' => $a, 'comment_date_gmt' => '2026-10-27 09:05:00' ) );
+$reader = wp_insert_user( array( 'user_login' => 'reader', 'user_pass' => 'x', 'user_nicename' => 'Reader Two!', 'display_name' => 'Reader' ) );
+$insert( array( 'comment_author' => 'Q other user', 'user_id' => $reader, 'comment_date_gmt' => '2026-10-27 11:00:00' ) );
+$legacy = $insert( array( 'comment_author' => 'R untyped', 'comment_date_gmt' => '2026-10-27 12:00:00' ) );
+$wpdb->update( $wpdb->comments, array( 'comment_type' => '' ), array( 'comment_ID' => $legacy ) );
+clean_comment_cache( $legacy );
+foreach ( array(
+	array( '', 0, '' ),
+	array( '', 1, 'http://' ),
+	array( '<b>Bold</b> & co', 0, 'javascript:alert(1)' ),
+	array( 'Linked', 0, 'https://example.test/a b?x=1&y=2' ),
+	array( 'Plain http', 0, 'http://example.test' ),
+) as $n => list( $author, $user_id, $url ) ) {
+	$insert( array( 'comment_author' => $author, 'user_id' => $user_id, 'comment_author_url' => $url, 'comment_date' => "2026-10-2$n 1$n:3$n:00", 'comment_date_gmt' => "2026-10-27 13:0$n:00" ) );
+}
+$front = $insert( array( 'comment_post_ID' => 2, 'comment_author' => 'On the front page' ) );
+foreach ( array(
+	"See http://example.test/a_(b) and www.example.org, or mail me@example.test :) \"quoted\" -- wordpress\n\nSecond <b>para\nline",
+	'0',
+	'',
+	home_url( '/inside' ) . ' <code>http://example.test</code> <a href="http://example.test">http://example.test</a> 8-)',
+	"<p>Already</p>\n<blockquote>q</blockquote>",
+) as $n => $content ) {
+	$insert( array( 'comment_author' => "S$n content", 'comment_content' => $content, 'comment_date_gmt' => "2026-10-27 14:0$n:00" ) );
+}
+// Users for the avatar's initials: no display name, no email address.
+$named  = wp_insert_user( array( 'user_login' => 'named', 'user_pass' => 'x', 'user_email' => 'Named@Example.test ', 'first_name' => 'Ada', 'last_name' => 'Lovelace' ) );
+$wpdb->update( $wpdb->users, array( 'display_name' => '' ), array( 'ID' => $named ) );
+$login  = wp_insert_user( array( 'user_login' => 'loginonly', 'user_pass' => 'x', 'user_email' => '' ) );
+$wpdb->update( $wpdb->users, array( 'display_name' => '' ), array( 'ID' => $login ) );
+$first  = wp_insert_user( array( 'user_login' => 'firstonly', 'user_pass' => 'x', 'user_email' => 'first@example.test', 'first_name' => 'Grace' ) );
+$wpdb->update( $wpdb->users, array( 'display_name' => '' ), array( 'ID' => $first ) );
+clean_user_cache( $named );
+clean_user_cache( $login );
+clean_user_cache( $first );
+foreach ( array(
+	array( 'Ada by user', $named, 'other@example.test' ),
+	array( 'Login by user', $login, 'other@example.test' ),
+	array( 'First by user', $first, 'other@example.test' ),
+	array( "\u{5c71}\u{7530} \u{592a}\u{90ce}", 0, 'kanji@example.test' ),
+	array( 'Ann Lee Smith', 0, '' ),
+	array( 'single', 0, '  MiXed@Example.TEST' ),
+	array( "\u{00e9}mile \u{00c9}cole", 0, 'e@example.test' ),
+	array( 'Missing user', 999, 'gone@example.test' ),
+	array( "\u{1F600} Smile", 0, 'smile@example.test' ),
+) as $n => list( $author, $user_id, $email ) ) {
+	$insert( array( 'comment_author' => $author, 'user_id' => $user_id, 'comment_author_email' => $email, 'comment_author_url' => $n % 2 ? 'https://example.test/' . $n : '', 'comment_date_gmt' => "2026-10-27 15:0$n:00" ) );
+}
+$users = $wpdb->get_results( "SELECT ID, display_name, user_nicename, user_login, user_email FROM {$wpdb->users}", ARRAY_A );
+foreach ( $users as &$user ) {
+	$user['first_name'] = get_user_meta( $user['ID'], 'first_name', true );
+	$user['last_name']  = get_user_meta( $user['ID'], 'last_name', true );
+}
+unset( $user );
+
+// The front page takes comments, so its reply links show.
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 2 ) );
+clean_post_cache( 2 );
+$rows = $wpdb->get_results( "SELECT * FROM {$wpdb->comments} ORDER BY comment_ID", ARRAY_A );
+// The first line has what every case shares.
+echo bin2hex( wp_json_encode( array( 'comments' => $rows, 'users' => $users, 'siteurl' => site_url() ) ) ), "\n";
+
+$option_sets = array(
+	array(),
+	array( 'thread_comments' => '0' ),
+	array( 'thread_comments_depth' => '2' ),
+	array( 'thread_comments_depth' => '1' ),
+	array( 'comment_order' => 'desc' ),
+	array( 'comment_order' => 'desc', 'thread_comments_depth' => '3' ),
+	array( 'comment_registration' => '1' ),
+	array( 'date_format' => 'Y/m/d', 'thread_comments_depth' => '4' ),
+	array( 'show_on_front' => 'page', 'page_on_front' => '2' ),
+	array( 'use_smilies' => '0' ),
+	array( 'avatar_default' => 'initials', 'avatar_rating' => 'PG' ),
+	array( 'avatar_default' => 'gravatar_default', 'avatar_rating' => '' ),
+	array( 'avatar_default' => 'https://example.test/a b.png?x=1', 'avatar_rating' => 'X' ),
+	array( 'avatar_default' => 'mysteryman', 'show_avatars' => '' ),
+	array( 'avatar_default' => '', 'avatar_rating' => '0' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '1' ),
+);
+$markups = array(
+	'<!-- wp:comment-template --><p>c</p><!-- /wp:comment-template -->',
+	'<!-- wp:comment-template {"className":"listed"} --><p>c</p><!-- /wp:comment-template -->',
+	'<!-- wp:comment-template --><!-- wp:comment-date {"isLink":false} /--><!-- wp:comment-author-name {"style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
+	'<!-- wp:comment-template --><!-- wp:comment-edit-link --><a>saved</a><!-- /wp:comment-edit-link --><!-- /wp:comment-template -->',
+	'<!-- wp:comment-date /-->',
+	'<!-- wp:comment-author-name /-->',
+	'<!-- wp:comment-reply-link /-->',
+	'<!-- wp:comment-content /-->',
+	'<!-- wp:comment-template --><!-- wp:avatar /--><!-- wp:avatar {"size":40,"isLink":true,"linkTarget":"_blank","borderColor":"contrast","style":{"border":{"radius":"5px","width":"2px","top":{"color":"red","width":"1px"}}}} /--><!-- wp:avatar {"isLink":true,"style":{"border":{"color":"#123456","style":"dashed"}}} /--><!-- /wp:comment-template -->',
+	'<!-- wp:avatar /-->',
+	'<!-- wp:avatar {"userId":1,"isLink":true,"linkTarget":"_blank","size":300} /-->',
+	'<!-- wp:avatar {"userId":99,"isLink":true} /-->',
+	'<!-- wp:avatar {"userId":"1","size":0} /-->',
+	'<!-- wp:avatar {"userId":-1} /-->',
+	'<!-- wp:avatar {"userId":0} /-->',
+	'<!-- wp:avatar {"userId":1.7,"size":-20} /-->',
+	'<!-- wp:avatar {"userId":"abc"} /-->',
+	'<!-- wp:comment-template {"style":{"elements":{"link":{"color":{"text":"red"}}}}} --><!-- wp:comment-author-name /--><!-- /wp:comment-template -->',
+	'<!-- wp:comment-template --><!-- wp:comment-content /--><!-- wp:comment-content {"textAlign":"right","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
+	'<!-- wp:comment-template --><!-- wp:comment-date /--><!-- wp:comment-date {"format":"Y-m-d H:i","isLink":true} /--><!-- wp:comment-date {"format":"human-diff","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- wp:comment-author-name /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":"_blank","textAlign":"right"} /--><!-- wp:comment-author-name {"isLink":true,"linkTarget":""} /--><!-- wp:comment-edit-link /--><!-- wp:comment-reply-link /--><!-- wp:comment-reply-link {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /--><!-- /wp:comment-template -->',
+);
+$option_names = array( 'thread_comments', 'thread_comments_depth', 'comment_order', 'comment_registration', 'date_format', 'show_on_front', 'page_on_front', 'use_smilies', 'avatar_default', 'avatar_rating', 'show_avatars', 'close_comments_for_old_posts', 'close_comments_days_old', 'require_name_email', 'show_comments_cookies_opt_in', 'page_comments', 'comments_per_page', 'default_comments_page' );
+// A top-level block passes the render_block_data filters, as in
+// render_block(); the elements counter is recorded where a case starts.
+$render = static function ( $markup, $context ) {
+	$parsed = parse_blocks( $markup )[0];
+	return ( new WP_Block( apply_filters( 'render_block_data', $parsed, $parsed, null ), $context ) )->render();
+};
+$elements = static fn() => (int) substr( wp_unique_prefixed_id( 'wp-elements-' ), 12 );
+$reset = function () {
+	$GLOBALS['comment_alt']        = 0;
+	$GLOBALS['comment_depth']      = 0;
+	$GLOBALS['comment_thread_alt'] = 0;
+};
+foreach ( $option_sets as $options ) {
+	foreach ( $option_names as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	foreach ( $options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	foreach ( array( 1, 2, 3, 0 ) as $post_id ) {
+		foreach ( $markups as $markup ) {
+			$reset();
+			$context = $post_id ? array( 'postId' => $post_id ) : array();
+			$counter = $elements();
+			$html    = $render( $markup, $context );
+			// Twice in one request, as the counters carry on.
+			$html   .= $render( $markup, $context );
+			$state   = array( 'options' => $options, 'elements' => $counter, 'post' => $post_id, 'password' => false, 'closed' => false, 'now' => time() );
+			echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+		}
+	}
+}
+
+// In a singular template's loop the first three images are not lazy, and
+// the first large one takes the high priority.
+foreach ( $option_names as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+$GLOBALS['wp_query']->in_the_loop = true;
+foreach ( array( current( preg_grep( '/^<!-- wp:comment-template --><!-- wp:avatar/', $markups ) ), '<!-- wp:avatar {"userId":1,"size":224} /-->', '<!-- wp:avatar {"userId":1,"size":223} /-->' ) as $markup ) {
+	wp_increase_content_media_count( -wp_increase_content_media_count( 0 ) );
+	wp_high_priority_element_flag( true );
+	$reset();
+	$counter = $elements();
+	$html  = $render( $markup, array( 'postId' => 1 ) );
+	$html .= $render( $markup, array( 'postId' => 1 ) );
+	$state = array( 'options' => array(), 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => false, 'now' => time(), 'loop' => true );
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+}
+$GLOBALS['wp_query']->in_the_loop = false;
+
+// The comment form, by options and by the request's replytocom.
+$form_markups = array(
+	'<!-- wp:post-comments-form /-->',
+	'<!-- wp:post-comments-form {"textAlign":"center","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
+);
+$form = function ( $options, $post_id, $markup, $uri, $global = 0 ) use ( $option_names, $render, $elements ) {
+	foreach ( $option_names as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	foreach ( $options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	$_SERVER['REQUEST_URI'] = $uri;
+	$_GET                   = array();
+	parse_str( (string) parse_url( $uri, PHP_URL_QUERY ), $_GET );
+	$GLOBALS['post'] = $global ? get_post( $global ) : null;
+	$context         = $post_id ? array( 'postId' => $post_id ) : array();
+	$counter         = $elements();
+	$html            = $render( $markup, $context );
+	$html           .= $render( $markup, $context );
+	$state           = array( 'options' => $options, 'elements' => $counter, 'post' => $post_id, 'password' => false, 'closed' => false, 'now' => time(), 'uri' => $uri ) + ( $global ? array( 'global' => $global ) : array() );
+	$GLOBALS['post'] = null;
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+};
+foreach ( array(
+	array(),
+	array( 'require_name_email' => '0' ),
+	array( 'show_comments_cookies_opt_in' => '0' ),
+	array( 'comment_registration' => '1' ),
+	array( 'thread_comments' => '0' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '1' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '0' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '100000' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '20000' ),
+	array( 'close_comments_for_old_posts' => '', 'close_comments_days_old' => '1' ),
+) as $options ) {
+	foreach ( $form_markups as $markup ) {
+		foreach ( array( 1, 2, 0, 999 ) as $post_id ) {
+			$form( $options, $post_id, $markup, '/?p=1&replytocom=1' );
+		}
+	}
+}
+foreach ( array(
+	'/?p=1', "/?p=1&replytocom=$front", "/?p=1&replytocom=$i", "/?p=1&replytocom=$spam", "/?p=1&replytocom=$note", '/?p=1&replytocom=abc',
+	'/?p=1&replytocom[]=1', '/?p=1&replytocom=1&unapproved=3&moderation-hash=x', '/?p=1&replytocom=+1', '/?p=1&replytocom=1e0', '/x/?a=b%20c&replytocom=1&a[]=1',
+	'/?replytocom=1', '/', '', '/?p=1&replytocom=0', '/?p=1&replytocom=-1',
+) as $uri ) {
+	foreach ( array( array(), array( 'thread_comments' => '0' ) ) as $options ) {
+		$form( $options, 1, $form_markups[0], $uri );
+	}
+}
+// The cancel link shows when the global post has the reply.
+foreach ( array( 1, 2 ) as $global ) {
+	$form( array(), 1, $form_markups[0], '/?p=1&replytocom=1', $global );
+}
+foreach ( $option_names as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+$_SERVER['REQUEST_URI'] = '/';
+$_GET                   = array();
+
+// With comments closed there is no reply link.
+foreach ( $option_names as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+// Logged-out reply links go to the login page, back to the global post.
+add_filter( 'pre_option_comment_registration', static fn() => '1' );
+$GLOBALS['post'] = get_post( 1 );
+$reset();
+$markup = end( $markups );
+$counter = $elements();
+$state  = array( 'options' => array( 'comment_registration' => '1' ), 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => false, 'now' => time(), 'global' => 1 );
+$html   = $render( $markup, array( 'postId' => 1 ) );
+$html  .= $render( $markup, array( 'postId' => 1 ) );
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+remove_all_filters( 'pre_option_comment_registration' );
+$GLOBALS['post'] = null;
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$reset();
+$markup = end( $markups );
+$counter = $elements();
+$state  = array( 'options' => array(), 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => true, 'now' => time() );
+$html  = $render( $markup, array( 'postId' => 1 ) );
+$html .= $render( $markup, array( 'postId' => 1 ) );
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+
+// A password protected post shows no comments.
+$wpdb->update( $wpdb->posts, array( 'post_password' => 'pw' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$markup = $markups[0];
+$reset();
+$counter = $elements();
+$state = array( 'options' => array(), 'elements' => $counter, 'post' => 1, 'password' => true, 'closed' => true, 'now' => time() );
+$html  = $render( $markup, array( 'postId' => 1 ) );
+$html .= $render( $markup, array( 'postId' => 1 ) );
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+
+// Nor a comment form, though comments are open.
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$markup = $form_markups[0];
+$counter = $elements();
+$state  = array( 'options' => array(), 'elements' => $counter, 'post' => 1, 'password' => true, 'closed' => false, 'now' => time() );
+$html   = $render( $markup, array( 'postId' => 1 ) );
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html . $html ), "\n";
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+
+// A post template that inherits the main query runs its loop, and only
+// there are images counted; a query of its own runs after it has ended.
+$wpdb->update( $wpdb->posts, array( 'post_password' => '' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+
+// Comment pages, on the single post: the template lists one page, and the
+// pagination links move between pages as cpage asks.
+$pagination_markups = array(
+	'<!-- wp:comments --><div class="wp-block-comments"><!-- wp:comment-template --><!-- wp:comment-author-name /--><!-- /wp:comment-template -->' .
+		'<!-- wp:comments-pagination {"layout":{"type":"flex","justifyContent":"space-between"}} -->' . "\n\t" . '<!-- wp:comments-pagination-previous /-->' . "\n\t" . '<!-- wp:comments-pagination-next /-->' . "\n\t" . '<!-- /wp:comments-pagination --></div><!-- /wp:comments -->',
+	'<!-- wp:comments-pagination {"paginationArrow":"arrow","style":{"elements":{"link":{"color":{"text":"red"}}}}} --><!-- wp:comments-pagination-previous {"label":"Back & <b>forth</b> &amp; on &b2c;"} /--><!-- wp:comments-pagination-next {"label":"On &#8211; up","fontSize":"small"} /--><!-- /wp:comments-pagination -->',
+	'<!-- wp:comments-pagination {"paginationArrow":"chevron"} --><!-- wp:comments-pagination-previous /--><!-- wp:comments-pagination-next /--><!-- /wp:comments-pagination -->',
+	'<!-- wp:comments-pagination {"paginationArrow":"none"} --><!-- wp:comments-pagination-next /--><!-- /wp:comments-pagination -->',
+	'<!-- wp:comments-pagination-previous /-->',
+	'<!-- wp:comments-pagination-next /-->',
+	'<!-- wp:comments-pagination --><!-- wp:comments-pagination-numbers /--><!-- /wp:comments-pagination -->',
+	'<!-- wp:comments-pagination-numbers {"fontSize":"small"} /-->',
+);
+$GLOBALS['wp_query']->is_singular = true;
+$GLOBALS['post']                  = get_post( 1 );
+foreach ( array(
+	array(),
+	array( 'page_comments' => '1', 'comments_per_page' => '5' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '5', 'default_comments_page' => 'oldest' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '5', 'default_comments_page' => 'other' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '7', 'thread_comments' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '5', 'comment_order' => 'desc' ),
+	array( 'page_comments' => 'yes', 'comments_per_page' => '5' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '1' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '20' ),
+) as $options ) {
+	foreach ( $option_names as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	foreach ( $options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	foreach ( array( '', '1', '2', '3', '99', '0', 'abc', '-1' ) as $cpage ) {
+		$GLOBALS['wp_query']->set( 'cpage', $cpage );
+		$uri = '' === $cpage ? '/?p=1' : "/?p=1&cpage=$cpage";
+		// The page numbers keep the request's other arguments.
+		$uri                    = '3' === $cpage ? "$uri&x=a+b%26c&y[]=1" : $uri;
+		$_SERVER['REQUEST_URI'] = $uri;
+		foreach ( array( 1, 0 ) as $post_id ) {
+			// Without a post the previous link counts every post's comments,
+			// which HyScribe does not port.
+			foreach ( $post_id ? $pagination_markups : array( $pagination_markups[0], $pagination_markups[5], $pagination_markups[7] ) as $markup ) {
+				$reset();
+				$context = $post_id ? array( 'postId' => $post_id ) : array();
+				$counter = $elements();
+				$html    = $render( $markup, $context );
+				$html   .= $render( $markup, $context );
+				$state   = array( 'options' => $options, 'elements' => $counter, 'post' => $post_id, 'password' => false, 'closed' => true, 'now' => time(), 'uri' => $uri, 'global' => 1, 'singular' => true );
+				echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+			}
+		}
+	}
+}
+// Page numbers under pretty permalinks link to comment-page-N.
+foreach ( array( '/%postname%/', '/%year%/%postname%' ) as $structure ) {
+	foreach ( $option_names as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	$options = array( 'page_comments' => '1', 'comments_per_page' => '5', 'permalink_structure' => $structure );
+	foreach ( $options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	$GLOBALS['wp_rewrite']->init();
+	foreach ( array( '', '2', '3' ) as $cpage ) {
+		$GLOBALS['wp_query']->set( 'cpage', $cpage );
+		$uri                    = '/hello-world/' . ( '' === $cpage ? '' : "comment-page-$cpage/" ) . '?x=1';
+		$_SERVER['REQUEST_URI'] = $uri;
+		$markup                 = $pagination_markups[7];
+		$reset();
+		$counter = $elements();
+		$html    = $render( $markup, array( 'postId' => 1 ) );
+		$html   .= $render( $markup, array( 'postId' => 1 ) );
+		$state   = array( 'options' => $options, 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => true, 'now' => time(), 'uri' => $uri, 'global' => 1, 'singular' => true, 'vars' => array( 'x' => '1', 'cpage' => $cpage ) );
+		echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+	}
+	remove_all_filters( 'pre_option_permalink_structure' );
+	unset( $options['permalink_structure'] );
+	$GLOBALS['wp_rewrite']->init();
+}
+// On paged comments, a comment's date and reply links go to its thread's
+// page, from get_page_of_comment().
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$link_markup = '<!-- wp:comment-template --><!-- wp:comment-date /--><!-- wp:comment-reply-link /--><!-- /wp:comment-template -->';
+foreach ( array(
+	array( 'page_comments' => '1', 'comments_per_page' => '2' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '2', 'default_comments_page' => 'oldest' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'thread_comments' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'thread_comments_depth' => '1' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '-1' ),
+	array( 'page_comments' => '0', 'comments_per_page' => '2' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '2', 'permalink_structure' => '/%postname%/' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '2', 'permalink_structure' => '/%year%/%postname%' ),
+) as $link_options ) {
+	foreach ( array_merge( $option_names, array( 'permalink_structure' ) ) as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	foreach ( $link_options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	$GLOBALS['wp_rewrite']->init();
+	foreach ( array( '', '2' ) as $cpage ) {
+		$GLOBALS['wp_query']->set( 'cpage', $cpage );
+		$uri                    = '' === $cpage ? '/?p=1' : "/?p=1&cpage=$cpage";
+		$_SERVER['REQUEST_URI'] = $uri;
+		$reset();
+		$counter = $elements();
+		$html    = $render( $link_markup, array( 'postId' => 1 ) );
+		$html   .= $render( $link_markup, array( 'postId' => 1 ) );
+		$state   = array( 'options' => $link_options, 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => false, 'now' => time(), 'uri' => $uri, 'global' => 1, 'singular' => true );
+		echo bin2hex( $link_markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+	}
+}
+foreach ( array_merge( $option_names, array( 'permalink_structure' ) ) as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+foreach ( $options as $name => $value ) {
+	add_filter( "pre_option_$name", static fn() => $value );
+}
+$GLOBALS['wp_rewrite']->init();
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+
+// The legacy comments block runs comments_template() (the compat template,
+// wp_list_comments() and the classic form) on a single post or page only.
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$three_status = get_post( 3 )->comment_status;
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'open' ), array( 'ID' => 3 ) );
+clean_post_cache( 3 );
+$legacy_markups = array(
+	'<!-- wp:post-comments /-->',
+	'<!-- wp:comments {"legacy":true,"textAlign":"right","style":{"elements":{"link":{"color":{"text":"red"}}}}} /-->',
+	'<!-- wp:comments {"legacy":false} /-->',
+);
+$legacy = function ( $options, $post_id, $markup, $cpage, $singular, $closed = false ) use ( $option_names, $render, $reset, $elements ) {
+	// The pagination blocks above leave their link attributes filters on.
+	remove_all_filters( 'previous_comments_link_attributes' );
+	remove_all_filters( 'next_comments_link_attributes' );
+	foreach ( array_merge( $option_names, array( 'permalink_structure', 'time_format' ) ) as $name ) {
+		remove_all_filters( "pre_option_$name" );
+	}
+	foreach ( $options as $name => $value ) {
+		add_filter( "pre_option_$name", static fn() => $value );
+	}
+	$GLOBALS['wp_rewrite']->init();
+	$GLOBALS['wp_query']->is_singular = $singular;
+	$GLOBALS['wp_query']->is_single   = $singular;
+	$GLOBALS['wp_query']->set( 'cpage', $cpage );
+	$uri                    = '' === $cpage ? '/?p=1' : "/?p=1&cpage=$cpage";
+	$_SERVER['REQUEST_URI'] = $uri;
+	$GLOBALS['post']        = get_post( 1 );
+	$reset();
+	// A single template runs in the main loop, where the first images are not lazy.
+	$GLOBALS['wp_query']->in_the_loop = $singular;
+	wp_increase_content_media_count( -wp_increase_content_media_count( 0 ) );
+	wp_high_priority_element_flag( true );
+	$context = $post_id ? array( 'postId' => $post_id ) : array();
+	$counter = $elements();
+	$html    = $render( $markup, $context );
+	$html   .= $render( $markup, $context );
+	$GLOBALS['wp_query']->in_the_loop = false;
+	$state   = array( 'options' => $options, 'elements' => $counter, 'post' => $post_id, 'password' => false, 'closed' => $closed, 'now' => time(), 'uri' => $uri, 'global' => 1, 'singular' => $singular );
+	$GLOBALS['post'] = null;
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+};
+foreach ( array(
+	array(),
+	array( 'thread_comments' => '0' ),
+	array( 'thread_comments_depth' => '2' ),
+	array( 'thread_comments_depth' => '1' ),
+	array( 'comment_order' => 'desc' ),
+	array( 'comment_order' => 'desc', 'thread_comments' => '0' ),
+	array( 'comment_registration' => '1' ),
+	array( 'date_format' => 'Y/m/d', 'time_format' => 'H:i', 'thread_comments_depth' => '4' ),
+	array( 'show_avatars' => '' ),
+	array( 'avatar_default' => 'initials', 'use_smilies' => '0' ),
+	array( 'close_comments_for_old_posts' => '1', 'close_comments_days_old' => '1' ),
+) as $options ) {
+	$legacy( $options, 1, $legacy_markups[0], '', true );
+}
+foreach ( array( 1, 2, 3, 0 ) as $post_id ) {
+	foreach ( $legacy_markups as $markup ) {
+		$legacy( array(), $post_id, $markup, '', true );
+	}
+}
+// The global post is the block's own: its login link and page links.
+$legacy( array( 'comment_registration' => '1' ), 2, $legacy_markups[0], '', true );
+$legacy( array( 'page_comments' => '1', 'comments_per_page' => '100' ), 1, $legacy_markups[0], '', true );
+$legacy( array(), 1, $legacy_markups[0], '', false );
+$legacy( array(), 1, $legacy_markups[1], '2', false );
+foreach ( array(
+	array( 'page_comments' => '1', 'comments_per_page' => '3' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'default_comments_page' => 'oldest' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'thread_comments' => '0' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'comment_order' => 'desc' ),
+	array( 'page_comments' => '1', 'comments_per_page' => '3', 'permalink_structure' => '/%postname%/' ),
+) as $options ) {
+	foreach ( array( '', '1', '2', '99', 'abc' ) as $cpage ) {
+		$legacy( $options, 1, $legacy_markups[0], $cpage, true );
+	}
+}
+foreach ( array_merge( $option_names, array( 'permalink_structure', 'time_format' ) ) as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+$GLOBALS['wp_rewrite']->init();
+$GLOBALS['wp_query']->is_singular = false;
+$GLOBALS['wp_query']->is_single   = false;
+$GLOBALS['wp_query']->set( 'cpage', '' );
+$_SERVER['REQUEST_URI'] = '/';
+// A closed post that still has comments lists them, and a password protected one shows a note.
+foreach ( array( array( 'closed', 'comment_status' ), array( 'pw', 'post_password' ) ) as list( $kind, $column ) ) {
+	$wpdb->update( $wpdb->posts, array( $column => 'closed' === $kind ? 'closed' : 'pw' ), array( 'ID' => 1 ) );
+	clean_post_cache( 1 );
+	$GLOBALS['wp_query']->is_singular = true;
+	$GLOBALS['wp_query']->is_single   = true;
+	$GLOBALS['post']                  = get_post( 1 );
+	$reset();
+	$GLOBALS['wp_query']->in_the_loop = true;
+	wp_increase_content_media_count( -wp_increase_content_media_count( 0 ) );
+	wp_high_priority_element_flag( true );
+	$counter = $elements();
+	$markup  = $legacy_markups[0];
+	$html    = $render( $markup, array( 'postId' => 1 ) );
+	$html   .= $render( $markup, array( 'postId' => 1 ) );
+	$GLOBALS['wp_query']->in_the_loop = false;
+	$state   = array( 'options' => array(), 'elements' => $counter, 'post' => 1, 'password' => 'pw' === $kind, 'closed' => 'closed' === $kind, 'now' => time(), 'uri' => '/', 'global' => 1, 'singular' => true );
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+	$GLOBALS['wp_query']->is_singular = false;
+	$GLOBALS['wp_query']->is_single   = false;
+	$GLOBALS['post']                  = null;
+	$wpdb->update( $wpdb->posts, array( 'closed' === $kind ? 'comment_status' : 'post_password' => 'closed' === $kind ? 'open' : '' ), array( 'ID' => 1 ) );
+	clean_post_cache( 1 );
+}
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+// Closed to comments, a page past the last holds none and says so.
+$wpdb->update( $wpdb->posts, array( 'comment_status' => 'closed' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$legacy( array( 'page_comments' => '1', 'comments_per_page' => '3' ), 1, $legacy_markups[0], '99', true, true );
+foreach ( $option_names as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+$GLOBALS['wp_query']->is_singular = false;
+$GLOBALS['wp_query']->is_single   = false;
+$GLOBALS['wp_query']->set( 'cpage', '' );
+$_SERVER['REQUEST_URI'] = '/';
+$wpdb->update( $wpdb->posts, array( 'comment_status' => $three_status ), array( 'ID' => 3 ) );
+clean_post_cache( 3 );
+
+// Outside a singular page there are no links.
+$GLOBALS['wp_query']->is_singular = false;
+$GLOBALS['wp_query']->set( 'cpage', '2' );
+$_SERVER['REQUEST_URI']           = '/?p=1&cpage=2';
+foreach ( array( $pagination_markups[2], $pagination_markups[7] ) as $markup ) {
+	$reset();
+	$counter = $elements();
+	$html    = $render( $markup, array( 'postId' => 1 ) );
+	$html   .= $render( $markup, array( 'postId' => 1 ) );
+	$state   = array( 'options' => $options, 'elements' => $counter, 'post' => 1, 'password' => false, 'closed' => true, 'now' => time(), 'uri' => '/?p=1&cpage=2', 'global' => 1 );
+	echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+}
+$markup = $pagination_markups[2];
+// Nor for a password protected post.
+$GLOBALS['wp_query']->is_singular = true;
+$wpdb->update( $wpdb->posts, array( 'post_password' => 'pw' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$GLOBALS['post'] = get_post( 1 );
+$reset();
+$counter = $elements();
+$html   = $render( $markup, array( 'postId' => 1 ) );
+$html  .= $render( $markup, array( 'postId' => 1 ) );
+$state  = array( 'options' => $options, 'elements' => $counter, 'post' => 1, 'password' => true, 'closed' => true, 'now' => time(), 'uri' => '/?p=1&cpage=2', 'global' => 1, 'singular' => true );
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+$wpdb->update( $wpdb->posts, array( 'post_password' => '' ), array( 'ID' => 1 ) );
+clean_post_cache( 1 );
+$_SERVER['REQUEST_URI'] = '/';
+$GLOBALS['wp_query']->is_singular = false;
+$GLOBALS['wp_query']->set( 'cpage', '' );
+$GLOBALS['post'] = null;
+foreach ( $option_names as $name ) {
+	remove_all_filters( "pre_option_$name" );
+}
+$GLOBALS['wp_query']->query( array( 'post_type' => array( 'post', 'page' ), 'orderby' => 'ID', 'order' => 'ASC' ) );
+wp_increase_content_media_count( -wp_increase_content_media_count( 0 ) );
+wp_high_priority_element_flag( true );
+$markup = '<!-- wp:group --><div class="wp-block-group"><!-- wp:query {"query":{"inherit":true}} --><div class="wp-block-query"><!-- wp:post-template --><!-- wp:avatar /--><!-- wp:avatar /--><!-- /wp:post-template --></div><!-- /wp:query --><!-- wp:avatar {"userId":1} /--><!-- wp:query {"query":{"inherit":false,"postType":"page","perPage":1}} --><div class="wp-block-query"><!-- wp:post-template --><!-- wp:avatar /--><!-- /wp:post-template --></div><!-- /wp:query --></div><!-- /wp:group -->';
+$counter = $elements();
+$html    = $render( $markup, array() );
+$html   .= $render( $markup, array() );
+$state = array( 'options' => array(), 'elements' => $counter, 'post' => 0, 'password' => false, 'closed' => true, 'now' => time(), 'main' => wp_list_pluck( $GLOBALS['wp_query']->posts, 'ID' ) );
+echo bin2hex( $markup ), "\t", bin2hex( wp_json_encode( $state ) ), "\t", bin2hex( $html ), "\n";
+
+$wpdb->query( 'ROLLBACK' );

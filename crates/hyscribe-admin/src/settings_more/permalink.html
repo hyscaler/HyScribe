@@ -1,0 +1,177 @@
+<div class="wrap">
+<h1>Permalink Settings</h1>
+
+<form name="form" action="options-permalink.php" method="post">
+%fields%
+<p>
+HyScribe offers you the ability to create a custom URL structure for your permalinks and archives. Custom URL structures can improve the aesthetics, usability, and forward-compatibility of your links. A <a href="https://wordpress.org/documentation/article/customize-permalinks/">number of tags are available</a>, and here are some examples to get you started.</p>
+
+<h2 id="wp-settings-section-common-settings" class="title">Common Settings</h2>
+<p>
+Select the permalink structure for your website. Including the <code>%postname%</code> tag makes links easy to understand, and can help your posts rank higher in search engines.</p>
+<table class="form-table permalink-structure" role="presentation">
+<tbody>
+<tr>
+	<th scope="row">Permalink structure</th>
+	<td>
+		<fieldset class="structure-selection">
+			<legend class="screen-reader-text">Permalink structure</legend>
+			%structures%			
+			<div class="row">
+				<input id="custom_selection"
+					name="selection" type="radio" value="custom"
+					%custom%				/>
+				<div>
+					<label for="custom_selection">Custom Structure</label>
+					<p>
+						<label for="permalink_structure" class="screen-reader-text">
+							Customize permalink structure by selecting available tags						</label>
+						<span class="code">
+							<code id="permalink-custom">%base_url%</code>
+							<input name="permalink_structure" id="permalink_structure"
+								type="text" value="%structure%"
+								aria-describedby="permalink-custom" class="regular-text code"
+							/>
+						</span>
+					</p>
+
+					<div class="available-structure-tags hide-if-no-js">
+						<div id="custom_selection_updated" aria-live="assertive" class="screen-reader-text"></div>
+												<fieldset>
+							<legend>Available tags:</legend>
+							<ul role="list">
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="year (The year of the post, four digits, for example 2004.)"
+										data-added="year added to permalink structure"
+										data-removed="year removed from permalink structure"
+										data-used="year (already used in permalink structure)">
+										%year%									</button>
+								</li>
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="monthnum (Month of the year, for example 05.)"
+										data-added="monthnum added to permalink structure"
+										data-removed="monthnum removed from permalink structure"
+										data-used="monthnum (already used in permalink structure)">
+										%monthnum%									</button>
+								</li>
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="day (Day of the month, for example 28.)"
+										data-added="day added to permalink structure"
+										data-removed="day removed from permalink structure"
+										data-used="day (already used in permalink structure)">
+										%day%									</button>
+								</li>
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="hour (Hour of the day, for example 15.)"
+										data-added="hour added to permalink structure"
+										data-removed="hour removed from permalink structure"
+										data-used="hour (already used in permalink structure)">
+										%hour%									</button>
+								</li>
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="minute (Minute of the hour, for example 43.)"
+										data-added="minute added to permalink structure"
+										data-removed="minute removed from permalink structure"
+										data-used="minute (already used in permalink structure)">
+										%minute%									</button>
+								</li>
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="second (Second of the minute, for example 33.)"
+										data-added="second added to permalink structure"
+										data-removed="second removed from permalink structure"
+										data-used="second (already used in permalink structure)">
+										%second%									</button>
+								</li>
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="post_id (The unique ID of the post, for example 423.)"
+										data-added="post_id added to permalink structure"
+										data-removed="post_id removed from permalink structure"
+										data-used="post_id (already used in permalink structure)">
+										%post_id%									</button>
+								</li>
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="postname (The sanitized post title (slug).)"
+										data-added="postname added to permalink structure"
+										data-removed="postname removed from permalink structure"
+										data-used="postname (already used in permalink structure)">
+										%postname%									</button>
+								</li>
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="category (Category slug. Nested sub-categories appear as nested directories in the URL.)"
+										data-added="category added to permalink structure"
+										data-removed="category removed from permalink structure"
+										data-used="category (already used in permalink structure)">
+										%category%									</button>
+								</li>
+															<li>
+									<button type="button"
+										class="button button-secondary"
+										aria-label="author (A sanitized version of the author name.)"
+										data-added="author added to permalink structure"
+										data-removed="author removed from permalink structure"
+										data-used="author (already used in permalink structure)">
+										%author%									</button>
+								</li>
+														</ul>
+						</fieldset>
+											</div><!-- .available-structure-tags -->
+				</div>
+			</div><!-- .row -->
+		</fieldset><!-- .structure-selection -->
+	</td>
+</tr>
+</tbody>
+</table>
+
+<h2 id="wp-settings-section-optional" class="title">Optional</h2>
+<p class="permalink-structure-optional-description">
+If you like, you may enter custom structures for your category and tag URLs here. For example, using <code>topics</code> as your category base would make your category links like <code>%base%/topics/uncategorized/</code>. If you leave these blank the defaults will be used.</p>
+
+<table class="form-table" role="presentation">
+	<tr>
+		<th>
+			<label for="category_base">
+				Category base			</label>
+		</th>
+		<td>
+					<input name="category_base" id="category_base" type="text"
+				value="%category_base%" class="regular-text code"
+			/>
+				</td>
+	</tr>
+	<tr>
+		<th>
+			<label for="tag_base">Tag base</label>
+		</th>
+		<td>
+					<input name="tag_base" id="tag_base" type="text"
+				value="%tag_base%" class="regular-text code"
+			/>
+				</td>
+	</tr>
+	</table>
+
+
+<p class="submit"><input type="submit" name="submit" id="submit" class="button button-primary" value="Save Changes"  /></p></form>
+
+				
+</div><!-- .wrap -->
+

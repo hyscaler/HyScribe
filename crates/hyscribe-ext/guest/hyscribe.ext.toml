@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# The test extension's manifest: the grants its calls are checked against,
+# the same as tests/guest/mod.rs gives the host's tests.
+
+[extension]
+kind = "plugin"
+id = "hyscribe-test"
+version = "0.1.0"
+sdk = "0.3"
+replaces = "hyscribe-test/hyscribe-test.php"
+replaces_versions = ">=0.1"
+compatibility = "full"
+license = "Apache-2.0 OR MIT"
+name = "HyScribe Test"
+description = "Drives every call of the extension SDK for HyScribe's tests."
+author = "HyScribe"
+author_uri = "https://hyscribe.com/"
+plugin_uri = "https://hyscribe.com/plugins/hyscribe-test/"
+
+[capabilities]
+options = ["ext", "ext_fail", "ext_bytes", "ext_active", "ext_hooks"]
+post_types = ["ext_item", "ext_item_named_too_long"]
+mail = true
+filesystem = ["uploads/ext"]
+
+[hooks]
+actions = ["ext_action", "ext_event"]
+filters = [
+  "the_content", "ext_trap", "ext_loop", "ext_grow", "ext_late", "ext_order",
+  "ext_options", "ext_cron", "ext_echo", "ext_meta", "ext_query", "ext_mail",
+  "ext_auth", "ext_assets", "ext_fire", "ext_chain", "ext_remove", "ext_current",
+  "ext_bad_json", "ext_error", "ext_stack", "ext_count", "ext_gone", "ext_nest",
+  "body_class", "admin_footer_text", "ext_transients", "ext_roles", "ext_http",
+  "ext_slow",
+]
+shortcodes = ["ext", "ext_gone"]
+sensitive = ["map_meta_cap"]
+
+[meta]
+keys = ["_ext", "_ext_*"]
+
+[taxonomies]
+read = ["category"]
+write = ["ext_kind", "ext_kind_named_far_too_long_for_wp"]
+
+[rest]
+namespaces = ["ext/v1"]
+
+[transients]
+names = ["ext_cache", "ext_tmp_*"]
+site = ["ext_site*"]
+
+[roles]
+names = ["ext_manager", "ext_fail"]
+capabilities = ["ext_cap", "read"]
+
+[http]
+hosts = ["api.test", "redirect.test"]

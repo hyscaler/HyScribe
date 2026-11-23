@@ -1,0 +1,35 @@
+# URLs of the default install, plain permalinks. One path per line,
+# optionally with the status HyScribe gives instead, for intended differences.
+/
+/?p=1
+/?page_id=2
+/?page_id=3
+/?p=2
+/?p=999
+/no/such/path
+/?s=hello
+/?cat=1
+/?author=1 404  # intended: author archives give away login names
+/?m=2026
+/?feed=rss2
+/?p=1&replytocom=1
+/?p=1&cpage=2
+/?p=1&cpage=abc
+/robots.txt
+/wp-login.php 307  # intended: redirects to /hs-login (ADR 0008)
+/wp-admin/ 307  # intended: redirects to /hs-admin/ (ADR 0008)
+/wp-content/themes/twentytwentyfive/style.css 200  # static files: served with M3.9
+/?p=2
+/?page_id=1
+/index.php
+/no/such/path/
+/?s=
+/?s=nothingmatches
+/?s=sample+page
+/?cat=999
+/?m=1999
+/?m=202610
+/?m=20261027
+/?m=abc
+/?s=hello&cat=1
+/?cat=1&m=2026

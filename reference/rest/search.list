@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# /wp/v2/search for reference/rest/golden.sh (method, target, flags), over
+# the default install and the Theme Test Data fixture.
+GET	/?rest_route=/wp/v2/search
+GET	/?rest_route=/wp/v2/search&search=hello
+GET	/?rest_route=/wp/v2/search&search=sample%20page
+GET	/?rest_route=/wp/v2/search&search=page&subtype=page
+GET	/?rest_route=/wp/v2/search&subtype=post,page
+GET	/?rest_route=/wp/v2/search&subtype=Page,%20post
+GET	/?rest_route=/wp/v2/search&subtype=any,post
+GET	/?rest_route=/wp/v2/search&subtype=bogus
+GET	/?rest_route=/wp/v2/search&subtype=bogus,post
+GET	/?rest_route=/wp/v2/search&subtype[]=post
+GET	/?rest_route=/wp/v2/search&subtype=attachment
+GET	/?rest_route=/wp/v2/search&subtype=category
+GET	/?rest_route=/wp/v2/search&subtype=
+GET	/?rest_route=/wp/v2/search&type=bogus
+GET	/?rest_route=/wp/v2/search&type=bogus&subtype=post
+GET	/?rest_route=/wp/v2/search&type[]=post
+GET	/?rest_route=/wp/v2/search&type=
+GET	/?rest_route=/wp/v2/search&type=term
+GET	/?rest_route=/wp/v2/search&type=term&search=un
+GET	/?rest_route=/wp/v2/search&type=term&subtype=post_tag
+GET	/?rest_route=/wp/v2/search&type=term&subtype=category&include=1
+GET	/?rest_route=/wp/v2/search&type=term&exclude=1
+GET	/?rest_route=/wp/v2/search&type=term&subtype=post_format
+GET	/?rest_route=/wp/v2/search&type=term&subtype=post
+GET	/?rest_route=/wp/v2/search&type=term&per_page=1&page=2
+GET	/?rest_route=/wp/v2/search&type=post-format
+GET	/?rest_route=/wp/v2/search&type=post-format&search=ga
+GET	/?rest_route=/wp/v2/search&type=post-format&subtype=post
+GET	/?rest_route=/wp/v2/search&type=post-format&per_page=2&page=2
+GET	/?rest_route=/wp/v2/search&include=2,1
+GET	/?rest_route=/wp/v2/search&include=1&exclude=1
+GET	/?rest_route=/wp/v2/search&exclude=1
+GET	/?rest_route=/wp/v2/search&include=x
+GET	/?rest_route=/wp/v2/search&per_page=1&page=2
+GET	/?rest_route=/wp/v2/search&per_page=1&page=3
+GET	/?rest_route=/wp/v2/search&page=0
+GET	/?rest_route=/wp/v2/search&per_page=101
+GET	/?rest_route=/wp/v2/search&context=embed
+GET	/?rest_route=/wp/v2/search&context=edit
+GET	/?rest_route=/wp/v2/search&_fields=id,title
+GET	/?rest_route=/wp/v2/search&_fields=url,_links
+GET	/?rest_route=/wp/v2/search&search=%3Cb%3Ehello
+HEAD	/?rest_route=/wp/v2/search
+HEAD	/?rest_route=/wp/v2/search&type=term
+GET	/wp-json/wp/v2/search?search=sample	pretty
+GET	/wp-json/wp/v2/search?type=term	pretty
+GET	/?rest_route=/wp/v2/search&search=template&per_page=20	ttd
+GET	/?rest_route=/wp/v2/search&search=protected	ttd
+GET	/?rest_route=/wp/v2/search&search=private	ttd
+GET	/?rest_route=/wp/v2/search&search=a&per_page=100	ttd
+GET	/?rest_route=/wp/v2/search&subtype=page&per_page=100	ttd
+GET	/?rest_route=/wp/v2/search&per_page=100&page=2	ttd
+GET	/?rest_route=/wp/v2/search&type=term&per_page=30	ttd
+GET	/?rest_route=/wp/v2/search&type=term&per_page=20&page=7	ttd
+GET	/?rest_route=/wp/v2/search&type=term&per_page=24&page=8	ttd
+GET	/?rest_route=/wp/v2/search&type=term&subtype=post_tag,category&search=pa&per_page=3&page=2	ttd
+GET	/?rest_route=/wp/v2/search&type=term&subtype=category,post_tag&include=1,89&_fields=id,type
+GET	/?rest_route=/wp/v2/search&type=term&subtype=any&exclude=1
+GET	/?rest_route=/wp/v2/search&type=term&search=pa	ttd
+GET	/?rest_route=/wp/v2/search&type=post-format&per_page=100	ttd
+GET	/?rest_route=/wp/v2/search&type=post-format&search=Image	ttd
+GET	/wp-json/wp/v2/search?type=post-format	pretty,ttd
+GET	/?rest_route=/wp/v2/search&type=term&subtype=category&page=2	default
+GET	/?rest_route=/wp/v2/search&type=post-format&per_page=2&page=9	ttd
+GET	/?rest_route=/wp/v2/search&type=term&subtype=category&search=UNC	default
+GET	/?rest_route=/wp/v2/search&type=term&subtype=category&search=a&exclude=26&per_page=3&page=2	ttd

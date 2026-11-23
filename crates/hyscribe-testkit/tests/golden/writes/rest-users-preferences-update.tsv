@@ -1,0 +1,4 @@
+# The rows PHP WordPress writes for the action rest-users-preferences-update (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-19 10:47:20 to 2026-11-19 10:47:20 UTC.
+# %wp_usermeta:1% is 18.
+wp_usermeta	%wp_usermeta:1%	~	meta_value	a:2:{s:4:"core";a:1:{s:10:"editorMode";s:6:"visual";}s:9:"_modified";s:24:"2026-11-18T10:00:00.000Z";}	a:2:{s:4:"core";a:1:{s:10:"editorMode";s:4:"text";}s:9:"_modified";s:24:"2026-11-19T04:17:00.000Z";}

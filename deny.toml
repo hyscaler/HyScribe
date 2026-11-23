@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# cargo-deny policy (docs/SECURITY_MODEL.md, ADR 0004).
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+    # basic-toml runs only at build time, inside askama's proc macro, reading
+    # a theme port's own askama.toml (ADR 0023, 2026-11-22). It is
+    # unmaintained, not vulnerable. Remove this when askama drops it. The
+    # advisory names basic-toml alone, so the entry covers no other crate.
+    { id = "RUSTSEC-2026-0374", reason = "build time only, unmaintained not vulnerable; remove when askama drops it" },
+]
+
+[licenses]
+version = 2
+# Licenses compatible with distributing HyScribe under AGPL-3.0-or-later.
+allow = [
+    # For quoted_printable, lettre's (ADR 0016): public domain equivalent.
+    "0BSD",
+    "AGPL-3.0-or-later",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    # For jpeg-encoder only (ADR 0015); the FSF lists it as GPL compatible.
+    "IJG",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+# The allow list is the policy, not an inventory of what is in use today.
+unused-allowed-license = "allow"
+# Mozilla's root certificates as data, which lettre's rustls build check
+# requires though the mail transport passes the host's roots (ADR 0016).
+exceptions = [{ allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" }]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace path dependencies have no version; they are not published.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

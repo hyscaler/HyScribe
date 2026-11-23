@@ -1,0 +1,1183 @@
+{
+    "block_styles": [
+        [
+            "core/details",
+            {
+                "name": "arrow-icon-details",
+                "label": "Arrow icon",
+                "inline_style": "\n\t\t\t\t.is-style-arrow-icon-details {\n\t\t\t\t\tpadding-top: var(--wp--preset--spacing--10);\n\t\t\t\t\tpadding-bottom: var(--wp--preset--spacing--10);\n\t\t\t\t}\n\n\t\t\t\t.is-style-arrow-icon-details summary {\n\t\t\t\t\tlist-style-type: \"\\2193\\00a0\\00a0\\00a0\";\n\t\t\t\t}\n\n\t\t\t\t.is-style-arrow-icon-details[open]>summary {\n\t\t\t\t\tlist-style-type: \"\\2192\\00a0\\00a0\\00a0\";\n\t\t\t\t}"
+            }
+        ],
+        [
+            "core/post-terms",
+            {
+                "name": "pill",
+                "label": "Pill",
+                "inline_style": "\n\t\t\t\t.is-style-pill a,\n\t\t\t\t.is-style-pill span:not([class], [data-rich-text-placeholder]) {\n\t\t\t\t\tdisplay: inline-block;\n\t\t\t\t\tbackground-color: var(--wp--preset--color--base-2);\n\t\t\t\t\tpadding: 0.375rem 0.875rem;\n\t\t\t\t\tborder-radius: var(--wp--preset--spacing--20);\n\t\t\t\t}\n\n\t\t\t\t.is-style-pill a:hover {\n\t\t\t\t\tbackground-color: var(--wp--preset--color--contrast-3);\n\t\t\t\t}"
+            }
+        ],
+        [
+            "core/list",
+            {
+                "name": "checkmark-list",
+                "label": "Checkmark",
+                "inline_style": "\n\t\t\t\tul.is-style-checkmark-list {\n\t\t\t\t\tlist-style-type: \"\\2713\";\n\t\t\t\t}\n\n\t\t\t\tul.is-style-checkmark-list li {\n\t\t\t\t\tpadding-inline-start: 1ch;\n\t\t\t\t}"
+            }
+        ],
+        [
+            "core/navigation-link",
+            {
+                "name": "arrow-link",
+                "label": "With arrow",
+                "inline_style": "\n\t\t\t\t.is-style-arrow-link .wp-block-navigation-item__label:after {\n\t\t\t\t\tcontent: \"\\2197\";\n\t\t\t\t\tpadding-inline-start: 0.25rem;\n\t\t\t\t\tvertical-align: middle;\n\t\t\t\t\ttext-decoration: none;\n\t\t\t\t\tdisplay: inline-block;\n\t\t\t\t}"
+            }
+        ],
+        [
+            "core/heading",
+            {
+                "name": "asterisk",
+                "label": "With asterisk",
+                "inline_style": "\n\t\t\t\t.is-style-asterisk:before {\n\t\t\t\t\tcontent: '';\n\t\t\t\t\twidth: 1.5rem;\n\t\t\t\t\theight: 3rem;\n\t\t\t\t\tbackground: var(--wp--preset--color--contrast-2, currentColor);\n\t\t\t\t\tclip-path: path('M11.93.684v8.039l5.633-5.633 1.216 1.23-5.66 5.66h8.04v1.737H13.2l5.701 5.701-1.23 1.23-5.742-5.742V21h-1.737v-8.094l-5.77 5.77-1.23-1.217 5.743-5.742H.842V9.98h8.162l-5.701-5.7 1.23-1.231 5.66 5.66V.684h1.737Z');\n\t\t\t\t\tdisplay: block;\n\t\t\t\t}\n\n\t\t\t\t/* Hide the asterisk if the heading has no content, to avoid using empty headings to display the asterisk only, which is an A11Y issue */\n\t\t\t\t.is-style-asterisk:empty:before {\n\t\t\t\t\tcontent: none;\n\t\t\t\t}\n\n\t\t\t\t.is-style-asterisk:-moz-only-whitespace:before {\n\t\t\t\t\tcontent: none;\n\t\t\t\t}\n\n\t\t\t\t.is-style-asterisk.has-text-align-center:before {\n\t\t\t\t\tmargin: 0 auto;\n\t\t\t\t}\n\n\t\t\t\t.is-style-asterisk.has-text-align-right:before {\n\t\t\t\t\tmargin-left: auto;\n\t\t\t\t}\n\n\t\t\t\t.rtl .is-style-asterisk.has-text-align-left:before {\n\t\t\t\t\tmargin-right: auto;\n\t\t\t\t}"
+            }
+        ]
+    ],
+    "partial_styles": [],
+    "pattern_categories": [
+        {
+            "name": "twentytwentyfour_page",
+            "label": "Pages",
+            "description": "A collection of full page layouts."
+        }
+    ],
+    "patterns": [
+        {
+            "title": "Hero",
+            "description": "A hero section with a title, a paragraph, a CTA button, and an image.",
+            "viewportWidth": 1400,
+            "categories": [
+                "banner",
+                "call-to-action",
+                "featured"
+            ],
+            "name": "twentytwentyfour/banner-hero"
+        },
+        {
+            "title": "Project description",
+            "description": "Project description section with title, paragraph, and an image.",
+            "viewportWidth": 1400,
+            "categories": [
+                "featured",
+                "banner",
+                "about",
+                "portfolio"
+            ],
+            "name": "twentytwentyfour/banner-project-description"
+        },
+        {
+            "title": "Call to action with image on right",
+            "description": "A title, paragraph, two CTA buttons, and an image for a general CTA section.",
+            "viewportWidth": 1400,
+            "categories": [
+                "call-to-action",
+                "banner"
+            ],
+            "name": "twentytwentyfour/cta-content-image-on-right"
+        },
+        {
+            "title": "Pricing",
+            "description": "A pricing section with a title, a paragraph and three pricing levels.",
+            "viewportWidth": 1400,
+            "categories": [
+                "call-to-action",
+                "services"
+            ],
+            "name": "twentytwentyfour/cta-pricing"
+        },
+        {
+            "title": "RSVP",
+            "description": "A large RSVP heading sideways, a description, and a CTA button.",
+            "viewportWidth": 1100,
+            "categories": [
+                "call-to-action",
+                "featured"
+            ],
+            "name": "twentytwentyfour/cta-rsvp"
+        },
+        {
+            "title": "Services call to action with image on left",
+            "description": "An image, title, paragraph and a CTA button to describe services.",
+            "viewportWidth": 1400,
+            "categories": [
+                "call-to-action",
+                "banner",
+                "featured",
+                "services"
+            ],
+            "name": "twentytwentyfour/cta-services-image-left"
+        },
+        {
+            "title": "Centered call to action",
+            "description": "Subscribers CTA section with a title, a paragraph and a CTA button.",
+            "categories": [
+                "call-to-action"
+            ],
+            "keywords": [
+                "newsletter",
+                "subscribe",
+                "button"
+            ],
+            "name": "twentytwentyfour/cta-subscribe-centered"
+        },
+        {
+            "title": "Footer with centered logo and navigation",
+            "description": "A footer section with a centered logo, navigation, and WordPress credits.",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentyfour/footer-centered-logo-nav"
+        },
+        {
+            "title": "Footer with colophon, 3 columns",
+            "description": "A footer section with a colophon and 3 columns.",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentyfour/footer-colophon-3-col"
+        },
+        {
+            "title": "Footer with colophon, 4 columns",
+            "description": "A footer section with a colophon and 4 columns.",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentyfour/footer"
+        },
+        {
+            "title": "Full screen image",
+            "description": "A cover image section that covers the entire width.",
+            "categories": [
+                "gallery",
+                "portfolio"
+            ],
+            "name": "twentytwentyfour/gallery-full-screen-image"
+        },
+        {
+            "title": "Offset gallery, 2 columns",
+            "description": "A gallery section with 2 columns and offset images.",
+            "viewportWidth": 1400,
+            "categories": [
+                "gallery",
+                "portfolio"
+            ],
+            "keywords": [
+                "project",
+                "images",
+                "media",
+                "masonry",
+                "columns"
+            ],
+            "name": "twentytwentyfour/gallery-offset-images-grid-2-col"
+        },
+        {
+            "title": "Offset gallery, 3 columns",
+            "description": "A gallery section with 3 columns and offset images.",
+            "viewportWidth": 1400,
+            "categories": [
+                "gallery",
+                "portfolio"
+            ],
+            "keywords": [
+                "project",
+                "images",
+                "media",
+                "masonry",
+                "columns"
+            ],
+            "name": "twentytwentyfour/gallery-offset-images-grid-3-col"
+        },
+        {
+            "title": "Offset gallery, 4 columns",
+            "description": "A gallery section with 4 columns and offset images.",
+            "viewportWidth": 1400,
+            "categories": [
+                "gallery",
+                "featured",
+                "portfolio"
+            ],
+            "keywords": [
+                "project",
+                "images",
+                "media",
+                "masonry",
+                "columns"
+            ],
+            "name": "twentytwentyfour/gallery-offset-images-grid-4-col"
+        },
+        {
+            "title": "Project layout",
+            "description": "A gallery section with a project layout with 2 images.",
+            "viewportWidth": 1600,
+            "categories": [
+                "gallery",
+                "featured",
+                "portfolio"
+            ],
+            "name": "twentytwentyfour/gallery-project-layout"
+        },
+        {
+            "title": "404",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfour/hidden-404"
+        },
+        {
+            "title": "Comments",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfour/hidden-comments"
+        },
+        {
+            "title": "No results",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfour/hidden-no-results"
+        },
+        {
+            "title": "Portfolio hero",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfour/hidden-portfolio-hero"
+        },
+        {
+            "title": "Post meta",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfour/hidden-post-meta"
+        },
+        {
+            "title": "Post navigation",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfour/hidden-post-navigation"
+        },
+        {
+            "title": "Posts heading",
+            "description": "",
+            "inserter": false,
+            "categories": [
+                "hidden"
+            ],
+            "name": "twentytwentyfour/hidden-posts-heading"
+        },
+        {
+            "title": "Search",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfour/hidden-search"
+        },
+        {
+            "title": "Sidebar",
+            "description": "",
+            "inserter": false,
+            "name": "twentytwentyfour/hidden-sidebar"
+        },
+        {
+            "title": "About",
+            "description": "A business about page with a hero section, a text section, a services section, a team section, a clients section, a FAQ section, and a CTA section.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfour_page"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfour/page-about-business"
+        },
+        {
+            "title": "Blogging home",
+            "description": "A blogging home page with a hero section, a text section, a blog section, and a CTA section.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfour_page"
+            ],
+            "keywords": [
+                "page",
+                "starter"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfour/page-home-blogging"
+        },
+        {
+            "title": "Business home",
+            "description": "A business home page with a hero section, a text section, a services section, a team section, a clients section, a FAQ section, and a CTA section.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfour_page"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfour/page-home-business"
+        },
+        {
+            "title": "Portfolio home image gallery",
+            "description": "A portfolio home page that features a gallery.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfour_page"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfour/page-home-gallery"
+        },
+        {
+            "title": "Portfolio home with post featured images",
+            "description": "A portfolio home page with a description and a 4-column post section with only feature images.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfour_page"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfour/page-home-portfolio"
+        },
+        {
+            "title": "Newsletter landing",
+            "description": "A block with a newsletter subscription CTA for a landing page.",
+            "viewportWidth": 1100,
+            "categories": [
+                "call-to-action",
+                "twentytwentyfour_page",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfour/page-newsletter-landing"
+        },
+        {
+            "title": "Portfolio project overview",
+            "description": "A full portfolio page with a section for project description, project details, a full screen image, and a gallery section with two images.",
+            "viewportWidth": 1400,
+            "categories": [
+                "twentytwentyfour_page",
+                "featured"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfour/page-portfolio-overview"
+        },
+        {
+            "title": "RSVP landing",
+            "description": "A large RSVP heading sideways, a description, and a CTA button.",
+            "viewportWidth": 1100,
+            "categories": [
+                "twentytwentyfour_page"
+            ],
+            "keywords": [
+                "starter"
+            ],
+            "blockTypes": [
+                "core/post-content"
+            ],
+            "postTypes": [
+                "page",
+                "wp_template"
+            ],
+            "name": "twentytwentyfour/page-rsvp-landing"
+        },
+        {
+            "title": "List of posts, 1 column",
+            "description": "A list of posts, 1 column.",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentyfour/posts-1-col"
+        },
+        {
+            "title": "List of posts, 3 columns",
+            "description": "A list of posts, 3 columns.",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentyfour/posts-3-col"
+        },
+        {
+            "title": "Grid of posts featuring the first post, 2 columns",
+            "description": "A grid of posts featuring the first post, 2 columns.",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentyfour/posts-grid-2-col"
+        },
+        {
+            "title": "Posts with featured images only, 3 columns",
+            "description": "A list of posts with featured images only, 3 columns.",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentyfour/posts-images-only-3-col"
+        },
+        {
+            "title": "Offset posts with featured images only, 4 columns",
+            "description": "A list of posts with featured images only, 4 columns.",
+            "categories": [
+                "posts"
+            ],
+            "name": "twentytwentyfour/posts-images-only-offset-4-col"
+        },
+        {
+            "title": "List of posts without images, 1 column",
+            "description": "A list of posts without images, 1 column.",
+            "categories": [
+                "query",
+                "posts"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentyfour/posts-list"
+        },
+        {
+            "title": "Team members, 4 columns",
+            "description": "A team section, with a heading, a paragraph, and 4 columns for team members.",
+            "viewportWidth": 1400,
+            "categories": [
+                "team",
+                "about"
+            ],
+            "name": "twentytwentyfour/team-4-col"
+        },
+        {
+            "title": "Blogging archive template",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "archive",
+                "category",
+                "tag",
+                "author",
+                "date"
+            ],
+            "name": "twentytwentyfour/template-archive-blogging"
+        },
+        {
+            "title": "Portfolio archive template",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "archive"
+            ],
+            "name": "twentytwentyfour/template-archive-portfolio"
+        },
+        {
+            "title": "Blogging home template",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "front-page",
+                "index",
+                "home"
+            ],
+            "name": "twentytwentyfour/template-home-blogging"
+        },
+        {
+            "title": "Business home template",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "front-page",
+                "home"
+            ],
+            "name": "twentytwentyfour/template-home-business"
+        },
+        {
+            "title": "Portfolio home template with post featured images",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "front-page",
+                "home"
+            ],
+            "name": "twentytwentyfour/template-home-portfolio"
+        },
+        {
+            "title": "Blogging index template",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "index",
+                "home"
+            ],
+            "name": "twentytwentyfour/template-index-blogging"
+        },
+        {
+            "title": "Portfolio index template",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "index"
+            ],
+            "name": "twentytwentyfour/template-index-portfolio"
+        },
+        {
+            "title": "Blogging search template",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "search"
+            ],
+            "name": "twentytwentyfour/template-search-blogging"
+        },
+        {
+            "title": "Portfolio search template",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "search"
+            ],
+            "name": "twentytwentyfour/template-search-portfolio"
+        },
+        {
+            "title": "Portfolio single post template",
+            "description": "",
+            "viewportWidth": 1400,
+            "inserter": false,
+            "templateTypes": [
+                "posts",
+                "single"
+            ],
+            "name": "twentytwentyfour/template-single-portfolio"
+        },
+        {
+            "title": "Centered testimonial",
+            "description": "A centered testimonial section with an avatar, name, and job title.",
+            "viewportWidth": 1300,
+            "categories": [
+                "testimonials",
+                "text"
+            ],
+            "keywords": [
+                "quote",
+                "review",
+                "about"
+            ],
+            "name": "twentytwentyfour/testimonial-centered"
+        },
+        {
+            "title": "Text with alternating images",
+            "description": "A text section, then a two-column section with text in one column and an image in the other.",
+            "viewportWidth": 1400,
+            "categories": [
+                "text",
+                "about"
+            ],
+            "name": "twentytwentyfour/text-alternating-images"
+        },
+        {
+            "title": "Centered statement, small",
+            "description": "A centered italic text statement with compact padding.",
+            "viewportWidth": 1200,
+            "categories": [
+                "text",
+                "about"
+            ],
+            "keywords": [
+                "mission",
+                "introduction"
+            ],
+            "name": "twentytwentyfour/text-centered-statement-small"
+        },
+        {
+            "title": "Centered statement",
+            "description": "A centered text statement with a large amount of padding on all sides.",
+            "viewportWidth": 1400,
+            "categories": [
+                "text",
+                "about",
+                "featured"
+            ],
+            "keywords": [
+                "mission",
+                "introduction"
+            ],
+            "name": "twentytwentyfour/text-centered-statement"
+        },
+        {
+            "title": "FAQ",
+            "description": "A FAQ section with a large FAQ heading and a group of questions and answers.",
+            "viewportWidth": 1400,
+            "categories": [
+                "text",
+                "about",
+                "featured"
+            ],
+            "keywords": [
+                "faq",
+                "about",
+                "frequently",
+                "asked"
+            ],
+            "name": "twentytwentyfour/text-faq"
+        },
+        {
+            "title": "Feature grid, 3 columns",
+            "description": "A feature grid of 2 rows and 3 columns with headings and text.",
+            "viewportWidth": 1400,
+            "categories": [
+                "text",
+                "about"
+            ],
+            "name": "twentytwentyfour/text-feature-grid-3-col"
+        },
+        {
+            "title": "Project details",
+            "description": "A text-only section for project details.",
+            "viewportWidth": 1400,
+            "categories": [
+                "text",
+                "portfolio"
+            ],
+            "name": "twentytwentyfour/text-project-details"
+        },
+        {
+            "title": "Title text and button on left with image on right",
+            "description": "A title, a paragraph and a CTA button on the left with an image on the right.",
+            "viewportWidth": 1400,
+            "categories": [
+                "banner",
+                "about",
+                "featured"
+            ],
+            "name": "twentytwentyfour/text-title-left-image-right"
+        }
+    ],
+    "rest": {
+        "stylesheet": "twentytwentyfour",
+        "template": "twentytwentyfour",
+        "requires_php": "7.0",
+        "requires_wp": "6.4",
+        "textdomain": "twentytwentyfour",
+        "version": "1.6",
+        "screenshot": "%siteurl%/wp-content/themes/twentytwentyfour/screenshot.png",
+        "author": {
+            "raw": "the WordPress team",
+            "rendered": "<a href=\"https://wordpress.org\">the WordPress team</a>"
+        },
+        "author_uri": {
+            "raw": "https://wordpress.org",
+            "rendered": "https://wordpress.org"
+        },
+        "description": {
+            "raw": "Twenty Twenty-Four is designed to be flexible, versatile and applicable to any website. Its collection of templates and patterns tailor to different needs, such as presenting a business, blogging and writing or showcasing work. A multitude of possibilities open up with just a few adjustments to color and typography. Twenty Twenty-Four comes with style variations and full page designs to help speed up the site building process, is fully compatible with the site editor, and takes advantage of new design tools introduced in WordPress 6.4.",
+            "rendered": "Twenty Twenty-Four is designed to be flexible, versatile and applicable to any website. Its collection of templates and patterns tailor to different needs, such as presenting a business, blogging and writing or showcasing work. A multitude of possibilities open up with just a few adjustments to color and typography. Twenty Twenty-Four comes with style variations and full page designs to help speed up the site building process, is fully compatible with the site editor, and takes advantage of new design tools introduced in WordPress 6.4."
+        },
+        "name": {
+            "raw": "Twenty Twenty-Four",
+            "rendered": "Twenty Twenty-Four"
+        },
+        "tags": {
+            "raw": [
+                "one-column",
+                "custom-colors",
+                "custom-menu",
+                "custom-logo",
+                "editor-style",
+                "featured-images",
+                "full-site-editing",
+                "block-patterns",
+                "rtl-language-support",
+                "sticky-post",
+                "threaded-comments",
+                "translation-ready",
+                "wide-blocks",
+                "block-styles",
+                "style-variations",
+                "accessibility-ready",
+                "blog",
+                "portfolio",
+                "news"
+            ],
+            "rendered": "one-column, custom-colors, custom-menu, custom-logo, editor-style, featured-images, full-site-editing, block-patterns, rtl-language-support, sticky-post, threaded-comments, translation-ready, wide-blocks, block-styles, style-variations, accessibility-ready, blog, portfolio, news"
+        },
+        "theme_uri": {
+            "raw": "https://wordpress.org/themes/twentytwentyfour/",
+            "rendered": "https://wordpress.org/themes/twentytwentyfour/"
+        },
+        "status": "active",
+        "theme_supports": {
+            "align-wide": false,
+            "automatic-feed-links": true,
+            "block-templates": true,
+            "block-template-parts": false,
+            "custom-background": false,
+            "custom-header": false,
+            "custom-logo": false,
+            "customize-selective-refresh-widgets": false,
+            "dark-editor-style": false,
+            "disable-custom-colors": false,
+            "disable-custom-font-sizes": false,
+            "disable-custom-gradients": false,
+            "disable-layout-styles": false,
+            "editor-color-palette": false,
+            "editor-font-sizes": false,
+            "editor-gradient-presets": false,
+            "editor-spacing-sizes": false,
+            "editor-styles": true,
+            "html5": [
+                "comment-form",
+                "comment-list",
+                "search-form",
+                "gallery",
+                "caption",
+                "style",
+                "script"
+            ],
+            "formats": [
+                "standard"
+            ],
+            "post-thumbnails": true,
+            "responsive-embeds": true,
+            "title-tag": false,
+            "wp-block-styles": false
+        },
+        "is_block_theme": true,
+        "stylesheet_uri": "%siteurl%/wp-content/themes/twentytwentyfour",
+        "template_uri": "%siteurl%/wp-content/themes/twentytwentyfour",
+        "default_template_types": [
+            {
+                "title": "Index",
+                "description": "Used as a fallback template for all pages when a more specific template is not defined.",
+                "slug": "index"
+            },
+            {
+                "title": "Blog Home",
+                "description": "Displays the latest posts as either the site homepage or as the \"Posts page\" as defined under reading settings. If it exists, the Front Page template overrides this template when posts are shown on the homepage.",
+                "slug": "home"
+            },
+            {
+                "title": "Front Page",
+                "description": "Displays your site's homepage, whether it is set to display latest posts or a static page. The Front Page template takes precedence over all templates.",
+                "slug": "front-page"
+            },
+            {
+                "title": "Single Entries",
+                "description": "Displays any single entry, such as a post or a page. This template will serve as a fallback when a more specific template (e.g. Single Post, Page, or Attachment) cannot be found.",
+                "slug": "singular"
+            },
+            {
+                "title": "Single Posts",
+                "description": "Displays a single post on your website unless a custom template has been applied to that post or a dedicated template exists.",
+                "slug": "single"
+            },
+            {
+                "title": "Pages",
+                "description": "Displays a static page unless a custom template has been applied to that page or a dedicated template exists.",
+                "slug": "page"
+            },
+            {
+                "title": "All Archives",
+                "description": "Displays any archive, including posts by a single author, category, tag, taxonomy, custom post type, and date. This template will serve as a fallback when more specific templates (e.g. Category or Tag) cannot be found.",
+                "slug": "archive"
+            },
+            {
+                "title": "Author Archives",
+                "description": "Displays a single author's post archive. This template will serve as a fallback when a more specific template (e.g. Author: Admin) cannot be found.",
+                "slug": "author"
+            },
+            {
+                "title": "Category Archives",
+                "description": "Displays a post category archive. This template will serve as a fallback when a more specific template (e.g. Category: Recipes) cannot be found.",
+                "slug": "category"
+            },
+            {
+                "title": "Taxonomy",
+                "description": "Displays a custom taxonomy archive. Like categories and tags, taxonomies have terms which you use to classify things. For example: a taxonomy named \"Art\" can have multiple terms, such as \"Modern\" and \"18th Century.\" This template will serve as a fallback when a more specific template (e.g. Taxonomy: Art) cannot be found.",
+                "slug": "taxonomy"
+            },
+            {
+                "title": "Date Archives",
+                "description": "Displays a post archive when a specific date is visited (e.g., example.com/2023/).",
+                "slug": "date"
+            },
+            {
+                "title": "Tag Archives",
+                "description": "Displays a post tag archive. This template will serve as a fallback when a more specific template (e.g. Tag: Pizza) cannot be found.",
+                "slug": "tag"
+            },
+            {
+                "title": "Attachment Pages",
+                "description": "Displays when a visitor views the dedicated page that exists for any media attachment.",
+                "slug": "attachment"
+            },
+            {
+                "title": "Search Results",
+                "description": "Displays when a visitor performs a search on your website.",
+                "slug": "search"
+            },
+            {
+                "title": "Privacy Policy",
+                "description": "Displays your site's Privacy Policy page.",
+                "slug": "privacy-policy"
+            },
+            {
+                "title": "Page: 404",
+                "description": "Displays when a visitor views a non-existent page, such as a dead link or a mistyped URL.",
+                "slug": "404"
+            },
+            {
+                "title": "Post Format: Standard",
+                "description": "Displays the Standard post format archive.",
+                "slug": "taxonomy-post_format-post-format-standard"
+            },
+            {
+                "title": "Post Format: Aside",
+                "description": "Displays the Aside post format archive.",
+                "slug": "taxonomy-post_format-post-format-aside"
+            },
+            {
+                "title": "Post Format: Chat",
+                "description": "Displays the Chat post format archive.",
+                "slug": "taxonomy-post_format-post-format-chat"
+            },
+            {
+                "title": "Post Format: Gallery",
+                "description": "Displays the Gallery post format archive.",
+                "slug": "taxonomy-post_format-post-format-gallery"
+            },
+            {
+                "title": "Post Format: Link",
+                "description": "Displays the Link post format archive.",
+                "slug": "taxonomy-post_format-post-format-link"
+            },
+            {
+                "title": "Post Format: Image",
+                "description": "Displays the Image post format archive.",
+                "slug": "taxonomy-post_format-post-format-image"
+            },
+            {
+                "title": "Post Format: Quote",
+                "description": "Displays the Quote post format archive.",
+                "slug": "taxonomy-post_format-post-format-quote"
+            },
+            {
+                "title": "Post Format: Status",
+                "description": "Displays the Status post format archive.",
+                "slug": "taxonomy-post_format-post-format-status"
+            },
+            {
+                "title": "Post Format: Video",
+                "description": "Displays the Video post format archive.",
+                "slug": "taxonomy-post_format-post-format-video"
+            },
+            {
+                "title": "Post Format: Audio",
+                "description": "Displays the Audio post format archive.",
+                "slug": "taxonomy-post_format-post-format-audio"
+            }
+        ],
+        "default_template_part_areas": [
+            {
+                "area": "uncategorized",
+                "label": "General",
+                "description": "General templates often perform a specific role like displaying post content, and are not tied to any particular area.",
+                "icon": "layout",
+                "area_tag": "div"
+            },
+            {
+                "area": "header",
+                "label": "Header",
+                "description": "The Header template defines a page area that typically contains a title, logo, and main navigation.",
+                "icon": "header",
+                "area_tag": "header"
+            },
+            {
+                "area": "footer",
+                "label": "Footer",
+                "description": "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
+                "icon": "footer",
+                "area_tag": "footer"
+            },
+            {
+                "area": "navigation-overlay",
+                "label": "Navigation Overlay",
+                "description": "The Navigation Overlay template defines an overlay area that typically contains navigation links and can be toggled open and closed.",
+                "icon": "navigation-overlay",
+                "area_tag": "div"
+            }
+        ]
+    },
+    "post_formats": [],
+    "block_styles_support": false,
+    "styles": [
+        {
+            "block": "core/button",
+            "handle": "twentytwentyfour-button-style-outline",
+            "src": "assets/css/button-outline.css",
+            "ver": "1.6"
+        }
+    ],
+    "template_files": [
+        "archive",
+        "404",
+        "page-with-sidebar",
+        "search",
+        "index",
+        "single",
+        "page-no-title",
+        "single-with-sidebar",
+        "page-wide",
+        "page",
+        "home"
+    ],
+    "part_files": [
+        "sidebar",
+        "header",
+        "footer",
+        "post-meta"
+    ],
+    "theme_features": [
+        "core-block-patterns",
+        "post-thumbnails",
+        "responsive-embeds",
+        "editor-styles",
+        "html5",
+        "automatic-feed-links",
+        "widgets-block-editor",
+        "block-templates"
+    ],
+    "themes_screen": {
+        "id": "twentytwentyfour",
+        "name": "Twenty Twenty-Four",
+        "description": "Twenty Twenty-Four is designed to be flexible, versatile and applicable to any website. Its collection of templates and patterns tailor to different needs, such as presenting a business, blogging and writing or showcasing work. A multitude of possibilities open up with just a few adjustments to color and typography. Twenty Twenty-Four comes with style variations and full page designs to help speed up the site building process, is fully compatible with the site editor, and takes advantage of new design tools introduced in WordPress 6.4.",
+        "author": "the WordPress team",
+        "authorAndUri": "<a href=\"https://wordpress.org\">the WordPress team</a>",
+        "tags": "One Column, Custom Colors, custom-menu, Custom Logo, Editor Style, Featured Images, Site Editor, Block Editor Patterns, rtl-language-support, Sticky Post, threaded-comments, translation-ready, Wide Blocks, Block Editor Styles, Style Variations, Accessibility Ready, Blog, Portfolio, News",
+        "version": "1.6"
+    },
+    "block_variations": {
+        "core/template-part": [
+            {
+                "name": "area_header",
+                "title": "Header",
+                "description": "The Header template defines a page area that typically contains a title, logo, and main navigation.",
+                "attributes": {
+                    "area": "header"
+                },
+                "scope": [],
+                "icon": "header"
+            },
+            {
+                "name": "area_footer",
+                "title": "Footer",
+                "description": "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
+                "attributes": {
+                    "area": "footer"
+                },
+                "scope": [],
+                "icon": "footer"
+            },
+            {
+                "name": "instance_sidebar",
+                "title": "Sidebar",
+                "description": "1",
+                "attributes": {
+                    "slug": "sidebar",
+                    "theme": "twentytwentyfour",
+                    "area": "uncategorized"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "layout",
+                "example": {
+                    "attributes": {
+                        "slug": "sidebar",
+                        "theme": "twentytwentyfour",
+                        "area": "uncategorized"
+                    }
+                }
+            },
+            {
+                "name": "instance_header",
+                "title": "Header",
+                "description": "1",
+                "attributes": {
+                    "slug": "header",
+                    "theme": "twentytwentyfour",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header",
+                        "theme": "twentytwentyfour",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_footer",
+                "title": "Footer",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer",
+                    "theme": "twentytwentyfour",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer",
+                        "theme": "twentytwentyfour",
+                        "area": "footer"
+                    }
+                }
+            },
+            {
+                "name": "instance_post-meta",
+                "title": "Post Meta",
+                "description": "1",
+                "attributes": {
+                    "slug": "post-meta",
+                    "theme": "twentytwentyfour",
+                    "area": "uncategorized"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "layout",
+                "example": {
+                    "attributes": {
+                        "slug": "post-meta",
+                        "theme": "twentytwentyfour",
+                        "area": "uncategorized"
+                    }
+                }
+            }
+        ],
+        "core/navigation-link": [
+            {
+                "name": "post",
+                "title": "Post link",
+                "description": " ",
+                "attributes": {
+                    "type": "post",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "page",
+                "title": "Page link",
+                "description": " ",
+                "attributes": {
+                    "type": "page",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "category",
+                "title": "Category link",
+                "description": " ",
+                "attributes": {
+                    "type": "category",
+                    "kind": "taxonomy"
+                }
+            },
+            {
+                "name": "tag",
+                "title": "Tag link",
+                "description": " ",
+                "attributes": {
+                    "type": "tag",
+                    "kind": "taxonomy"
+                }
+            }
+        ]
+    },
+    "binding_sources": []
+}

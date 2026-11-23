@@ -1,0 +1,230 @@
+{
+	"styles": [
+		[
+			"core/group",
+			"hs-test"
+		],
+		[
+			"core/button",
+			"hs-button"
+		],
+		[
+			"core/image",
+			"hs-image"
+		],
+		[
+			"core/quote",
+			"hs-empty"
+		]
+	],
+	"theme": {
+		"version": 3,
+		"styles": {
+			"blocks": {
+				"core/group": {
+					"variations": {
+						"hs-test": {
+							"color": {
+								"background": "var:preset|color|base",
+								"text": {
+									"ref": "styles.color.text"
+								}
+							},
+							"border": {
+								"width": {
+									"ref": ""
+								},
+								"radius": {
+									"ref": "styles.nothing.here"
+								}
+							},
+							"spacing": {
+								"blockGap": "2rem",
+								"padding": {
+									"top": "1rem"
+								}
+							},
+							"typography": {
+								"fontSize": "20px"
+							},
+							"css": "& p { margin: 0 } &:hover { opacity: .9 }",
+							":hover": {
+								"color": {
+									"text": "red"
+								}
+							},
+							"elements": {
+								"link": {
+									"color": {
+										"text": "blue"
+									},
+									":hover": {
+										"color": {
+											"text": "green"
+										}
+									}
+								},
+								"heading": {
+									"typography": {
+										"fontWeight": "700"
+									}
+								},
+								"button": {
+									"color": {
+										"background": "black"
+									}
+								}
+							},
+							"blocks": {
+								"core/paragraph": {
+									"color": {
+										"text": "purple"
+									},
+									"elements": {
+										"link": {
+											"color": {
+												"text": "orange"
+											}
+										}
+									}
+								},
+								"core/heading": {
+									"typography": {
+										"fontSize": "3rem"
+									}
+								}
+							},
+							"@mobile": {
+								"color": {
+									"text": "teal"
+								},
+								"spacing": {
+									"blockGap": "1rem"
+								},
+								"css": "& em { color: red }",
+								"elements": {
+									"link": {
+										"color": {
+											"text": "navy"
+										},
+										":hover": {
+											"color": {
+												"text": "lime"
+											}
+										},
+										":focus": {
+											"typography": {
+												"fontSize": {
+													"ref": "styles.missing"
+												}
+											}
+										},
+										"css": "& b { color: red }"
+									},
+									"button": {
+										"color": {
+											"text": "white"
+										}
+									},
+									"unknown": {
+										"color": {
+											"text": "red"
+										}
+									},
+									"heading": {
+										"css": "& i { margin: 0 }"
+									}
+								}
+							}
+						}
+					}
+				},
+				"core/button": {
+					"variations": {
+						"hs-button": {
+							"color": {
+								"ref": "styles.elements.button.color"
+							},
+							"dimensions": {
+								"width": "25%"
+							},
+							":hover": {
+								"color": {
+									"text": "red"
+								},
+								"dimensions": {
+									"width": "50%"
+								},
+								"typography": {
+									"writingMode": "vertical-rl"
+								}
+							},
+							":focus": {
+								"typography": {
+									"writingMode": "vertical-lr"
+								}
+							},
+							"@tablet": {
+								"dimensions": {
+									"width": "75%"
+								},
+								"color": {
+									"text": "white"
+								},
+								":hover": {
+									"color": {
+										"text": "pink"
+									},
+									"typography": {
+										"writingMode": "horizontal-tb"
+									}
+								},
+								":focus": {
+									"typography": {
+										"fontSize": {
+											"ref": "styles.missing"
+										}
+									}
+								}
+							},
+							"spacing": {
+								"blockGap": "3rem"
+							}
+						}
+					}
+				},
+				"core/image": {
+					"variations": {
+						"hs-image": {
+							"border": {
+								"radius": "4px"
+							},
+							"@mobile": {
+								"border": {
+									"radius": "8px"
+								}
+							}
+						}
+					}
+				},
+				"core/quote": {
+					"variations": {
+						"hs-empty": {
+							"typography": {
+								"fontSize": {
+									"ref": "styles.missing"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"settings": {
+			"viewport": {
+				"mobile": "500px",
+				"tablet": "60em"
+			}
+		}
+	}
+}

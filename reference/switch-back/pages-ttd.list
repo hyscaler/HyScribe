@@ -1,0 +1,33 @@
+# The screens and pages run.sh asks PHP WordPress for over the Theme Test Data (plain
+# permalinks, so every address names an ID): user, path, status, text, as pages.list.
+visitor	/?p=%rest-post%	200	Synced from REST.
+visitor	/?p=%rest-post%	200	A REST post, updated
+visitor	/?page_id=%rest-page%	200	A page written over REST.
+visitor	/	200	Switch back over the Theme Test Data
+admin	/wp-admin/edit.php?post_status=draft	200	A REST draft
+admin	/wp-admin/edit.php?post_status=future	200	A REST future post
+admin	/wp-admin/edit.php?post_status=trash	200	Trashed over REST
+admin	/wp-admin/edit.php?post_type=wp_block	200	A REST pattern, renamed
+admin	/wp-admin/edit-comments.php?comment_status=moderated	200	A visitor comment over the Theme Test Data.
+admin	/wp-admin/options-general.php	200	Saved by HyScribe
+admin	/wp-admin/upload.php?mode=list	200	REST image
+admin	/wp-admin/upload.php?mode=list	200	REST png
+admin	/wp-admin/upload.php?mode=list	200	orient-6
+admin	/wp-admin/upload.php?mode=list	200	Edited by REST
+admin	/wp-admin/post.php?post=%rest-media-edit%&action=edit	200	Alt after
+admin	/wp-admin/post.php?post=%rest-media%&action=edit	200	A wide REST picture
+visitor	/?attachment_id=%rest-media%	301	-
+visitor	/?p=%rest-post%	200	wide-768x256.jpg
+visitor	/wp-content/uploads/%ym%/wide.jpg	200	-
+visitor	/wp-content/uploads/%ym%/wide-300x100.jpg	200	-
+visitor	/wp-content/uploads/%ym%/small.jpg	200	-
+visitor	/?p=%rest-post%	200	Single template saved from HyScribe.
+visitor	/?p=%rest-post%	200	Footer saved from HyScribe.
+visitor	/	200	Footer saved from HyScribe.
+visitor	/?page_id=%se-page%	200	Custom template saved from HyScribe.
+visitor	/?page_id=%se-page%	200	A part made in HyScribe.
+visitor	/?page_id=%se-page%	200	A page in the new template.
+visitor	/	200	#fdf2d0
+admin	/wp-admin/site-editor.php	200	site-editor
+visitor	/?p=%scratch-cron-future%	200	Published by HyScribe cron.
+visitor	/?p=%scratch-cron-old%	404	Page not found

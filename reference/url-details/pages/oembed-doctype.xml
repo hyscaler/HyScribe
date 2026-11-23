@@ -1,0 +1,3 @@
+<?xml version="1.0"?>
+<!DOCTYPE oembed>
+<oembed><type>rich</type><html>&lt;iframe src="https://xml.test/doctype"&gt;&lt;/iframe&gt;</html></oembed>

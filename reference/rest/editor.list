@@ -1,0 +1,56 @@
+# The editors' read routes for reference/rest/golden.sh (method, target, flags).
+GET	/?rest_route=/wp/v2/block-types
+GET	/?rest_route=/wp/v2/block-types&context=edit&_fields=name,styles
+GET	/?rest_route=/wp/v2/block-types&context=embed&_fields=name,is_dynamic,_links
+GET	/?rest_route=/wp/v2/block-types&_fields=name,styles,variations.name
+GET	/?rest_route=/wp/v2/block-types&_fields=name,title,_links&namespace=core
+GET	/?rest_route=/wp/v2/block-types&namespace=nope
+GET	/?rest_route=/wp/v2/block-types&namespace[]=core
+GET	/?rest_route=/wp/v2/block-types&context=bogus
+GET	/?rest_route=/wp/v2/block-types/core&_fields=name,parent,ancestor,allowed_blocks
+GET	/?rest_route=/wp/v2/block-types/nope
+GET	/?rest_route=/wp/v2/block-types/core&namespace=nope&_fields=name
+GET	/?rest_route=/wp/v2/block-types/core/paragraph
+GET	/?rest_route=/wp/v2/block-types/core/heading&context=edit
+GET	/?rest_route=/wp/v2/block-types/core/group&context=embed
+GET	/?rest_route=/wp/v2/block-types/core/list
+GET	/?rest_route=/wp/v2/block-types/core/template-part
+GET	/?rest_route=/wp/v2/block-types/core/post-terms&_fields=variations
+GET	/?rest_route=/wp/v2/block-types/core/navigation-link&_fields=variations,_links
+GET	/?rest_route=/wp/v2/block-types/core/archives&_fields=is_dynamic,_links
+GET	/?rest_route=/wp/v2/block-types/core/nope
+GET	/?rest_route=/wp/v2/block-types/CORE/Paragraph
+GET	/?rest_route=/wp/v2/block-types/core/paragraph&context=nope
+GET	/wp-json/wp/v2/block-types/core/quote	pretty
+HEAD	/?rest_route=/wp/v2/block-types
+HEAD	/?rest_route=/wp/v2/block-types/core/paragraph
+HEAD	/?rest_route=/wp/v2/block-types/core/nope
+GET	/?rest_route=/wp/v2/block-patterns/categories
+GET	/?rest_route=/wp/v2/block-patterns/categories&_fields=name&context=edit
+GET	/?rest_route=/wp/v2/block-patterns/categories&context=embed
+GET	/?rest_route=/wp/v2/block-patterns/categories&context=bogus
+GET	/?rest_route=/wp/v2/block-patterns/categories&context=
+GET	/?rest_route=/wp/v2/block-patterns/categories&context[]=view
+HEAD	/?rest_route=/wp/v2/block-patterns/categories
+GET	/wp-json/wp/v2/block-patterns/categories	pretty
+GET	/?rest_route=/wp/v2/themes	skip=administrator
+GET	/?rest_route=/wp/v2/themes&status=inactive	skip=administrator
+GET	/?rest_route=/wp/v2/themes&status=bogus
+GET	/?rest_route=/wp/v2/themes/twentytwentyfive	skip=administrator+editor+author+contributor
+GET	/?rest_route=/wp/v2/themes/twentytwentyfour	skip=administrator
+GET	/?rest_route=/wp/v2/themes/nope
+GET	/?rest_route=/wp/v2/themes/twentytwentyfive&context=edit	writes
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive&context=embed
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive&_fields=settings.color.palette,_links
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfour
+GET	/?rest_route=/wp/v2/global-styles/themes/twenty%74wentyfive
+HEAD	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive/variations
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive/variations&_fields=title
+GET	/?rest_route=/wp/v2/global-styles/themes/nope/variations
+GET	/?rest_route=/wp/v2/global-styles/themes/twenty%2574wentyfive
+GET	/?rest_route=/wp/v2/global-styles/themes/twenty%2574wentyfive/variations
+GET	/?rest_route=/wp/v2/themes/twenty%2574wentyfive	skip=administrator+editor+author+contributor
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive&_fields=styles.color
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive&_embed&_fields=_embedded

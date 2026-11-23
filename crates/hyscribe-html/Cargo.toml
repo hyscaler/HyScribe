@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "hyscribe-html"
+description = "WordPress's HTML API: WP_HTML_Tag_Processor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+hyscribe-kses.workspace = true
+
+[dev-dependencies]
+hyscribe-testkit.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

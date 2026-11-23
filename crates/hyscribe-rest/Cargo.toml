@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "hyscribe-rest"
+description = "The REST API: WP_REST_Server and its routes (ADR 0013)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+hyscribe-fetch.workspace = true
+hyscribe-image.workspace = true
+hyscribe-kses.workspace = true
+hyscribe-model.workspace = true
+hyscribe-phpser.workspace = true
+hyscribe-render.workspace = true
+
+[dev-dependencies]
+hyscribe-render = { workspace = true, features = ["fixture-themes"] }
+hyscribe-auth.workspace = true
+hyscribe-testkit.workspace = true
+sha2.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,29 @@
+# The requests of reference/register/golden.sh, in order:
+#   query<TAB>state<TAB>form
+# state is register for a site anyone may register on, 0 for one nobody may.
+# Every POST is a registration form; a user is made only by the ones that
+# end in a redirect, and their logins and addresses are not made twice but
+# on purpose, to be refused.
+action=register	0	user_login=reg-off&user_email=reg-off%40example.test
+action=register	register	user_login=reg-one&user_email=reg-one%40example.test
+action=register	register	user_login=reg-one&user_email=reg-other%40example.test
+action=register	register	user_login=reg-other&user_email=reg-one%40example.test
+action=register	register	user_login=REG-ONE&user_email=reg-case%40example.test
+action=register	register	user_login=reg-two&user_email=reg-two%40example.test&redirect_to=%2Fsample-page%2F
+action=register	register	user_login=reg-three&user_email=reg-three%40example.test&redirect_to=http%3A%2F%2Fevil.test%2F
+action=register	register	user_login=reg-four&user_email=reg-four%40example.test&redirect_to=0
+action=register	register	user_login=reg-five&user_email=%20reg-five%40example.test
+action=register	register	user_login=&user_email=
+action=register	register
+action=register	register	user_login=0&user_email=x
+action=register	register	user_login=%3Cb%3E&user_email=a%40b
+action=register	register	user_login=a%2Fb&user_email=reg-six%40example.test
+action=register	register	user_login=%20reg-seven&user_email=reg-seven%40example.test
+action=register	register	user_login=reg-eight&user_email=not-an-address
+action=register	register	user_login=reg-nine&user_email=reg-one%40example.test&redirect_to=%2Fx%22
+action=register	register	user_login=a%22b&user_email=c%22d%40example.test&redirect_to=%2Fx%22
+action=register	register	user_login=admin&user_email=admin%40default-install.test
+action=register	register	user_login=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&user_email=reg-long%40example.test
+action=register	register	user_login%5B%5D=x&user_email%5B%5D=y
+action=register&interim-login=1	register	user_login=&user_email=
+action=register&redirect_to=%2Fq%22	register	user_login=&user_email=

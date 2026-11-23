@@ -1,0 +1,45 @@
+# The REST index for reference/rest/golden.sh (method, target, flags): the
+# block editor's preload of WordPress 7.1.3 (edit-form-blocks.php), its
+# fields without the image settings, other fields clients ask for; then, refused, those HyScribe answers 501
+# as they keep the routes or namespaces (ADR 0013). The namespace indexes are in namespaces.list.
+GET	/?rest_route=/&_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front
+GET	/?rest_route=/&_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front	localhost
+GET	/wp-json/?_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front	pretty,localhost
+GET	/?rest_route=/&_fields=description,gmt_offset,home,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front
+GET	/?rest_route=/&_fields=name,description,url,home
+GET	/?rest_route=/&_fields=name&_pretty
+GET	/?rest_route=/&_fields=_links
+GET	/?rest_route=/&_fields=name,_links	localhost
+GET	/?rest_route=/&_fields=name,_embedded&_embed
+GET	/?rest_route=/&_fields=name&_embed
+GET	/?rest_route=/&_fields=site_logo
+GET	/?rest_route=/&_fields=site_icon_url
+GET	/?rest_route=/&_fields=site_icon.x
+GET	/?rest_route=/&_fields=authentication
+GET	/?rest_route=/&_fields=image_sizes
+GET	/?rest_route=/&_fields=image_sizes	localhost
+GET	/?rest_route=/&_fields=image_sizes.thumbnail.width,image_strip_meta	localhost
+GET	/?rest_route=/&_fields[]=name&_fields[]=url
+GET	/?rest_route=/&_fields[]=%20site_logo
+GET	/?rest_route=/&_fields[]=
+GET	/?rest_route=/&_fields=nope
+GET	/?rest_route=/&_fields=name&context=edit
+GET	/?rest_route=/&_fields=name,name.x,routes
+GET	/?rest_route=/&_fields=name&_envelope
+GET	/?rest_route=/&_fields=name&_jsonp=cb
+HEAD	/?rest_route=/&_fields=name
+GET	/wp-json/?_fields=name,_links	pretty
+GET	/wp-json?_fields=url	pretty
+GET	/?rest_route=/&_fields=name	origin
+OPTIONS	/?rest_route=/
+POST	/?rest_route=/&_fields=name
+GET	/?rest_route=/	refused
+GET	/?rest_route=/&_fields=	refused
+GET	/?rest_route=/&_fields=%20,	refused
+GET	/?rest_route=/&_fields=routes	refused
+GET	/?rest_route=/&_fields=namespaces	refused
+GET	/?rest_route=/&_fields=name,routes./	refused
+GET	/?rest_route=/&_fields=name,namespaces	localhost,refused
+GET	/?rest_route=/&_embed	refused
+HEAD	/?rest_route=/	refused
+GET	/wp-json/	pretty,refused

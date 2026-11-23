@@ -1,0 +1,193 @@
+
+		%notices%
+		<div class="wrap" id="profile-page">
+			<h1 class="wp-heading-inline">
+					%heading%			</h1>
+
+			%add%
+			<hr class="wp-header-end">
+
+			<form id="your-profile" action="%action%" method="post" novalidate="novalidate"
+								>
+				%nonce%%wp_referer%								<p>
+					<input type="hidden" name="from" value="profile" />
+					<input type="hidden" name="checkuser_id" value="%me%" />
+				</p>
+
+				<h2>Personal Options</h2>
+
+				<table class="form-table" role="presentation">
+					%rich%
+					
+%syntax%					
+										<tr class="user-admin-color-wrap">
+						<th scope="row">Administration Color Scheme</th>
+						<td>
+								<fieldset id="color-picker" class="scheme-list">
+		<legend class="screen-reader-text"><span>Administration Color Scheme</span></legend>
+		%colors%				</fieldset>
+							</td>
+					</tr>
+					
+%shortcuts%					
+					<tr class="show-admin-bar user-admin-bar-front-wrap">
+						<th scope="row">Toolbar</th>
+						<td>
+							<label for="admin_bar_front">
+								<input name="admin_bar_front" type="checkbox" id="admin_bar_front" value="1"%front% />
+								Show Toolbar when viewing site							</label><br />
+						</td>
+					</tr>
+
+%scrolling%					
+										
+					
+				</table>
+				
+				<h2>Name</h2>
+
+				<table class="form-table" role="presentation">
+					<tr class="user-user-login-wrap">
+						<th><label for="user_login">Username</label></th>
+						<td><input type="text" name="user_login" id="user_login" value="%login%" readonly="readonly" class="regular-text ltr" /> <span class="description">Usernames cannot be changed.</span></td>
+					</tr>
+
+					%role%
+					
+					<tr class="user-first-name-wrap">
+						<th><label for="first_name">First Name</label></th>
+						<td>
+													<input type="text" name="first_name" id="first_name" value="%first%"%given% class="regular-text" />
+												</td>
+					</tr>
+
+					<tr class="user-last-name-wrap">
+						<th><label for="last_name">Last Name</label></th>
+						<td>
+													<input type="text" name="last_name" id="last_name" value="%last%"%family% class="regular-text" />
+												</td>
+					</tr>
+
+					<tr class="user-nickname-wrap">
+						<th><label for="nickname">Nickname <span class="description">(required)</span></label></th>
+						<td>
+													<input type="text" name="nickname" id="nickname" value="%nickname%"%nick_auto% class="regular-text" />
+												</td>
+					</tr>
+
+					<tr class="user-display-name-wrap">
+						<th>
+							<label for="display_name">Display name publicly as</label>
+						</th>
+						<td>
+							<select name="display_name" id="display_name">
+					%display%															</select>
+						</td>
+					</tr>
+				</table>
+
+				<h2>Contact Info</h2>
+
+				<table class="form-table" role="presentation">
+					<tr class="user-email-wrap">
+						<th><label for="email">Email <span class="description">(required)</span></label></th>
+						<td>
+															%email_field%
+							
+							%pending%						</td>
+					</tr>
+
+					<tr class="user-url-wrap">
+						<th><label for="url">Website</label></th>
+						<td><input type="url" name="url" id="url" value="%url%" class="regular-text code" /></td>
+					</tr>
+
+									</table>
+
+				<h2>%about%</h2>
+
+				<table class="form-table" role="presentation">
+					<tr class="user-description-wrap">
+						<th><label for="description">Biographical Info</label></th>
+						<td><textarea name="description" id="description" rows="5" cols="30">%description%</textarea>
+						<p class="description">Share a little biographical information to fill out your profile. This may be shown publicly.</p></td>
+					</tr>
+
+%picture%																					</table>
+
+						<h2>Account Management</h2>
+
+						<table class="form-table" role="presentation">
+							<tr id="password" class="user-pass1-wrap">
+								<th><label for="pass1">New Password</label></th>
+								<td>
+									<input type="hidden" value=" " /><!-- #24364 workaround -->
+									<button type="button" class="button wp-generate-pw hide-if-no-js" aria-expanded="false">Set New Password</button>
+									<div class="wp-pwd hide-if-js">
+										<div class="password-input-wrapper">
+											<input type="password" name="pass1" id="pass1" class="regular-text ltr" value="" autocomplete="new-password" spellcheck="false" data-pw="%password%" aria-describedby="pass-strength-result" />
+											<div style="display:none" id="pass-strength-result" aria-live="polite"></div>
+										</div>
+										<button type="button" class="button wp-hide-pw user-new-password-toggle hide-if-no-js" data-toggle="0" aria-label="Hide password">
+											<span class="dashicons dashicons-hidden" aria-hidden="true"></span>
+											<span class="text">Hide</span>
+										</button>
+										<button type="button" class="button wp-cancel-pw hide-if-no-js" data-toggle="0" aria-label="Cancel password change">
+											<span class="dashicons dashicons-no" aria-hidden="true"></span>
+											<span class="text">Cancel</span>
+										</button>
+									</div>
+								</td>
+							</tr>
+							<tr class="user-pass2-wrap hide-if-js">
+								<th scope="row"><label for="pass2">Repeat New Password</label></th>
+								<td>
+								<input type="password" name="pass2" id="pass2" class="regular-text" value="" autocomplete="new-password" spellcheck="false" aria-describedby="pass2-desc" />
+																			<p class="description" id="pass2-desc">%pass2%</p>
+																	</td>
+							</tr>
+							<tr class="pw-weak">
+								<th>Confirm Password</th>
+								<td>
+									<label>
+										<input type="checkbox" name="pw_weak" class="pw-checkbox" />
+										<span id="pw-weak-text-label">Confirm use of weak password</span>
+									</label>
+								</td>
+							</tr>
+							
+														%reset%
+%sessions%													</table>
+
+											%apps%					
+					
+					
+				%caps%
+				<input type="hidden" name="action" value="update" />
+				<input type="hidden" name="user_id" id="user_id" value="%user_id%" />
+
+				<p class="submit"><input type="submit" name="submit" id="submit" class="button button-primary" value="%submit%"  /></p>
+			</form>
+		</div>
+		<script>
+	if (window.location.hash == '#password') {
+		document.getElementById('pass1').focus();
+	}
+</script>
+
+<script>
+	jQuery( function( $ ) {
+		var languageSelect = $( '#locale' );
+		$( 'form' ).on( 'submit', function() {
+			/*
+			 * Don't show a spinner for English and installed languages,
+			 * as there is nothing to download.
+			 */
+			if ( ! languageSelect.find( 'option:selected' ).data( 'installed' ) ) {
+				$( '#submit', this ).after( '<span class="spinner language-install-spinner is-active" />' );
+			}
+		});
+	} );
+</script>
+
+%templates%

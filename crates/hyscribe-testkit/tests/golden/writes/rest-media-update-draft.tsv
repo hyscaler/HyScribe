@@ -1,0 +1,13 @@
+# The rows PHP WordPress writes for the action rest-media-update-draft (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 20:31:35 to 2026-11-18 20:31:35 UTC.
+# %wp_posts:1% is 9301.
+# %wp_postmeta:1% is 26.
+# %wp_postmeta:2% is 27.
+# %wp_postmeta:3% is 28.
+# %wp_postmeta:4% is 29.
+# %wp_postmeta:5% is 30.
+wp_postmeta	%wp_postmeta:5%	+	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	+	meta_key	_wp_old_slug
+wp_postmeta	%wp_postmeta:5%	+	meta_value	a-write-oracle-picture
+wp_postmeta	%wp_postmeta:5%	+	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	~	post_name	a-write-oracle-picture	a-draft-slug

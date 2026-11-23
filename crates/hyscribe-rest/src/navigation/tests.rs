@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The PHP oracle's answers on the routes of synced patterns, navigation
+//! menus and classic menus, `tests/golden/patterns.tsv` over
+//! `reference/rest/patterns.sql`, replayed for every identity.
+
+use std::sync::OnceLock;
+
+use hyscribe_testkit::{RestCase, rest_cases, rest_headers};
+
+use crate::tests::content::{Content, default_install_with};
+use crate::tests::serve_over;
+
+fn patterns() -> &'static Content {
+    static CONTENT: OnceLock<Content> = OnceLock::new();
+    CONTENT.get_or_init(|| {
+        default_install_with(include_str!("../../../../reference/rest/patterns.sql"))
+    })
+}
+
+#[test]
+fn answers_match_php() {
+    let cases = rest_cases(include_str!("../../tests/golden/patterns.tsv"));
+    for case in &cases {
+        let served = serve_over(patterns(), case);
+        let what = format!(
+            "{} {} {} {}",
+            case.who, case.method, case.target, case.flags
+        );
+        assert_eq!(served.status, case.status, "{what}");
+        let mut php = case.headers.clone();
+        php.sort();
+        assert_eq!(rest_headers(&served.headers), php, "{what}");
+        let body = String::from_utf8_lossy(&case.body);
+        assert_eq!(String::from_utf8_lossy(&served.body), body, "{what}");
+    }
+    assert_eq!(cases.len(), 6 * 132);
+}
+
+/// `content` serves `target` to the administrator.
+fn get(content: &'static Content, target: &str) -> crate::Served {
+    let case = RestCase {
+        who: "administrator".into(),
+        method: "GET".into(),
+        target: target.into(),
+        flags: String::new(),
+        status: 0,
+        headers: Vec::new(),
+        body: Vec::new(),
+        sent: Vec::new(),
+    };
+    serve_over(content, &case)
+}
+
+/// A menu item of a post type archive, or of a type or taxonomy WordPress
+/// registers but does not show in REST, is not ported; without
+/// `nav_menu_options`, as on the default install, a menu adds no new
+/// pages, and a location the theme's mods give a category is no menu's
+/// and links from no category; an item of a post no route shows, as a
+/// revision, links to no object.
+#[test]
+fn menu_items_not_ported_and_plain_menus() {
+    let state = concat!(
+        "INSERT INTO `wp_options` VALUES (9801,'theme_mods_twentytwentyfive',",
+        "'a:1:{s:18:\"nav_menu_locations\";a:1:{s:7:\"primary\";i:1;}}','auto');\n",
+        "INSERT INTO `wp_terms` VALUES (870,'Plain','plain',0);\n",
+        "INSERT INTO `wp_term_taxonomy` VALUES (870,870,'nav_menu','',0,0);\n",
+        "INSERT INTO `wp_posts` VALUES ",
+        "(871,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','','','publish','closed','closed','','871','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'',1,'nav_menu_item','',0),",
+        "(872,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','','','publish','closed','closed','','872','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'',2,'nav_menu_item','',0),",
+        "(873,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','','','publish','closed','closed','','873','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'',3,'nav_menu_item','',0),",
+        "(876,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','','','publish','closed','closed','','876','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',0,'',4,'nav_menu_item','',0),",
+        "(877,1,'2026-11-07 10:00:00','2026-11-07 10:00:00','','Kept','','inherit','closed','closed','','877','','','2026-11-07 10:00:00','2026-11-07 10:00:00','',1,'',0,'revision','',0);\n",
+        "INSERT INTO `wp_postmeta` VALUES (871,871,'_menu_item_type','post_type_archive'),",
+        "(872,872,'_menu_item_type','post_type'),(873,872,'_menu_item_object','revision'),",
+        "(874,873,'_menu_item_type','taxonomy'),(875,873,'_menu_item_object','post_format'),",
+        "(876,876,'_menu_item_type','post_type'),(877,876,'_menu_item_object','page'),",
+        "(878,876,'_menu_item_object_id','877');\n",
+    );
+    let content: &'static Content = Box::leak(Box::new(default_install_with(state)));
+    for id in 871..=873 {
+        let served = get(content, &format!("/?rest_route=/wp/v2/menu-items/{id}"));
+        assert_eq!(served.status, 501, "{id}");
+    }
+    // `rest_get_route_for_post()` of a revision is empty: no object link.
+    let item = get(content, "/?rest_route=/wp/v2/menu-items/876");
+    assert_eq!(item.status, 200);
+    assert!(!String::from_utf8_lossy(&item.body).contains("menu-item-object"));
+    let served = get(
+        content,
+        "/?rest_route=/wp/v2/menus/870&_fields=locations,auto_add",
+    );
+    assert_eq!(served.body, br#"{"locations":[],"auto_add":false}"#);
+    let category = get(content, "/?rest_route=/wp/v2/categories/1").body;
+    assert!(!String::from_utf8_lossy(&category).contains("menu-location"));
+}

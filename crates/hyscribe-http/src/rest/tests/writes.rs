@@ -1,0 +1,3049 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The posts' and pages' writes (MVP 4.3): PHP's answers to
+//! `reference/rest/post-writes.list` sent over HTTP to `wordpress_saves`
+//! with a writer, as a visitor and each role, the database loaded afresh
+//! after each request that wrote; and the rows each write makes, against
+//! the write oracle on the fixture.
+
+use crate::mail::tests::{mailed, outbox, php_mails, printed};
+use hyscribe_config::{Database, Mode};
+use hyscribe_db::Writer;
+use hyscribe_render::date::{Zone, stored_unix};
+use hyscribe_rest::{Outcome, Pending, Plan};
+use hyscribe_testkit::writes::{check_writes, load_default_install};
+use hyscribe_testkit::{fixture_database, rest_cases};
+use hyscribe_write::terms::Taxonomy::PostTag;
+use sqlx::Connection as _;
+
+use super::*;
+
+/// The scratch database the writing tests reload.
+pub(super) fn saves() -> Database {
+    Database {
+        name: "wordpress_saves".into(),
+        ..fixture_database()
+    }
+}
+
+/// `wordpress_saves` as the default install with `reference/rest/users.sql`'s
+/// users, as the oracle recorded over it.
+pub(super) async fn fresh() {
+    fresh_with("").await;
+}
+
+/// A connection to `wordpress_saves`.
+async fn saves_conn() -> sqlx::MySqlConnection {
+    let db = saves();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    sqlx::MySqlConnection::connect_with(&options).await.unwrap()
+}
+
+/// The one value `sql` selects from `wordpress_saves`.
+async fn stored(sql: &'static str, id: u64) -> String {
+    let query = sqlx::query_scalar::<_, Vec<u8>>(sql).bind(id);
+    let value = query.fetch_one(&mut saves_conn().await).await.unwrap();
+    String::from_utf8(value).unwrap()
+}
+
+/// [`fresh`] with a list's `state`, its statements before `-- cleanup`.
+async fn fresh_with(state: &str) {
+    load_default_install(&saves()).await.unwrap();
+    let mut conn = saves_conn().await;
+    let users = include_str!("../../../../../reference/rest/users.sql");
+    let state = state.split("\n-- cleanup\n").next().unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe([users, state].concat()))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+}
+
+/// [`saves_site`] with uploads into `uploads`, which a media delete needs.
+pub(super) async fn uploading(dir: &std::path::Path, uploads: &std::path::Path) -> Arc<Site> {
+    let site = Arc::into_inner(saves_site(dir).await).unwrap();
+    let limits = hyscribe_config::ImageLimits::default();
+    Arc::new(site.with_uploads(crate::Uploads::new(uploads.into(), 2 << 20, limits)))
+}
+
+/// The oracle's site over `wordpress_saves`, with sessions in `dir` and a
+/// writer.
+pub(super) async fn saves_site(dir: &std::path::Path) -> Arc<Site> {
+    let db = crate::Db::connect(&saves()).await.unwrap();
+    let home = Some("http://127.0.0.1:8081".to_string());
+    let site = Arc::new(Site::load(db, home.clone(), home).await.unwrap());
+    let site = Arc::into_inner(on(site, false, dir)).unwrap();
+    let writer = Writer::open(&saves(), Mode::Primary).await.unwrap();
+    Arc::new(site.with_writer(writer))
+}
+
+/// The dates of `body` from `start` to `end` as `%now%`, as the golden
+/// keeps them.
+pub(super) fn now_masked(body: &str, (start, end): (i64, i64)) -> String {
+    let shaped = |date: &[u8]| {
+        date.iter().enumerate().all(|(i, b)| match i {
+            4 | 7 => *b == b'-',
+            10 => *b == b'T',
+            13 | 16 => *b == b':',
+            _ => b.is_ascii_digit(),
+        })
+    };
+    let mut out = String::new();
+    let mut rest = body;
+    while let Some(date) = rest.get(..19) {
+        let unix = stored_unix(&date.replace('T', " "), Zone::Utc);
+        if shaped(date.as_bytes()) && (start..=end).contains(&unix) {
+            out.push_str("%now%");
+            rest = rest.get(19..).unwrap_or_default();
+            continue;
+        }
+        let next = rest.chars().next().unwrap();
+        out.push(next);
+        rest = rest.get(next.len_utf8()..).unwrap_or_default();
+    }
+    out + rest
+}
+
+/// `body` with each preview link's nonce as `%preview_nonce%`, as the
+/// golden keeps it.
+fn preview_masked(body: &str) -> String {
+    let key = "preview_nonce=";
+    let mut parts = body.split(key);
+    let mut out = parts.next().unwrap_or_default().to_string();
+    for part in parts {
+        out.push_str(key);
+        out.push_str("%preview_nonce%");
+        out.push_str(part.get(10..).unwrap_or_default());
+    }
+    out
+}
+
+/// PHP's answers to the posts' and pages' writes, for a visitor and every
+/// role: those that write leave the rows PHP leaves (the write oracle
+/// tests below), so the next request starts from the database afresh. The
+/// body PHP takes with `meta` is planned like any other.
+#[tokio::test(flavor = "multi_thread")]
+async fn post_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/post-writes.tsv");
+    assert_eq!(writes_match_php(golden, "", &[]).await, (6 * 31, 0));
+}
+
+/// Form posts whose text is not valid UTF-8 are refused as PHP's `wpdb`
+/// refuses them, and an `id` below 1 is not found
+/// (`reference/rest/invalid-input.list`).
+#[tokio::test(flavor = "multi_thread")]
+async fn invalid_input_is_refused_as_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/invalid-input.tsv");
+    assert_eq!(writes_match_php(golden, "", &[]).await, (6 * 10, 0));
+}
+
+/// PHP's answers to the navigation menus' and synced patterns' writes, over
+/// `reference/rest/site-writes.sql`, those flagged `refused` answered 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/site-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/site-writes.sql");
+    // Meta PHP refuses only after the write, to those who may edit the
+    // pattern.
+    let editors: &[&str] = &["administrator", "editor"];
+    let unported = [
+        (r#"{"meta":{"wp_pattern_sync_status":"bogus"}}"#, editors),
+        (r#"{"meta":{"wp_pattern_sync_status":null}}"#, editors),
+    ];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 30, 2 * 2)
+    );
+}
+
+/// PHP's answers to the block editor's saves as its JavaScript sends them,
+/// over `reference/rest/editor-saves.sql` (MVP 5.2).
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_saves_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/editor-saves.tsv");
+    let state = include_str!("../../../../../reference/rest/editor-saves.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 34, 0));
+}
+
+/// PHP's answers to the themes reads whose links create the active theme's
+/// global styles post (`reference/rest/theme-writes.list`), for a visitor and
+/// every role, the post made by the first read that needs it.
+#[tokio::test(flavor = "multi_thread")]
+async fn theme_reads_create_the_styles_post_as_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/theme-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/theme-writes.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 9, 0));
+}
+
+/// PHP's answers to the navigation fallback route over a site without a
+/// menu (`reference/rest/navigation-fallback.list`) for a visitor and every
+/// role: the administrator's read makes the menu, and the editor, who may
+/// not edit theme options, is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_navigation_fallback_route_writes_as_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/navigation-fallback.tsv");
+    let state = include_str!("../../../../../reference/rest/navigation-fallback.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 15, 0));
+}
+
+/// The same route over a site with menus answers the newest published one
+/// and writes nothing (`reference/rest/navigation-fallback-existing.list`).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_navigation_fallback_route_finds_the_newest_menu_as_php() {
+    let golden =
+        include_str!("../../../../hyscribe-rest/tests/golden/navigation-fallback-existing.tsv");
+    let state = include_str!("../../../../../reference/rest/navigation-fallback-existing.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 17, 0));
+}
+
+/// A navigation fallback read makes the `wp_navigation` post row for row as
+/// PHP does, by the user who asks (`rest-navigation-fallback-*`), nothing
+/// when a statement fails part way; a read that finds a menu writes none.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_navigation_fallback_read_writes_the_post_as_php() {
+    use crate::outbound::tests::{golden, golden_new_posts};
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let target = "/?rest_route=/wp-block-editor/v1/navigation-fallback";
+    let mut pending = planned(&site, "GET", target, "").await;
+    for case in [
+        "rest-navigation-fallback-default",
+        "rest-navigation-fallback-classic",
+    ] {
+        let post = hyscribe_render::Classic {
+            title: golden(case, "post_title"),
+            name: golden(case, "post_name"),
+            content: golden(case, "post_content"),
+        };
+        let write = hyscribe_rest::Write::NavigationFallback(Some(Box::new(post)));
+        // Over a site without a menu the plan is the page list, as the oracle's default.
+        if case.ends_with("default") {
+            assert_eq!(pending.plan.write, write, "{case}");
+        }
+        pending.plan.write = write;
+        // The oracle's setup made the classic menus' items, as posts of their own.
+        let setup = async |conn: &mut hyscribe_db::Connection| {
+            let row = "INSERT INTO wp_posts (post_author, post_content, post_title, post_excerpt, \
+                post_status, post_name, post_type, to_ping, pinged, post_content_filtered) \
+                VALUES (1, '', '', '', 'publish', '', 'nav_menu_item', '', '', '')";
+            for _ in 1..golden_new_posts(case) {
+                let inserted = sqlx::query(row).execute(&mut *conn).await;
+                inserted.map_err(|err| err.to_string())?;
+            }
+            Ok(())
+        };
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+            let outcome = acted(conn, &pending.plan, &ctx).await;
+            assert!(matches!(outcome, Outcome::Written(id) if id != 0), "{case}");
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), case, setup, action).await;
+        report.unwrap();
+    }
+    // A menu found is written as nothing.
+    pending.plan.write = hyscribe_rest::Write::NavigationFallback(None);
+    let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+    let writer = Writer::open(&saves(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome =
+        crate::rest::writes::act(writer.begin().await, &pending.plan, &ctx, outbox()).await;
+    assert_eq!(outcome.unwrap(), Outcome::Written(0));
+}
+
+/// PHP's answers to the media's updates and deletes
+/// (`reference/rest/media-writes.list`) for a visitor and every role, over
+/// `reference/rest/media-writes.sql`: a body that names `featured_media` or
+/// `meta` is not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn media_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/media-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/media-writes.sql");
+    let unported = [(r#"{"featured_media":1}"#, &[][..])];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 38, 6)
+    );
+}
+
+/// `serialize()` of the metadata the oracle's attachment has.
+const ORACLE_METADATA: &[u8] = br#"a:6:{s:5:"width";i:1200;s:6:"height";i:800;s:4:"file";s:18:"2026/11/oracle.jpg";s:8:"filesize";i:345678;s:5:"sizes";a:2:{s:6:"medium";a:5:{s:4:"file";s:18:"oracle-300x200.jpg";s:5:"width";i:300;s:6:"height";i:200;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:12345;}s:9:"thumbnail";a:5:{s:4:"file";s:18:"oracle-150x150.jpg";s:5:"width";i:150;s:6:"height";i:150;s:9:"mime-type";s:10:"image/jpeg";s:8:"filesize";i:5432;}}s:10:"image_meta";a:12:{s:8:"aperture";s:1:"0";s:6:"credit";s:0:"";s:6:"camera";s:0:"";s:7:"caption";s:0:"";s:17:"created_timestamp";s:1:"0";s:9:"copyright";s:0:"";s:12:"focal_length";s:1:"0";s:3:"iso";s:1:"0";s:13:"shutter_speed";s:1:"0";s:5:"title";s:0:"";s:11:"orientation";s:1:"0";s:8:"keywords";a:0:{}}}"#;
+
+/// What an oracle attachment is made with, besides the rows of its own.
+#[derive(Clone, Copy, PartialEq)]
+enum Extras {
+    /// Nothing.
+    None,
+    /// A comment, and the image as post 1's featured image.
+    Used,
+    /// [`Extras::Used`], in the trash with its trash meta.
+    UsedTrashed,
+    /// Only in the trash.
+    Trashed,
+}
+
+/// The oracle's `$media_attachment( $args, $parent )` as attachment `id`
+/// (`reference/writes/actions-media-rest.php`), with `extras`.
+async fn oracle_attachment(
+    write: &mut hyscribe_db::Write<'_>,
+    ctx: &hyscribe_write::posts::Context,
+    (id, parent, name): (u64, u64, Option<&str>),
+    extras: Extras,
+) -> Result<(), hyscribe_write::Error> {
+    use hyscribe_write::options::{Meta, add_metadata, update_metadata};
+    let args = hyscribe_write::posts::PostArgs {
+        import_id: id,
+        title: b"A write oracle picture".to_vec(),
+        content: b"Its description".to_vec(),
+        excerpt: b"Its caption".to_vec(),
+        mime_type: "image/jpeg".into(),
+        author: Some(1),
+        parent,
+        name: name.map(|name| name.as_bytes().to_vec()),
+        ..hyscribe_write::posts::PostArgs::default()
+    };
+    let id =
+        hyscribe_write::posts::wp_insert_attachment(write, ctx, args, "2026/11/oracle.jpg").await?;
+    let any = Value::String(Vec::new());
+    let metadata = hyscribe_phpser::unserialize(ORACLE_METADATA).unwrap();
+    let backups = hyscribe_phpser::unserialize(
+        br#"a:1:{s:9:"full-orig";a:3:{s:5:"width";i:1200;s:6:"height";i:800;s:4:"file";s:15:"oracle-orig.jpg";}}"#,
+    )
+    .unwrap();
+    let alt = Value::String(b"Old alt".to_vec());
+    for (key, value) in [
+        ("_wp_attachment_metadata", &metadata),
+        ("_wp_attachment_image_alt", &alt),
+        ("_wp_attachment_backup_sizes", &backups),
+    ] {
+        update_metadata(write, Meta::Post, id, key, value, &any).await?;
+    }
+    if extras == Extras::None {
+        return Ok(());
+    }
+    if matches!(extras, Extras::Used | Extras::UsedTrashed) {
+        let comment = hyscribe_db::CommentFields {
+            post_id: id,
+            author: b"A reader".to_vec(),
+            date: "2026-01-01 00:00:00".into(),
+            date_gmt: "2026-01-01 00:00:00".into(),
+            content: b"A comment.".to_vec(),
+            approved: "1".into(),
+            comment_type: "comment".into(),
+            ..hyscribe_db::CommentFields::default()
+        };
+        write.insert_comment(&comment).await?;
+        let image = Value::Int(i64::try_from(id).unwrap());
+        add_metadata(write, Meta::Post, 1, "_thumbnail_id", &image, false).await?;
+    }
+    if extras == Extras::UsedTrashed {
+        let status = Value::String(b"inherit".to_vec());
+        add_metadata(
+            write,
+            Meta::Post,
+            id,
+            "_wp_trash_meta_status",
+            &status,
+            false,
+        )
+        .await?;
+        let time = Value::Int(ctx.now);
+        add_metadata(write, Meta::Post, id, "_wp_trash_meta_time", &time, false).await?;
+    }
+    Ok(())
+}
+
+/// What an update of the oracle's attachment is sent as.
+const UPDATE: &str = r#"{"title":"<b>New</b> <script>x()</script>title","caption":"A <em>caption</em><iframe src=\"https://example.test/\"></iframe>","description":{"raw":"<p onclick=\"y()\">Described</p>"},"alt_text":"  A <b>new</b>\talt  ","post":2,"slug":"renamed picture","comment_status":"closed","ping_status":"closed","template":""}"#;
+
+/// Each media update and delete leaves the rows PHP's leave
+/// (`reference/writes/actions-media-rest.php`), and a delete the files
+/// `wp_delete_attachment_files()` names, each on an attachment of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn media_writes_are_php_s() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let _comments = crate::admin::tests::COMMENT_ROWS.lock().await;
+    let media = |id: u64| format!("/?rest_route=/wp/v2/media/{id}");
+    let force = |id: u64, force: &str| format!("/?rest_route=/wp/v2/media/{id}&force={force}");
+    let (taken, id) = (9300, 9301);
+    let cases: Vec<(&str, &'static str, String, &str, Extras, bool)> = vec![
+        (
+            "rest-media-update",
+            "POST",
+            media(id),
+            UPDATE,
+            Extras::None,
+            false,
+        ),
+        (
+            "rest-media-update-private",
+            "PATCH",
+            media(id),
+            r#"{"status":"private","post":0,"date":"2026-01-02T03:04:05"}"#,
+            Extras::None,
+            false,
+        ),
+        (
+            "rest-media-update-alt",
+            "PUT",
+            media(id),
+            r#"{"alt_text":""}"#,
+            Extras::None,
+            false,
+        ),
+        (
+            "rest-media-update-slug",
+            "POST",
+            media(id),
+            r#"{"slug":"taken-slug"}"#,
+            Extras::None,
+            true,
+        ),
+        (
+            "rest-media-update-draft",
+            "POST",
+            media(id),
+            r#"{"status":"draft","slug":"a-draft-slug","author":1}"#,
+            Extras::None,
+            false,
+        ),
+        (
+            "rest-media-update-trashed",
+            "POST",
+            media(id),
+            r#"{"title":"Renamed in the trash"}"#,
+            Extras::Trashed,
+            false,
+        ),
+        (
+            "rest-media-delete",
+            "DELETE",
+            force(id, "true"),
+            "",
+            Extras::Used,
+            false,
+        ),
+        (
+            "rest-media-delete-trashed",
+            "DELETE",
+            force(id, "1"),
+            "",
+            Extras::UsedTrashed,
+            false,
+        ),
+        (
+            "rest-media-delete-unattached",
+            "DELETE",
+            force(id, "true"),
+            "",
+            Extras::None,
+            false,
+        ),
+    ];
+    for (golden, method, target, body, extras, taken_name) in cases {
+        fresh_with("").await;
+        let dir = tempfile::tempdir().unwrap();
+        let site = saves_site(dir.path()).await;
+        let unattached = golden.ends_with("unattached");
+        let parent = u64::from(!unattached);
+        let trash = matches!(extras, Extras::Trashed | Extras::UsedTrashed);
+        let attachments = async |conn: &mut hyscribe_db::Connection, writer: &Writer| {
+            let ctx = hyscribe_write::posts::Context {
+                user: 1,
+                can_publish: true,
+                home: b"http://127.0.0.1:8081".to_vec(),
+                upload_host: b"127.0.0.1:8081".to_vec(),
+                unfiltered_html: false,
+                constants: hyscribe_config::Constants::default(),
+                now: now(),
+            };
+            let shown = |err: hyscribe_write::Error| format!("{err:?}");
+            let mut write = writer
+                .begin_on(conn)
+                .await
+                .map_err(|err| format!("{err:?}"))?;
+            if taken_name {
+                let named = (taken, parent, Some("taken-slug"));
+                let first = oracle_attachment(&mut write, &ctx, named, Extras::None);
+                first.await.map_err(shown)?;
+            }
+            let oracle = (id, parent, None);
+            let second = oracle_attachment(&mut write, &ctx, oracle, extras);
+            second.await.map_err(shown)?;
+            write.commit().await.map_err(|err| format!("{err:?}"))?;
+            if trash {
+                let sql = "UPDATE wp_posts SET post_status = 'trash' WHERE ID = ?";
+                let trashed = sqlx::query(sql).bind(id).execute(&mut *conn).await;
+                trashed.map_err(|err| format!("{err:?}"))?;
+            }
+            Ok::<_, String>(())
+        };
+        let saves_writer = Writer::open(&saves(), Mode::Primary)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut conn = saves_conn().await;
+        attachments(&mut conn, &saves_writer).await.unwrap();
+        let pending = planned(&site, method, &target, body).await;
+        let setup = async |conn: &mut hyscribe_db::Connection| {
+            let writer = Writer::open(&fixture_database(), Mode::Primary)
+                .await
+                .unwrap()
+                .unwrap();
+            attachments(conn, &writer).await
+        };
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+            let outcome = acted(conn, &pending.plan, &ctx).await;
+            match outcome {
+                Outcome::Written(_) => {}
+                Outcome::Deleted(deleted, files) => {
+                    assert_eq!(deleted, id, "{golden}");
+                    let own = |path: &str, within: &str| (path.into(), within.into());
+                    let names: Vec<(Vec<u8>, Vec<u8>)> = vec![
+                        own("2026/11/oracle-300x200.jpg", "2026/11"),
+                        own("2026/11/oracle-150x150.jpg", "2026/11"),
+                        own("2026/11/oracle-orig.jpg", "2026/11"),
+                        own("2026/11/oracle.jpg", ""),
+                    ];
+                    assert_eq!(files, names, "{golden}");
+                }
+                other => panic!("{golden}: {other:?}"),
+            }
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), golden, setup, action).await;
+        report.unwrap();
+    }
+}
+
+/// A themes read whose links name the global styles post writes the rows
+/// PHP's does (`rest-themes-global-styles`), and nothing when a statement
+/// fails part way.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_themes_read_creates_the_styles_post_as_php() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let pending = planned(&site, "GET", "/?rest_route=/wp/v2/themes&status=active", "").await;
+    let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
+    let action = async |conn: &mut hyscribe_db::Connection, ()| {
+        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+        let outcome = acted(conn, &pending.plan, &ctx).await;
+        assert!(matches!(outcome, Outcome::Written(_)));
+        Ok(())
+    };
+    let golden = "rest-themes-global-styles";
+    let report = check_writes(&fixture_database(), golden, nothing, action).await;
+    report.unwrap();
+}
+
+/// An attachment's delete planned while it was there and acted once it is
+/// gone is refused as PHP's `wp_delete_post()` returning false is.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_media_delete_of_a_gone_attachment_is_refused() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(include_str!(
+        "../../../../../reference/rest/media-writes.sql"
+    ))
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let target = "/?rest_route=/wp/v2/media/9301&force=true";
+    let pending = planned(&site, "DELETE", target, "").await;
+    // The fixture database has no such attachment.
+    let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+    let fixture = Writer::open(&fixture_database(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome =
+        crate::rest::writes::act(fixture.begin().await, &pending.plan, &ctx, outbox()).await;
+    assert_eq!(outcome.unwrap(), Outcome::Refused("rest_cannot_delete"));
+}
+
+/// The status and body of the administrator's `method target` sent to
+/// `site` with their cookie.
+async fn as_administrator(site: &Arc<Site>, method: &str, target: &str) -> (StatusCode, String) {
+    let (cookie, nonce) = log_in_as(site, "admin", 1).await;
+    let request = axum::http::Request::builder()
+        .method(method)
+        .uri(target)
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, cookie)
+        .header("x-wp-nonce", nonce);
+    let response = send(site, request, "").await;
+    (response.status(), body(response).await)
+}
+
+/// How many posts of `wordpress_saves` have the ID `id`.
+async fn posts_with(id: u64) -> i64 {
+    let sql = "SELECT COUNT(*) FROM wp_posts WHERE ID = ?";
+    let count = sqlx::query_scalar::<_, i64>(sql).bind(id);
+    count.fetch_one(&mut saves_conn().await).await.unwrap()
+}
+
+/// A media delete's files go once its rows are committed, those of the
+/// attachment and not a link out of its folder or another file; without an
+/// uploads folder it is not ported and writes nothing; and with MEDIA_TRASH
+/// on, only a forced one is.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_media_delete_removes_its_files_once_it_commits() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let state = include_str!("../../../../../reference/rest/media-writes.sql");
+    fresh_with(state).await;
+    let (sessions, uploads, outside) = (
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+        tempfile::tempdir().unwrap(),
+    );
+    let folder = uploads.path().join("2026/11");
+    std::fs::create_dir_all(&folder).unwrap();
+    let names = [
+        "oracle-one.jpg",
+        "oracle-one-300x200.jpg",
+        "oracle-one-orig.jpg",
+        "unrelated.jpg",
+    ];
+    for name in names {
+        std::fs::write(folder.join(name), name).unwrap();
+    }
+    // The 150 by 150 size is a link to a file outside the uploads.
+    std::fs::write(outside.path().join("kept.jpg"), "kept").unwrap();
+    let link = folder.join("oracle-one-150x150.jpg");
+    std::os::unix::fs::symlink(outside.path().join("kept.jpg"), &link).unwrap();
+    let target = "/?rest_route=/wp/v2/media/9301&force=true";
+    // No uploads folder: not ported, and nothing written.
+    let plain = saves_site(sessions.path()).await;
+    let (status, text) = as_administrator(&plain, "DELETE", target).await;
+    assert_eq!((status, text.as_str()), (StatusCode::NOT_IMPLEMENTED, ""));
+    assert_eq!(posts_with(9301).await, 1);
+    assert!(folder.join("oracle-one.jpg").exists());
+    // MEDIA_TRASH on: a delete that is not forced is not ported.
+    let site = uploading(sessions.path(), uploads.path()).await;
+    let constants = hyscribe_config::Constants {
+        media_trash: true,
+        ..hyscribe_config::Constants::default()
+    };
+    let trashing = Arc::new(Arc::into_inner(site).unwrap().with_constants(constants));
+    let unforced = "/?rest_route=/wp/v2/media/9301";
+    let (status, text) = as_administrator(&trashing, "DELETE", unforced).await;
+    assert_eq!((status, text.as_str()), (StatusCode::NOT_IMPLEMENTED, ""));
+    assert_eq!(posts_with(9301).await, 1);
+    // Forced, it deletes the rows and then the files.
+    let site = uploading(sessions.path(), uploads.path()).await;
+    // With MEDIA_TRASH off, an unforced delete is PHP's own refusal.
+    let (status, text) = as_administrator(&site, "DELETE", unforced).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert!(text.contains("rest_trash_not_supported"), "{text}");
+    assert_eq!(posts_with(9301).await, 1);
+    assert_eq!(
+        as_administrator(&site, "DELETE", target).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(posts_with(9301).await, 0);
+    for name in &names[..3] {
+        assert!(!folder.join(name).exists(), "{name}");
+    }
+    assert!(folder.join("unrelated.jpg").exists());
+    assert!(link.is_symlink() && outside.path().join("kept.jpg").exists());
+}
+
+/// PHP's answers to batches (`reference/rest/batch.list`) as a visitor, an
+/// author and the administrator, their writes made one after the other,
+/// those flagged `refused` answered 501; `hyscribe-rest` replays every role.
+#[tokio::test(flavor = "multi_thread")]
+async fn batches_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/batch.tsv");
+    let who = ["visitor\t", "author\t", "administrator\t"];
+    let golden: Vec<&str> = golden
+        .lines()
+        .filter(|line| who.iter().any(|who| line.starts_with(who)))
+        .collect();
+    assert_eq!(
+        writes_match_php(&golden.join("\n"), "", &[]).await,
+        (3 * 28, 3)
+    );
+}
+
+/// The cases of `golden`, recorded over `state`, sent over HTTP as each
+/// identity: how many there are and how many answered 501, as those
+/// flagged `refused` and the bodies of `unported` must, to the identities
+/// listed with them or to all for none; a body may have the request's target before it.
+async fn writes_match_php(
+    golden: &str,
+    state: &str,
+    unported: &[(&str, &[&str])],
+) -> (usize, usize) {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(state).await;
+    let dir = tempfile::tempdir().unwrap();
+    let uploads = tempfile::tempdir().unwrap();
+    let mut site = uploading(dir.path(), uploads.path()).await;
+    let mut logins = Vec::new();
+    for (who, login, id) in [
+        ("administrator", "admin", 1),
+        ("editor", "editor", 701),
+        ("author", "author", 702),
+        ("contributor", "contributor", 703),
+        ("subscriber", "subscriber", 704),
+    ] {
+        logins.push((who, log_in_as(&site, login, id).await));
+    }
+    let cases = rest_cases(golden);
+    let mut refused = 0;
+    for case in &cases {
+        let sent = String::from_utf8(case.sent.clone()).unwrap();
+        let mut request = axum::http::Request::builder()
+            .method(case.method.as_str())
+            .uri(case.target.as_str())
+            .header(header::HOST, "127.0.0.1:8081")
+            // PHP's requests come from 127.0.0.1, as the oracle's plugin says.
+            .extension(crate::Peer([127, 0, 0, 1].into()));
+        let login = logins.iter().find(|(who, _)| *who == case.who);
+        let nonce = match login {
+            Some((_, (cookie, nonce))) => {
+                request = request
+                    .header(header::COOKIE, cookie)
+                    .header("x-wp-nonce", nonce);
+                nonce.clone()
+            }
+            None => String::from("%nonce%"),
+        };
+        for (flag, kind) in [
+            ("json", "application/json"),
+            ("form", "application/x-www-form-urlencoded"),
+        ] {
+            if case.flag(flag) {
+                request = request.header(header::CONTENT_TYPE, kind);
+            }
+        }
+        for (flag, method) in [("override", "DELETE"), ("put", "PUT")] {
+            if case.flag(flag) {
+                request = request.header("x-http-method-override", method);
+            }
+        }
+        let start = now();
+        let response = send(&site, request, &sent).await;
+        let what = format!("{} {} {} {sent}", case.who, case.method, case.target);
+        // A body alone, or with the target of the request before it.
+        let with_target = format!("{} {sent}", case.target);
+        let unported = unported.iter().any(|(body, whos)| {
+            (*body == sent || *body == with_target)
+                && (whos.is_empty() || whos.contains(&case.who.as_str()))
+        });
+        if case.flag("refused") || unported {
+            assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED, "{what}");
+            refused += 1;
+            continue;
+        }
+        let status = response.status();
+        assert_eq!(status.as_u16(), case.status, "{what}");
+        let mut php = case.headers.clone();
+        php.sort();
+        assert_eq!(kept(response.headers(), &nonce), php, "{what}");
+        let ours = body(response).await.replace(&nonce, "%nonce%");
+        let ours = preview_masked(&now_masked(&ours, (start, now())));
+        let php = String::from_utf8_lossy(&case.body).replace(CREDIT[0], CREDIT[1]);
+        let at = ours
+            .bytes()
+            .zip(php.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let from = at.saturating_sub(80);
+        assert_eq!(ours.get(from..), php.get(from..), "{what}");
+        // Connections opened before the tables were loaded again can
+        // refuse them (1412), so the site connects afresh too. A `meta`
+        // PHP refuses answers an error once the user is written.
+        let meta_refused = sent.contains(r#""meta":"#);
+        if status.is_success() || meta_refused {
+            fresh_with(state).await;
+            site = uploading(dir.path(), uploads.path()).await;
+        }
+    }
+    (cases.len(), refused)
+}
+
+/// `target` asked of `site` by user 1 with the JSON `body`, from the
+/// address and user agent of `client`: what `then` makes of the request.
+async fn as_admin<T: Send + 'static>(
+    site: &Arc<Site>,
+    asked: (&'static str, &str, &str),
+    client: (&'static [u8], Option<&'static [u8]>),
+    then: impl FnOnce(&Rest, &hyscribe_rest::Request) -> T + Send + 'static,
+) -> T {
+    as_user(site, 1, asked, client, then).await
+}
+
+/// [`as_admin`], asked by the user `user`.
+async fn as_user<T: Send + 'static>(
+    site: &Arc<Site>,
+    user: u64,
+    (method, target, body): (&'static str, &str, &str),
+    client: (&'static [u8], Option<&'static [u8]>),
+    then: impl FnOnce(&Rest, &hyscribe_rest::Request) -> T + Send + 'static,
+) -> T {
+    let (site, handle) = (Arc::clone(site), Handle::current());
+    let (target, body) = (target.to_string(), body.to_string());
+    tokio::task::spawn_blocking(move || {
+        let mut reads = LoginReads::new(&site, handle, now());
+        reads.act_as(user, Vec::new());
+        let nonce = reads.nonce("wp_rest");
+        let rest = Rest {
+            reads,
+            site: &site,
+            user,
+            caps: OnceCell::new(),
+        };
+        let (path, query) = target.split_once('?').unwrap_or((&target, ""));
+        let get = parse_str(query.as_bytes()).as_array().unwrap().to_vec();
+        let route = hyscribe_phpser::lookup(&get, "rest_route")
+            .unwrap()
+            .to_php_string();
+        let request = hyscribe_rest::Request {
+            method,
+            route: &route,
+            uri: path.as_bytes(),
+            get: &get,
+            post: &[],
+            cookie_user: user,
+            origin: None,
+            nonce: Some(nonce.as_bytes()),
+            host: None,
+            now: 0,
+            remote_addr: client.0,
+            postpass: false,
+            user_agent: client.1,
+            method_override: None,
+            content_type: Some(b"application/json"),
+            body: body.as_bytes(),
+        };
+        then(&rest, &request)
+    })
+    .await
+    .unwrap()
+}
+
+/// `target` asked of `site` by user 1 with the JSON `body`, past its
+/// checks: the write it plans.
+pub(super) async fn planned(
+    site: &Arc<Site>,
+    method: &'static str,
+    target: &str,
+    body: &str,
+) -> Pending {
+    let then = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
+        rest, request,
+    ) {
+        hyscribe_rest::Answer::Write(pending) => *pending,
+        hyscribe_rest::Answer::Served(served) => {
+            panic!("{}", String::from_utf8_lossy(&served.body))
+        }
+    };
+    as_admin(site, (method, target, body), (b"", None), then).await
+}
+
+/// The answer to `target` asked as [`planned`] once the write came to
+/// `outcome`: its status and body.
+async fn answered(
+    site: &Arc<Site>,
+    asked: (&'static str, &str, &str),
+    outcome: Outcome,
+) -> (u16, String) {
+    let then = move |rest: &Rest, request: &hyscribe_rest::Request| {
+        let hyscribe_rest::Answer::Write(pending) = hyscribe_rest::answer(rest, request) else {
+            panic!("served at once")
+        };
+        let served = hyscribe_rest::written(rest, request, *pending, outcome)
+            .served()
+            .unwrap();
+        (served.status, String::from_utf8(served.body).unwrap())
+    };
+    as_admin(site, asked, (b"", None), then).await
+}
+
+/// What `plan` writes on `conn`, once each statement budget short of it
+/// has failed and rolled back.
+async fn acted(
+    conn: &mut hyscribe_db::Connection,
+    plan: &Plan,
+    ctx: &hyscribe_write::posts::Context,
+) -> Outcome {
+    let fixture = fixture_database();
+    let writer = Writer::open(&fixture, Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut budget = 0;
+    loop {
+        let mut write = writer.begin_on(conn).await;
+        if let Ok(write) = &mut write {
+            write.fail_after(budget);
+        }
+        match crate::rest::writes::act(write, plan, ctx, outbox()).await {
+            Err(hyscribe_write::Error::Db(err)) if err.to_string().contains("budget is spent") => {
+                budget += 1;
+            }
+            outcome => return outcome.unwrap(),
+        }
+    }
+}
+
+/// Each write leaves the rows PHP's leaves (`reference/writes/actions-rest.php`),
+/// and nothing when a statement fails part way.
+#[tokio::test(flavor = "multi_thread")]
+async fn post_writes_are_php_s() {
+    // The editor's saves write the same rows of the fixture.
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let writes = [
+        (
+            "rest-posts-create",
+            "POST",
+            "/?rest_route=/wp/v2/posts",
+            r#"{"title":"<b>Bold</b> <script>x()</script>title","content":"<p onclick=\"y()\">Para</p><script>bad()</script>","excerpt":"<em>Kept</em><iframe src=\"https://example.test/\"></iframe>","status":"publish","slug":"rest slug","comment_status":"closed","ping_status":"closed","categories":[1],"tags":[],"date":"2026-01-02T03:04:05","featured_media":0,"template":""}"#,
+        ),
+        (
+            "rest-posts-create-draft",
+            "POST",
+            "/?rest_route=/wp/v2/posts",
+            r#"{"title":"A REST draft","status":"draft","slug":"hello-world"}"#,
+        ),
+        (
+            "rest-pages-create",
+            "POST",
+            "/?rest_route=/wp/v2/pages",
+            r#"{"title":"A REST page","content":"<!-- wp:template-part {\"slug\":\"header\"} /-->","parent":2,"menu_order":3,"status":"publish"}"#,
+        ),
+        (
+            "rest-posts-update",
+            "POST",
+            "/?rest_route=/wp/v2/posts/1",
+            r#"{"title":"Hello again","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:core/template-part {\"slug\":\"footer\"}   /-->","sticky":true,"categories":[1,999],"tags":[],"date_gmt":"2026-02-03T04:05:06Z"}"#,
+        ),
+        (
+            "rest-posts-update-draft",
+            "PATCH",
+            "/?rest_route=/wp/v2/posts/1",
+            r#"{"status":"draft","slug":"sample-page","date":null}"#,
+        ),
+        (
+            "rest-pages-update",
+            "PUT",
+            "/?rest_route=/wp/v2/pages/2",
+            r#"{"title":"Sample renamed","parent":0,"menu_order":5,"status":"private","password":"dropped","featured_media":1}"#,
+        ),
+        (
+            "rest-posts-trash",
+            "DELETE",
+            "/?rest_route=/wp/v2/posts/1",
+            "",
+        ),
+        (
+            "rest-posts-delete",
+            "DELETE",
+            "/?rest_route=/wp/v2/posts/1&force=true",
+            "",
+        ),
+        (
+            "rest-pages-delete",
+            "DELETE",
+            "/?rest_route=/wp/v2/pages/2&force=1",
+            "",
+        ),
+    ];
+    for (golden, method, target, body) in writes {
+        let pending = planned(&site, method, target, body).await;
+        let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // The clock is read once the oracle's has started, as `%now%` counts from it.
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+            let outcome = acted(conn, &pending.plan, &ctx).await;
+            assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), golden, nothing, action).await;
+        report.unwrap();
+    }
+}
+
+/// The navigation menus' and synced patterns' writes leave the rows PHP's
+/// leave, planned over `wordpress_saves` and written on the fixture, each
+/// with `reference/rest/site-writes.sql`'s posts.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_writes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/site-writes.sql");
+    let insert = state
+        .lines()
+        .find(|line| line.starts_with("INSERT INTO `wp_posts`"))
+        .unwrap();
+    let footer = r#"{"title":"Footer","content":"<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"http://127.0.0.1:8081/\",\"kind\":\"custom\"} /-->","status":"publish"}"#;
+    let header = r#"{"title":"Header renamed","content":"<!-- wp:navigation-link {\"label\":\"Only\",\"url\":\"https://example.test/\",\"kind\":\"custom\"} /-->"}"#;
+    let pattern = r#"{"title":"A pattern","content":"<!-- wp:paragraph -->\n<p>Reused</p>\n<!-- /wp:paragraph -->","status":"publish","date":"2026-01-02T03:04:05"}"#;
+    let renamed = r#"{"title":"Renamed pattern","content":"<!-- wp:paragraph -->\n<p>Changed</p>\n<!-- /wp:paragraph -->"}"#;
+    let navigation = "/?rest_route=/wp/v2/navigation";
+    let blocks = "/?rest_route=/wp/v2/blocks";
+    let writes = [
+        ("rest-navigation-create", "POST", navigation.into(), footer),
+        (
+            "rest-navigation-update",
+            "POST",
+            format!("{navigation}/851"),
+            header,
+        ),
+        (
+            "rest-navigation-publish",
+            "PUT",
+            format!("{navigation}/852"),
+            r#"{"status":"publish","slug":"header"}"#,
+        ),
+        (
+            "rest-navigation-trash",
+            "DELETE",
+            format!("{navigation}/851"),
+            "",
+        ),
+        (
+            "rest-navigation-delete",
+            "DELETE",
+            format!("{navigation}/852&force=true"),
+            "",
+        ),
+        ("rest-blocks-create", "POST", blocks.into(), pattern),
+        (
+            "rest-blocks-update",
+            "POST",
+            format!("{blocks}/853"),
+            renamed,
+        ),
+        (
+            "rest-blocks-publish",
+            "PATCH",
+            format!("{blocks}/854"),
+            r#"{"status":"publish"}"#,
+        ),
+        ("rest-blocks-trash", "DELETE", format!("{blocks}/853"), ""),
+        (
+            "rest-blocks-delete",
+            "DELETE",
+            format!("{blocks}/854&force=1"),
+            "",
+        ),
+    ];
+    let bare = |golden: &str| golden.ends_with("-create");
+    oracle_writes(state, insert, bare, &writes).await;
+}
+
+/// Each of `writes` leaves the rows PHP's leaves, planned over
+/// `wordpress_saves` with `state` and written on the fixture after
+/// `setup`'s statements, but where `bare` says a write starts without them.
+async fn oracle_writes(
+    state: &str,
+    setup: &str,
+    bare: fn(&str) -> bool,
+    writes: &[(&str, &'static str, String, &str)],
+) {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(state).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    for &(golden, method, ref target, body) in writes {
+        let pending = planned(&site, method, target, body).await;
+        let setup = async |conn: &mut hyscribe_db::Connection| {
+            if !bare(golden) {
+                let setup = sqlx::raw_sql(sqlx::AssertSqlSafe(setup));
+                setup.execute(&mut *conn).await.unwrap();
+            }
+            Ok::<_, String>(())
+        };
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            // Timed within the oracle's run, however long the plan took.
+            let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+            let outcome = acted(conn, &pending.plan, &ctx).await;
+            assert!(matches!(outcome, Outcome::Written(_)), "{golden}");
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), golden, setup, action).await;
+        report.unwrap();
+    }
+}
+
+/// Each of `writes`, a golden of the write oracle and the request that
+/// makes it, leaves the rows PHP's leaves, and nothing when a statement
+/// fails part way.
+async fn planned_writes_are_php_s(site: &Arc<Site>, writes: &[(&str, &'static str, &str, &str)]) {
+    for &(golden, method, target, body) in writes {
+        let pending = planned(site, method, target, body).await;
+        let ctx = crate::rest::writes::context(site, &pending.plan, now());
+        let nothing = async |_: &mut hyscribe_db::Connection| Ok::<_, String>(());
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let outcome = acted(conn, &pending.plan, &ctx).await;
+            let written = matches!(outcome, Outcome::Written(_) | Outcome::Cached(_));
+            assert!(written, "{golden}");
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), golden, nothing, action).await;
+        report.unwrap();
+    }
+}
+
+/// PHP's answers to the categories' and tags' writes, as
+/// [`writes_match_php`] replays them.
+#[tokio::test(flavor = "multi_thread")]
+async fn term_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/term-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/term-writes.sql");
+    let unported = [(r#"{"name":"Meta","meta":{}}"#, &[][..])];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 42, 6)
+    );
+}
+
+/// PHP's answers to the comments' writes, as [`post_writes_match_php`]
+/// replays them, from 127.0.0.1 with no user agent.
+#[tokio::test(flavor = "multi_thread")]
+async fn comment_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/comment-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/comment-writes.sql");
+    // Meta PHP refuses once the comment is written, to those who may not
+    // edit it.
+    let meta = r#"{"post":1,"content":"Meta","meta":{"_wp_note_status":"resolved"}}"#;
+    let unported = [(meta, &["author", "contributor", "subscriber"][..])];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 54, 3)
+    );
+}
+
+/// PHP's answers to the notes and the comment meta
+/// (`reference/rest/comment-notes.list`), as [`post_writes_match_php`]
+/// replays them: a `_wp_note_status` PHP refuses once the comment is written
+/// answers 501 to those who may edit the comment.
+#[tokio::test(flavor = "multi_thread")]
+async fn comment_notes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/comment-notes.tsv");
+    let state = include_str!("../../../../../reference/rest/comment-notes.sql");
+    let editors: &[&str] = &["administrator", "editor"];
+    let others: &[&str] = &["author", "contributor", "subscriber"];
+    let everyone: Vec<&str> = [editors, others].concat();
+    // Some bodies are sent to more than one comment: with the target first.
+    let bogus = r#"/?rest_route=/wp/v2/comments/11 {"meta":{"_wp_note_status":"bogus"}}"#;
+    let reset = r#"/?rest_route=/wp/v2/comments/11 {"meta":{"_wp_note_status":null}}"#;
+    let plain = r#"/?rest_route=/wp/v2/comments/10 {"meta":{"_wp_note_status":null}}"#;
+    let unported = [
+        (
+            r#"{"post":1,"content":"Bogus","type":"note","meta":{"_wp_note_status":"bogus"}}"#,
+            editors,
+        ),
+        (
+            r#"{"post":1,"content":"Number","type":"note","meta":{"_wp_note_status":5}}"#,
+            editors,
+        ),
+        (
+            r#"{"post":1,"content":"Null","type":"note","meta":{"_wp_note_status":null}}"#,
+            editors,
+        ),
+        (
+            r#"{"post":1,"content":"Plain with meta","meta":{"_wp_note_status":"resolved"}}"#,
+            others,
+        ),
+        (
+            r#"{"post":1,"content":"Plain with null","meta":{"_wp_note_status":null}}"#,
+            &everyone[..],
+        ),
+        (
+            r#"{"post":1,"content":"Plain bogus","meta":{"_wp_note_status":"bogus"}}"#,
+            &everyone[..],
+        ),
+        (bogus, editors),
+        (reset, editors),
+        (plain, editors),
+    ];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 51, 3 * 2 + 3 + 5 + 5 + 3 * 2)
+    );
+}
+
+/// The notes and the comment meta leave the rows PHP's leave
+/// (`reference/writes/actions-rest.php`), each over
+/// `reference/rest/comment-notes.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn comment_notes_are_php_s() {
+    let _rows = crate::admin::tests::COMMENT_ROWS.lock().await;
+    let state = include_str!("../../../../../reference/rest/comment-notes.sql");
+    let setup = state.split("\n-- cleanup\n").next().unwrap();
+    let comments = "/?rest_route=/wp/v2/comments";
+    let note = |rest: &str| format!(r#"{{"post":1,{rest},"type":"note"}}"#);
+    let writes = [
+        (
+            "rest-notes-create",
+            "POST",
+            comments.to_string(),
+            r#"{"post":1,"content":"A new note","type":"note"}"#.to_string(),
+        ),
+        (
+            "rest-notes-reply",
+            "POST",
+            comments.to_string(),
+            note(r#""parent":11,"content":"A reply","status":"approved""#),
+        ),
+        (
+            "rest-notes-resolve",
+            "POST",
+            comments.to_string(),
+            note(r#""parent":11,"content":"","meta":{"_wp_note_status":"resolved"}"#),
+        ),
+        (
+            "rest-notes-held",
+            "POST",
+            comments.to_string(),
+            note(r#""content":"Held","status":"hold""#),
+        ),
+        (
+            "rest-notes-named",
+            "POST",
+            comments.to_string(),
+            note(
+                r#""content":"Named <b>one</b>","author_name":"Noter <i>x</i>","author_email":"noter@example.test","author_url":"https://noter.example.test/","author_ip":"10.0.0.9","date":"2026-01-02T03:04:05""#,
+            ),
+        ),
+        (
+            "rest-notes-update",
+            "POST",
+            format!("{comments}/11"),
+            r#"{"content":"A note, edited"}"#.to_string(),
+        ),
+        (
+            "rest-notes-meta",
+            "POST",
+            format!("{comments}/11"),
+            r#"{"meta":{"_wp_note_status":"resolved"}}"#.to_string(),
+        ),
+        (
+            "rest-notes-meta-reset",
+            "POST",
+            format!("{comments}/12"),
+            r#"{"meta":{"_wp_note_status":null}}"#.to_string(),
+        ),
+        (
+            "rest-notes-meta-same",
+            "POST",
+            format!("{comments}/12"),
+            r#"{"meta":{"_wp_note_status":"resolved"}}"#.to_string(),
+        ),
+        (
+            "rest-notes-trash",
+            "DELETE",
+            format!("{comments}/11"),
+            String::new(),
+        ),
+        (
+            "rest-notes-delete",
+            "DELETE",
+            format!("{comments}/11&force=true"),
+            String::new(),
+        ),
+        (
+            "rest-comments-meta",
+            "POST",
+            comments.to_string(),
+            r#"{"post":1,"content":"Plain with meta","meta":{"_wp_note_status":"resolved"}}"#
+                .to_string(),
+        ),
+        (
+            "rest-comments-meta-update",
+            "POST",
+            format!("{comments}/10"),
+            r#"{"meta":{"_wp_note_status":"resolved"}}"#.to_string(),
+        ),
+    ];
+    let writes: Vec<_> = writes
+        .iter()
+        .map(|(golden, method, target, body)| (*golden, *method, target.clone(), body.as_str()))
+        .collect();
+    oracle_writes(state, setup, |_| false, &writes).await;
+}
+
+/// PHP's answers to the users' writes, as [`post_writes_match_php`]
+/// replays them: a password of one's own answers 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/user-writes.tsv");
+    let logged_in = [
+        "administrator",
+        "editor",
+        "author",
+        "contributor",
+        "subscriber",
+    ];
+    let unported = [
+        (r#"{"password":"my-new-secret"}"#, &logged_in[..]),
+        (r#"{"password":"new-secret"}"#, &["author"][..]),
+    ];
+    assert_eq!(writes_match_php(golden, "", &unported).await, (6 * 53, 6));
+}
+
+/// PHP's answers to the persisted preferences' writes over rows that
+/// `user-preferences.sql` stores, as [`post_writes_match_php`] replays them.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_preferences_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/user-preferences.tsv");
+    let state = include_str!("../../../../../reference/rest/user-preferences.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 11, 0));
+}
+
+/// PHP's answers to the settings' writes, as [`post_writes_match_php`]
+/// replays them.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/settings-writes.tsv");
+    assert_eq!(writes_match_php(golden, "", &[]).await, (6 * 17, 0));
+}
+
+/// The comments' writes leave the rows PHP's leave.
+#[tokio::test(flavor = "multi_thread")]
+async fn comment_writes_are_php_s() {
+    let _rows = crate::admin::tests::COMMENT_ROWS.lock().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let writes = [
+        (
+            "rest-comments-create",
+            "POST",
+            "/?rest_route=/wp/v2/comments",
+            r#"{"post":1,"parent":1,"content":"<p onclick=\"x()\">Hi</p> <a href=\"https://example.test/\">link</a>","author_name":"Named <b>one</b>","author_email":"named@example.test","author_url":"https://named.example.test/","date":"2026-01-02T03:04:05","status":"hold"}"#,
+        ),
+        (
+            "rest-comments-update",
+            "POST",
+            "/?rest_route=/wp/v2/comments/1",
+            r#"{"content":"Edited <script>x()</script>","author_name":"Renamed","status":"spam","date_gmt":"2026-02-03T04:05:06Z"}"#,
+        ),
+        (
+            "rest-comments-trash",
+            "DELETE",
+            "/?rest_route=/wp/v2/comments/1",
+            "",
+        ),
+        (
+            "rest-comments-delete",
+            "DELETE",
+            "/?rest_route=/wp/v2/comments/1&force=true",
+            "",
+        ),
+    ];
+    planned_writes_are_php_s(&site, &writes).await;
+}
+
+/// The persisted preferences' writes leave the rows PHP's leave, as the
+/// administrator's own (`users/me`): stored, changed and deleted.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_preferences_are_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let target = "/?rest_route=/wp/v2/users/me";
+    let set = (
+        "rest-users-preferences",
+        "POST",
+        target,
+        r#"{"meta":{"persisted_preferences":{"note":"it's \"q\" \\ \u00e9 <b>","core":{"editorMode":"visual"},"_modified":"2026-11-19T09:30:00.123Z"}}}"#,
+    );
+    planned_writes_are_php_s(&site, &[set]).await;
+    // Stored before the plan is made: planned by hand over what it finds.
+    let pending = planned(&site, "POST", target, "{}").await;
+    let changed = r#"{"core":{"editorMode":"text"},"_modified":"2026-11-19T04:17:00.000Z"}"#;
+    let stored = r#"a:2:{s:4:"core";a:1:{s:10:"editorMode";s:6:"visual";}s:9:"_modified";s:24:"2026-11-18T10:00:00.000Z";}"#;
+    for (golden, value) in [
+        ("rest-users-preferences-update", Some(changed)),
+        ("rest-users-preferences-reset", None),
+    ] {
+        let value = value.map(|json| hyscribe_phpser::json_decode(json.as_bytes()).unwrap());
+        let save = hyscribe_rest::UserSave {
+            id: 1,
+            preferences: Some(hyscribe_rest::Preferences {
+                key: "wp_persisted_preferences".into(),
+                value,
+            }),
+            ..hyscribe_rest::UserSave::default()
+        };
+        let mut plan = pending.plan.clone();
+        plan.write = hyscribe_rest::Write::User(Box::new(save));
+        let setup = async |conn: &mut hyscribe_db::Connection| {
+            let insert = "INSERT INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'wp_persisted_preferences', ?)";
+            sqlx::query(insert)
+                .bind(stored)
+                .execute(&mut *conn)
+                .await
+                .unwrap();
+            Ok::<_, String>(())
+        };
+        let action = async |conn: &mut hyscribe_db::Connection, ()| {
+            let ctx = crate::rest::writes::context(&site, &plan, now());
+            assert_eq!(acted(conn, &plan, &ctx).await, Outcome::Written(1));
+            Ok(())
+        };
+        let report = check_writes(&fixture_database(), golden, setup, action).await;
+        report.unwrap();
+    }
+}
+
+/// The users' writes leave the rows PHP's leave; the update and delete
+/// are of an author the setup adds, the delete's post passed to user 1.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_writes_are_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let create = (
+        "rest-users-create",
+        "POST",
+        "/?rest_route=/wp/v2/users",
+        r#"{"username":"newbie","email":"newbie@example.test","password":"secret-pass","name":"New Bie","first_name":"New","description":"<b>Hi</b><script>x()</script>","slug":"New Bie","roles":["editor","author"]}"#,
+    );
+    planned_writes_are_php_s(&site, &[create]).await;
+    let writer = Writer::open(&fixture_database(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    // The oracle's author, the author of post 1 for the delete.
+    let author = async |conn: &mut hyscribe_db::Connection, post: bool| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        let some = |text: &str| Some(text.as_bytes().to_vec());
+        let data = hyscribe_write::users::UserData {
+            user_login: some("oracle-author"),
+            user_pass: some("A pass phrase"),
+            user_email: some("oracle-author@example.test"),
+            role: some("author"),
+            ..hyscribe_write::users::UserData::default()
+        };
+        let id = hyscribe_write::users::wp_insert_user(&mut write, &data);
+        let id = id.await.unwrap();
+        write.commit().await.unwrap();
+        if post {
+            let author = sqlx::query("UPDATE wp_posts SET post_author = ? WHERE ID = 1").bind(id);
+            author.execute(&mut *conn).await.unwrap();
+        }
+        Ok::<_, String>(id)
+    };
+    let pending = planned(&site, "PUT", "/?rest_route=/wp/v2/categories/1", "{}").await;
+    let some = |text: &str| Some(text.as_bytes().to_vec());
+    let update = |id| hyscribe_rest::UserSave {
+        id,
+        display_name: some("Author Renamed"),
+        nickname: some("Nick"),
+        email: some("renamed@example.test"),
+        url: some("https://a.example.test"),
+        description: some("Bio <em>here</em>"),
+        pass: some("new-secret"),
+        roles: Some(vec![b"subscriber".to_vec()]),
+        ..hyscribe_rest::UserSave::default()
+    };
+    for (golden, post) in [("rest-users-update", false), ("rest-users-delete", true)] {
+        let mut plan = pending.plan.clone();
+        let action = async |conn: &mut hyscribe_db::Connection, id| {
+            plan.write = match post {
+                false => hyscribe_rest::Write::User(Box::new(update(id))),
+                true => hyscribe_rest::Write::DeleteUser(id, Some(1)),
+            };
+            let ctx = crate::rest::writes::context(&site, &plan, now());
+            assert_eq!(acted(conn, &plan, &ctx).await, Outcome::Written(id));
+            Ok(())
+        };
+        let setup = async |conn: &mut hyscribe_db::Connection| author(conn, post).await;
+        let report = check_writes(&fixture_database(), golden, setup, action).await;
+        report.unwrap();
+    }
+}
+
+/// The write a request plans.
+fn plan_of(rest: &Rest, request: &hyscribe_rest::Request) -> hyscribe_rest::Write {
+    match hyscribe_rest::answer(rest, request) {
+        hyscribe_rest::Answer::Write(pending) => pending.plan.write,
+        hyscribe_rest::Answer::Served(served) => {
+            panic!("{}", String::from_utf8_lossy(&served.body))
+        }
+    }
+}
+
+/// A comment stored without a type.
+const UNTYPED: &str = "INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url, comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_approved, comment_agent, comment_type) VALUES (90, 1, '', '', '', '', '2026-11-02 00:00:00', '2026-11-02 00:00:00', 'Untyped', '1', '', '');";
+
+/// A comment's author URL longer than its column takes.
+const LONG_URL: &str = concat!(
+    r#"{"author_url":"https://x.test/"#,
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    r#""}"#
+);
+
+/// The errors PHP answers where a write function refused, which no
+/// request of the goldens reaches.
+#[tokio::test(flavor = "multi_thread")]
+async fn refused_writes_are_answered_as_php_answers_them() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let terms = include_str!("../../../../../reference/rest/term-writes.sql");
+    fresh_with(&format!("{terms}\n{UNTYPED}")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let error = |code: &str, message: &str, status: Option<u16>| {
+        let data = status.map_or("null".to_string(), |status| {
+            format!(r#"{{"status":{status}}}"#)
+        });
+        let code = format!(r#"{{"code":"{code}","message":"{message}","data":{data}}}"#);
+        (status.unwrap_or(500), code)
+    };
+    let term = ("POST", "/?rest_route=/wp/v2/tags/2", r#"{"name":"x"}"#);
+    for (code, message) in [
+        ("invalid_term_name", "Invalid term name."),
+        ("missing_parent", "Parent term does not exist."),
+        ("invalid_term", "Empty Term."),
+    ] {
+        let refused = answered(&site, term, Outcome::Refused(code)).await;
+        assert_eq!(refused, error(code, message, None));
+    }
+    let deleted = ("DELETE", "/?rest_route=/wp/v2/tags/2&force=1", "");
+    let cannot = |what: &str| {
+        error(
+            "rest_cannot_delete",
+            &format!("The {what} cannot be deleted."),
+            Some(500),
+        )
+    };
+    let refused = answered(&site, deleted, Outcome::Refused("rest_cannot_delete")).await;
+    assert_eq!(refused, cannot("term"));
+    let comment = (
+        "POST",
+        "/?rest_route=/wp/v2/comments",
+        r#"{"post":1,"content":"x"}"#,
+    );
+    let flood = "You are posting comments too quickly. Slow down.";
+    let refused = answered(&site, comment, Outcome::Refused("comment_flood")).await;
+    assert_eq!(refused, error("comment_flood", flood, Some(400)));
+    let edit = (
+        "POST",
+        "/?rest_route=/wp/v2/comments/1",
+        r#"{"content":"x"}"#,
+    );
+    let refused = answered(&site, edit, Outcome::Refused("rest_comment_failed_edit")).await;
+    assert_eq!(
+        refused,
+        error(
+            "rest_comment_failed_edit",
+            "Updating comment failed.",
+            Some(500)
+        )
+    );
+    let trash = ("DELETE", "/?rest_route=/wp/v2/comments/1", "");
+    let refused = answered(&site, trash, Outcome::Refused("rest_cannot_delete")).await;
+    assert_eq!(refused, cannot("comment"));
+    let user = ("POST", "/?rest_route=/wp/v2/users/702", r#"{"name":"x"}"#);
+    for (code, message) in [
+        (
+            "empty_user_login",
+            "Cannot create a user with an empty login name.",
+        ),
+        (
+            "user_login_too_long",
+            "Username may not be longer than 60 characters.",
+        ),
+        (
+            "empty_user_nicename",
+            "Cannot create a user with an empty nicename.",
+        ),
+        (
+            "user_nicename_too_long",
+            "Nicename may not be longer than 50 characters.",
+        ),
+        (
+            "user_url_too_long",
+            "User URL may not be longer than 100 characters.",
+        ),
+        ("invalid_user_id", "Invalid user ID."),
+    ] {
+        let refused = answered(&site, user, Outcome::Refused(code)).await;
+        assert_eq!(refused, error(code, message, None));
+    }
+    let delete = (
+        "DELETE",
+        "/?rest_route=/wp/v2/users/704&force=1&reassign=1",
+        "",
+    );
+    let refused = answered(&site, delete, Outcome::Refused("rest_cannot_delete")).await;
+    assert_eq!(refused, cannot("user"));
+    // Content without a raw text gives none, so an update keeps its own.
+    let raw = (
+        "POST",
+        "/?rest_route=/wp/v2/comments/1",
+        r#"{"content":{"rendered":"x"}}"#,
+    );
+    let write = as_admin(&site, raw, (b"", None), plan_of).await;
+    let hyscribe_rest::Write::Comment(save) = write else {
+        unreachable!()
+    };
+    assert_eq!(save.content, None);
+    // Answered at once: an author by URL alone, and a slug another user has.
+    for (asked, code) in [
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/comments",
+                r#"{"post":1,"content":"x","author_name":"","author_url":"https://x.test"}"#,
+            ),
+            "rest_comment_author_data_required",
+        ),
+        (
+            (
+                "PATCH",
+                "/?rest_route=/wp/v2/users/702",
+                r#"{"slug":"editor"}"#,
+            ),
+            "rest_user_invalid_slug",
+        ),
+        (
+            (
+                "DELETE",
+                "/?rest_route=/wp/v2/users/me&force=true&reassign=1&id=x",
+                "",
+            ),
+            "rest_user_invalid_reassign",
+        ),
+        (
+            ("DELETE", "/?rest_route=/wp/v2/tags/2&force=maybe", ""),
+            "rest_invalid_param",
+        ),
+        (
+            ("DELETE", "/?rest_route=/wp/v2/posts/1&force=maybe", ""),
+            "rest_invalid_param",
+        ),
+        (
+            ("DELETE", "/?rest_route=/wp/v2/comments/1&force=maybe", ""),
+            "rest_invalid_param",
+        ),
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/comments",
+                r#"{"post":1,"content":"x","author_name":"","author_email":"e@example.test"}"#,
+            ),
+            "rest_comment_author_data_required",
+        ),
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/comments/1",
+                r#"{"author":999}"#,
+            ),
+            "rest_comment_author_invalid",
+        ),
+        (
+            ("POST", "/?rest_route=/wp/v2/comments/1", LONG_URL),
+            "comment_author_url_column_length",
+        ),
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/categories",
+                r#"{"name":"x","parent":-1}"#,
+            ),
+            "rest_term_invalid",
+        ),
+    ] {
+        let served = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
+            rest, request,
+        ) {
+            hyscribe_rest::Answer::Served(served) => String::from_utf8(served.body).unwrap(),
+            hyscribe_rest::Answer::Write(_) => unreachable!(),
+        };
+        let body = as_admin(&site, asked, (b"", None), served).await;
+        assert!(body.contains(code), "{body}");
+    }
+    // A slug no other user has is planned.
+    let slug = (
+        "PATCH",
+        "/?rest_route=/wp/v2/users/702",
+        r#"{"slug":"fresh-slug"}"#,
+    );
+    as_admin(&site, slug, (b"", None), plan_of).await;
+    // One's own role may be a role that edits users.
+    let roles = (
+        "POST",
+        "/?rest_route=/wp/v2/users/1",
+        r#"{"roles":["administrator","administrator"]}"#,
+    );
+    let write = as_admin(&site, roles, (b"", None), plan_of).await;
+    let administrator = Some(vec![b"administrator".to_vec()]);
+    assert!(matches!(write, hyscribe_rest::Write::User(save) if save.roles == administrator));
+    // `/users/me` is the current user's, whatever ID a body gives.
+    let me = (
+        "POST",
+        "/?rest_route=/wp/v2/users/me",
+        r#"{"id":702,"first_name":"x"}"#,
+    );
+    let write = as_admin(&site, me, (b"", None), plan_of).await;
+    assert!(matches!(write, hyscribe_rest::Write::User(save) if save.id == 1));
+    let me = (
+        "DELETE",
+        "/?rest_route=/wp/v2/users/me&force=true&reassign=702",
+        r#"{"id":704}"#,
+    );
+    let write = as_admin(&site, me, (b"", None), plan_of).await;
+    assert_eq!(write, hyscribe_rest::Write::DeleteUser(1, Some(702)));
+    // An author URL as long as its column takes is planned.
+    let url = format!(r#"{{"author_url":"https://x.test/{}"}}"#, "a".repeat(185));
+    let long = ("POST", "/?rest_route=/wp/v2/comments/1", url.as_str());
+    as_admin(&site, long, (b"", None), plan_of).await;
+    // An editor's comment skips the flood check, as a moderator's.
+    let comment = (
+        "POST",
+        "/?rest_route=/wp/v2/comments",
+        r#"{"post":1,"content":"x"}"#,
+    );
+    let hyscribe_rest::Write::Comment(save) =
+        as_user(&site, 701, comment, (b"", None), plan_of).await
+    else {
+        unreachable!()
+    };
+    assert!(save.skip_flood);
+    // A comment stored without a type is a comment.
+    let untyped = (
+        "POST",
+        "/?rest_route=/wp/v2/comments/90",
+        r#"{"type":"comment"}"#,
+    );
+    as_admin(&site, untyped, (b"", None), plan_of).await;
+    // A comment takes the request's address and user agent.
+    let client = (&b"192.0.2.1"[..], Some(&b"Agent/2.0"[..]));
+    let plan = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
+        rest, request,
+    ) {
+        hyscribe_rest::Answer::Write(pending) => pending.plan.write,
+        hyscribe_rest::Answer::Served(_) => unreachable!(),
+    };
+    let write = as_admin(&site, comment, client, plan).await;
+    let hyscribe_rest::Write::Comment(save) = write else {
+        unreachable!()
+    };
+    assert_eq!(
+        (&save.author_ip[..], save.agent.as_deref()),
+        (&b"192.0.2.1"[..], Some(&b"Agent/2.0"[..]))
+    );
+}
+
+/// What the write functions refuse past the checks, as another request
+/// gets in first, and each status a comment's write may ask for.
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_refused_past_their_checks() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let pending = planned(&site, "PUT", "/?rest_route=/wp/v2/categories/1", "{}").await;
+    let writer = site.writer.as_ref().unwrap();
+    let act = async |write: hyscribe_rest::Write| {
+        let mut plan = pending.plan.clone();
+        plan.write = write;
+        let ctx = crate::rest::writes::context(&site, &plan, now());
+        crate::rest::writes::act(writer.begin().await, &plan, &ctx, outbox())
+            .await
+            .unwrap()
+    };
+    let term = |id, name: &str, parent| {
+        let save = hyscribe_rest::TermSave {
+            taxonomy: "category",
+            id,
+            name: Some(name.as_bytes().to_vec()),
+            parent,
+            ..hyscribe_rest::TermSave::default()
+        };
+        hyscribe_rest::Write::Term(Box::new(save))
+    };
+    for (write, refused) in [
+        (term(0, "<b></b>", None), "invalid_term_name"),
+        (term(0, "Orphan", Some(999)), "missing_parent"),
+        (term(999, "Gone", None), "invalid_term"),
+    ] {
+        assert_eq!(act(write).await, Outcome::Refused(refused));
+    }
+    let comment = |id, status: &str| {
+        let save = hyscribe_rest::CommentSave {
+            id,
+            post_id: Some(1),
+            author: Some(b"Reader".to_vec()),
+            author_email: Some(b"reader@example.test".to_vec()),
+            author_ip: b"192.0.2.9".to_vec(),
+            content: (id == 0).then(|| format!("A comment to {status}").into_bytes()),
+            status: Some(status.as_bytes().to_vec()),
+            ..hyscribe_rest::CommentSave::default()
+        };
+        hyscribe_rest::Write::Comment(Box::new(save))
+    };
+    let failed = Outcome::Refused("rest_comment_failed_edit");
+    assert_eq!(act(comment(999, "hold")).await, failed);
+    let Outcome::Written(id) = act(comment(0, "trash")).await else {
+        panic!("not written")
+    };
+    let approved = "SELECT comment_approved FROM wp_comments WHERE comment_ID = ?";
+    assert_eq!(stored(approved, id).await, "trash");
+    for (status, now) in [
+        ("untrash", "0"),
+        ("spam", "spam"),
+        ("unspam", "0"),
+        ("approved", "1"),
+        ("approved", "1"),
+        ("hold", "0"),
+        ("approve", "1"),
+        ("trash", "trash"),
+        ("bogus", "trash"),
+    ] {
+        assert_eq!(act(comment(id, status)).await, Outcome::Written(id));
+        assert_eq!(stored(approved, id).await, now, "{status}");
+    }
+    // An update's agent, parent and author, and a new comment's dates.
+    let edit = hyscribe_rest::CommentSave {
+        id,
+        parent: Some(1),
+        user_id: Some(704),
+        agent: Some(b"Agent/3.0".to_vec()),
+        ..hyscribe_rest::CommentSave::default()
+    };
+    act(hyscribe_rest::Write::Comment(Box::new(edit))).await;
+    let row = "SELECT CONCAT_WS('|', comment_agent, comment_parent, user_id) FROM wp_comments WHERE comment_ID = ?";
+    assert_eq!(stored(row, id).await, "Agent/3.0|1|704");
+    let dated = hyscribe_rest::CommentSave {
+        post_id: Some(1),
+        author: Some(b"Dated".to_vec()),
+        author_email: Some(b"dated@example.test".to_vec()),
+        content: Some(b"Dated".to_vec()),
+        date: Some(("2026-01-02 05:04:05".into(), "2026-01-02 03:04:05".into())),
+        skip_flood: true,
+        ..hyscribe_rest::CommentSave::default()
+    };
+    let Outcome::Written(dated) = act(hyscribe_rest::Write::Comment(Box::new(dated))).await else {
+        panic!("not written")
+    };
+    let dates = "SELECT CONCAT_WS('|', comment_date, comment_date_gmt) FROM wp_comments WHERE comment_ID = ?";
+    assert_eq!(
+        stored(dates, dated).await,
+        "2026-01-02 05:04:05|2026-01-02 03:04:05"
+    );
+    // A user's password and locale.
+    let user = hyscribe_rest::UserSave {
+        id: 704,
+        pass: Some(b"new-secret".to_vec()),
+        locale: Some(b"en_US".to_vec()),
+        ..hyscribe_rest::UserSave::default()
+    };
+    assert_eq!(
+        act(hyscribe_rest::Write::User(Box::new(user))).await,
+        Outcome::Written(704)
+    );
+    let pass = stored("SELECT user_pass FROM wp_users WHERE ID = ?", 704).await;
+    assert!(hyscribe_auth::check_password(
+        b"new-secret",
+        pass.as_bytes()
+    ));
+    let locale = "SELECT meta_value FROM wp_usermeta WHERE user_id = ? AND meta_key = 'locale'";
+    assert_eq!(stored(locale, 704).await, "en_US");
+    let flood = Outcome::Refused("comment_flood");
+    assert_eq!(act(comment(0, "hold")).await, flood);
+    // A text setting given an array, which sanitize_option() does not port.
+    let setting = hyscribe_rest::Setting {
+        option: "date_format".into(),
+        value: Some(hyscribe_phpser::Value::Array(Vec::new())),
+        default: None,
+    };
+    let save = hyscribe_rest::SettingsSave {
+        options: vec![setting],
+        invalid: None,
+    };
+    let mut plan = pending.plan.clone();
+    plan.write = hyscribe_rest::Write::Settings(Box::new(save));
+    let ctx = crate::rest::writes::context(&site, &plan, now());
+    let unported = crate::rest::writes::act(writer.begin().await, &plan, &ctx, outbox()).await;
+    assert!(matches!(unported, Err(hyscribe_write::Error::Unported(_))));
+    fresh().await;
+}
+
+/// A user's update tells the user as PHP's REST API does, in
+/// `reference/mail/run.php`'s `rest-user` saves, once written: nothing of
+/// a write that a failed statement stopped.
+#[tokio::test(flavor = "multi_thread")]
+async fn user_updates_are_told_as_php_tells_them() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let writer = site.writer.as_ref().unwrap();
+    let mut write = writer.begin().await.unwrap();
+    let odd = hyscribe_write::users::UserData {
+        user_login: Some(b"Tom O. Neil.".to_vec()),
+        user_email: Some(br"o\'neil@example.test".to_vec()),
+        user_pass: Some(b"a password".to_vec()),
+        role: Some(b"subscriber".to_vec()),
+        ..Default::default()
+    };
+    let id = hyscribe_write::users::wp_insert_user(&mut write, &odd)
+        .await
+        .unwrap();
+    write.commit().await.unwrap();
+    let pass = r#""password":"another password""#;
+    for (case, body) in [
+        ("rest-user-name", r#"{"name":"Tom"}"#.to_string()),
+        (
+            "rest-user-same",
+            format!(r#"{{{pass},"email":"o'neil@example.test"}}"#),
+        ),
+        (
+            "rest-user",
+            format!(r#"{{{pass},"email":"new'address@example.test","roles":["author"]}}"#),
+        ),
+    ] {
+        let target = format!("/?rest_route=/wp/v2/users/{id}");
+        let pending = planned(&site, "PUT", &target, &body).await;
+        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+        mailed();
+        let mut budget = 0;
+        let outcome = loop {
+            let mut write = writer.begin().await;
+            if let Ok(write) = &mut write {
+                write.fail_after(budget);
+            }
+            match crate::rest::writes::act(write, &pending.plan, &ctx, outbox()).await {
+                Err(hyscribe_write::Error::Db(err))
+                    if err.to_string().contains("budget is spent") =>
+                {
+                    budget += 1;
+                }
+                outcome => break outcome.unwrap(),
+            }
+        };
+        assert_eq!(outcome, Outcome::Written(id), "{case}");
+        assert_eq!(printed(case, &mailed()), php_mails(case), "{case}");
+    }
+    fresh().await;
+}
+
+/// A setting not stored reads as its registered default, which a value
+/// equal to it leaves unwritten, as `update_option()` compares them.
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_not_stored_read_as_their_default() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with("DELETE FROM wp_options WHERE option_name = 'use_smilies';").await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let body = r#"{"use_smilies":true}"#;
+    let pending = planned(&site, "POST", "/?rest_route=/wp/v2/settings", body).await;
+    let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+    let writer = site.writer.as_ref().unwrap();
+    let outcome =
+        crate::rest::writes::act(writer.begin().await, &pending.plan, &ctx, outbox()).await;
+    assert_eq!(outcome.unwrap(), Outcome::Cached(Vec::new()));
+    fresh().await;
+}
+
+/// The terms' and settings' writes leave the rows PHP's leave.
+#[tokio::test(flavor = "multi_thread")]
+async fn term_and_settings_writes_are_php_s() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let writes = [
+        (
+            "rest-categories-create",
+            "POST",
+            "/?rest_route=/wp/v2/categories",
+            r#"{"name":"News","description":"<b>Fresh</b> <script>x()</script>","slug":"the news","parent":1}"#,
+        ),
+        (
+            "rest-categories-update",
+            "PUT",
+            "/?rest_route=/wp/v2/categories/1",
+            r#"{"name":"Renamed","description":"Desc","slug":"renamed"}"#,
+        ),
+        (
+            "rest-settings-update",
+            "POST",
+            "/?rest_route=/wp/v2/settings",
+            r#"{"title":"New <b>title</b> & co","posts_per_page":null,"use_smilies":false,"start_of_week":"3","timezone":"Europe/Paris","site_logo":5,"language":""}"#,
+        ),
+    ];
+    planned_writes_are_php_s(&site, &writes).await;
+    // A tag the setup adds to post 1, deleted.
+    let mut pending = planned(&site, "PUT", "/?rest_route=/wp/v2/categories/1", "{}").await;
+    let writer = Writer::open(&fixture_database(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let setup = async |conn: &mut hyscribe_db::Connection| {
+        let mut write = writer.begin_on(conn).await.unwrap();
+        let args = hyscribe_write::terms::TermArgs::default();
+        let tag = hyscribe_write::terms::wp_insert_term(&mut write, PostTag, b"Tagged", &args);
+        let tag = tag.await.unwrap().term_id;
+        let terms = [hyscribe_write::terms::TermRef::Id(tag)];
+        let set = hyscribe_write::terms::wp_set_object_terms(&mut write, 1, &terms, PostTag, false);
+        set.await.unwrap();
+        write.commit().await.unwrap();
+        Ok::<_, String>(tag)
+    };
+    let action = async |conn: &mut hyscribe_db::Connection, tag| {
+        pending.plan.write = hyscribe_rest::Write::DeleteTerm("post_tag", tag);
+        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+        let outcome = acted(conn, &pending.plan, &ctx).await;
+        assert_eq!(outcome, Outcome::Written(tag));
+        Ok(())
+    };
+    let report = check_writes(&fixture_database(), "rest-tags-delete", setup, action).await;
+    report.unwrap();
+}
+
+/// The block editor's saves leave the rows PHP's leave
+/// (`reference/writes/actions-editor.php`), each over
+/// `reference/rest/editor-saves.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_saves_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/editor-saves.sql");
+    let setup = state.split("\n-- cleanup\n").next().unwrap();
+    let para =
+        |text: &str| format!(r#"<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->"#);
+    let hello = para(
+        "Welcome to WordPress. This is your first post. Edit or delete it, then start writing!",
+    );
+    let (drafted, friends) = (para("Drafted in the editor."), para("For friends."));
+    let post = |id: u64| format!("/?rest_route=/wp/v2/posts/{id}");
+    let saves = [
+        (
+            "editor-save-draft",
+            post(9601),
+            format!(
+                r#"{{"id":9601,"title":"First draft","content":"{drafted}","status":"draft"}}"#
+            ),
+        ),
+        (
+            "editor-publish",
+            post(9601),
+            format!(
+                r#"{{"id":9601,"title":"Published from the editor","content":"{drafted}","status":"publish"}}"#
+            ),
+        ),
+        (
+            "editor-schedule",
+            post(9601),
+            format!(
+                r#"{{"id":9601,"title":"Scheduled","content":"{drafted}","date":"2030-06-01T09:30:00","status":"future"}}"#
+            ),
+        ),
+        (
+            "editor-update",
+            post(1),
+            format!(
+                r#"{{"id":1,"title":"Hello edited","content":"{}"}}"#,
+                para("Edited in the editor.")
+            ),
+        ),
+        (
+            "editor-unschedule",
+            post(9604),
+            format!(
+                r#"{{"id":9604,"status":"draft","date":null,"content":"{}"}}"#,
+                para("Coming up.")
+            ),
+        ),
+        (
+            "editor-private",
+            post(9606),
+            format!(r#"{{"id":9606,"status":"private","password":"","content":"{friends}"}}"#),
+        ),
+        (
+            "editor-featured-image",
+            post(1),
+            format!(r#"{{"id":1,"featured_media":9605,"content":"{hello}"}}"#),
+        ),
+        (
+            "editor-format",
+            post(1),
+            format!(r#"{{"id":1,"format":"gallery","content":"{hello}"}}"#),
+        ),
+        (
+            "editor-format-standard",
+            post(9606),
+            format!(r#"{{"id":9606,"format":"standard","content":"{friends}"}}"#),
+        ),
+        (
+            "editor-terms",
+            post(1),
+            format!(r#"{{"id":1,"categories":[1,9602],"tags":[9601],"content":"{hello}"}}"#),
+        ),
+        (
+            "editor-page-template",
+            "/?rest_route=/wp/v2/pages/2".into(),
+            r#"{"id":2,"template":"page-no-title","parent":9607}"#.into(),
+        ),
+    ];
+    let writes: Vec<_> = saves
+        .iter()
+        .map(|(golden, target, body)| (*golden, "PUT", target.clone(), body.as_str()))
+        .collect();
+    oracle_writes(state, setup, |_| false, &writes).await;
+}
+
+/// PHP's answers to the block editor's saves with `meta` and of password
+/// protected and sticky posts, over `reference/rest/editor-meta.sql`: what
+/// PHP refuses of a footnotes value once the post is written answers 501 to
+/// those who may edit the post.
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_meta_saves_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/editor-meta.tsv");
+    let state = include_str!("../../../../../reference/rest/editor-meta.sql");
+    let editors: &[&str] = &["administrator", "editor"];
+    let unported = [
+        (r#"{"id":9702,"meta":{"footnotes":5}}"#, editors),
+        (r#"{"id":9702,"meta":{"footnotes":["x"]}}"#, editors),
+        (r#"{"id":9702,"meta":{"footnotes":true}}"#, editors),
+        (
+            r#"{"id":9702,"meta":{"footnotes":"[{\"content\":[\"x\"],\"id\":\"a\"}]"}}"#,
+            editors,
+        ),
+    ];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 42, 4 * 2)
+    );
+}
+
+/// A post password cookie, which would let a protected post be sticky, is
+/// not read: the save answers 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_post_password_cookie_is_not_ported() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let state = include_str!("../../../../../reference/rest/editor-meta.sql");
+    fresh_with(state).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let (cookie, nonce) = log_in_as(&site, "admin", 1).await;
+    let hash = crate::login::Names::new(&site).hash;
+    let cookie = format!("{cookie}; wp-postpass_{hash}=%24P%24Bwhatever");
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/index.php?rest_route=/wp/v2/posts/9705&_locale=user")
+        .header(header::HOST, "127.0.0.1:8081")
+        .header(header::COOKIE, cookie)
+        .header("x-wp-nonce", nonce)
+        .header("x-http-method-override", "PUT")
+        .header(header::CONTENT_TYPE, "application/json");
+    let response = send(&site, request, r#"{"id":9705,"sticky":true}"#).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+}
+
+/// The footnotes saves leave the rows PHP's leave, with the revisions they
+/// make (`reference/writes/actions-editor.php`), each over
+/// `reference/rest/editor-meta.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn editor_meta_saves_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/editor-meta.sql");
+    let setup = state.split("\n-- cleanup\n").next().unwrap();
+    let meta = |footnotes: &str| format!(r#""meta":{{"footnotes":{footnotes}}}"#);
+    let note = |id: &str, content: &str| {
+        meta(&format!(
+            r#""[{{\"content\":\"{content}\",\"id\":\"{id}\"}}]""#
+        ))
+    };
+    let noted = r#"<!-- wp:paragraph -->\n<p>Noted again.</p>\n<!-- /wp:paragraph -->"#;
+    let kses = meta(
+        r#""[{\"content\":\"Bad <script>x()</script><em>ok</em> caf\\u00e9 / <a href=\\\"https://x.test/\\\" onclick=\\\"y()\\\">l</a>\",\"id\":\"AB 12!\"},{\"content\":\"\",\"id\":\"e\"},{\"content\":\"no id\"},{\"id\":\"no-content\"},{\"content\":\"kept\",\"id\":7}]""#,
+    );
+    let post = |id: u64| format!("/?rest_route=/wp/v2/posts/{id}");
+    let saves = [
+        (
+            "editor-meta-footnotes",
+            post(9701),
+            format!(
+                r#"{{"content":"<!-- wp:paragraph -->\n<p>Noted now.</p>\n<!-- /wp:paragraph -->",{}}}"#,
+                note("n1", "A <b>note</b>")
+            ),
+        ),
+        (
+            "editor-meta-first",
+            post(9701),
+            format!("{{{}}}", note("n1", "First")),
+        ),
+        ("editor-meta-kses", post(9701), format!("{{{kses}}}")),
+        (
+            "editor-meta-changed",
+            post(9702),
+            format!("{{{}}}", note("a1", "New")),
+        ),
+        (
+            "editor-meta-same",
+            post(9702),
+            format!("{{{}}}", note("a1", "Old")),
+        ),
+        (
+            "editor-meta-content",
+            post(9702),
+            format!(r#"{{"content":"{noted}",{}}}"#, note("a1", "Newer")),
+        ),
+        (
+            "editor-meta-reset",
+            post(9702),
+            format!("{{{}}}", meta("null")),
+        ),
+        (
+            "editor-meta-empty",
+            post(9702),
+            format!("{{{}}}", meta(r#""""#)),
+        ),
+        (
+            "editor-meta-page",
+            "/?rest_route=/wp/v2/pages/9704".into(),
+            format!("{{{}}}", note("g1", "On a page")),
+        ),
+        (
+            "editor-meta-create",
+            "/?rest_route=/wp/v2/posts".into(),
+            format!(
+                r#"{{"title":"Created","status":"draft",{}}}"#,
+                note("b1", "Born")
+            ),
+        ),
+        (
+            "editor-meta-create-page",
+            "/?rest_route=/wp/v2/pages".into(),
+            format!(
+                r#"{{"title":"A page","status":"draft",{}}}"#,
+                note("c1", "Page born")
+            ),
+        ),
+        (
+            "editor-meta-pattern",
+            "/?rest_route=/wp/v2/blocks/9707".into(),
+            format!("{{{}}}", note("p1", "Pattern new")),
+        ),
+        (
+            "editor-meta-pattern-reset",
+            "/?rest_route=/wp/v2/blocks/9707".into(),
+            r#"{"meta":{"footnotes":null,"wp_pattern_sync_status":"unsynced"}}"#.into(),
+        ),
+        (
+            "editor-meta-create-pattern",
+            "/?rest_route=/wp/v2/blocks".into(),
+            r#"{"title":"Fresh pattern","status":"publish","meta":{"footnotes":"[{\"content\":\"Fresh\",\"id\":\"f1\"}]","wp_pattern_sync_status":"unsynced"}}"#.into(),
+        ),
+    ];
+    let writes: Vec<_> = saves
+        .iter()
+        .map(|(golden, target, body)| (*golden, "POST", target.clone(), body.as_str()))
+        .collect();
+    oracle_writes(state, setup, |_| false, &writes).await;
+}
+
+/// PHP's answers to the autosaves, over `reference/rest/autosaves.sql`,
+/// with `meta`, not ported for posts, answered 501.
+#[tokio::test(flavor = "multi_thread")]
+async fn autosaves_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/autosaves.tsv");
+    let state = include_str!("../../../../../reference/rest/autosaves.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 10, 6));
+}
+
+/// PHP's answers to the templates' and template parts' writes, over
+/// `reference/rest/template-writes.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn template_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/template-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/template-writes.sql");
+    // A template its slug would title after the page it names, which the
+    // read path does not port.
+    let titled = r#"{"slug":"page-about-us","title":"page-about-us","content":"x"}"#;
+    let single = r#"{"slug":"single-post-hello-world","title":"single-post-hello-world","status":"publish","is_wp_suggestion":true}"#;
+    let archive = r#"{"slug":"category-uncategorized","title":"","description":"","status":"publish","is_wp_suggestion":true,"content":"x"}"#;
+    let unported: [(&str, &[&str]); 3] = [
+        (titled, &["administrator"]),
+        (single, &["administrator"]),
+        (archive, &["administrator"]),
+    ];
+    assert_eq!(
+        writes_match_php(golden, state, &unported).await,
+        (6 * 47, 3)
+    );
+}
+
+/// PHP's answers to the global styles saves of
+/// `reference/rest/global-styles-writes.list`, their insecure values gone.
+#[tokio::test(flavor = "multi_thread")]
+async fn global_styles_writes_match_php() {
+    let golden = include_str!("../../../../hyscribe-rest/tests/golden/global-styles-writes.tsv");
+    let state = include_str!("../../../../../reference/rest/global-styles-writes.sql");
+    assert_eq!(writes_match_php(golden, state, &[]).await, (6 * 16, 0));
+}
+
+/// The answers to what a write comes to past the goldens: a created
+/// template not found, a template gone before its answer, a refusal of an
+/// update, a revert or a delete, and an autosave of an empty draft, which
+/// PHP refuses with an error of no status; and the plans not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn written_answers_past_the_goldens() {
+    let state = include_str!("../../../../../reference/rest/template-writes.sql");
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(state).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let templates = |path: &str| format!("/?rest_route=/wp/v2/templates{path}");
+    let index = templates("/twentytwentyfive//index");
+    let cases = [
+        (
+            ("POST", templates(""), r#"{"slug":"lost","title":"Lost"}"#),
+            Outcome::Written(1),
+            (400, "rest_template_insert_error"),
+        ),
+        (
+            ("POST", templates(""), r#"{"slug":"plain"}"#),
+            Outcome::Refused("empty_content"),
+            (400, "empty_content"),
+        ),
+        (
+            (
+                "POST",
+                templates("/twentytwentyfive//my-custom"),
+                r#"{"title":"x"}"#,
+            ),
+            Outcome::Refused("rest_cannot_delete"),
+            (500, "rest_cannot_delete"),
+        ),
+        // Text `wpdb` refuses, which PHP answers as no template found.
+        (
+            (
+                "POST",
+                templates("/twentytwentyfive//my-custom"),
+                r#"{"title":"x"}"#,
+            ),
+            Outcome::InvalidText(String::new()),
+            (501, ""),
+        ),
+        (
+            (
+                "POST",
+                "/?rest_route=/wp/v2/global-styles/741".to_string(),
+                r#"{"title":"x"}"#,
+            ),
+            Outcome::InvalidText(String::new()),
+            (501, ""),
+        ),
+        (
+            ("DELETE", templates("/twentytwentyfive//my-custom"), ""),
+            Outcome::Refused("rest_cannot_delete"),
+            (500, "rest_cannot_delete"),
+        ),
+        (
+            ("POST", index.clone(), r#"{"source":"theme"}"#),
+            Outcome::Written(711),
+            (200, r#""source":"custom""#),
+        ),
+    ];
+    for ((method, target, body), outcome, (status, code)) in cases {
+        let (found, text) = answered(&site, (method, &target, body), outcome).await;
+        let what = format!("{method} {target} {body}");
+        assert_eq!(found, status, "{what}");
+        assert!(text.contains(code), "{what}");
+    }
+    let unported = [
+        // A template its slug would title after the page it names.
+        (
+            "POST",
+            templates(""),
+            r#"{"slug":"page-sample-page","content":"x"}"#,
+        ),
+        // Reverting a template with no customised post, or no theme file.
+        (
+            "POST",
+            templates("/twentytwentyfive//search"),
+            r#"{"source":"theme"}"#,
+        ),
+        (
+            "POST",
+            templates("/twentytwentyfive//my-custom"),
+            r#"{"source":"theme"}"#,
+        ),
+        // A pattern the theme does not have.
+        (
+            "POST",
+            templates(""),
+            r#"{"slug":"x","content":"<!-- wp:pattern {\"slug\":\"core/x\"} /-->"}"#,
+        ),
+    ];
+    let (cookie, nonce) = log_in(&site).await;
+    for (method, target, body) in unported {
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(&target)
+            .header(header::COOKIE, &cookie)
+            .header("x-wp-nonce", &nonce)
+            .header(header::CONTENT_TYPE, "application/json");
+        let response = send(&site, request, body).await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_IMPLEMENTED,
+            "{target} {body}"
+        );
+    }
+    let autosaves = include_str!("../../../../../reference/rest/autosaves.sql");
+    fresh_with(autosaves).await;
+    let site = saves_site(dir.path()).await;
+    let page = "/?rest_route=/wp/v2/pages/863/autosaves";
+    let empty = answered(
+        &site,
+        ("POST", page, "{}"),
+        Outcome::Refused("empty_content"),
+    );
+    assert_eq!(empty.await, (501, String::new()));
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/?rest_route=/wp/v2/blocks/853/autosaves")
+        .header(header::COOKIE, &cookie)
+        .header("x-wp-nonce", &nonce)
+        .header(header::CONTENT_TYPE, "application/json");
+    let meta = r#"{"meta":{"wp_pattern_sync_status":"partial"}}"#;
+    fresh_with(include_str!(
+        "../../../../../reference/rest/site-writes.sql"
+    ))
+    .await;
+    let site = saves_site(dir.path()).await;
+    let response = send(&site, request, meta).await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    // A pattern, which is not viewable, has no preview link.
+    let pattern = r#"{"title":"Pattern autosaved"}"#;
+    let target = "/?rest_route=/wp/v2/blocks/853/autosaves";
+    let login = (cookie.clone(), nonce.clone());
+    let (status, text) = sent_as(&site, &login, ("POST", target, pattern)).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    fresh().await;
+}
+
+/// The administrator's `method target` with the JSON `body` sent to
+/// `site`, logged in as the cookie and nonce say: its status and body.
+async fn sent_as(
+    site: &Arc<Site>,
+    (cookie, nonce): &(String, String),
+    (method, target, sent): (&str, &str, &str),
+) -> (StatusCode, String) {
+    let request = axum::http::Request::builder()
+        .method(method)
+        .uri(target)
+        .header(header::COOKIE, cookie)
+        .header("x-wp-nonce", nonce)
+        .header(header::CONTENT_TYPE, "application/json");
+    let response = send(site, request, sent).await;
+    let status = response.status();
+    (status, body(response).await)
+}
+
+/// Templates past the goldens, over `reference/rest/template-writes.sql`
+/// with a template its slug would title, which reads 501, and one naming a
+/// pattern the theme does not have: what PHP answers with its errors, and
+/// what is not ported, 501, before anything is written.
+#[tokio::test(flavor = "multi_thread")]
+async fn template_writes_past_the_goldens() {
+    let state = include_str!("../../../../../reference/rest/template-writes.sql");
+    let more = "INSERT INTO wp_posts (ID, post_author, post_content, post_title, post_excerpt, \
+        post_status, post_name, post_type, to_ping, pinged, post_content_filtered) VALUES \
+        (770, 1, 'x', '', '', 'publish', 'single-post-hello-world', 'wp_template', '', '', ''), \
+        (771, 1, '<!-- wp:pattern {\"slug\":\"core/x\"} /-->', 'Odd', '', 'publish', 'my-odd', \
+        'wp_template', '', '', ''); \
+        INSERT INTO wp_term_relationships VALUES (770, 711, 0), (771, 711, 0);\n-- cleanup\n";
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(&format!(
+        "{}{more}",
+        state.split("\n-- cleanup\n").next().unwrap()
+    ))
+    .await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let login = log_in(&site).await;
+    let at = |path: &str| format!("/?rest_route=/wp/v2/{path}");
+    let foreign = r#"{"content":"<!-- wp:pattern {\"slug\":\"core/x\"} /-->"}"#;
+    let cases = [
+        (
+            "POST",
+            at("templates/twentytwentyfive//single-post-hello-world"),
+            r#"{"title":"x"}"#,
+            501,
+        ),
+        (
+            "DELETE",
+            at("templates/twentytwentyfive//single-post-hello-world"),
+            "",
+            501,
+        ),
+        (
+            "DELETE",
+            at("templates/twentytwentyfive//my-odd&force=true"),
+            "",
+            501,
+        ),
+        (
+            "POST",
+            at("templates/twentytwentyfive//my-custom"),
+            foreign,
+            501,
+        ),
+        (
+            "PATCH",
+            at("templates/twentytwentyfive//my-custom"),
+            r#"{"author":999}"#,
+            400,
+        ),
+        (
+            "POST",
+            at("templates/twentytwentyfive//my-custom"),
+            r#"{"content":{}}"#,
+            200,
+        ),
+        (
+            "PATCH",
+            at("template-parts/twentytwentyfive//header"),
+            r#"{"title":"Head"}"#,
+            200,
+        ),
+    ];
+    for (method, target, body, status) in cases {
+        let (found, text) = sent_as(&site, &login, (method, &target, body)).await;
+        assert_eq!(found.as_u16(), status, "{method} {target} {body}: {text}");
+    }
+    // `rest_after_insert_{$post_type}` fires once a template or part is
+    // written, as the write tests one at a time leave it alone.
+    let fired = || {
+        let fired = hyscribe_model::hooks::FIRED.lock().unwrap();
+        fired
+            .iter()
+            .filter(|hook| hook.starts_with("rest_after_insert_wp_template"))
+            .count()
+    };
+    let before = fired();
+    let parts = at("template-parts");
+    let created = (
+        "POST",
+        parts.as_str(),
+        r#"{"slug":"fired","title":"Fired"}"#,
+    );
+    assert_eq!(sent_as(&site, &login, created).await.0, StatusCode::CREATED);
+    assert_eq!(fired(), before + 1);
+    fresh().await;
+}
+
+/// Autosaves past the goldens: a template, which an autosave does not
+/// port, and the author's draft emptied, which PHP refuses with an error of
+/// no status; an empty template is no template.
+#[tokio::test(flavor = "multi_thread")]
+async fn autosaves_past_the_goldens() {
+    let state = include_str!("../../../../../reference/rest/autosaves.sql");
+    let unlocked = format!(
+        "{}\nDELETE FROM wp_postmeta WHERE post_id = 866;\n-- cleanup\n",
+        state.split("\n-- cleanup\n").next().unwrap()
+    );
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh_with(&unlocked).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let login = log_in(&site).await;
+    let autosaves = "/?rest_route=/wp/v2/posts/866/autosaves";
+    for (body, status) in [
+        (r#"{"template":"single"}"#, 501),
+        (r#"{"title":""}"#, 501),
+        (r#"{"template":"","title":"Kept"}"#, 200),
+    ] {
+        let (found, text) = sent_as(&site, &login, ("POST", autosaves, body)).await;
+        assert_eq!(found.as_u16(), status, "{body}: {text}");
+    }
+    // A form's text that is not UTF-8, which `wpdb` refuses.
+    let (cookie, nonce) = &login;
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri(autosaves)
+        .header(header::COOKIE, cookie)
+        .header("x-wp-nonce", nonce)
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+    let response = send(&site, request, "title=a%FFb").await;
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    fresh().await;
+}
+
+/// The INSERTs of a list's `state`, which a write oracle action adds first.
+fn inserts(state: &str) -> String {
+    let lines = state
+        .lines()
+        .filter(|line| line.starts_with("INSERT INTO "));
+    lines.collect::<Vec<_>>().join("\n")
+}
+
+/// The synced patterns' sync status and categories leave the rows PHP's
+/// leave, over all of `reference/rest/site-writes.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn pattern_writes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/site-writes.sql");
+    let in_two = r#"{"title":"In two","content":"<!-- wp:paragraph -->\n<p>Two</p>\n<!-- /wp:paragraph -->","status":"publish","wp_pattern_category":[861,862,999],"meta":{"other":"x","wp_pattern_sync_status":"partial"}}"#;
+    let blocks = |path: &str| format!("/?rest_route=/wp/v2/blocks{path}");
+    let writes = [
+        (
+            "rest-blocks-create-unsynced",
+            "POST",
+            blocks(""),
+            r#"{"title":"Unsynced","meta":{"wp_pattern_sync_status":"unsynced"}}"#,
+        ),
+        ("rest-blocks-create-categorised", "POST", blocks(""), in_two),
+        (
+            "rest-blocks-categories",
+            "POST",
+            blocks("/853"),
+            r#"{"wp_pattern_category":[862]}"#,
+        ),
+        (
+            "rest-blocks-draft-meta",
+            "POST",
+            blocks("/854"),
+            r#"{"meta":{"wp_pattern_sync_status":"partial"},"wp_pattern_category":[861]}"#,
+        ),
+        (
+            "rest-blocks-delete-categorised",
+            "DELETE",
+            blocks("/853&force=true"),
+            "",
+        ),
+    ];
+    let bare = |golden: &str| golden == "rest-blocks-create-unsynced";
+    oracle_writes(state, &inserts(state), bare, &writes).await;
+}
+
+/// The templates' and parts' writes leave the rows PHP's leave, over
+/// `reference/rest/template-writes.sql`.
+#[tokio::test(flavor = "multi_thread")]
+async fn template_writes_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/template-writes.sql");
+    let paragraph =
+        |text: &str| format!(r#""<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->""#);
+    let templates = |path: &str| format!("/?rest_route=/wp/v2/templates{path}");
+    let parts = |path: &str| format!("/?rest_route=/wp/v2/template-parts{path}");
+    let mine = format!(
+        r#"{{"slug":"my-template","title":"My template","content":{},"description":"Made here"}}"#,
+        paragraph("Mine")
+    );
+    let side = format!(
+        r#"{{"slug":"my-sidebar","title":"My sidebar","area":"header","content":{}}}"#,
+        paragraph("Side")
+    );
+    let customised = format!(r#"{{"content":{}}}"#, paragraph("Customised"));
+    let foot = format!(r#"{{"content":{}}}"#, paragraph("Foot"));
+    let again = format!(
+        r#"{{"title":"Index again","content":{}}}"#,
+        paragraph("Changed")
+    );
+    let writes = [
+        (
+            "rest-templates-create",
+            "POST",
+            templates(""),
+            mine.as_str(),
+        ),
+        (
+            "rest-templates-create-suggested",
+            "POST",
+            templates(""),
+            r#"{"slug":"page-about","title":{"raw":"About"},"content":{"raw":"<!-- wp:post-content /-->"},"author":1,"is_wp_suggestion":true}"#,
+        ),
+        (
+            "rest-templates-create-taken",
+            "POST",
+            templates(""),
+            r#"{"slug":"my-custom","title":"Again","content":"<!-- wp:post-title /-->"}"#,
+        ),
+        ("rest-template-parts-create", "POST", parts(""), &side),
+        (
+            "rest-template-parts-create-area",
+            "POST",
+            parts(""),
+            r#"{"slug":"odd-part","title":"Odd","area":"bogus"}"#,
+        ),
+        (
+            "rest-templates-customise",
+            "POST",
+            templates("/twentytwentyfive//page"),
+            &customised,
+        ),
+        (
+            "rest-template-parts-customise",
+            "PUT",
+            parts("/twentytwentyfive//footer"),
+            &foot,
+        ),
+        (
+            "rest-templates-update",
+            "POST",
+            templates("/twentytwentyfive//index"),
+            &again,
+        ),
+        (
+            "rest-template-parts-update",
+            "PATCH",
+            parts("/twentytwentyfive//header"),
+            r#"{"area":"footer","description":"Moved"}"#,
+        ),
+        (
+            "rest-templates-revert",
+            "POST",
+            templates("/twentytwentyfive//page-no-title"),
+            r#"{"source":"theme"}"#,
+        ),
+        (
+            "rest-templates-trash",
+            "DELETE",
+            templates("/twentytwentyfive//my-custom"),
+            "",
+        ),
+        (
+            "rest-templates-delete",
+            "DELETE",
+            templates("/twentytwentyfive//my-custom&force=true"),
+            "",
+        ),
+        (
+            "rest-template-parts-delete",
+            "DELETE",
+            parts("/twentytwentyfive//header&force=1"),
+            "",
+        ),
+    ];
+    oracle_writes(state, &inserts(state), |_| false, &writes).await;
+}
+
+/// The autosaves leave the rows PHP's leave, over
+/// `reference/rest/autosaves.sql`: a draft of the user's updated, their
+/// old autosave updated, and a new one.
+#[tokio::test(flavor = "multi_thread")]
+async fn autosaves_are_php_s() {
+    let state = include_str!("../../../../../reference/rest/autosaves.sql");
+    let saved = |title: &str, text: &str, excerpt: &str| {
+        format!(
+            r#"{{"title":"{title}","content":"<!-- wp:paragraph -->\n<p>{text}</p>\n<!-- /wp:paragraph -->"{excerpt}}}"#
+        )
+    };
+    let autosaves = |path: &str| format!("/?rest_route=/wp/v2/{path}/autosaves");
+    let page = saved("Page autosaved", "Page words", "");
+    let held = saved("Held, autosaved", "Held", "");
+    let other = saved("Draft autosaved", "Later words", r#","excerpt":"""#);
+    let again = saved("Published", "Out there, changed", r#","excerpt":"""#);
+    let writes = [
+        (
+            "rest-autosaves-draft",
+            "POST",
+            autosaves("pages/863"),
+            page.as_str(),
+        ),
+        ("rest-autosaves-new", "POST", autosaves("posts/866"), &held),
+        (
+            "rest-autosaves-other",
+            "POST",
+            autosaves("posts/861"),
+            &other,
+        ),
+        (
+            "rest-autosaves-again",
+            "POST",
+            autosaves("posts/862"),
+            &again,
+        ),
+    ];
+    oracle_writes(state, &inserts(state), |_| false, &writes).await;
+}
+
+/// Without a writer, a write past its checks is refused as hs-admin
+/// refuses one.
+#[tokio::test(flavor = "multi_thread")]
+async fn shadow_mode_refuses_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let site = site(false, dir.path()).await;
+    let (cookie, nonce) = log_in(&site).await;
+    let ask = |target: &str| {
+        axum::http::Request::builder()
+            .method("POST")
+            .uri(target)
+            .header(header::COOKIE, &cookie)
+            .header("x-wp-nonce", &nonce)
+            .header(header::CONTENT_TYPE, "application/json")
+    };
+    // A settings update giving none writes nothing, so it is answered.
+    let none = send(&site, ask("/?rest_route=/wp/v2/settings"), "{}").await;
+    assert_eq!(none.status(), StatusCode::OK);
+    let response = send(
+        &site,
+        ask("/?rest_route=/wp/v2/posts"),
+        r#"{"title":"Kept out"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let message = hyscribe_admin::login::READ_ONLY;
+    let json = format!(
+        r#"{{"code":"wp_die","message":"{message}","data":{{"status":403}},"additional_errors":[]}}"#
+    );
+    assert_eq!(body(response).await, json);
+}
+
+/// A write the database refuses answers the error page, and a trash or
+/// deletion the post is already past writes nothing: each leaves the
+/// database as it was.
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_stop_short() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    fresh().await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let (cookie, nonce) = log_in(&site).await;
+    let ask = |method: &str, target: &str| {
+        axum::http::Request::builder()
+            .method(method)
+            .uri(target)
+            .header(header::COOKIE, &cookie)
+            .header("x-wp-nonce", &nonce)
+            .header(header::CONTENT_TYPE, "application/json")
+    };
+    // Planned, then trashed and deleted by another request first.
+    let trash = planned(&site, "DELETE", "/?rest_route=/wp/v2/posts/1", "").await;
+    let delete = planned(&site, "DELETE", "/?rest_route=/wp/v2/posts/1&force=1", "").await;
+    let gone = send(
+        &site,
+        ask("DELETE", "/?rest_route=/wp/v2/posts/1&force=1"),
+        "",
+    )
+    .await;
+    assert_eq!(gone.status(), StatusCode::OK);
+    let writer = site.writer.as_ref().unwrap();
+    for pending in [trash, delete] {
+        let ctx = crate::rest::writes::context(&site, &pending.plan, now());
+        let outcome =
+            crate::rest::writes::act(writer.begin().await, &pending.plan, &ctx, outbox()).await;
+        assert_eq!(outcome.unwrap(), Outcome::Refused("rest_cannot_delete"));
+    }
+    // A database the writer refuses: its version is not supported.
+    let mut write = writer.begin().await.unwrap();
+    write.update_option("db_version", b"1").await.unwrap();
+    write.commit().await.unwrap();
+    let response = send(
+        &site,
+        ask("POST", "/?rest_route=/wp/v2/posts"),
+        r#"{"title":"x"}"#,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    fresh().await;
+}
+
+/// Every row of the posts, their meta and the terms in `wordpress_saves`,
+/// without the posts' dates.
+async fn site_rows() -> Vec<String> {
+    let mut conn = saves_conn().await;
+    let mut rows = Vec::new();
+    for sql in [
+        "SELECT CONCAT_WS('|', ID, post_author, post_content, post_title, post_excerpt, \
+         post_status, comment_status, ping_status, post_password, post_name, to_ping, pinged, \
+         post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, \
+         comment_count) FROM wp_posts ORDER BY ID",
+        "SELECT CONCAT_WS('|', meta_id, post_id, meta_key, meta_value) FROM wp_postmeta \
+         ORDER BY meta_id",
+        "SELECT CONCAT_WS('|', term_id, name, slug, term_group) FROM wp_terms ORDER BY term_id",
+        "SELECT CONCAT_WS('|', term_taxonomy_id, term_id, taxonomy, description, parent, count) \
+         FROM wp_term_taxonomy ORDER BY term_taxonomy_id",
+        "SELECT CONCAT_WS('|', object_id, term_taxonomy_id, term_order) \
+         FROM wp_term_relationships ORDER BY object_id, term_taxonomy_id",
+    ] {
+        let query = sqlx::query_scalar::<_, Vec<u8>>(sqlx::AssertSqlSafe(sql));
+        let found = query.fetch_all(&mut conn).await.unwrap();
+        rows.extend(found.into_iter().map(|row| String::from_utf8(row).unwrap()));
+    }
+    rows
+}
+
+/// A JSON object of `fields`.
+fn json_object(fields: &[(&str, Value)]) -> String {
+    let fields = fields
+        .iter()
+        .map(|(name, value)| (Key::String(name.as_bytes().to_vec()), value.clone()))
+        .collect();
+    String::from_utf8(hyscribe_phpser::json_encode(&Value::Array(fields)).unwrap()).unwrap()
+}
+
+/// The site editor's saves of `reference/site-edits/save.php` sent to
+/// HyScribe leave the rows PHP left (`reference/site-edits/content.sql`)
+/// but for their dates, from the global styles post the site editor's
+/// first view writes.
+#[tokio::test(flavor = "multi_thread")]
+async fn site_editor_saves_leave_php_s_rows() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let edits = include_str!("../../../../../reference/site-edits/content.sql");
+    fresh_with(edits).await;
+    let php = site_rows().await;
+    let styles: Vec<String> = edits
+        .lines()
+        .filter(|line| {
+            [
+                "`wp_posts` VALUES (4,",
+                "`wp_terms` VALUES (2,",
+                "`wp_term_taxonomy` VALUES (2,",
+                "`wp_term_relationships` VALUES (4,",
+            ]
+            .iter()
+            .any(|start| line.contains(start))
+        })
+        .map(String::from)
+        .collect();
+    assert_eq!(styles.len(), 4);
+    // The global styles post as the site editor's first view writes it.
+    let first = r#"UPDATE wp_posts SET post_content = '{"version":3,"isGlobalStylesUserThemeJSON":true}' WHERE ID = 4;"#;
+    fresh_with(&[styles.join("\n").as_str(), first].join("\n")).await;
+    let dir = tempfile::tempdir().unwrap();
+    let site = saves_site(dir.path()).await;
+    let (cookie, nonce) = log_in(&site).await;
+    let asked = |method: &'static str, route: String, body: String| {
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(format!("/?rest_route={route}"))
+            .header(header::COOKIE, &cookie)
+            .header("x-wp-nonce", &nonce)
+            .header(header::CONTENT_TYPE, "application/json");
+        let site = Arc::clone(&site);
+        async move {
+            let response = send(&site, request, &body).await;
+            let status = response.status();
+            let body = super::body(response).await;
+            assert!(status.is_success(), "{route}: {status} {body}");
+            hyscribe_phpser::json_decode(body.as_bytes()).unwrap()
+        }
+    };
+    let text = |text: &str| Value::String(text.as_bytes().to_vec());
+    let paragraph =
+        |words: &str| format!("<!-- wp:paragraph -->\n<p>{words}</p>\n<!-- /wp:paragraph -->");
+    let saved = |route: &str, content: String| {
+        let id = route.rsplit_once('/').map_or("", |(_, id)| id);
+        let id = format!("twentytwentyfive/{id}");
+        let body = json_object(&[("id", text(&id)), ("content", text(&content))]);
+        asked("POST", route.to_string(), body)
+    };
+    let links = [
+        r#"<!-- wp:navigation-link {"label":"Sample Page","type":"page","id":2,"url":"http://127.0.0.1:8081/?page_id=2","kind":"post-type"} /-->"#,
+        r#"<!-- wp:navigation-link {"label":"Elsewhere","url":"https://example.com/","kind":"custom"} /-->"#,
+    ];
+    let decoded = |json: &str| hyscribe_phpser::json_decode(json.as_bytes()).unwrap();
+    let styles = json_object(&[
+        ("id", Value::Int(4)),
+        (
+            "settings",
+            decoded(
+                r##"{"color":{"palette":{"custom":[{"color":"#a1b2c3","name":"Brand","slug":"custom-brand"}]}}}"##,
+            ),
+        ),
+        (
+            "styles",
+            decoded(
+                r#"{"color":{"background":"var:preset|color|accent-2","text":"var:preset|color|contrast"},"typography":{"lineHeight":"1.7"},"elements":{"link":{"color":{"text":"var:preset|color|custom-brand"}}},"blocks":{"core/paragraph":{"typography":{"fontSize":"var:preset|font-size|large"}}},"css":"body{letter-spacing:0.01em}"}"#,
+            ),
+        ),
+    ]);
+    asked("POST", "/wp/v2/global-styles/4".into(), styles).await;
+    let menu = json_object(&[
+        ("title", text("Main menu")),
+        ("status", text("publish")),
+        ("content", text(&links.join("\n\n"))),
+    ]);
+    let menu = asked("POST", "/wp/v2/navigation".into(), menu).await;
+    let menu = menu.get_str("id").unwrap().to_int();
+    let mut opened = Vec::new();
+    for route in [
+        "/wp/v2/template-parts/twentytwentyfive//header",
+        "/wp/v2/templates/twentytwentyfive//home",
+        "/wp/v2/templates/twentytwentyfive//single",
+    ] {
+        let answer = asked("GET", format!("{route}&context=edit"), String::new()).await;
+        let content = answer.get_str("content").unwrap().get_str("raw").unwrap();
+        opened.push(String::from_utf8(content.to_php_string()).unwrap());
+    }
+    let header = opened[0].replacen(
+        "<!-- wp:navigation {",
+        &format!("<!-- wp:navigation {{\"ref\":{menu},"),
+        1,
+    );
+    saved("/wp/v2/template-parts/twentytwentyfive//header", header).await;
+    let footer = paragraph("Edited footer");
+    saved("/wp/v2/template-parts/twentytwentyfive//footer", footer).await;
+    for (slug, content) in ["home", "single"].into_iter().zip(&opened[1..]) {
+        let at = content
+            .find(r#"<!-- wp:template-part {"slug":"footer""#)
+            .unwrap();
+        let (before, after) = content.split_at(at);
+        let edited = format!(
+            "{before}{}\n\n{after}",
+            paragraph(&format!("Edited {slug}"))
+        );
+        saved(
+            &format!("/wp/v2/templates/twentytwentyfive//{slug}"),
+            edited,
+        )
+        .await;
+    }
+    let part = |slug: &str| {
+        format!(r#"<!-- wp:template-part {{"slug":"{slug}","theme":"twentytwentyfive"}} /-->"#)
+    };
+    let landing = format!(
+        "{}\n\n{}\n\n<!-- wp:post-title /-->\n\n<!-- wp:post-content /-->",
+        part("header"),
+        paragraph("Landing")
+    );
+    let landing = json_object(&[
+        ("slug", text("wp-custom-template-landing")),
+        ("title", text("Landing")),
+        ("content", text(&landing)),
+    ]);
+    asked("POST", "/wp/v2/templates".into(), landing).await;
+    let template = json_object(&[("template", text("wp-custom-template-landing"))]);
+    asked("POST", "/wp/v2/posts/1".into(), template).await;
+    saved("/wp/v2/templates/twentytwentyfive//archive", String::new()).await;
+    let blank = json_object(&[
+        ("slug", text("wp-custom-template-blank")),
+        ("title", text("Blank")),
+        ("content", text("")),
+    ]);
+    asked("POST", "/wp/v2/templates".into(), blank).await;
+    let page = json_object(&[
+        ("title", text("Blank page")),
+        ("status", text("publish")),
+        ("template", text("wp-custom-template-blank")),
+    ]);
+    asked("POST", "/wp/v2/pages".into(), page).await;
+    let sample = format!(
+        "{}\n\n<!-- wp:post-content /-->\n\n{}",
+        paragraph("Only the sample page"),
+        part("footer")
+    );
+    let sample = json_object(&[
+        ("slug", text("page-sample-page")),
+        ("title", text("Page: Sample Page")),
+        ("description", text("Template for Sample Page")),
+        ("is_wp_suggestion", Value::Bool(true)),
+        ("content", text(&sample)),
+    ]);
+    asked("POST", "/wp/v2/templates".into(), sample).await;
+    let policy = format!("{}\n\n<!-- wp:post-content /-->", paragraph("Our policy"));
+    let policy = json_object(&[
+        ("slug", text("privacy-policy")),
+        ("title", text("Privacy Policy")),
+        ("content", text(&policy)),
+    ]);
+    asked("POST", "/wp/v2/templates".into(), policy).await;
+    assert_eq!(site_rows().await, php);
+    fresh().await;
+}

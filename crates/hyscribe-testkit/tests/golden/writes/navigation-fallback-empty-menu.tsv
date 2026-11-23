@@ -1,0 +1,28 @@
+# The rows PHP WordPress writes for the action navigation-fallback-empty-menu (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-19 13:09:38 to 2026-11-19 13:09:38 UTC.
+# %wp_posts:1% is 6.
+# %wp_terms:1% is 2.
+# %wp_term_taxonomy:1% is 2.
+wp_posts	%wp_posts:1%	+	ID	%wp_posts:1%
+wp_posts	%wp_posts:1%	+	comment_count	0
+wp_posts	%wp_posts:1%	+	comment_status	closed
+wp_posts	%wp_posts:1%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:1%
+wp_posts	%wp_posts:1%	+	menu_order	0
+wp_posts	%wp_posts:1%	+	ping_status	closed
+wp_posts	%wp_posts:1%	+	pinged	
+wp_posts	%wp_posts:1%	+	post_author	0
+wp_posts	%wp_posts:1%	+	post_content	<!-- wp:page-list /-->
+wp_posts	%wp_posts:1%	+	post_content_filtered	
+wp_posts	%wp_posts:1%	+	post_date	%now%
+wp_posts	%wp_posts:1%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_excerpt	
+wp_posts	%wp_posts:1%	+	post_mime_type	
+wp_posts	%wp_posts:1%	+	post_modified	%now%
+wp_posts	%wp_posts:1%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_name	navigation
+wp_posts	%wp_posts:1%	+	post_parent	0
+wp_posts	%wp_posts:1%	+	post_password	
+wp_posts	%wp_posts:1%	+	post_status	publish
+wp_posts	%wp_posts:1%	+	post_title	Navigation
+wp_posts	%wp_posts:1%	+	post_type	wp_navigation
+wp_posts	%wp_posts:1%	+	to_ping	

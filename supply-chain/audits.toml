@@ -1,0 +1,440 @@
+
+# cargo-vet audits file
+
+[[audits.askama]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+notes = "Version bumps of itself and askama_macros, and one argument of EscapeDisplay's write! passed by value rather than by reference. No unsafe, build script, or I/O added."
+
+[[audits.askama_derive]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+notes = "Version bumps (syn 3, prettyplease 0.3, which is optional and off here, askama_parser 0.16.1), a filter's generic default reported as an error instead of an assertion, and the type of a `let` written into the generated code. Runs at build time only; no unsafe, filesystem, network, process or environment access added."
+
+[[audits.askama_macros]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+notes = "Version bumps of itself and askama_derive only."
+
+[[audits.askama_parser]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.16.1"
+notes = "Parses an optional type after a `let` variable and gives clearer errors for a missing expression or `=`; a format! of a constant message replaced by the string. No unsafe or I/O added."
+
+[[audits.async-trait]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.1.92"
+notes = "Proc macro only: rewrites async fns in traits and impls into methods returning Pin<Box<dyn Future + Send + 'a>>, through syn, quote and proc-macro2. No unsafe code (the word appears only as a parsed token), no build script, and no filesystem, network, process or environment access at expansion time; the code it emits is ordinary boxing of the future. lettre's async transport traits use it."
+
+[[audits.base64]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.23.1"
+notes = 'Reviewed the scalar engine, the decoders and the new SIMD engine, which the default simd-unsafe feature turns on (lettre takes the defaults, for SMTP AUTH). Without that feature the crate is #![forbid(unsafe_code)]. The unsafe code is engine/simd.rs: AVX2 and NEON kernels behind #[target_feature], reached only after is_x86_feature_detected!("avx2") or is_aarch64_feature_detected!("neon") selected the backend at construction (the *_unchecked constructors are unsafe fns HyScribe never calls). Each loop is guarded so every unaligned 32 or 16 byte load stays inside the input (decode stops at the complete non-terminal quads length, which decode_helper derives from the input) and every store inside the output; an invalid block falls back to the scalar decoder. No build script, proc macros, or filesystem, network, process or environment access.'
+
+[[audits.blake2]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.10.6"
+notes = "Reviewed every source file of the crate. no_std; std only forwards to digest/std. No build script, proc macros, or filesystem, network, process or environment access; the tests, benches and .blb test vectors are dev only. The only unsafe code outside feature gated SIMD is as_bytes.rs, which views [T] as bytes for an unsafe marker trait implemented only on primitive integers and repr(C) tuples of one integer type, so no padding or invalid values; finalize copies two u64x4 (64 bytes) into a 64 byte output. The simd, simd_opt and simd_asm features (platform intrinsics, transmuted shuffles and an inline asm path for 32 bit ARM NEON) need a nightly compiler and stay off with default features off. The portable path matches RFC 7693: IV, sigma, rotations 32, 24, 16 and 63, twelve rounds for BLAKE2b, the parameter block with key and output lengths, and the MAC's zero padded key block hashed as the first block. Its panics are asserts on key, output, salt and persona sizes, which Blake2bMac checks first and answers with InvalidLength, an unreachable! for block sizes other than BLAKE2b's and BLAKE2s's, and copy_from_slice between equal lengths. Dependency: digest 0.10 with its mac feature, which pulls in subtle (covered by imported audits)."
+
+[[audits.blowfish]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.10.0"
+notes = "Pure Rust Blowfish with #![deny(unsafe_code)] and no unsafe blocks. No build script, proc macros, or filesystem, network, process or environment access. The P and S tables are the standard Blowfish constants, and the bcrypt key schedule helpers use bounds checked indexing only."
+
+[[audits.byteorder-lite]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.1.0"
+notes = "Fork of byteorder keeping the ReadBytesExt and WriteBytesExt traits and the endian conversions, without the methods that needed unsafe. #![forbid(unsafe_code)] and no unsafe. No build script, dependencies or I/O beyond the std::io Read and Write values the caller passes in."
+
+[[audits.cipher]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.4 -> 0.5.2"
+notes = "Trait restructuring for 0.5 (block and mode backends, tweakable ciphers, stream wrapper behind a feature). The crate now declares #![forbid(unsafe_code)], removing the two unsafe blocks 0.4.4 had. No build script, proc macros, or I/O; include_bytes appears only in feature gated test macros."
+
+[[audits.cpp_demangle]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.5.1"
+notes = "Itanium C++ symbol demangler, about 13,200 lines, depending only on cfg-if (afl only behind its fuzz feature). The crate denies unsafe_code and allows it at two sites, both sound: reference_newtype in ast.rs casts &Vec<TypeHandle> to a shared reference of a single field newtype whose Drop is unreachable (no repr(transparent), which rustc lays out identically in practice), and parse_number calls from_utf8_unchecked on bytes already filtered to ASCII digits and letters. Parsing is capped by ParseOptions recursion_limit (default 96) and printing by DemangleOptions recursion_limit (default 128), TooMuchRecursion propagating rather than backtracking, so hostile input cannot overflow the stack; output size is not capped, a denial of service risk only for a caller demangling untrusted symbols. The build script generates tests into OUT_DIR from in/ and tests/, which the published package excludes, so it writes nothing. No filesystem, network, process or environment access in the library. HyScribe compiles it out: wasmtime's demangle feature is off."
+
+[[audits.email-encoding]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.4.2"
+notes = "#![forbid(unsafe_code)]. RFC 2047 encoded words, RFC 2231 parameters, quoted strings and the base64 and quoted-printable body encoders lettre writes headers and bodies with, over a fmt::Write that folds lines at 76 characters; truncation is at char boundaries. No build script, proc macros, or filesystem, network, process or environment access. Depends on base64 0.23 and memchr."
+
+[[audits.email-encoding]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.2 -> 0.4.3"
+notes = "Changes to the body encoding chooser and the RFC 2231 and header writers, plus version and licence metadata. Still #![forbid(unsafe_code)]; no build script, proc macros, or filesystem, network, process or environment access added; dependencies unchanged."
+
+[[audits.email_address]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.2.9"
+notes = "RFC 5321 and 5322 address parser and validator, with unsafe_code among its warned lints and no unsafe code. Pure string handling with length limits on the local part and domain; no build script, proc macros, or filesystem, network, process or environment access. serde stays an optional feature lettre does not enable."
+
+[[audits.fastrand]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "2.5.0"
+notes = "#![forbid(unsafe_code)]. The wyrand generator; the thread local global generator is seeded from a DefaultHasher of Instant::now() and the thread ID (getrandom only on wasm with the js feature). Not cryptographic and documented as such: lettre uses it for MIME boundaries only. No build script, proc macros, or filesystem, network, process or environment access. Replaces the safe-to-run exemption now that it ships through lettre's builder."
+
+[[audits.getrandom]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.2.17"
+notes = "Reviewed the Linux and Android path HyScribe builds: the getrandom syscall through libc::syscall, falling back to /dev/urandom (opened O_CLOEXEC once, after polling /dev/random until the pool is ready, behind a pthread mutex) when the kernel lacks the syscall or seccomp blocks it; sys_fill_exact loops on EINTR and bounds every advance with get_mut. The unsafe code is the libc calls and the MaybeUninit slice casts, each sound as written. The other platforms' backends were read for I/O: each calls only its system's RNG. No build script, proc macros, network, process or environment access; std only for io::Error conversions."
+
+[[audits.gif]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.14.2"
+notes = "Pure Rust GIF decoder and encoder with #![forbid(unsafe_code)]. No build script or proc macros; the only extern block is an empty documentation include under the optional color_quant feature. No filesystem, network, process or environment access: it reads and writes only the Read, BufRead and Write values passed in. The decoder caps buffer growth with a MemoryLimit (50 MB by default) and fallible try_reserve. Depends on weezl, and on color_quant only with that feature."
+
+[[audits.image-webp]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.2.4"
+notes = "Pure Rust WebP decoder and lossless encoder with #![forbid(unsafe_code)] and no unsafe anywhere. No build script, proc macros, or file, network, process or environment access: it reads and writes through the caller's Read, Seek and Write. Depends on byteorder-lite and quick-error. Simple VP8 and VP8L frames are limited to 16384 a side and the extended canvas to a u32 area; the memory limit defaults to unbounded, so callers must check the dimensions before decoding, as hyscribe-image does."
+
+[[audits.inout]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.2 -> 0.2.5"
+notes = "Lint fixes (as casts replaced by ptr::from_ref, ptr::from_mut and cast) and a rework of PaddedInOutBuf to hold raw pointers, fixing a Stacked Borrows violation. The reworked unsafe code checks that the output buffer holds every block it writes and returns PadError instead of trusting the padding implementation. No build script, new dependencies or I/O."
+
+[[audits.itertools]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.14.0"
+notes = "Iterator adaptors over caller supplied iterators, 14,505 lines, depending only on either with default features off; build = false and no proc macro. Eight unsafe sites in two files, all sound. next_array.rs: ArrayBuilder keeps arr[..len] initialised; push indexes arr[len] (panicking at N before any state changes), writes, then increments len; take calls assume_init only when len equals N, after resetting len to 0 and swapping in an uninitialised array, so nothing drops twice; AsMut and Drop cast only the initialised prefix from [MaybeUninit<T>] to [T], which share a layout. either_or_both.rs: insert_left and insert_right move the old value out with ptr::read and write Both back with ptr::write, with nothing between that can panic, and unreachable_unchecked follows an assignment of Both. Size hints only set capacities. No filesystem, network, process or environment access. wasmtime's Cranelift glue uses zip_eq, join and Either."
+
+[[audits.jiff-tzdb]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.1.9"
+notes = "A no_std lookup over the IANA Time Zone Database 2026e: a sorted table of zone names and byte ranges into concatenated TZif data embedded with include_bytes, found by an ASCII case insensitive binary search. No unsafe code, build script, proc macros, dependencies, or filesystem, network, process or environment access."
+
+[[audits.jpeg-encoder]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.7.1"
+notes = "Pure Rust JPEG encoder. Without the simd feature lib.rs applies forbid(unsafe_code), so the crate has no unsafe code; the only unsafe is the AVX2 module compiled with simd on x86, entered after runtime feature detection with loads and stores on slices of known length. No build script, proc macros or dependencies. Its only filesystem access is Encoder::new_file at a path the caller gives; otherwise output goes to the Write passed in. It encodes pixels and parses no untrusted input. Licensed (MIT OR Apache-2.0) AND IJG."
+
+[[audits.kamadak-exif]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.6.2"
+notes = "Exif parser for TIFF, JPEG, HEIF, PNG and WebP over a caller supplied BufRead. One unsafe block in value.rs casts &Value to &UIntValue, a repr(transparent) wrapper, after checking the variant is Byte, Short or Long: sound. Entry counts use checked_mul and are checked against the remaining data before value buffers are allocated, lengths are read through take(len), IFD chains are capped at 8. Depends on mutate_once. No build script, filesystem, network, process or environment access outside tests and docs."
+
+[[audits.lettre]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.11.23"
+notes = "Reviewed the modules HyScribe builds with default features off and builder, smtp-transport, tokio1, tokio1-rustls, ring and webpki-roots: message (builder, headers, mailbox parsing and Display, MIME parts and body encodings), address (email_address and idna checks), and transport/smtp (client, async connection and net, tls, authentication, commands, extension, response parser, error, connection URL). #![forbid(unsafe_code)] and no build script or proc macros of its own. Network access is the SMTP connection to the host the caller names; TLS goes through tokio-rustls with only the root certificates the caller adds (CertificateStore::None, so the webpki-roots feature, which its build check requires, loads nothing), and the dangerous_accept_invalid_* switches stay off. Tls::Required fails when the server does not offer STARTTLS. Header values with CR or LF cannot be written: the quoted string writer returns fmt::Error for them, and the encoder RFC 2047 encodes other control characters. The response parser (nom) bounds every read; with the tracing feature off nothing is logged, so credentials and messages are not. The sendmail and file transports, which run a process and write files, and the hostname, native-tls, boring-tls, dkim, pool and serde features are compiled out."
+
+[[audits.lettre]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.11.23 -> 0.11.24"
+notes = "The RUSTSEC-2026-0565 fix: SMTP replies are read line by line into a buffer capped at MAX_RESPONSE_BYTES (100,000) through a new ResponseParser, so a line that never ends cannot take memory without bound. Also: bytes already buffered after the STARTTLS reply end the connection instead of being read as if they came over TLS; DATA and the message end must get replies of the expected class; NOOP needs a 250; an opt-in for partially rejected recipients (off by default). Still #![forbid(unsafe_code)]; no build script, proc macros, or new filesystem, process or environment access; dependency changes are only minimum version bumps of existing ones."
+
+[[audits.memfd]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.5 -> 0.6.6"
+notes = "Packaging only: the CI workflow, the order of Cargo.toml's metadata tables and the version. No change to any Rust source, build script or dependency."
+
+[[audits.mutate_once]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.1.2"
+notes = "A write once, read many interior mutability cell. Three unsafe blocks turn its UnsafeCell into a reference; a Cell state machine panics on a second mutable borrow, refuses mutation once a shared reference is out and resets in the guard's Drop, so they are sound, and the type is not Sync. No dependencies, build script or I/O."
+
+[[audits.nom]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "8.0.0"
+notes = "Parser combinators. No build script, proc macros, or filesystem, network, process or environment access. The unsafe code is in traits.rs: get_unchecked on &str at an index find() returned or at the string's end, both char boundaries, so sound. Depends on memchr. lettre parses SMTP replies with it."
+
+[[audits.png]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.18.0-rc -> 0.18.1"
+notes = "Still #![forbid(unsafe_code)], no unsafe added, no build script and no I/O beyond caller supplied readers and writers. Runtime dependencies unchanged; only dev dependencies changed. New target_arch code is safe scalar Paeth unfiltering, and core::simd only behind the opt in unstable feature. Chunk buffers now grow by doubling, capped by and charged to Limits::bytes (64 MiB by default), and more output size calculations fail on overflow: the limits tighten."
+
+[[audits.quick-error]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "2.0.1"
+notes = "A single macro_rules! macro generating error enums with Display, Error and From implementations. No unsafe code, build script, proc macros, dependencies or I/O; std::fs and std::env appear only in doc comments and examples."
+
+[[audits.quoted_printable]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.5.2"
+notes = "#![forbid(unsafe_code)] and no dependencies. Quoted-printable encode and decode (RFC 2045) over byte slices with Strict and Robust decode modes and line wrapping at 76; pure functions returning owned buffers. No build script, proc macros, or filesystem, network, process or environment access."
+
+[[audits.rustc-hash]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "2.1.1 -> 2.1.3"
+notes = "No unsafe code added. The 64 by 64 bit multiply picks its path with cfg! instead of the pointer width and uses wrapping_mul; byte hashing walks 16 byte chunks with split_first_chunk instead of indexing; Default is derived; the optional rand dependency moves to 0.9. No I/O, build script or new dependency."
+
+[[audits.rustls-webpki]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+delta = "0.103.16 -> 0.103.17"
+notes = "Adds a certificate transparency SCT list parser (src/sct.rs) over untrusted::Reader with bounds checked reads and no unsafe code, records the SCT extension instead of treating it as unknown, and adds spki_for_anchor and VerifiedPath::issuer_spki, which rewrap the anchor's SubjectPublicKeyInfo. No new dependencies, build script, I/O or unsafe code."
+
+[[audits.webpki-roots]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "1.0.11"
+notes = "Data only: src/lib.rs is #![no_std] and #![forbid(unsafe_code)], and holds one const, TLS_SERVER_ROOTS, a slice of rustls-pki-types TrustAnchor values (subject, public key info, name constraints as byte strings) generated from Mozilla's root store, each commented with its PEM. No functions, build script, proc macros or I/O. Depends on rustls-pki-types only. lettre's rustls build check requires the feature; the mail transport passes CertificateStore::None, so these roots are never loaded (ADR 0016)."
+
+[[audits.weezl]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.1.12"
+notes = "Pure Rust LZW encoder and decoder with #![forbid(unsafe_code)] in the library and its lzw binary. No build script or proc macros. No I/O except through the Read, Write or futures streams passed in; file access only in the binary and benches, include_bytes only in test modules. The code table is bounded at 4096 entries, so memory stays fixed whatever the input."
+
+[[audits.zune-core]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.5.3"
+notes = "Shared types for the zune decoders: decoder options, colour spaces, bit depths and the byte reader and writer traits. No unsafe code (use_unsafe is only a flag decoders read), no build script, no I/O beyond the Read and Write abstractions it defines. Its log and serde dependencies are optional."
+
+[[audits.zune-jpeg]]
+who = "Devadatta Sahoo <webmaster@nettantra.com>"
+criteria = "safe-to-deploy"
+version = "0.5.15"
+notes = "Pure Rust baseline and progressive JPEG decoder over a caller supplied byte source. All unsafe code is SIMD intrinsics compiled only with the x86 or neon feature; with default features off lib.rs applies forbid(unsafe_code), so the crate builds with no unsafe at all. Certified for use without x86 and neon. Width and height are checked against the options' limits before buffers are allocated. No build script, filesystem, network, process or environment access. Depends only on zune-core."
+
+[[trusted.addr2line]]
+criteria = "safe-to-deploy"
+user-id = 4415 # Philip Craig (philipc)
+start = "2019-05-01"
+end = "2027-11-18"
+
+[[trusted.anyhow]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-10-05"
+end = "2027-11-18"
+
+[[trusted.arbitrary]]
+criteria = "safe-to-deploy"
+user-id = 696 # Nick Fitzgerald (fitzgen)
+start = "2020-01-14"
+end = "2027-11-18"
+
+[[trusted.cc]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2022-10-29"
+end = "2027-11-16"
+
+[[trusted.dlmalloc]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2020-05-19"
+end = "2027-11-18"
+
+[[trusted.find-msvc-tools]]
+criteria = "safe-to-deploy"
+user-id = 539 # Josh Stone (cuviper)
+start = "2025-08-29"
+end = "2027-11-16"
+
+[[trusted.form_urlencoded]]
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2021-02-19"
+end = "2027-11-22"
+
+[[trusted.gimli]]
+criteria = "safe-to-deploy"
+user-id = 4415 # Philip Craig (philipc)
+start = "2019-04-25"
+end = "2027-11-18"
+
+[[trusted.id-arena]]
+criteria = "safe-to-deploy"
+user-id = 696 # Nick Fitzgerald (fitzgen)
+start = "2026-01-14"
+end = "2027-11-18"
+
+[[trusted.libm]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2024-10-26"
+end = "2027-11-18"
+
+[[trusted.mach2]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:JohnTitor/mach2"
+start = "2025-11-16"
+end = "2027-11-18"
+
+[[trusted.object]]
+criteria = "safe-to-deploy"
+user-id = 4415 # Philip Craig (philipc)
+start = "2019-04-26"
+end = "2027-11-18"
+
+[[trusted.openssl-probe]]
+criteria = "safe-to-deploy"
+user-id = 4556 # Dirkjan Ochtman (djc)
+start = "2025-12-29"
+end = "2027-11-16"
+
+[[trusted.prettyplease]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2022-01-04"
+end = "2027-11-18"
+
+[[trusted.ring]]
+criteria = "safe-to-deploy"
+user-id = 2751 # Joe Birr-Pixton (ctz)
+start = "2025-02-22"
+end = "2027-11-16"
+
+[[trusted.rustc-demangle]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2023-03-23"
+end = "2027-11-18"
+
+[[trusted.rustls]]
+criteria = "safe-to-deploy"
+user-id = 2751 # Joe Birr-Pixton (ctz)
+start = "2019-04-02"
+end = "2027-11-16"
+
+[[trusted.rustls-pki-types]]
+criteria = "safe-to-deploy"
+user-id = 2751 # Joe Birr-Pixton (ctz)
+start = "2023-09-07"
+end = "2027-11-16"
+
+[[trusted.rustls-webpki]]
+criteria = "safe-to-deploy"
+user-id = 2751 # Joe Birr-Pixton (ctz)
+start = "2023-01-09"
+end = "2027-11-16"
+
+[[trusted.rustversion]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-07-08"
+end = "2027-11-18"
+
+[[trusted.target-lexicon]]
+criteria = "safe-to-deploy"
+user-id = 6825 # Dan Gohman (sunfishcode)
+start = "2019-03-06"
+end = "2027-11-18"
+
+[[trusted.termcolor]]
+criteria = "safe-to-deploy"
+user-id = 189 # Andrew Gallant (BurntSushi)
+start = "2019-06-04"
+end = "2027-11-18"
+
+[[trusted.tokio-rustls]]
+criteria = "safe-to-deploy"
+user-id = 4556 # Dirkjan Ochtman (djc)
+start = "2023-06-09"
+end = "2027-11-16"
+
+[[trusted.url]]
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2021-02-18"
+end = "2027-11-22"
+
+[[trusted.winapi-util]]
+criteria = "safe-to-deploy"
+user-id = 189 # Andrew Gallant (BurntSushi)
+start = "2020-01-11"
+end = "2027-11-18"
+
+[[trusted.windows-sys]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-15"
+end = "2027-11-16"
+
+[[trusted.windows-targets]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-09"
+end = "2027-11-16"
+
+[[trusted.windows_aarch64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2027-11-16"
+
+[[trusted.windows_aarch64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-05"
+end = "2027-11-16"
+
+[[trusted.windows_i686_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2027-11-16"
+
+[[trusted.windows_i686_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2024-04-02"
+end = "2027-11-16"
+
+[[trusted.windows_i686_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2027-11-16"
+
+[[trusted.windows_x86_64_gnu]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-28"
+end = "2027-11-16"
+
+[[trusted.windows_x86_64_gnullvm]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2022-09-01"
+end = "2027-11-16"
+
+[[trusted.windows_x86_64_msvc]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-10-27"
+end = "2027-11-16"
+
+[[trusted.winnow]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2023-02-01"
+end = "2027-11-22"

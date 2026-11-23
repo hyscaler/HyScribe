@@ -1,0 +1,651 @@
+# The rows PHP WordPress writes for the action user-insert-roles (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:56:16 to 2026-11-14 19:56:19 UTC.
+# %wp_users:1% is 2.
+# %wp_users:2% is 3.
+# %wp_users:3% is 4.
+# %wp_users:4% is 5.
+# %wp_users:5% is 6.
+# %wp_users:6% is 7.
+# %wp_users:7% is 8.
+# %wp_users:8% is 9.
+# %wp_usermeta:1% is 17.
+# %wp_usermeta:2% is 18.
+# %wp_usermeta:3% is 19.
+# %wp_usermeta:4% is 20.
+# %wp_usermeta:5% is 21.
+# %wp_usermeta:6% is 22.
+# %wp_usermeta:7% is 23.
+# %wp_usermeta:8% is 24.
+# %wp_usermeta:9% is 25.
+# %wp_usermeta:10% is 26.
+# %wp_usermeta:11% is 27.
+# %wp_usermeta:12% is 28.
+# %wp_usermeta:13% is 29.
+# %wp_usermeta:14% is 30.
+# %wp_usermeta:15% is 31.
+# %wp_usermeta:16% is 32.
+# %wp_usermeta:17% is 33.
+# %wp_usermeta:18% is 34.
+# %wp_usermeta:19% is 35.
+# %wp_usermeta:20% is 36.
+# %wp_usermeta:21% is 37.
+# %wp_usermeta:22% is 38.
+# %wp_usermeta:23% is 39.
+# %wp_usermeta:24% is 40.
+# %wp_usermeta:25% is 41.
+# %wp_usermeta:26% is 42.
+# %wp_usermeta:27% is 43.
+# %wp_usermeta:28% is 44.
+# %wp_usermeta:29% is 45.
+# %wp_usermeta:30% is 46.
+# %wp_usermeta:31% is 47.
+# %wp_usermeta:32% is 48.
+# %wp_usermeta:33% is 49.
+# %wp_usermeta:34% is 50.
+# %wp_usermeta:35% is 51.
+# %wp_usermeta:36% is 52.
+# %wp_usermeta:37% is 53.
+# %wp_usermeta:38% is 54.
+# %wp_usermeta:39% is 55.
+# %wp_usermeta:40% is 56.
+# %wp_usermeta:41% is 57.
+# %wp_usermeta:42% is 58.
+# %wp_usermeta:43% is 59.
+# %wp_usermeta:44% is 60.
+# %wp_usermeta:45% is 61.
+# %wp_usermeta:46% is 62.
+# %wp_usermeta:47% is 63.
+# %wp_usermeta:48% is 64.
+# %wp_usermeta:49% is 65.
+# %wp_usermeta:50% is 66.
+# %wp_usermeta:51% is 67.
+# %wp_usermeta:52% is 68.
+# %wp_usermeta:53% is 69.
+# %wp_usermeta:54% is 70.
+# %wp_usermeta:55% is 71.
+# %wp_usermeta:56% is 72.
+# %wp_usermeta:57% is 73.
+# %wp_usermeta:58% is 74.
+# %wp_usermeta:59% is 75.
+# %wp_usermeta:60% is 76.
+# %wp_usermeta:61% is 77.
+# %wp_usermeta:62% is 78.
+# %wp_usermeta:63% is 79.
+# %wp_usermeta:64% is 80.
+# %wp_usermeta:65% is 81.
+# %wp_usermeta:66% is 82.
+# %wp_usermeta:67% is 83.
+# %wp_usermeta:68% is 84.
+# %wp_usermeta:69% is 85.
+# %wp_usermeta:70% is 86.
+# %wp_usermeta:71% is 87.
+# %wp_usermeta:72% is 88.
+# %wp_usermeta:73% is 89.
+# %wp_usermeta:74% is 90.
+# %wp_usermeta:75% is 91.
+# %wp_usermeta:76% is 92.
+# %wp_usermeta:77% is 93.
+# %wp_usermeta:78% is 94.
+# %wp_usermeta:79% is 95.
+# %wp_usermeta:80% is 96.
+# %wp_usermeta:81% is 97.
+# %wp_usermeta:82% is 98.
+# %wp_usermeta:83% is 99.
+# %wp_usermeta:84% is 100.
+# %wp_usermeta:85% is 101.
+# %wp_usermeta:86% is 102.
+# %wp_usermeta:87% is 103.
+# %wp_usermeta:88% is 104.
+# %wp_usermeta:89% is 105.
+# %wp_usermeta:90% is 106.
+# %wp_usermeta:91% is 107.
+# %wp_usermeta:92% is 108.
+# %wp_usermeta:93% is 109.
+# %wp_usermeta:94% is 110.
+# %wp_usermeta:95% is 111.
+# %wp_usermeta:96% is 112.
+# %wp_usermeta:97% is 113.
+# %wp_usermeta:98% is 114.
+# %wp_usermeta:99% is 115.
+# %wp_usermeta:100% is 116.
+# %wp_usermeta:101% is 117.
+# %wp_usermeta:102% is 118.
+# %wp_usermeta:103% is 119.
+# %wp_usermeta:104% is 120.
+# %wp_usermeta:105% is 121.
+# %wp_usermeta:106% is 122.
+# %wp_usermeta:107% is 123.
+# %wp_usermeta:108% is 124.
+# %wp_usermeta:109% is 125.
+# %wp_usermeta:110% is 126.
+# %wp_usermeta:111% is 127.
+# %wp_usermeta:112% is 128.
+wp_options	user_count	~	option_value	1	9
+wp_usermeta	%wp_usermeta:1%	+	meta_key	nickname
+wp_usermeta	%wp_usermeta:1%	+	meta_value	oracle-subscriber
+wp_usermeta	%wp_usermeta:1%	+	umeta_id	%wp_usermeta:1%
+wp_usermeta	%wp_usermeta:1%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:10%	+	meta_key	use_ssl
+wp_usermeta	%wp_usermeta:10%	+	meta_value	0
+wp_usermeta	%wp_usermeta:10%	+	umeta_id	%wp_usermeta:10%
+wp_usermeta	%wp_usermeta:10%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:100%	+	meta_key	first_name
+wp_usermeta	%wp_usermeta:100%	+	meta_value	
+wp_usermeta	%wp_usermeta:100%	+	umeta_id	%wp_usermeta:100%
+wp_usermeta	%wp_usermeta:100%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:101%	+	meta_key	last_name
+wp_usermeta	%wp_usermeta:101%	+	meta_value	
+wp_usermeta	%wp_usermeta:101%	+	umeta_id	%wp_usermeta:101%
+wp_usermeta	%wp_usermeta:101%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:102%	+	meta_key	description
+wp_usermeta	%wp_usermeta:102%	+	meta_value	
+wp_usermeta	%wp_usermeta:102%	+	umeta_id	%wp_usermeta:102%
+wp_usermeta	%wp_usermeta:102%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:103%	+	meta_key	rich_editing
+wp_usermeta	%wp_usermeta:103%	+	meta_value	true
+wp_usermeta	%wp_usermeta:103%	+	umeta_id	%wp_usermeta:103%
+wp_usermeta	%wp_usermeta:103%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:104%	+	meta_key	syntax_highlighting
+wp_usermeta	%wp_usermeta:104%	+	meta_value	true
+wp_usermeta	%wp_usermeta:104%	+	umeta_id	%wp_usermeta:104%
+wp_usermeta	%wp_usermeta:104%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:105%	+	meta_key	infinite_scrolling
+wp_usermeta	%wp_usermeta:105%	+	meta_value	true
+wp_usermeta	%wp_usermeta:105%	+	umeta_id	%wp_usermeta:105%
+wp_usermeta	%wp_usermeta:105%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:106%	+	meta_key	comment_shortcuts
+wp_usermeta	%wp_usermeta:106%	+	meta_value	false
+wp_usermeta	%wp_usermeta:106%	+	umeta_id	%wp_usermeta:106%
+wp_usermeta	%wp_usermeta:106%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:107%	+	meta_key	admin_color
+wp_usermeta	%wp_usermeta:107%	+	meta_value	modern
+wp_usermeta	%wp_usermeta:107%	+	umeta_id	%wp_usermeta:107%
+wp_usermeta	%wp_usermeta:107%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:108%	+	meta_key	use_ssl
+wp_usermeta	%wp_usermeta:108%	+	meta_value	0
+wp_usermeta	%wp_usermeta:108%	+	umeta_id	%wp_usermeta:108%
+wp_usermeta	%wp_usermeta:108%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:109%	+	meta_key	show_admin_bar_front
+wp_usermeta	%wp_usermeta:109%	+	meta_value	true
+wp_usermeta	%wp_usermeta:109%	+	umeta_id	%wp_usermeta:109%
+wp_usermeta	%wp_usermeta:109%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:11%	+	meta_key	show_admin_bar_front
+wp_usermeta	%wp_usermeta:11%	+	meta_value	true
+wp_usermeta	%wp_usermeta:11%	+	umeta_id	%wp_usermeta:11%
+wp_usermeta	%wp_usermeta:11%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:110%	+	meta_key	locale
+wp_usermeta	%wp_usermeta:110%	+	meta_value	
+wp_usermeta	%wp_usermeta:110%	+	umeta_id	%wp_usermeta:110%
+wp_usermeta	%wp_usermeta:110%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:111%	+	meta_key	wp_capabilities
+wp_usermeta	%wp_usermeta:111%	+	meta_value	a:1:{s:10:"subscriber";b:1;}
+wp_usermeta	%wp_usermeta:111%	+	umeta_id	%wp_usermeta:111%
+wp_usermeta	%wp_usermeta:111%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:112%	+	meta_key	wp_user_level
+wp_usermeta	%wp_usermeta:112%	+	meta_value	0
+wp_usermeta	%wp_usermeta:112%	+	umeta_id	%wp_usermeta:112%
+wp_usermeta	%wp_usermeta:112%	+	user_id	%wp_users:8%
+wp_usermeta	%wp_usermeta:12%	+	meta_key	locale
+wp_usermeta	%wp_usermeta:12%	+	meta_value	
+wp_usermeta	%wp_usermeta:12%	+	umeta_id	%wp_usermeta:12%
+wp_usermeta	%wp_usermeta:12%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:13%	+	meta_key	wp_capabilities
+wp_usermeta	%wp_usermeta:13%	+	meta_value	a:1:{s:10:"subscriber";b:1;}
+wp_usermeta	%wp_usermeta:13%	+	umeta_id	%wp_usermeta:13%
+wp_usermeta	%wp_usermeta:13%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:14%	+	meta_key	wp_user_level
+wp_usermeta	%wp_usermeta:14%	+	meta_value	0
+wp_usermeta	%wp_usermeta:14%	+	umeta_id	%wp_usermeta:14%
+wp_usermeta	%wp_usermeta:14%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:15%	+	meta_key	nickname
+wp_usermeta	%wp_usermeta:15%	+	meta_value	oracle-editor
+wp_usermeta	%wp_usermeta:15%	+	umeta_id	%wp_usermeta:15%
+wp_usermeta	%wp_usermeta:15%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:16%	+	meta_key	first_name
+wp_usermeta	%wp_usermeta:16%	+	meta_value	Ada
+wp_usermeta	%wp_usermeta:16%	+	umeta_id	%wp_usermeta:16%
+wp_usermeta	%wp_usermeta:16%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:17%	+	meta_key	last_name
+wp_usermeta	%wp_usermeta:17%	+	meta_value	Lovelace
+wp_usermeta	%wp_usermeta:17%	+	umeta_id	%wp_usermeta:17%
+wp_usermeta	%wp_usermeta:17%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:18%	+	meta_key	description
+wp_usermeta	%wp_usermeta:18%	+	meta_value	
+wp_usermeta	%wp_usermeta:18%	+	umeta_id	%wp_usermeta:18%
+wp_usermeta	%wp_usermeta:18%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:19%	+	meta_key	rich_editing
+wp_usermeta	%wp_usermeta:19%	+	meta_value	true
+wp_usermeta	%wp_usermeta:19%	+	umeta_id	%wp_usermeta:19%
+wp_usermeta	%wp_usermeta:19%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:2%	+	meta_key	first_name
+wp_usermeta	%wp_usermeta:2%	+	meta_value	
+wp_usermeta	%wp_usermeta:2%	+	umeta_id	%wp_usermeta:2%
+wp_usermeta	%wp_usermeta:2%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:20%	+	meta_key	syntax_highlighting
+wp_usermeta	%wp_usermeta:20%	+	meta_value	true
+wp_usermeta	%wp_usermeta:20%	+	umeta_id	%wp_usermeta:20%
+wp_usermeta	%wp_usermeta:20%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:21%	+	meta_key	infinite_scrolling
+wp_usermeta	%wp_usermeta:21%	+	meta_value	true
+wp_usermeta	%wp_usermeta:21%	+	umeta_id	%wp_usermeta:21%
+wp_usermeta	%wp_usermeta:21%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:22%	+	meta_key	comment_shortcuts
+wp_usermeta	%wp_usermeta:22%	+	meta_value	false
+wp_usermeta	%wp_usermeta:22%	+	umeta_id	%wp_usermeta:22%
+wp_usermeta	%wp_usermeta:22%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:23%	+	meta_key	admin_color
+wp_usermeta	%wp_usermeta:23%	+	meta_value	modern
+wp_usermeta	%wp_usermeta:23%	+	umeta_id	%wp_usermeta:23%
+wp_usermeta	%wp_usermeta:23%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:24%	+	meta_key	use_ssl
+wp_usermeta	%wp_usermeta:24%	+	meta_value	0
+wp_usermeta	%wp_usermeta:24%	+	umeta_id	%wp_usermeta:24%
+wp_usermeta	%wp_usermeta:24%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:25%	+	meta_key	show_admin_bar_front
+wp_usermeta	%wp_usermeta:25%	+	meta_value	true
+wp_usermeta	%wp_usermeta:25%	+	umeta_id	%wp_usermeta:25%
+wp_usermeta	%wp_usermeta:25%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:26%	+	meta_key	locale
+wp_usermeta	%wp_usermeta:26%	+	meta_value	
+wp_usermeta	%wp_usermeta:26%	+	umeta_id	%wp_usermeta:26%
+wp_usermeta	%wp_usermeta:26%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:27%	+	meta_key	wp_capabilities
+wp_usermeta	%wp_usermeta:27%	+	meta_value	a:1:{s:6:"editor";b:1;}
+wp_usermeta	%wp_usermeta:27%	+	umeta_id	%wp_usermeta:27%
+wp_usermeta	%wp_usermeta:27%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:28%	+	meta_key	wp_user_level
+wp_usermeta	%wp_usermeta:28%	+	meta_value	7
+wp_usermeta	%wp_usermeta:28%	+	umeta_id	%wp_usermeta:28%
+wp_usermeta	%wp_usermeta:28%	+	user_id	%wp_users:2%
+wp_usermeta	%wp_usermeta:29%	+	meta_key	nickname
+wp_usermeta	%wp_usermeta:29%	+	meta_value	oracle-author
+wp_usermeta	%wp_usermeta:29%	+	umeta_id	%wp_usermeta:29%
+wp_usermeta	%wp_usermeta:29%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:3%	+	meta_key	last_name
+wp_usermeta	%wp_usermeta:3%	+	meta_value	
+wp_usermeta	%wp_usermeta:3%	+	umeta_id	%wp_usermeta:3%
+wp_usermeta	%wp_usermeta:3%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:30%	+	meta_key	first_name
+wp_usermeta	%wp_usermeta:30%	+	meta_value	Only First
+wp_usermeta	%wp_usermeta:30%	+	umeta_id	%wp_usermeta:30%
+wp_usermeta	%wp_usermeta:30%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:31%	+	meta_key	last_name
+wp_usermeta	%wp_usermeta:31%	+	meta_value	
+wp_usermeta	%wp_usermeta:31%	+	umeta_id	%wp_usermeta:31%
+wp_usermeta	%wp_usermeta:31%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:32%	+	meta_key	description
+wp_usermeta	%wp_usermeta:32%	+	meta_value	
+wp_usermeta	%wp_usermeta:32%	+	umeta_id	%wp_usermeta:32%
+wp_usermeta	%wp_usermeta:32%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:33%	+	meta_key	rich_editing
+wp_usermeta	%wp_usermeta:33%	+	meta_value	true
+wp_usermeta	%wp_usermeta:33%	+	umeta_id	%wp_usermeta:33%
+wp_usermeta	%wp_usermeta:33%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:34%	+	meta_key	syntax_highlighting
+wp_usermeta	%wp_usermeta:34%	+	meta_value	true
+wp_usermeta	%wp_usermeta:34%	+	umeta_id	%wp_usermeta:34%
+wp_usermeta	%wp_usermeta:34%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:35%	+	meta_key	infinite_scrolling
+wp_usermeta	%wp_usermeta:35%	+	meta_value	true
+wp_usermeta	%wp_usermeta:35%	+	umeta_id	%wp_usermeta:35%
+wp_usermeta	%wp_usermeta:35%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:36%	+	meta_key	comment_shortcuts
+wp_usermeta	%wp_usermeta:36%	+	meta_value	false
+wp_usermeta	%wp_usermeta:36%	+	umeta_id	%wp_usermeta:36%
+wp_usermeta	%wp_usermeta:36%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:37%	+	meta_key	admin_color
+wp_usermeta	%wp_usermeta:37%	+	meta_value	modern
+wp_usermeta	%wp_usermeta:37%	+	umeta_id	%wp_usermeta:37%
+wp_usermeta	%wp_usermeta:37%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:38%	+	meta_key	use_ssl
+wp_usermeta	%wp_usermeta:38%	+	meta_value	0
+wp_usermeta	%wp_usermeta:38%	+	umeta_id	%wp_usermeta:38%
+wp_usermeta	%wp_usermeta:38%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:39%	+	meta_key	show_admin_bar_front
+wp_usermeta	%wp_usermeta:39%	+	meta_value	true
+wp_usermeta	%wp_usermeta:39%	+	umeta_id	%wp_usermeta:39%
+wp_usermeta	%wp_usermeta:39%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:4%	+	meta_key	description
+wp_usermeta	%wp_usermeta:4%	+	meta_value	
+wp_usermeta	%wp_usermeta:4%	+	umeta_id	%wp_usermeta:4%
+wp_usermeta	%wp_usermeta:4%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:40%	+	meta_key	locale
+wp_usermeta	%wp_usermeta:40%	+	meta_value	
+wp_usermeta	%wp_usermeta:40%	+	umeta_id	%wp_usermeta:40%
+wp_usermeta	%wp_usermeta:40%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:41%	+	meta_key	wp_capabilities
+wp_usermeta	%wp_usermeta:41%	+	meta_value	a:1:{s:6:"author";b:1;}
+wp_usermeta	%wp_usermeta:41%	+	umeta_id	%wp_usermeta:41%
+wp_usermeta	%wp_usermeta:41%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:42%	+	meta_key	wp_user_level
+wp_usermeta	%wp_usermeta:42%	+	meta_value	2
+wp_usermeta	%wp_usermeta:42%	+	umeta_id	%wp_usermeta:42%
+wp_usermeta	%wp_usermeta:42%	+	user_id	%wp_users:3%
+wp_usermeta	%wp_usermeta:43%	+	meta_key	nickname
+wp_usermeta	%wp_usermeta:43%	+	meta_value	oracle-contributor
+wp_usermeta	%wp_usermeta:43%	+	umeta_id	%wp_usermeta:43%
+wp_usermeta	%wp_usermeta:43%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:44%	+	meta_key	first_name
+wp_usermeta	%wp_usermeta:44%	+	meta_value	
+wp_usermeta	%wp_usermeta:44%	+	umeta_id	%wp_usermeta:44%
+wp_usermeta	%wp_usermeta:44%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:45%	+	meta_key	last_name
+wp_usermeta	%wp_usermeta:45%	+	meta_value	Only Last
+wp_usermeta	%wp_usermeta:45%	+	umeta_id	%wp_usermeta:45%
+wp_usermeta	%wp_usermeta:45%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:46%	+	meta_key	description
+wp_usermeta	%wp_usermeta:46%	+	meta_value	
+wp_usermeta	%wp_usermeta:46%	+	umeta_id	%wp_usermeta:46%
+wp_usermeta	%wp_usermeta:46%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:47%	+	meta_key	rich_editing
+wp_usermeta	%wp_usermeta:47%	+	meta_value	true
+wp_usermeta	%wp_usermeta:47%	+	umeta_id	%wp_usermeta:47%
+wp_usermeta	%wp_usermeta:47%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:48%	+	meta_key	syntax_highlighting
+wp_usermeta	%wp_usermeta:48%	+	meta_value	true
+wp_usermeta	%wp_usermeta:48%	+	umeta_id	%wp_usermeta:48%
+wp_usermeta	%wp_usermeta:48%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:49%	+	meta_key	infinite_scrolling
+wp_usermeta	%wp_usermeta:49%	+	meta_value	true
+wp_usermeta	%wp_usermeta:49%	+	umeta_id	%wp_usermeta:49%
+wp_usermeta	%wp_usermeta:49%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:5%	+	meta_key	rich_editing
+wp_usermeta	%wp_usermeta:5%	+	meta_value	true
+wp_usermeta	%wp_usermeta:5%	+	umeta_id	%wp_usermeta:5%
+wp_usermeta	%wp_usermeta:5%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:50%	+	meta_key	comment_shortcuts
+wp_usermeta	%wp_usermeta:50%	+	meta_value	false
+wp_usermeta	%wp_usermeta:50%	+	umeta_id	%wp_usermeta:50%
+wp_usermeta	%wp_usermeta:50%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:51%	+	meta_key	admin_color
+wp_usermeta	%wp_usermeta:51%	+	meta_value	modern
+wp_usermeta	%wp_usermeta:51%	+	umeta_id	%wp_usermeta:51%
+wp_usermeta	%wp_usermeta:51%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:52%	+	meta_key	use_ssl
+wp_usermeta	%wp_usermeta:52%	+	meta_value	0
+wp_usermeta	%wp_usermeta:52%	+	umeta_id	%wp_usermeta:52%
+wp_usermeta	%wp_usermeta:52%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:53%	+	meta_key	show_admin_bar_front
+wp_usermeta	%wp_usermeta:53%	+	meta_value	true
+wp_usermeta	%wp_usermeta:53%	+	umeta_id	%wp_usermeta:53%
+wp_usermeta	%wp_usermeta:53%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:54%	+	meta_key	locale
+wp_usermeta	%wp_usermeta:54%	+	meta_value	
+wp_usermeta	%wp_usermeta:54%	+	umeta_id	%wp_usermeta:54%
+wp_usermeta	%wp_usermeta:54%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:55%	+	meta_key	wp_capabilities
+wp_usermeta	%wp_usermeta:55%	+	meta_value	a:1:{s:11:"contributor";b:1;}
+wp_usermeta	%wp_usermeta:55%	+	umeta_id	%wp_usermeta:55%
+wp_usermeta	%wp_usermeta:55%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:56%	+	meta_key	wp_user_level
+wp_usermeta	%wp_usermeta:56%	+	meta_value	1
+wp_usermeta	%wp_usermeta:56%	+	umeta_id	%wp_usermeta:56%
+wp_usermeta	%wp_usermeta:56%	+	user_id	%wp_users:4%
+wp_usermeta	%wp_usermeta:57%	+	meta_key	nickname
+wp_usermeta	%wp_usermeta:57%	+	meta_value	Boss
+wp_usermeta	%wp_usermeta:57%	+	umeta_id	%wp_usermeta:57%
+wp_usermeta	%wp_usermeta:57%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:58%	+	meta_key	first_name
+wp_usermeta	%wp_usermeta:58%	+	meta_value	
+wp_usermeta	%wp_usermeta:58%	+	umeta_id	%wp_usermeta:58%
+wp_usermeta	%wp_usermeta:58%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:59%	+	meta_key	last_name
+wp_usermeta	%wp_usermeta:59%	+	meta_value	
+wp_usermeta	%wp_usermeta:59%	+	umeta_id	%wp_usermeta:59%
+wp_usermeta	%wp_usermeta:59%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:6%	+	meta_key	syntax_highlighting
+wp_usermeta	%wp_usermeta:6%	+	meta_value	true
+wp_usermeta	%wp_usermeta:6%	+	umeta_id	%wp_usermeta:6%
+wp_usermeta	%wp_usermeta:6%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:60%	+	meta_key	description
+wp_usermeta	%wp_usermeta:60%	+	meta_value	
+wp_usermeta	%wp_usermeta:60%	+	umeta_id	%wp_usermeta:60%
+wp_usermeta	%wp_usermeta:60%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:61%	+	meta_key	rich_editing
+wp_usermeta	%wp_usermeta:61%	+	meta_value	true
+wp_usermeta	%wp_usermeta:61%	+	umeta_id	%wp_usermeta:61%
+wp_usermeta	%wp_usermeta:61%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:62%	+	meta_key	syntax_highlighting
+wp_usermeta	%wp_usermeta:62%	+	meta_value	true
+wp_usermeta	%wp_usermeta:62%	+	umeta_id	%wp_usermeta:62%
+wp_usermeta	%wp_usermeta:62%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:63%	+	meta_key	infinite_scrolling
+wp_usermeta	%wp_usermeta:63%	+	meta_value	true
+wp_usermeta	%wp_usermeta:63%	+	umeta_id	%wp_usermeta:63%
+wp_usermeta	%wp_usermeta:63%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:64%	+	meta_key	comment_shortcuts
+wp_usermeta	%wp_usermeta:64%	+	meta_value	false
+wp_usermeta	%wp_usermeta:64%	+	umeta_id	%wp_usermeta:64%
+wp_usermeta	%wp_usermeta:64%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:65%	+	meta_key	admin_color
+wp_usermeta	%wp_usermeta:65%	+	meta_value	modern
+wp_usermeta	%wp_usermeta:65%	+	umeta_id	%wp_usermeta:65%
+wp_usermeta	%wp_usermeta:65%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:66%	+	meta_key	use_ssl
+wp_usermeta	%wp_usermeta:66%	+	meta_value	0
+wp_usermeta	%wp_usermeta:66%	+	umeta_id	%wp_usermeta:66%
+wp_usermeta	%wp_usermeta:66%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:67%	+	meta_key	show_admin_bar_front
+wp_usermeta	%wp_usermeta:67%	+	meta_value	true
+wp_usermeta	%wp_usermeta:67%	+	umeta_id	%wp_usermeta:67%
+wp_usermeta	%wp_usermeta:67%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:68%	+	meta_key	locale
+wp_usermeta	%wp_usermeta:68%	+	meta_value	
+wp_usermeta	%wp_usermeta:68%	+	umeta_id	%wp_usermeta:68%
+wp_usermeta	%wp_usermeta:68%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:69%	+	meta_key	wp_capabilities
+wp_usermeta	%wp_usermeta:69%	+	meta_value	a:1:{s:13:"administrator";b:1;}
+wp_usermeta	%wp_usermeta:69%	+	umeta_id	%wp_usermeta:69%
+wp_usermeta	%wp_usermeta:69%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:7%	+	meta_key	infinite_scrolling
+wp_usermeta	%wp_usermeta:7%	+	meta_value	true
+wp_usermeta	%wp_usermeta:7%	+	umeta_id	%wp_usermeta:7%
+wp_usermeta	%wp_usermeta:7%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:70%	+	meta_key	wp_user_level
+wp_usermeta	%wp_usermeta:70%	+	meta_value	10
+wp_usermeta	%wp_usermeta:70%	+	umeta_id	%wp_usermeta:70%
+wp_usermeta	%wp_usermeta:70%	+	user_id	%wp_users:5%
+wp_usermeta	%wp_usermeta:71%	+	meta_key	nickname
+wp_usermeta	%wp_usermeta:71%	+	meta_value	Jane Doe
+wp_usermeta	%wp_usermeta:71%	+	umeta_id	%wp_usermeta:71%
+wp_usermeta	%wp_usermeta:71%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:72%	+	meta_key	first_name
+wp_usermeta	%wp_usermeta:72%	+	meta_value	
+wp_usermeta	%wp_usermeta:72%	+	umeta_id	%wp_usermeta:72%
+wp_usermeta	%wp_usermeta:72%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:73%	+	meta_key	last_name
+wp_usermeta	%wp_usermeta:73%	+	meta_value	
+wp_usermeta	%wp_usermeta:73%	+	umeta_id	%wp_usermeta:73%
+wp_usermeta	%wp_usermeta:73%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:74%	+	meta_key	description
+wp_usermeta	%wp_usermeta:74%	+	meta_value	
+wp_usermeta	%wp_usermeta:74%	+	umeta_id	%wp_usermeta:74%
+wp_usermeta	%wp_usermeta:74%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:75%	+	meta_key	rich_editing
+wp_usermeta	%wp_usermeta:75%	+	meta_value	true
+wp_usermeta	%wp_usermeta:75%	+	umeta_id	%wp_usermeta:75%
+wp_usermeta	%wp_usermeta:75%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:76%	+	meta_key	syntax_highlighting
+wp_usermeta	%wp_usermeta:76%	+	meta_value	true
+wp_usermeta	%wp_usermeta:76%	+	umeta_id	%wp_usermeta:76%
+wp_usermeta	%wp_usermeta:76%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:77%	+	meta_key	infinite_scrolling
+wp_usermeta	%wp_usermeta:77%	+	meta_value	true
+wp_usermeta	%wp_usermeta:77%	+	umeta_id	%wp_usermeta:77%
+wp_usermeta	%wp_usermeta:77%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:78%	+	meta_key	comment_shortcuts
+wp_usermeta	%wp_usermeta:78%	+	meta_value	false
+wp_usermeta	%wp_usermeta:78%	+	umeta_id	%wp_usermeta:78%
+wp_usermeta	%wp_usermeta:78%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:79%	+	meta_key	admin_color
+wp_usermeta	%wp_usermeta:79%	+	meta_value	modern
+wp_usermeta	%wp_usermeta:79%	+	umeta_id	%wp_usermeta:79%
+wp_usermeta	%wp_usermeta:79%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:8%	+	meta_key	comment_shortcuts
+wp_usermeta	%wp_usermeta:8%	+	meta_value	false
+wp_usermeta	%wp_usermeta:8%	+	umeta_id	%wp_usermeta:8%
+wp_usermeta	%wp_usermeta:8%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:80%	+	meta_key	use_ssl
+wp_usermeta	%wp_usermeta:80%	+	meta_value	0
+wp_usermeta	%wp_usermeta:80%	+	umeta_id	%wp_usermeta:80%
+wp_usermeta	%wp_usermeta:80%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:81%	+	meta_key	show_admin_bar_front
+wp_usermeta	%wp_usermeta:81%	+	meta_value	true
+wp_usermeta	%wp_usermeta:81%	+	umeta_id	%wp_usermeta:81%
+wp_usermeta	%wp_usermeta:81%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:82%	+	meta_key	locale
+wp_usermeta	%wp_usermeta:82%	+	meta_value	
+wp_usermeta	%wp_usermeta:82%	+	umeta_id	%wp_usermeta:82%
+wp_usermeta	%wp_usermeta:82%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:83%	+	meta_key	wp_capabilities
+wp_usermeta	%wp_usermeta:83%	+	meta_value	a:1:{s:10:"subscriber";b:1;}
+wp_usermeta	%wp_usermeta:83%	+	umeta_id	%wp_usermeta:83%
+wp_usermeta	%wp_usermeta:83%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:84%	+	meta_key	wp_user_level
+wp_usermeta	%wp_usermeta:84%	+	meta_value	0
+wp_usermeta	%wp_usermeta:84%	+	umeta_id	%wp_usermeta:84%
+wp_usermeta	%wp_usermeta:84%	+	user_id	%wp_users:6%
+wp_usermeta	%wp_usermeta:85%	+	meta_key	nickname
+wp_usermeta	%wp_usermeta:85%	+	meta_value	jane.doe
+wp_usermeta	%wp_usermeta:85%	+	umeta_id	%wp_usermeta:85%
+wp_usermeta	%wp_usermeta:85%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:86%	+	meta_key	first_name
+wp_usermeta	%wp_usermeta:86%	+	meta_value	
+wp_usermeta	%wp_usermeta:86%	+	umeta_id	%wp_usermeta:86%
+wp_usermeta	%wp_usermeta:86%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:87%	+	meta_key	last_name
+wp_usermeta	%wp_usermeta:87%	+	meta_value	
+wp_usermeta	%wp_usermeta:87%	+	umeta_id	%wp_usermeta:87%
+wp_usermeta	%wp_usermeta:87%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:88%	+	meta_key	description
+wp_usermeta	%wp_usermeta:88%	+	meta_value	
+wp_usermeta	%wp_usermeta:88%	+	umeta_id	%wp_usermeta:88%
+wp_usermeta	%wp_usermeta:88%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:89%	+	meta_key	rich_editing
+wp_usermeta	%wp_usermeta:89%	+	meta_value	true
+wp_usermeta	%wp_usermeta:89%	+	umeta_id	%wp_usermeta:89%
+wp_usermeta	%wp_usermeta:89%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:9%	+	meta_key	admin_color
+wp_usermeta	%wp_usermeta:9%	+	meta_value	modern
+wp_usermeta	%wp_usermeta:9%	+	umeta_id	%wp_usermeta:9%
+wp_usermeta	%wp_usermeta:9%	+	user_id	%wp_users:1%
+wp_usermeta	%wp_usermeta:90%	+	meta_key	syntax_highlighting
+wp_usermeta	%wp_usermeta:90%	+	meta_value	true
+wp_usermeta	%wp_usermeta:90%	+	umeta_id	%wp_usermeta:90%
+wp_usermeta	%wp_usermeta:90%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:91%	+	meta_key	infinite_scrolling
+wp_usermeta	%wp_usermeta:91%	+	meta_value	true
+wp_usermeta	%wp_usermeta:91%	+	umeta_id	%wp_usermeta:91%
+wp_usermeta	%wp_usermeta:91%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:92%	+	meta_key	comment_shortcuts
+wp_usermeta	%wp_usermeta:92%	+	meta_value	false
+wp_usermeta	%wp_usermeta:92%	+	umeta_id	%wp_usermeta:92%
+wp_usermeta	%wp_usermeta:92%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:93%	+	meta_key	admin_color
+wp_usermeta	%wp_usermeta:93%	+	meta_value	modern
+wp_usermeta	%wp_usermeta:93%	+	umeta_id	%wp_usermeta:93%
+wp_usermeta	%wp_usermeta:93%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:94%	+	meta_key	use_ssl
+wp_usermeta	%wp_usermeta:94%	+	meta_value	0
+wp_usermeta	%wp_usermeta:94%	+	umeta_id	%wp_usermeta:94%
+wp_usermeta	%wp_usermeta:94%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:95%	+	meta_key	show_admin_bar_front
+wp_usermeta	%wp_usermeta:95%	+	meta_value	true
+wp_usermeta	%wp_usermeta:95%	+	umeta_id	%wp_usermeta:95%
+wp_usermeta	%wp_usermeta:95%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:96%	+	meta_key	locale
+wp_usermeta	%wp_usermeta:96%	+	meta_value	
+wp_usermeta	%wp_usermeta:96%	+	umeta_id	%wp_usermeta:96%
+wp_usermeta	%wp_usermeta:96%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:97%	+	meta_key	wp_capabilities
+wp_usermeta	%wp_usermeta:97%	+	meta_value	a:0:{}
+wp_usermeta	%wp_usermeta:97%	+	umeta_id	%wp_usermeta:97%
+wp_usermeta	%wp_usermeta:97%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:98%	+	meta_key	wp_user_level
+wp_usermeta	%wp_usermeta:98%	+	meta_value	0
+wp_usermeta	%wp_usermeta:98%	+	umeta_id	%wp_usermeta:98%
+wp_usermeta	%wp_usermeta:98%	+	user_id	%wp_users:7%
+wp_usermeta	%wp_usermeta:99%	+	meta_key	nickname
+wp_usermeta	%wp_usermeta:99%	+	meta_value	jane-doe
+wp_usermeta	%wp_usermeta:99%	+	umeta_id	%wp_usermeta:99%
+wp_usermeta	%wp_usermeta:99%	+	user_id	%wp_users:8%
+wp_users	%wp_users:1%	+	ID	%wp_users:1%
+wp_users	%wp_users:1%	+	display_name	oracle-subscriber
+wp_users	%wp_users:1%	+	user_activation_key	
+wp_users	%wp_users:1%	+	user_email	oracle-subscriber@example.test
+wp_users	%wp_users:1%	+	user_login	oracle-subscriber
+wp_users	%wp_users:1%	+	user_nicename	oracle-subscriber
+wp_users	%wp_users:1%	+	user_pass	%password%
+wp_users	%wp_users:1%	+	user_registered	%now%
+wp_users	%wp_users:1%	+	user_status	0
+wp_users	%wp_users:1%	+	user_url	
+wp_users	%wp_users:2%	+	ID	%wp_users:2%
+wp_users	%wp_users:2%	+	display_name	Ada Lovelace
+wp_users	%wp_users:2%	+	user_activation_key	
+wp_users	%wp_users:2%	+	user_email	oracle-editor@example.test
+wp_users	%wp_users:2%	+	user_login	oracle-editor
+wp_users	%wp_users:2%	+	user_nicename	oracle-editor
+wp_users	%wp_users:2%	+	user_pass	%password%
+wp_users	%wp_users:2%	+	user_registered	%now%
+wp_users	%wp_users:2%	+	user_status	0
+wp_users	%wp_users:2%	+	user_url	
+wp_users	%wp_users:3%	+	ID	%wp_users:3%
+wp_users	%wp_users:3%	+	display_name	Only First
+wp_users	%wp_users:3%	+	user_activation_key	
+wp_users	%wp_users:3%	+	user_email	oracle-author@example.test
+wp_users	%wp_users:3%	+	user_login	oracle-author
+wp_users	%wp_users:3%	+	user_nicename	oracle-author
+wp_users	%wp_users:3%	+	user_pass	%password%
+wp_users	%wp_users:3%	+	user_registered	%now%
+wp_users	%wp_users:3%	+	user_status	0
+wp_users	%wp_users:3%	+	user_url	
+wp_users	%wp_users:4%	+	ID	%wp_users:4%
+wp_users	%wp_users:4%	+	display_name	Only Last
+wp_users	%wp_users:4%	+	user_activation_key	
+wp_users	%wp_users:4%	+	user_email	oracle-contributor@example.test
+wp_users	%wp_users:4%	+	user_login	oracle-contributor
+wp_users	%wp_users:4%	+	user_nicename	oracle-contributor
+wp_users	%wp_users:4%	+	user_pass	%password%
+wp_users	%wp_users:4%	+	user_registered	%now%
+wp_users	%wp_users:4%	+	user_status	0
+wp_users	%wp_users:4%	+	user_url	
+wp_users	%wp_users:5%	+	ID	%wp_users:5%
+wp_users	%wp_users:5%	+	display_name	The Boss
+wp_users	%wp_users:5%	+	user_activation_key	
+wp_users	%wp_users:5%	+	user_email	oracle-admin@example.test
+wp_users	%wp_users:5%	+	user_login	oracle-admin
+wp_users	%wp_users:5%	+	user_nicename	oracle-admin
+wp_users	%wp_users:5%	+	user_pass	%password%
+wp_users	%wp_users:5%	+	user_registered	%now%
+wp_users	%wp_users:5%	+	user_status	0
+wp_users	%wp_users:5%	+	user_url	
+wp_users	%wp_users:6%	+	ID	%wp_users:6%
+wp_users	%wp_users:6%	+	display_name	Jane Doe
+wp_users	%wp_users:6%	+	user_activation_key	
+wp_users	%wp_users:6%	+	user_email	jane@example.test
+wp_users	%wp_users:6%	+	user_login	Jane Doe
+wp_users	%wp_users:6%	+	user_nicename	jane-doe
+wp_users	%wp_users:6%	+	user_pass	%password%
+wp_users	%wp_users:6%	+	user_registered	%now%
+wp_users	%wp_users:6%	+	user_status	0
+wp_users	%wp_users:6%	+	user_url	
+wp_users	%wp_users:7%	+	ID	%wp_users:7%
+wp_users	%wp_users:7%	+	display_name	jane.doe
+wp_users	%wp_users:7%	+	user_activation_key	
+wp_users	%wp_users:7%	+	user_email	jane.doe@example.test
+wp_users	%wp_users:7%	+	user_login	jane.doe
+wp_users	%wp_users:7%	+	user_nicename	jane-doe-2
+wp_users	%wp_users:7%	+	user_pass	%password%
+wp_users	%wp_users:7%	+	user_registered	%now%
+wp_users	%wp_users:7%	+	user_status	0
+wp_users	%wp_users:7%	+	user_url	
+wp_users	%wp_users:8%	+	ID	%wp_users:8%
+wp_users	%wp_users:8%	+	display_name	jane-doe
+wp_users	%wp_users:8%	+	user_activation_key	
+wp_users	%wp_users:8%	+	user_email	jane-doe@example.test
+wp_users	%wp_users:8%	+	user_login	jane-doe
+wp_users	%wp_users:8%	+	user_nicename	jane-doe-3
+wp_users	%wp_users:8%	+	user_pass	%password%
+wp_users	%wp_users:8%	+	user_registered	%now%
+wp_users	%wp_users:8%	+	user_status	0
+wp_users	%wp_users:8%	+	user_url	

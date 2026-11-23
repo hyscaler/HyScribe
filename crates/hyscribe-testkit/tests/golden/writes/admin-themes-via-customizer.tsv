@@ -1,0 +1,9 @@
+# The rows PHP WordPress writes for the action admin-themes-via-customizer (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-20 09:17:16 to 2026-11-20 09:17:16 UTC.
+# %wp_options:1% is 167.
+# %wp_options:2% is 168.
+# %wp_options:3% is 169.
+# %wp_options:4% is 170.
+# %wp_options:5% is 171.
+wp_options	theme_switched	~	option_value	twentytwentyfive	
+wp_options	theme_switched_via_customizer	~	option_value	1	

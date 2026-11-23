@@ -1,0 +1,1044 @@
+{
+    "block_styles": [],
+    "partial_styles": [],
+    "pattern_categories": [
+        {
+            "name": "twentytwentytwo_pages",
+            "label": "Pages"
+        }
+    ],
+    "patterns": [
+        {
+            "title": "Default footer",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-default"
+        },
+        {
+            "title": "Dark footer with title and citation",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-dark"
+        },
+        {
+            "title": "Footer with logo and citation",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-logo"
+        },
+        {
+            "title": "Footer with navigation and citation",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-navigation"
+        },
+        {
+            "title": "Footer with title, tagline, and social links on a dark background",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-title-tagline-social"
+        },
+        {
+            "title": "Footer with social links and copyright",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-social-copyright"
+        },
+        {
+            "title": "Footer with navigation and copyright",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-navigation-copyright"
+        },
+        {
+            "title": "Footer with text, title, and logo",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-about-title-logo"
+        },
+        {
+            "title": "Footer with query, title, and citation",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-query-title-citation"
+        },
+        {
+            "title": "Footer with query, featured images, title, and citation",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-query-images-title-citation"
+        },
+        {
+            "title": "Blog footer",
+            "categories": [
+                "footer"
+            ],
+            "blockTypes": [
+                "core/template-part/footer"
+            ],
+            "name": "twentytwentytwo/footer-blog"
+        },
+        {
+            "title": "Subscribe callout",
+            "categories": [
+                "featured",
+                "buttons"
+            ],
+            "name": "twentytwentytwo/general-subscribe"
+        },
+        {
+            "title": "Featured posts",
+            "categories": [
+                "featured",
+                "query"
+            ],
+            "name": "twentytwentytwo/general-featured-posts"
+        },
+        {
+            "title": "Layered images with duotone",
+            "categories": [
+                "featured",
+                "gallery"
+            ],
+            "name": "twentytwentytwo/general-layered-images-with-duotone"
+        },
+        {
+            "title": "Wide image with introduction and buttons",
+            "categories": [
+                "featured",
+                "columns"
+            ],
+            "name": "twentytwentytwo/general-wide-image-intro-buttons"
+        },
+        {
+            "title": "Large list of names",
+            "categories": [
+                "featured",
+                "text"
+            ],
+            "name": "twentytwentytwo/general-large-list-names"
+        },
+        {
+            "title": "Video with header and details",
+            "categories": [
+                "featured",
+                "columns"
+            ],
+            "name": "twentytwentytwo/general-video-header-details"
+        },
+        {
+            "title": "List of events",
+            "categories": [
+                "featured",
+                "text"
+            ],
+            "name": "twentytwentytwo/general-list-events"
+        },
+        {
+            "title": "Two images with text",
+            "categories": [
+                "featured",
+                "columns",
+                "gallery"
+            ],
+            "name": "twentytwentytwo/general-two-images-text"
+        },
+        {
+            "title": "Image with caption",
+            "categories": [
+                "featured",
+                "columns",
+                "gallery"
+            ],
+            "name": "twentytwentytwo/general-image-with-caption"
+        },
+        {
+            "title": "Video trailer",
+            "categories": [
+                "featured",
+                "columns"
+            ],
+            "name": "twentytwentytwo/general-video-trailer"
+        },
+        {
+            "title": "Pricing table",
+            "categories": [
+                "featured",
+                "columns",
+                "buttons"
+            ],
+            "name": "twentytwentytwo/general-pricing-table"
+        },
+        {
+            "title": "Divider with image and color (light)",
+            "categories": [
+                "featured"
+            ],
+            "name": "twentytwentytwo/general-divider-light"
+        },
+        {
+            "title": "Divider with image and color (dark)",
+            "categories": [
+                "featured"
+            ],
+            "name": "twentytwentytwo/general-divider-dark"
+        },
+        {
+            "title": "Default header",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-default"
+        },
+        {
+            "title": "Large header with dark background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-large-dark"
+        },
+        {
+            "title": "Small header with dark background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-small-dark"
+        },
+        {
+            "title": "Header with image background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-image-background"
+        },
+        {
+            "title": "Header with image background and overlay",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-image-background-overlay"
+        },
+        {
+            "title": "Header with tagline",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-with-tagline"
+        },
+        {
+            "title": "Text-only header with background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-text-only-green-background"
+        },
+        {
+            "title": "Text-only header with background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-text-only-salmon-background"
+        },
+        {
+            "title": "Title and button header",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-title-and-button"
+        },
+        {
+            "title": "Text-only header with tagline and background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-text-only-with-tagline-black-background"
+        },
+        {
+            "title": "Logo and navigation header with background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-logo-navigation-gray-background"
+        },
+        {
+            "title": "Logo, navigation, and social links header with background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-logo-navigation-social-black-background"
+        },
+        {
+            "title": "Title, navigation, and social links header",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-title-navigation-social"
+        },
+        {
+            "title": "Logo, navigation, and offset tagline Header",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-logo-navigation-offset-tagline"
+        },
+        {
+            "title": "Logo and navigation header",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-stacked"
+        },
+        {
+            "title": "Header with centered logo",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-centered-logo"
+        },
+        {
+            "title": "Header with centered logo and background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-centered-logo-black-background"
+        },
+        {
+            "title": "Centered header with navigation, social links, and background",
+            "categories": [
+                "header"
+            ],
+            "blockTypes": [
+                "core/template-part/header"
+            ],
+            "name": "twentytwentytwo/header-centered-title-navigation-social"
+        },
+        {
+            "title": "404 content",
+            "inserter": false,
+            "name": "twentytwentytwo/hidden-404"
+        },
+        {
+            "title": "Heading and bird image",
+            "inserter": false,
+            "name": "twentytwentytwo/hidden-bird"
+        },
+        {
+            "title": "Heading and bird image",
+            "inserter": false,
+            "name": "twentytwentytwo/hidden-heading-and-bird"
+        },
+        {
+            "title": "About page with media on the left",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-about-media-left"
+        },
+        {
+            "title": "Simple dark about page",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-about-simple-dark"
+        },
+        {
+            "title": "About page with media on the right",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-about-media-right"
+        },
+        {
+            "title": "About page on solid color background",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-about-solid-color"
+        },
+        {
+            "title": "About page links",
+            "categories": [
+                "twentytwentytwo_pages",
+                "buttons"
+            ],
+            "name": "twentytwentytwo/page-about-links"
+        },
+        {
+            "title": "About page links (dark)",
+            "categories": [
+                "twentytwentytwo_pages",
+                "buttons"
+            ],
+            "name": "twentytwentytwo/page-about-links-dark"
+        },
+        {
+            "title": "About page with large image and buttons",
+            "categories": [
+                "twentytwentytwo_pages",
+                "buttons"
+            ],
+            "name": "twentytwentytwo/page-about-large-image-and-buttons"
+        },
+        {
+            "title": "Page layout with image and text",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-layout-image-and-text"
+        },
+        {
+            "title": "Page layout with image, text and video",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-layout-image-text-and-video"
+        },
+        {
+            "title": "Page layout with two columns",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-layout-two-columns"
+        },
+        {
+            "title": "Poster with right sidebar",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-sidebar-poster"
+        },
+        {
+            "title": "Grid of posts with left sidebar",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-sidebar-grid-posts"
+        },
+        {
+            "title": "Blog posts with left sidebar",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-sidebar-blog-posts"
+        },
+        {
+            "title": "Blog posts with right sidebar",
+            "categories": [
+                "twentytwentytwo_pages"
+            ],
+            "name": "twentytwentytwo/page-sidebar-blog-posts-right"
+        },
+        {
+            "title": "Default posts",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentytwo/query-default"
+        },
+        {
+            "title": "Simple blog posts",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentytwo/query-simple-blog"
+        },
+        {
+            "title": "Grid of posts",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentytwo/query-grid"
+        },
+        {
+            "title": "Text-based grid of posts",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentytwo/query-text-grid"
+        },
+        {
+            "title": "Grid of image posts",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentytwo/query-image-grid"
+        },
+        {
+            "title": "Large post titles",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentytwo/query-large-titles"
+        },
+        {
+            "title": "Irregular grid of posts",
+            "categories": [
+                "query"
+            ],
+            "blockTypes": [
+                "core/query"
+            ],
+            "name": "twentytwentytwo/query-irregular-grid"
+        }
+    ],
+    "rest": {
+        "stylesheet": "twentytwentytwo",
+        "template": "twentytwentytwo",
+        "requires_php": "5.6",
+        "requires_wp": "5.9",
+        "textdomain": "twentytwentytwo",
+        "version": "2.2",
+        "screenshot": "%siteurl%/wp-content/themes/twentytwentytwo/screenshot.png",
+        "author": {
+            "raw": "the WordPress team",
+            "rendered": "<a href=\"https://wordpress.org/\">the WordPress team</a>"
+        },
+        "author_uri": {
+            "raw": "https://wordpress.org/",
+            "rendered": "https://wordpress.org/"
+        },
+        "description": {
+            "raw": "Built on a solidly designed foundation, Twenty Twenty-Two embraces the idea that everyone deserves a truly unique website. The theme’s subtle styles are inspired by the diversity and versatility of birds: its typography is lightweight yet strong, its color palette is drawn from nature, and its layout elements sit gently on the page. The true richness of Twenty Twenty-Two lies in its opportunity for customization. The theme is built to take advantage of the Site Editor features introduced in WordPress 5.9, which means that colors, typography, and the layout of every single page on your site can be customized to suit your vision. It also includes dozens of block patterns, opening the door to a wide range of professionally designed layouts in just a few clicks. Whether you’re building a single-page website, a blog, a business website, or a portfolio, Twenty Twenty-Two will help you create a site that is uniquely yours.",
+            "rendered": "Built on a solidly designed foundation, Twenty Twenty-Two embraces the idea that everyone deserves a truly unique website. The theme’s subtle styles are inspired by the diversity and versatility of birds: its typography is lightweight yet strong, its color palette is drawn from nature, and its layout elements sit gently on the page. The true richness of Twenty Twenty-Two lies in its opportunity for customization. The theme is built to take advantage of the Site Editor features introduced in WordPress 5.9, which means that colors, typography, and the layout of every single page on your site can be customized to suit your vision. It also includes dozens of block patterns, opening the door to a wide range of professionally designed layouts in just a few clicks. Whether you’re building a single-page website, a blog, a business website, or a portfolio, Twenty Twenty-Two will help you create a site that is uniquely yours."
+        },
+        "name": {
+            "raw": "Twenty Twenty-Two",
+            "rendered": "Twenty Twenty-Two"
+        },
+        "tags": {
+            "raw": [
+                "one-column",
+                "custom-colors",
+                "custom-menu",
+                "custom-logo",
+                "editor-style",
+                "featured-images",
+                "full-site-editing",
+                "block-patterns",
+                "rtl-language-support",
+                "sticky-post",
+                "threaded-comments",
+                "style-variations",
+                "wide-blocks",
+                "block-styles",
+                "accessibility-ready",
+                "blog",
+                "portfolio",
+                "news"
+            ],
+            "rendered": "one-column, custom-colors, custom-menu, custom-logo, editor-style, featured-images, full-site-editing, block-patterns, rtl-language-support, sticky-post, threaded-comments, style-variations, wide-blocks, block-styles, accessibility-ready, blog, portfolio, news"
+        },
+        "theme_uri": {
+            "raw": "https://wordpress.org/themes/twentytwentytwo/",
+            "rendered": "https://wordpress.org/themes/twentytwentytwo/"
+        },
+        "status": "active",
+        "theme_supports": {
+            "align-wide": false,
+            "automatic-feed-links": true,
+            "block-templates": true,
+            "block-template-parts": false,
+            "custom-background": false,
+            "custom-header": false,
+            "custom-logo": false,
+            "customize-selective-refresh-widgets": false,
+            "dark-editor-style": false,
+            "disable-custom-colors": false,
+            "disable-custom-font-sizes": false,
+            "disable-custom-gradients": false,
+            "disable-layout-styles": false,
+            "editor-color-palette": false,
+            "editor-font-sizes": false,
+            "editor-gradient-presets": false,
+            "editor-spacing-sizes": false,
+            "editor-styles": true,
+            "html5": [
+                "comment-form",
+                "comment-list",
+                "search-form",
+                "gallery",
+                "caption",
+                "style",
+                "script"
+            ],
+            "formats": [
+                "standard"
+            ],
+            "post-thumbnails": true,
+            "responsive-embeds": true,
+            "title-tag": false,
+            "wp-block-styles": true
+        },
+        "is_block_theme": true,
+        "stylesheet_uri": "%siteurl%/wp-content/themes/twentytwentytwo",
+        "template_uri": "%siteurl%/wp-content/themes/twentytwentytwo",
+        "default_template_types": [
+            {
+                "title": "Index",
+                "description": "Used as a fallback template for all pages when a more specific template is not defined.",
+                "slug": "index"
+            },
+            {
+                "title": "Blog Home",
+                "description": "Displays the latest posts as either the site homepage or as the \"Posts page\" as defined under reading settings. If it exists, the Front Page template overrides this template when posts are shown on the homepage.",
+                "slug": "home"
+            },
+            {
+                "title": "Front Page",
+                "description": "Displays your site's homepage, whether it is set to display latest posts or a static page. The Front Page template takes precedence over all templates.",
+                "slug": "front-page"
+            },
+            {
+                "title": "Single Entries",
+                "description": "Displays any single entry, such as a post or a page. This template will serve as a fallback when a more specific template (e.g. Single Post, Page, or Attachment) cannot be found.",
+                "slug": "singular"
+            },
+            {
+                "title": "Single Posts",
+                "description": "Displays a single post on your website unless a custom template has been applied to that post or a dedicated template exists.",
+                "slug": "single"
+            },
+            {
+                "title": "Pages",
+                "description": "Displays a static page unless a custom template has been applied to that page or a dedicated template exists.",
+                "slug": "page"
+            },
+            {
+                "title": "All Archives",
+                "description": "Displays any archive, including posts by a single author, category, tag, taxonomy, custom post type, and date. This template will serve as a fallback when more specific templates (e.g. Category or Tag) cannot be found.",
+                "slug": "archive"
+            },
+            {
+                "title": "Author Archives",
+                "description": "Displays a single author's post archive. This template will serve as a fallback when a more specific template (e.g. Author: Admin) cannot be found.",
+                "slug": "author"
+            },
+            {
+                "title": "Category Archives",
+                "description": "Displays a post category archive. This template will serve as a fallback when a more specific template (e.g. Category: Recipes) cannot be found.",
+                "slug": "category"
+            },
+            {
+                "title": "Taxonomy",
+                "description": "Displays a custom taxonomy archive. Like categories and tags, taxonomies have terms which you use to classify things. For example: a taxonomy named \"Art\" can have multiple terms, such as \"Modern\" and \"18th Century.\" This template will serve as a fallback when a more specific template (e.g. Taxonomy: Art) cannot be found.",
+                "slug": "taxonomy"
+            },
+            {
+                "title": "Date Archives",
+                "description": "Displays a post archive when a specific date is visited (e.g., example.com/2023/).",
+                "slug": "date"
+            },
+            {
+                "title": "Tag Archives",
+                "description": "Displays a post tag archive. This template will serve as a fallback when a more specific template (e.g. Tag: Pizza) cannot be found.",
+                "slug": "tag"
+            },
+            {
+                "title": "Attachment Pages",
+                "description": "Displays when a visitor views the dedicated page that exists for any media attachment.",
+                "slug": "attachment"
+            },
+            {
+                "title": "Search Results",
+                "description": "Displays when a visitor performs a search on your website.",
+                "slug": "search"
+            },
+            {
+                "title": "Privacy Policy",
+                "description": "Displays your site's Privacy Policy page.",
+                "slug": "privacy-policy"
+            },
+            {
+                "title": "Page: 404",
+                "description": "Displays when a visitor views a non-existent page, such as a dead link or a mistyped URL.",
+                "slug": "404"
+            },
+            {
+                "title": "Post Format: Standard",
+                "description": "Displays the Standard post format archive.",
+                "slug": "taxonomy-post_format-post-format-standard"
+            },
+            {
+                "title": "Post Format: Aside",
+                "description": "Displays the Aside post format archive.",
+                "slug": "taxonomy-post_format-post-format-aside"
+            },
+            {
+                "title": "Post Format: Chat",
+                "description": "Displays the Chat post format archive.",
+                "slug": "taxonomy-post_format-post-format-chat"
+            },
+            {
+                "title": "Post Format: Gallery",
+                "description": "Displays the Gallery post format archive.",
+                "slug": "taxonomy-post_format-post-format-gallery"
+            },
+            {
+                "title": "Post Format: Link",
+                "description": "Displays the Link post format archive.",
+                "slug": "taxonomy-post_format-post-format-link"
+            },
+            {
+                "title": "Post Format: Image",
+                "description": "Displays the Image post format archive.",
+                "slug": "taxonomy-post_format-post-format-image"
+            },
+            {
+                "title": "Post Format: Quote",
+                "description": "Displays the Quote post format archive.",
+                "slug": "taxonomy-post_format-post-format-quote"
+            },
+            {
+                "title": "Post Format: Status",
+                "description": "Displays the Status post format archive.",
+                "slug": "taxonomy-post_format-post-format-status"
+            },
+            {
+                "title": "Post Format: Video",
+                "description": "Displays the Video post format archive.",
+                "slug": "taxonomy-post_format-post-format-video"
+            },
+            {
+                "title": "Post Format: Audio",
+                "description": "Displays the Audio post format archive.",
+                "slug": "taxonomy-post_format-post-format-audio"
+            }
+        ],
+        "default_template_part_areas": [
+            {
+                "area": "uncategorized",
+                "label": "General",
+                "description": "General templates often perform a specific role like displaying post content, and are not tied to any particular area.",
+                "icon": "layout",
+                "area_tag": "div"
+            },
+            {
+                "area": "header",
+                "label": "Header",
+                "description": "The Header template defines a page area that typically contains a title, logo, and main navigation.",
+                "icon": "header",
+                "area_tag": "header"
+            },
+            {
+                "area": "footer",
+                "label": "Footer",
+                "description": "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
+                "icon": "footer",
+                "area_tag": "footer"
+            },
+            {
+                "area": "navigation-overlay",
+                "label": "Navigation Overlay",
+                "description": "The Navigation Overlay template defines an overlay area that typically contains navigation links and can be toggled open and closed.",
+                "icon": "navigation-overlay",
+                "area_tag": "div"
+            }
+        ]
+    },
+    "post_formats": [],
+    "block_styles_support": true,
+    "styles": [
+        {
+            "block": null,
+            "handle": "twentytwentytwo-style",
+            "src": "style.min.css",
+            "ver": "2.2"
+        }
+    ],
+    "template_files": [
+        "archive",
+        "404",
+        "page-no-separators",
+        "search",
+        "index",
+        "single",
+        "page-large-header",
+        "blank",
+        "single-no-separators",
+        "page",
+        "home"
+    ],
+    "part_files": [
+        "header-small-dark",
+        "header",
+        "header-large-dark",
+        "footer"
+    ],
+    "theme_features": [
+        "core-block-patterns",
+        "post-thumbnails",
+        "responsive-embeds",
+        "editor-styles",
+        "html5",
+        "automatic-feed-links",
+        "widgets-block-editor",
+        "block-templates",
+        "wp-block-styles",
+        "editor-style"
+    ],
+    "themes_screen": {
+        "id": "twentytwentytwo",
+        "name": "Twenty Twenty-Two",
+        "description": "Built on a solidly designed foundation, Twenty Twenty-Two embraces the idea that everyone deserves a truly unique website. The theme’s subtle styles are inspired by the diversity and versatility of birds: its typography is lightweight yet strong, its color palette is drawn from nature, and its layout elements sit gently on the page. The true richness of Twenty Twenty-Two lies in its opportunity for customization. The theme is built to take advantage of the Site Editor features introduced in WordPress 5.9, which means that colors, typography, and the layout of every single page on your site can be customized to suit your vision. It also includes dozens of block patterns, opening the door to a wide range of professionally designed layouts in just a few clicks. Whether you’re building a single-page website, a blog, a business website, or a portfolio, Twenty Twenty-Two will help you create a site that is uniquely yours.",
+        "author": "the WordPress team",
+        "authorAndUri": "<a href=\"https://wordpress.org/\">the WordPress team</a>",
+        "tags": "One Column, Custom Colors, custom-menu, Custom Logo, Editor Style, Featured Images, Site Editor, Block Editor Patterns, rtl-language-support, Sticky Post, threaded-comments, Style Variations, Wide Blocks, Block Editor Styles, Accessibility Ready, Blog, Portfolio, News",
+        "version": "2.2"
+    },
+    "block_variations": {
+        "core/template-part": [
+            {
+                "name": "area_header",
+                "title": "Header",
+                "description": "The Header template defines a page area that typically contains a title, logo, and main navigation.",
+                "attributes": {
+                    "area": "header"
+                },
+                "scope": [],
+                "icon": "header"
+            },
+            {
+                "name": "area_footer",
+                "title": "Footer",
+                "description": "The Footer template defines a page area that typically contains site credits, social links, or any other combination of blocks.",
+                "attributes": {
+                    "area": "footer"
+                },
+                "scope": [],
+                "icon": "footer"
+            },
+            {
+                "name": "instance_header-small-dark",
+                "title": "Header (Dark, small)",
+                "description": "1",
+                "attributes": {
+                    "slug": "header-small-dark",
+                    "theme": "twentytwentytwo",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header-small-dark",
+                        "theme": "twentytwentytwo",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_header",
+                "title": "Header",
+                "description": "1",
+                "attributes": {
+                    "slug": "header",
+                    "theme": "twentytwentytwo",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header",
+                        "theme": "twentytwentytwo",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_header-large-dark",
+                "title": "Header (Dark, large)",
+                "description": "1",
+                "attributes": {
+                    "slug": "header-large-dark",
+                    "theme": "twentytwentytwo",
+                    "area": "header"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "header",
+                "example": {
+                    "attributes": {
+                        "slug": "header-large-dark",
+                        "theme": "twentytwentytwo",
+                        "area": "header"
+                    }
+                }
+            },
+            {
+                "name": "instance_footer",
+                "title": "Footer",
+                "description": "1",
+                "attributes": {
+                    "slug": "footer",
+                    "theme": "twentytwentytwo",
+                    "area": "footer"
+                },
+                "scope": [
+                    "inserter"
+                ],
+                "icon": "footer",
+                "example": {
+                    "attributes": {
+                        "slug": "footer",
+                        "theme": "twentytwentytwo",
+                        "area": "footer"
+                    }
+                }
+            }
+        ],
+        "core/navigation-link": [
+            {
+                "name": "post",
+                "title": "Post link",
+                "description": " ",
+                "attributes": {
+                    "type": "post",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "page",
+                "title": "Page link",
+                "description": " ",
+                "attributes": {
+                    "type": "page",
+                    "kind": "post-type"
+                }
+            },
+            {
+                "name": "category",
+                "title": "Category link",
+                "description": " ",
+                "attributes": {
+                    "type": "category",
+                    "kind": "taxonomy"
+                }
+            },
+            {
+                "name": "tag",
+                "title": "Tag link",
+                "description": " ",
+                "attributes": {
+                    "type": "tag",
+                    "kind": "taxonomy"
+                }
+            }
+        ]
+    },
+    "binding_sources": []
+}

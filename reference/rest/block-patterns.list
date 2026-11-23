@@ -1,0 +1,25 @@
+# The block patterns route for reference/rest/golden.sh (method, target, flags), with block-patterns.php beside it.
+GET	/?rest_route=/wp/v2/block-patterns/patterns
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_locale=user
+GET	/wp-json/wp/v2/block-patterns/patterns	pretty
+GET	/?rest_route=/wp/v2/block-patterns/patterns&context=view
+GET	/?rest_route=/wp/v2/block-patterns/patterns&context=edit
+GET	/?rest_route=/wp/v2/block-patterns/patterns&context=embed
+GET	/?rest_route=/wp/v2/block-patterns/patterns&context=bogus
+GET	/?rest_route=/wp/v2/block-patterns/patterns&context=
+GET	/?rest_route=/wp/v2/block-patterns/patterns&context[]=view
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=name
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=name,title,categories&context=edit
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=content
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=name,viewport_width,inserter,keywords,block_types,post_types,template_types,source
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=name,description,nope
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields[]=name&_fields[]=source
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_fields=_links,name
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_embed&_fields=name
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_envelope&_fields=name
+GET	/?rest_route=/wp/v2/block-patterns/patterns&_jsonp=cb&_fields=name
+HEAD	/?rest_route=/wp/v2/block-patterns/patterns
+HEAD	/?rest_route=/wp/v2/block-patterns/patterns&context=edit
+GET	/?rest_route=/wp/v2/block-patterns/patterns/nope
+OPTIONS	/?rest_route=/wp/v2/block-patterns/patterns

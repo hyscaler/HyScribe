@@ -1,0 +1,170 @@
+		<form method="get">
+		<table style="display: none"><tbody id="inlineedit">
+					<tr id="inline-edit" class="inline-edit-row inline-edit-row-%type% quick-edit-row quick-edit-row-%type% inline-edit-%type%" style="display: none">
+			<td colspan="%columns%" class="colspanchange">
+			<div class="inline-edit-wrapper" role="region" aria-labelledby="quick-edit-legend">
+			<fieldset class="inline-edit-col-left">
+				<legend class="inline-edit-legend" id="quick-edit-legend">Quick Edit</legend>
+				<div class="inline-edit-col">
+
+				
+					
+						<label>
+							<span class="title">Title</span>
+							<span class="input-text-wrap"><input type="text" name="post_title" class="ptitle" value="" /></span>
+						</label>
+
+						
+							<label>
+								<span class="title">Slug</span>
+								<span class="input-text-wrap"><input type="text" name="post_name" value="" autocomplete="off" spellcheck="false" /></span>
+							</label>
+
+						
+					
+				
+									<fieldset class="inline-edit-date">
+						<legend><span class="title">Date</span></legend>
+						%date%					</fieldset>
+					<br class="clear" />
+				
+				%authors%
+				%password%
+				</div>
+			</fieldset>
+
+			
+%categories%			<fieldset class="inline-edit-col-right">
+				<div class="inline-edit-col">
+
+				
+				
+%attributes%				
+%templates%				
+%tags%				
+					
+						<div class="inline-edit-group wp-clearfix">
+
+						
+							<label class="alignleft">
+								<input type="checkbox" name="comment_status" value="open" />
+								<span class="checkbox-title">Allow Comments</span>
+							</label>
+
+						
+%pings%						
+						</div>
+
+					
+				
+					<div class="inline-edit-group wp-clearfix">
+
+						<label class="inline-edit-status alignleft">
+							<span class="title">Status</span>
+							<select name="_status">
+%statuses%
+						</label>
+
+						%sticky%
+					</div>
+
+				
+				</div>
+			</fieldset>
+
+			
+			<div class="submit inline-edit-save">
+									<input type="hidden" id="_inline_edit" name="_inline_edit" value="%nonce%" />					<button type="button" class="button button-primary save">Update</button>
+				
+				<button type="button" class="button cancel">Cancel</button>
+
+									<span class="spinner"></span>
+				
+				<input type="hidden" name="post_view" value="%view%" />
+				<input type="hidden" name="screen" value="edit-%type%" />
+				
+				<div class="notice notice-error notice-alt inline hidden"><p class="error"></p></div>			</div>
+		</div> <!-- end of .inline-edit-wrapper -->
+
+			</td></tr>
+
+						<tr id="bulk-edit" class="inline-edit-row inline-edit-row-%type% bulk-edit-row bulk-edit-row-%type% bulk-edit-%type%" style="display: none">
+			<td colspan="%columns%" class="colspanchange">
+			<div class="inline-edit-wrapper" role="region" aria-labelledby="bulk-edit-legend">
+			<fieldset class="inline-edit-col-left">
+				<legend class="inline-edit-legend" id="bulk-edit-legend">Bulk Edit</legend>
+				<div class="inline-edit-col">
+
+				
+					
+						<div id="bulk-title-div">
+							<div id="bulk-titles"></div>
+						</div>
+
+					
+				
+				
+				
+				
+				</div>
+			</fieldset>
+
+			
+			<fieldset class="inline-edit-col-right">
+				<div class="inline-edit-col">
+
+				%bulk_authors%
+				
+%bulk_attributes%				
+%bulk_templates%				
+				
+					
+						<div class="inline-edit-group wp-clearfix">
+
+						
+							<label class="alignleft">
+								<span class="title">Comments</span>
+								<select name="comment_status">
+									<option value="">&mdash; No Change &mdash;</option>
+									<option value="open">Allow</option>
+									<option value="closed">Do not allow</option>
+								</select>
+							</label>
+
+						
+%bulk_pings%						
+						</div>
+
+					
+				
+					<div class="inline-edit-group wp-clearfix">
+
+						<label class="inline-edit-status alignleft">
+							<span class="title">Status</span>
+							<select name="_status">
+%bulk_statuses%
+						</label>
+
+						%bulk_sticky%
+					</div>
+
+				%formats%
+				</div>
+			</fieldset>
+
+			
+			<div class="submit inline-edit-save">
+									<input type="submit" name="bulk_edit" id="bulk_edit" class="button button-primary" value="Update"  />				
+				<button type="button" class="button cancel">Cancel</button>
+
+				
+				<input type="hidden" name="post_view" value="%view%" />
+				<input type="hidden" name="screen" value="edit-%type%" />
+				
+				<div class="notice notice-error notice-alt inline hidden"><p class="error"></p></div>			</div>
+		</div> <!-- end of .inline-edit-wrapper -->
+
+			</td></tr>
+
+					</tbody></table>
+		</form>

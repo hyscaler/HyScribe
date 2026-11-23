@@ -1,0 +1,9 @@
+# The rows PHP WordPress writes for the action update-term (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 04:35:51 to 2026-11-15 04:35:51 UTC.
+# %wp_terms:1% is 964.
+# %wp_term_taxonomy:1% is 964.
+# %wp_options:1% is 134.
+# %wp_options:2% is 135.
+wp_options	category_children	~	option_id	%wp_options:1%	%wp_options:2%
+wp_term_taxonomy	%wp_term_taxonomy:1%	~	description		<em>What</em> is new.
+wp_terms	%wp_terms:1%	~	name	News	Renamed &amp; new

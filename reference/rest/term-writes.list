@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The categories' and tags' writes (MVP 4.3) that reference/rest/golden.sh
+# records as term-writes.tsv, over the default install with
+# term-writes.sql's terms: each request sent with its body as every
+# identity, the database put back after each. Creates, updates (POST, PUT,
+# PATCH, a form), deletes, with the checks of create_item(), update_item()
+# and wp_insert_term(), and `meta`, which HyScribe does not port.
+POST	/?rest_route=/wp/v2/categories	json,restore	{"name":"News","description":"<b>Fresh</b> <script>x()</script>","slug":"the news"}
+POST	/?rest_route=/wp/v2/categories	json,restore	{"name":"Child","parent":1}
+POST	/?rest_route=/wp/v2/categories	json,restore	{"name":"Orphan","parent":999}
+POST	/?rest_route=/wp/v2/categories	json,restore	{"name":"Top","parent":0}
+POST	/?rest_route=/wp/v2/categories	json,restore	{"name":"Uncategorized"}
+POST	/?rest_route=/wp/v2/categories	json,restore	{"name":"Sub","parent":1}
+POST	/?rest_route=/wp/v2/categories	json,restore	{}
+POST	/?rest_route=/wp/v2/categories	json,restore	{"name":"   "}
+POST	/?rest_route=/wp/v2/categories	json,restore	{"name":"Bad","parent":"x","slug":["a"]}
+POST	/?rest_route=/wp/v2/categories	json,restore	{"name":"Meta","meta":{}}
+POST	/?rest_route=/wp/v2/categories	form,restore	name=Form+%3Cb%3Ecat%3C%2Fb%3E&slug=Tagged
+POST	/?rest_route=/wp/v2/categories&_fields=id,name	json,restore	{"name":"Exists","id":1}
+POST	/?rest_route=/wp/v2/categories/1	json,restore	{"name":"Renamed","description":"Desc","slug":"renamed"}
+PUT	/?rest_route=/wp/v2/categories/3	json,restore	{"parent":0,"description":""}
+PATCH	/?rest_route=/wp/v2/categories/3	json,restore	{"slug":"uncategorized"}
+PATCH	/?rest_route=/wp/v2/categories/3	json,restore	{"parent":999}
+POST	/?rest_route=/wp/v2/categories/3	json,restore	{}
+POST	/?rest_route=/wp/v2/categories/999	json,restore	{"name":"Gone"}
+DELETE	/?rest_route=/wp/v2/categories/3	restore
+DELETE	/?rest_route=/wp/v2/categories/3&force=true	restore
+DELETE	/?rest_route=/wp/v2/categories/1&force=true	restore
+DELETE	/?rest_route=/wp/v2/categories/999&force=1	restore
+POST	/?rest_route=/wp/v2/tags	json,restore	{"name":"Fresh tag","description":"About <em>it</em>"}
+POST	/?rest_route=/wp/v2/tags	json,restore	{"name":"tagged"}
+POST	/?rest_route=/wp/v2/tags	json,restore	{"name":"Kid","parent":1}
+POST	/?rest_route=/wp/v2/tags	json,restore	{"name":"Sub"}
+PUT	/?rest_route=/wp/v2/tags/2	form,restore	name=Retagged&slug=retagged
+POST	/?rest_route=/wp/v2/tags/2	json,restore	{"parent":1}
+POST	/?rest_route=/wp/v2/tags/1	json,restore	{"name":"Not a tag"}
+DELETE	/?rest_route=/wp/v2/tags/2&force=1	restore
+POST	/?rest_route=/wp/v2/tags/2&_method=DELETE&force=true	restore
+# The editor's category and tag panels creating a term inline (apiFetch POST with _locale=user).
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Inline","parent":0}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Inline child","parent":1}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Sub","parent":0}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Sub","parent":1}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"  Spaced  <b>out</b> & more ","parent":0}
+POST	/index.php?rest_route=/wp/v2/categories&_locale=user	json,restore	{"name":"Café society","parent":0}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"inline tag"}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"Tagged"}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"tagged"}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"Two, words"}
+POST	/index.php?rest_route=/wp/v2/tags&_locale=user	json,restore	{"name":"Sub"}

@@ -12,14 +12,21 @@
 /dist/
 .env
 
-# Reference environment data
-/fixtures/snapshots/*.sql.gz
-/.reference-env/
-
 .DS_Store
 .idea/
 .vscode/
 
 # Private private notes clone and scratch files
+/repos/
 /tmp/
 CLAUDE.local.md
+AGENT.local.md
+AGENTS.local.md
+GEMINI.local.md
+
+# Coverage and mutation testing output
+*.profraw
+lcov.info
+/mutants.out*/
+*.cdx.json
+/.claude/worktrees/

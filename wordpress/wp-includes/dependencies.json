@@ -1,0 +1,1445 @@
+{
+    "styles": {
+        "about": {
+            "src": "/wp-admin/css/about.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "admin-bar": {
+            "src": "/wp-includes/css/admin-bar.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "admin-menu": {
+            "src": "/wp-admin/css/admin-menu.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "buttons": {
+            "src": "/wp-includes/css/buttons.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "classic-theme-styles": {
+            "src": "/wp-includes/css/classic-themes.min.css",
+            "ver": false
+        },
+        "code-editor": {
+            "src": "/wp-admin/css/code-editor.min.css",
+            "ver": false
+        },
+        "colors": {
+            "src": true,
+            "ver": false
+        },
+        "colors-fresh": {
+            "src": false,
+            "ver": false
+        },
+        "common": {
+            "src": "/wp-admin/css/common.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "customize-controls": {
+            "src": "/wp-admin/css/customize-controls.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "customize-nav-menus": {
+            "src": "/wp-admin/css/customize-nav-menus.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "customize-preview": {
+            "src": "/wp-includes/css/customize-preview.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "customize-widgets": {
+            "src": "/wp-admin/css/customize-widgets.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "dashboard": {
+            "src": "/wp-admin/css/dashboard.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "dashicons": {
+            "src": "/wp-includes/css/dashicons.min.css",
+            "ver": false
+        },
+        "deprecated-media": {
+            "src": "/wp-admin/css/deprecated-media.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "edit": {
+            "src": "/wp-admin/css/edit.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "editor-buttons": {
+            "src": "/wp-includes/css/editor.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "farbtastic": {
+            "src": "/wp-admin/css/farbtastic.min.css",
+            "ver": "1.3u1",
+            "rtl": true
+        },
+        "forms": {
+            "src": "/wp-admin/css/forms.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "imgareaselect": {
+            "src": "/wp-includes/js/imgareaselect/imgareaselect.css",
+            "ver": "0.9.8"
+        },
+        "install": {
+            "src": "/wp-admin/css/install.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "jcrop": {
+            "src": "/wp-includes/js/jcrop/jquery.Jcrop.min.css",
+            "ver": "0.9.15"
+        },
+        "l10n": {
+            "src": "/wp-admin/css/l10n.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "list-tables": {
+            "src": "/wp-admin/css/list-tables.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "login": {
+            "src": "/wp-admin/css/login.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "media": {
+            "src": "/wp-admin/css/media.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "media-views": {
+            "src": "/wp-includes/css/media-views.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "mediaelement": {
+            "src": "/wp-includes/js/mediaelement/mediaelementplayer-legacy.min.css",
+            "ver": "4.2.17"
+        },
+        "nav-menus": {
+            "src": "/wp-admin/css/nav-menus.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "open-sans": {
+            "src": "https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,300,400,600&subset=latin,latin-ext&display=fallback",
+            "ver": false
+        },
+        "revisions": {
+            "src": "/wp-admin/css/revisions.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "site-health": {
+            "src": "/wp-admin/css/site-health.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "site-icon": {
+            "src": "/wp-admin/css/site-icon.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "themes": {
+            "src": "/wp-admin/css/themes.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "thickbox": {
+            "src": "/wp-includes/js/thickbox/thickbox.css",
+            "ver": false
+        },
+        "widgets": {
+            "src": "/wp-admin/css/widgets.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-admin": {
+            "src": false,
+            "ver": false
+        },
+        "wp-auth-check": {
+            "src": "/wp-includes/css/wp-auth-check.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-base-styles": {
+            "src": "/wp-includes/css/dist/base-styles/admin-schemes.min.css",
+            "ver": false
+        },
+        "wp-block-directory": {
+            "src": "/wp-includes/css/dist/block-directory/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-block-editor": {
+            "src": "/wp-includes/css/dist/block-editor/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-block-editor-content": {
+            "src": "/wp-includes/css/dist/block-editor/content.min.css",
+            "ver": false
+        },
+        "wp-block-library": {
+            "src": "/wp-includes/css/dist/block-library/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-block-library-theme": {
+            "src": "/wp-includes/css/dist/block-library/theme.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-block-template-skip-link": {
+            "src": "/wp-includes/css/wp-block-template-skip-link.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-codemirror": {
+            "src": "/wp-includes/js/codemirror/codemirror.min.css",
+            "ver": "5.65.20"
+        },
+        "wp-color-picker": {
+            "src": "/wp-admin/css/color-picker.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-commands": {
+            "src": "/wp-includes/css/dist/commands/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-components": {
+            "src": "/wp-includes/css/dist/components/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-customize-widgets": {
+            "src": "/wp-includes/css/dist/customize-widgets/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-edit-blocks": {
+            "src": "/wp-includes/css/dist/block-library/editor.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-edit-post": {
+            "src": "/wp-includes/css/dist/edit-post/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-edit-site": {
+            "src": "/wp-includes/css/dist/edit-site/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-edit-widgets": {
+            "src": "/wp-includes/css/dist/edit-widgets/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-editor": {
+            "src": "/wp-includes/css/dist/editor/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-editor-classic-layout-styles": {
+            "src": "/wp-includes/css/dist/edit-post/classic.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-editor-font": {
+            "src": "https://fonts.googleapis.com/css?family=",
+            "ver": false
+        },
+        "wp-embed-template-ie": {
+            "src": false,
+            "ver": false
+        },
+        "wp-empty-template-alert": {
+            "src": "/wp-includes/css/wp-empty-template-alert.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-format-library": {
+            "src": "/wp-includes/css/dist/format-library/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-jquery-ui-dialog": {
+            "src": "/wp-includes/css/jquery-ui-dialog.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-list-reusable-blocks": {
+            "src": "/wp-includes/css/dist/list-reusable-blocks/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-media-utils": {
+            "src": "/wp-includes/css/dist/media-utils/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-mediaelement": {
+            "src": "/wp-includes/js/mediaelement/wp-mediaelement.min.css",
+            "ver": false
+        },
+        "wp-nux": {
+            "src": "/wp-includes/css/dist/nux/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-patterns": {
+            "src": "/wp-includes/css/dist/patterns/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-pointer": {
+            "src": "/wp-includes/css/wp-pointer.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-preferences": {
+            "src": "/wp-includes/css/dist/preferences/style.min.css",
+            "ver": false
+        },
+        "wp-reset-editor-styles": {
+            "src": "/wp-includes/css/dist/block-library/reset.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-reusable-blocks": {
+            "src": "/wp-includes/css/dist/reusable-blocks/style.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-theme": {
+            "src": "/wp-includes/css/dist/theme/design-tokens.min.css",
+            "ver": false,
+            "rtl": true
+        },
+        "wp-tooltip": {
+            "src": "/wp-admin/css/wp-tooltip.min.css",
+            "ver": false
+        },
+        "wp-view-transitions-admin": {
+            "src": false,
+            "ver": false
+        },
+        "wp-widgets": {
+            "src": "/wp-includes/css/dist/widgets/style.min.css",
+            "ver": false,
+            "rtl": true
+        }
+    },
+    "scripts": {
+        "accordion": {
+            "src": "/wp-admin/js/accordion.min.js",
+            "ver": false
+        },
+        "admin-bar": {
+            "src": "/wp-includes/js/admin-bar.min.js",
+            "ver": false
+        },
+        "admin-comments": {
+            "src": "/wp-admin/js/edit-comments.min.js",
+            "ver": false
+        },
+        "admin-gallery": {
+            "src": "/wp-admin/js/gallery.min.js",
+            "ver": false
+        },
+        "admin-tags": {
+            "src": "/wp-admin/js/tags.min.js",
+            "ver": false
+        },
+        "admin-widgets": {
+            "src": "/wp-admin/js/widgets.min.js",
+            "ver": false
+        },
+        "application-passwords": {
+            "src": "/wp-admin/js/application-passwords.min.js",
+            "ver": false
+        },
+        "auth-app": {
+            "src": "/wp-admin/js/auth-app.min.js",
+            "ver": false
+        },
+        "autosave": {
+            "src": "/wp-includes/js/autosave.min.js",
+            "ver": false
+        },
+        "backbone": {
+            "src": "/wp-includes/js/backbone.min.js",
+            "ver": "1.6.1"
+        },
+        "clipboard": {
+            "src": "/wp-includes/js/clipboard.min.js",
+            "ver": "2.0.11"
+        },
+        "code-editor": {
+            "src": "/wp-admin/js/code-editor.min.js",
+            "ver": false
+        },
+        "colorpicker": {
+            "src": "/wp-includes/js/colorpicker.min.js",
+            "ver": "3517m"
+        },
+        "comment": {
+            "src": "/wp-admin/js/comment.min.js",
+            "ver": false
+        },
+        "comment-reply": {
+            "src": "/wp-includes/js/comment-reply.min.js",
+            "ver": false
+        },
+        "common": {
+            "src": "/wp-admin/js/common.min.js",
+            "ver": false
+        },
+        "cropper": {
+            "src": "/wp-includes/js/crop/cropper.js",
+            "ver": false
+        },
+        "csslint": {
+            "src": "/wp-includes/js/codemirror/csslint.js",
+            "ver": "1.0.5"
+        },
+        "custom-background": {
+            "src": "/wp-admin/js/custom-background.min.js",
+            "ver": false
+        },
+        "custom-header": {
+            "src": "/wp-admin/js/custom-header.js",
+            "ver": false
+        },
+        "custom-html-widgets": {
+            "src": "/wp-admin/js/widgets/custom-html-widgets.min.js",
+            "ver": false
+        },
+        "customize-base": {
+            "src": "/wp-includes/js/customize-base.min.js",
+            "ver": false
+        },
+        "customize-controls": {
+            "src": "/wp-admin/js/customize-controls.min.js",
+            "ver": false
+        },
+        "customize-loader": {
+            "src": "/wp-includes/js/customize-loader.min.js",
+            "ver": false
+        },
+        "customize-models": {
+            "src": "/wp-includes/js/customize-models.js",
+            "ver": false
+        },
+        "customize-nav-menus": {
+            "src": "/wp-admin/js/customize-nav-menus.min.js",
+            "ver": false
+        },
+        "customize-preview": {
+            "src": "/wp-includes/js/customize-preview.min.js",
+            "ver": false
+        },
+        "customize-preview-nav-menus": {
+            "src": "/wp-includes/js/customize-preview-nav-menus.min.js",
+            "ver": false
+        },
+        "customize-preview-widgets": {
+            "src": "/wp-includes/js/customize-preview-widgets.min.js",
+            "ver": false
+        },
+        "customize-selective-refresh": {
+            "src": "/wp-includes/js/customize-selective-refresh.min.js",
+            "ver": false
+        },
+        "customize-views": {
+            "src": "/wp-includes/js/customize-views.js",
+            "ver": false
+        },
+        "customize-widgets": {
+            "src": "/wp-admin/js/customize-widgets.min.js",
+            "ver": false
+        },
+        "dashboard": {
+            "src": "/wp-admin/js/dashboard.min.js",
+            "ver": false
+        },
+        "editor": {
+            "src": "/wp-admin/js/editor.min.js",
+            "ver": false
+        },
+        "editor-expand": {
+            "src": "/wp-admin/js/editor-expand.min.js",
+            "ver": false
+        },
+        "esprima": {
+            "src": "/wp-includes/js/codemirror/esprima.js",
+            "ver": "4.0.1"
+        },
+        "farbtastic": {
+            "src": "/wp-admin/js/farbtastic.js",
+            "ver": "1.2"
+        },
+        "heartbeat": {
+            "src": "/wp-includes/js/heartbeat.min.js",
+            "ver": false
+        },
+        "hoverIntent": {
+            "src": "/wp-includes/js/hoverIntent.min.js",
+            "ver": "1.10.2"
+        },
+        "hoverintent-js": {
+            "src": "/wp-includes/js/hoverintent-js.min.js",
+            "ver": "2.2.1"
+        },
+        "htmlhint": {
+            "src": "/wp-includes/js/codemirror/htmlhint.js",
+            "ver": "1.9.2"
+        },
+        "htmlhint-kses": {
+            "src": "/wp-includes/js/codemirror/htmlhint-kses.js",
+            "ver": false
+        },
+        "image-edit": {
+            "src": "/wp-admin/js/image-edit.min.js",
+            "ver": false
+        },
+        "imagesloaded": {
+            "src": "/wp-includes/js/imagesloaded.min.js",
+            "ver": "5.0.0"
+        },
+        "imgareaselect": {
+            "src": "/wp-includes/js/imgareaselect/jquery.imgareaselect.min.js",
+            "ver": false
+        },
+        "inline-edit-post": {
+            "src": "/wp-admin/js/inline-edit-post.min.js",
+            "ver": false
+        },
+        "inline-edit-tax": {
+            "src": "/wp-admin/js/inline-edit-tax.min.js",
+            "ver": false
+        },
+        "iris": {
+            "src": "/wp-admin/js/iris.min.js",
+            "ver": "1.1.1"
+        },
+        "jcrop": {
+            "src": "/wp-includes/js/jcrop/jquery.Jcrop.min.js",
+            "ver": "0.9.15"
+        },
+        "jquery": {
+            "src": false,
+            "ver": "3.7.1"
+        },
+        "jquery-color": {
+            "src": "/wp-includes/js/jquery/jquery.color.min.js",
+            "ver": "3.0.0"
+        },
+        "jquery-core": {
+            "src": "/wp-includes/js/jquery/jquery.min.js",
+            "ver": "3.7.1"
+        },
+        "jquery-effects-blind": {
+            "src": "/wp-includes/js/jquery/ui/effect-blind.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-bounce": {
+            "src": "/wp-includes/js/jquery/ui/effect-bounce.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-clip": {
+            "src": "/wp-includes/js/jquery/ui/effect-clip.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-core": {
+            "src": "/wp-includes/js/jquery/ui/effect.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-drop": {
+            "src": "/wp-includes/js/jquery/ui/effect-drop.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-explode": {
+            "src": "/wp-includes/js/jquery/ui/effect-explode.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-fade": {
+            "src": "/wp-includes/js/jquery/ui/effect-fade.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-fold": {
+            "src": "/wp-includes/js/jquery/ui/effect-fold.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-highlight": {
+            "src": "/wp-includes/js/jquery/ui/effect-highlight.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-puff": {
+            "src": "/wp-includes/js/jquery/ui/effect-puff.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-pulsate": {
+            "src": "/wp-includes/js/jquery/ui/effect-pulsate.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-scale": {
+            "src": "/wp-includes/js/jquery/ui/effect-scale.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-shake": {
+            "src": "/wp-includes/js/jquery/ui/effect-shake.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-size": {
+            "src": "/wp-includes/js/jquery/ui/effect-size.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-slide": {
+            "src": "/wp-includes/js/jquery/ui/effect-slide.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-effects-transfer": {
+            "src": "/wp-includes/js/jquery/ui/effect-transfer.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-form": {
+            "src": "/wp-includes/js/jquery/jquery.form.min.js",
+            "ver": "4.3.0"
+        },
+        "jquery-hotkeys": {
+            "src": "/wp-includes/js/jquery/jquery.hotkeys.min.js",
+            "ver": "0.0.2m"
+        },
+        "jquery-masonry": {
+            "src": "/wp-includes/js/jquery/jquery.masonry.min.js",
+            "ver": "3.1.2b"
+        },
+        "jquery-migrate": {
+            "src": "/wp-includes/js/jquery/jquery-migrate.min.js",
+            "ver": "3.4.1"
+        },
+        "jquery-query": {
+            "src": "/wp-includes/js/jquery/jquery.query.js",
+            "ver": "2.2.3"
+        },
+        "jquery-serialize-object": {
+            "src": "/wp-includes/js/jquery/jquery.serialize-object.js",
+            "ver": "0.2-wp"
+        },
+        "jquery-table-hotkeys": {
+            "src": "/wp-includes/js/jquery/jquery.table-hotkeys.min.js",
+            "ver": false
+        },
+        "jquery-touch-punch": {
+            "src": "/wp-includes/js/jquery/jquery.ui.touch-punch.js",
+            "ver": "0.2.2"
+        },
+        "jquery-ui-accordion": {
+            "src": "/wp-includes/js/jquery/ui/accordion.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-autocomplete": {
+            "src": "/wp-includes/js/jquery/ui/autocomplete.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-button": {
+            "src": "/wp-includes/js/jquery/ui/button.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-checkboxradio": {
+            "src": "/wp-includes/js/jquery/ui/checkboxradio.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-controlgroup": {
+            "src": "/wp-includes/js/jquery/ui/controlgroup.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-core": {
+            "src": "/wp-includes/js/jquery/ui/core.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-datepicker": {
+            "src": "/wp-includes/js/jquery/ui/datepicker.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-dialog": {
+            "src": "/wp-includes/js/jquery/ui/dialog.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-draggable": {
+            "src": "/wp-includes/js/jquery/ui/draggable.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-droppable": {
+            "src": "/wp-includes/js/jquery/ui/droppable.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-menu": {
+            "src": "/wp-includes/js/jquery/ui/menu.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-mouse": {
+            "src": "/wp-includes/js/jquery/ui/mouse.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-position": {
+            "src": false,
+            "ver": "1.14.2"
+        },
+        "jquery-ui-progressbar": {
+            "src": "/wp-includes/js/jquery/ui/progressbar.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-resizable": {
+            "src": "/wp-includes/js/jquery/ui/resizable.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-selectable": {
+            "src": "/wp-includes/js/jquery/ui/selectable.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-selectmenu": {
+            "src": "/wp-includes/js/jquery/ui/selectmenu.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-slider": {
+            "src": "/wp-includes/js/jquery/ui/slider.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-sortable": {
+            "src": "/wp-includes/js/jquery/ui/sortable.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-spinner": {
+            "src": "/wp-includes/js/jquery/ui/spinner.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-tabs": {
+            "src": "/wp-includes/js/jquery/ui/tabs.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-tooltip": {
+            "src": "/wp-includes/js/jquery/ui/tooltip.min.js",
+            "ver": "1.14.2"
+        },
+        "jquery-ui-widget": {
+            "src": false,
+            "ver": "1.14.2"
+        },
+        "jshint": {
+            "src": "/wp-includes/js/codemirror/fakejshint.js",
+            "ver": "2.9.5"
+        },
+        "json2": {
+            "src": "/wp-includes/js/json2.min.js",
+            "ver": "2015-05-03"
+        },
+        "jsonlint": {
+            "src": "/wp-includes/js/codemirror/jsonlint.js",
+            "ver": "1.6.3"
+        },
+        "language-chooser": {
+            "src": "/wp-admin/js/language-chooser.min.js",
+            "ver": false
+        },
+        "link": {
+            "src": "/wp-admin/js/link.min.js",
+            "ver": false
+        },
+        "list-revisions": {
+            "src": "/wp-includes/js/wp-list-revisions.min.js",
+            "ver": false
+        },
+        "lodash": {
+            "src": "/wp-includes/js/dist/vendor/lodash.min.js",
+            "ver": "4.18.1"
+        },
+        "masonry": {
+            "src": "/wp-includes/js/masonry.min.js",
+            "ver": "4.2.2"
+        },
+        "mce-view": {
+            "src": "/wp-includes/js/mce-view.min.js",
+            "ver": false
+        },
+        "media": {
+            "src": "/wp-admin/js/media.min.js",
+            "ver": false
+        },
+        "media-audio-widget": {
+            "src": "/wp-admin/js/widgets/media-audio-widget.min.js",
+            "ver": false
+        },
+        "media-audiovideo": {
+            "src": "/wp-includes/js/media-audiovideo.min.js",
+            "ver": false
+        },
+        "media-editor": {
+            "src": "/wp-includes/js/media-editor.min.js",
+            "ver": false
+        },
+        "media-gallery": {
+            "src": "/wp-admin/js/media-gallery.min.js",
+            "ver": false
+        },
+        "media-gallery-widget": {
+            "src": "/wp-admin/js/widgets/media-gallery-widget.min.js",
+            "ver": false
+        },
+        "media-grid": {
+            "src": "/wp-includes/js/media-grid.min.js",
+            "ver": false
+        },
+        "media-image-widget": {
+            "src": "/wp-admin/js/widgets/media-image-widget.min.js",
+            "ver": false
+        },
+        "media-models": {
+            "src": "/wp-includes/js/media-models.min.js",
+            "ver": false
+        },
+        "media-upload": {
+            "src": "/wp-admin/js/media-upload.min.js",
+            "ver": false
+        },
+        "media-video-widget": {
+            "src": "/wp-admin/js/widgets/media-video-widget.min.js",
+            "ver": false
+        },
+        "media-views": {
+            "src": "/wp-includes/js/media-views.min.js",
+            "ver": false
+        },
+        "media-widgets": {
+            "src": "/wp-admin/js/widgets/media-widgets.min.js",
+            "ver": false
+        },
+        "mediaelement": {
+            "src": false,
+            "ver": "4.2.17"
+        },
+        "mediaelement-core": {
+            "src": "/wp-includes/js/mediaelement/mediaelement-and-player.min.js",
+            "ver": "4.2.17"
+        },
+        "mediaelement-migrate": {
+            "src": "/wp-includes/js/mediaelement/mediaelement-migrate.min.js",
+            "ver": false
+        },
+        "mediaelement-vimeo": {
+            "src": "/wp-includes/js/mediaelement/renderers/vimeo.min.js",
+            "ver": "4.2.17"
+        },
+        "moment": {
+            "src": "/wp-includes/js/dist/vendor/moment.min.js",
+            "ver": "2.30.1"
+        },
+        "moxiejs": {
+            "src": "/wp-includes/js/plupload/moxie.min.js",
+            "ver": "1.3.5.1"
+        },
+        "nav-menu": {
+            "src": "/wp-admin/js/nav-menu.min.js",
+            "ver": false
+        },
+        "password-strength-meter": {
+            "src": "/wp-admin/js/password-strength-meter.min.js",
+            "ver": false
+        },
+        "password-toggle": {
+            "src": "/wp-admin/js/password-toggle.min.js",
+            "ver": false
+        },
+        "plugin-install": {
+            "src": "/wp-admin/js/plugin-install.min.js",
+            "ver": false
+        },
+        "plupload": {
+            "src": "/wp-includes/js/plupload/plupload.min.js",
+            "ver": "2.1.9"
+        },
+        "plupload-all": {
+            "src": false,
+            "ver": "2.1.1"
+        },
+        "plupload-flash": {
+            "src": false,
+            "ver": "2.1.1"
+        },
+        "plupload-handlers": {
+            "src": "/wp-includes/js/plupload/handlers.min.js",
+            "ver": false
+        },
+        "plupload-html4": {
+            "src": false,
+            "ver": "2.1.1"
+        },
+        "plupload-html5": {
+            "src": false,
+            "ver": "2.1.1"
+        },
+        "plupload-silverlight": {
+            "src": false,
+            "ver": "2.1.1"
+        },
+        "post": {
+            "src": "/wp-admin/js/post.min.js",
+            "ver": false
+        },
+        "postbox": {
+            "src": "/wp-admin/js/postbox.min.js",
+            "ver": false
+        },
+        "privacy-tools": {
+            "src": "/wp-admin/js/privacy-tools.min.js",
+            "ver": false
+        },
+        "prototype": {
+            "src": "https://ajax.googleapis.com/ajax/libs/prototype/1.7.1.0/prototype.js",
+            "ver": "1.7.1"
+        },
+        "quicktags": {
+            "src": "/wp-includes/js/quicktags.min.js",
+            "ver": false
+        },
+        "react": {
+            "src": "/wp-includes/js/dist/vendor/react.min.js",
+            "ver": "18.3.1.1"
+        },
+        "react-dom": {
+            "src": "/wp-includes/js/dist/vendor/react-dom.min.js",
+            "ver": "18.3.1.1"
+        },
+        "react-jsx-runtime": {
+            "src": "/wp-includes/js/dist/vendor/react-jsx-runtime.min.js",
+            "ver": "18.3.1"
+        },
+        "regenerator-runtime": {
+            "src": "/wp-includes/js/dist/vendor/regenerator-runtime.min.js",
+            "ver": "0.14.1"
+        },
+        "revisions": {
+            "src": "/wp-admin/js/revisions.min.js",
+            "ver": false
+        },
+        "sack": {
+            "src": "/wp-includes/js/tw-sack.min.js",
+            "ver": "1.6.1"
+        },
+        "schedule": {
+            "src": "/wp-includes/js/jquery/jquery.schedule.js",
+            "ver": "20m"
+        },
+        "scriptaculous": {
+            "src": false,
+            "ver": false
+        },
+        "scriptaculous-builder": {
+            "src": "https://ajax.googleapis.com/ajax/libs/scriptaculous/1.9.0/builder.js",
+            "ver": "1.9.0"
+        },
+        "scriptaculous-controls": {
+            "src": "https://ajax.googleapis.com/ajax/libs/scriptaculous/1.9.0/controls.js",
+            "ver": "1.9.0"
+        },
+        "scriptaculous-dragdrop": {
+            "src": "https://ajax.googleapis.com/ajax/libs/scriptaculous/1.9.0/dragdrop.js",
+            "ver": "1.9.0"
+        },
+        "scriptaculous-effects": {
+            "src": "https://ajax.googleapis.com/ajax/libs/scriptaculous/1.9.0/effects.js",
+            "ver": "1.9.0"
+        },
+        "scriptaculous-root": {
+            "src": "https://ajax.googleapis.com/ajax/libs/scriptaculous/1.9.0/scriptaculous.js",
+            "ver": "1.9.0"
+        },
+        "scriptaculous-slider": {
+            "src": "https://ajax.googleapis.com/ajax/libs/scriptaculous/1.9.0/slider.js",
+            "ver": "1.9.0"
+        },
+        "scriptaculous-sound": {
+            "src": "https://ajax.googleapis.com/ajax/libs/scriptaculous/1.9.0/sound.js",
+            "ver": "1.9.0"
+        },
+        "set-post-thumbnail": {
+            "src": "/wp-admin/js/set-post-thumbnail.min.js",
+            "ver": false
+        },
+        "shortcode": {
+            "src": "/wp-includes/js/shortcode.min.js",
+            "ver": false
+        },
+        "site-health": {
+            "src": "/wp-admin/js/site-health.min.js",
+            "ver": false
+        },
+        "site-icon": {
+            "src": "/wp-admin/js/site-icon.js",
+            "ver": false
+        },
+        "suggest": {
+            "src": "/wp-includes/js/jquery/suggest.min.js",
+            "ver": "1.1-20110113"
+        },
+        "svg-painter": {
+            "src": "/wp-admin/js/svg-painter.js",
+            "ver": false
+        },
+        "tags-box": {
+            "src": "/wp-admin/js/tags-box.min.js",
+            "ver": false
+        },
+        "tags-suggest": {
+            "src": "/wp-admin/js/tags-suggest.min.js",
+            "ver": false
+        },
+        "text-widgets": {
+            "src": "/wp-admin/js/widgets/text-widgets.min.js",
+            "ver": false
+        },
+        "theme": {
+            "src": "/wp-admin/js/theme.min.js",
+            "ver": false
+        },
+        "thickbox": {
+            "src": "/wp-includes/js/thickbox/thickbox.js",
+            "ver": "3.1-20121105"
+        },
+        "underscore": {
+            "src": "/wp-includes/js/underscore.min.js",
+            "ver": "1.13.8"
+        },
+        "updates": {
+            "src": "/wp-admin/js/updates.min.js",
+            "ver": false
+        },
+        "user-profile": {
+            "src": "/wp-admin/js/user-profile.min.js",
+            "ver": false
+        },
+        "user-suggest": {
+            "src": "/wp-admin/js/user-suggest.min.js",
+            "ver": false
+        },
+        "utils": {
+            "src": "/wp-includes/js/utils.min.js",
+            "ver": false
+        },
+        "word-count": {
+            "src": "/wp-admin/js/word-count.min.js",
+            "ver": false
+        },
+        "wp-a11y": {
+            "src": "/wp-includes/js/dist/a11y.min.js",
+            "ver": "31c6cec5a4ff7aff483d"
+        },
+        "wp-ajax-response": {
+            "src": "/wp-includes/js/wp-ajax-response.min.js",
+            "ver": false
+        },
+        "wp-annotations": {
+            "src": "/wp-includes/js/dist/annotations.min.js",
+            "ver": "348a030f1b5717cfaba4"
+        },
+        "wp-api": {
+            "src": "/wp-includes/js/wp-api.min.js",
+            "ver": false
+        },
+        "wp-api-fetch": {
+            "src": "/wp-includes/js/dist/api-fetch.min.js",
+            "ver": "6f2a4faeee3c722b1e57"
+        },
+        "wp-api-request": {
+            "src": "/wp-includes/js/api-request.min.js",
+            "ver": false
+        },
+        "wp-auth-check": {
+            "src": "/wp-includes/js/wp-auth-check.min.js",
+            "ver": false
+        },
+        "wp-autop": {
+            "src": "/wp-includes/js/dist/autop.min.js",
+            "ver": "4e10a18cb6f21a043fc0"
+        },
+        "wp-backbone": {
+            "src": "/wp-includes/js/wp-backbone.min.js",
+            "ver": false
+        },
+        "wp-base-styles": {
+            "src": "/wp-includes/js/dist/base-styles.min.js",
+            "ver": "67fd7250ac73fa2feba5"
+        },
+        "wp-blob": {
+            "src": "/wp-includes/js/dist/blob.min.js",
+            "ver": "c7582a735ddd2edc9731"
+        },
+        "wp-block-directory": {
+            "src": "/wp-includes/js/dist/block-directory.min.js",
+            "ver": "7c679438bdaf9853987a"
+        },
+        "wp-block-editor": {
+            "src": "/wp-includes/js/dist/block-editor.min.js",
+            "ver": "37e58da384b2558bd479"
+        },
+        "wp-block-library": {
+            "src": "/wp-includes/js/dist/block-library.min.js",
+            "ver": "00e6e2a44788af201f35"
+        },
+        "wp-block-serialization-default-parser": {
+            "src": "/wp-includes/js/dist/block-serialization-default-parser.min.js",
+            "ver": "4c6f3dd40077f7c17604"
+        },
+        "wp-block-serialization-spec-parser": {
+            "src": "/wp-includes/js/dist/block-serialization-spec-parser.min.js",
+            "ver": "7b0b496c3d48b1ef3f9e"
+        },
+        "wp-blocks": {
+            "src": "/wp-includes/js/dist/blocks.min.js",
+            "ver": "c0e57a630a0b6f6c3bb5"
+        },
+        "wp-codemirror": {
+            "src": "/wp-includes/js/codemirror/codemirror.min.js",
+            "ver": "5.65.20"
+        },
+        "wp-color-picker": {
+            "src": "/wp-admin/js/color-picker.min.js",
+            "ver": false
+        },
+        "wp-commands": {
+            "src": "/wp-includes/js/dist/commands.min.js",
+            "ver": "1a4910212c7ed2355300"
+        },
+        "wp-components": {
+            "src": "/wp-includes/js/dist/components.min.js",
+            "ver": "9b751f17060211272a5c"
+        },
+        "wp-compose": {
+            "src": "/wp-includes/js/dist/compose.min.js",
+            "ver": "0e8bde2a499ea6073b42"
+        },
+        "wp-core-commands": {
+            "src": "/wp-includes/js/dist/core-commands.min.js",
+            "ver": "426a33508599b7f31db3"
+        },
+        "wp-core-data": {
+            "src": "/wp-includes/js/dist/core-data.min.js",
+            "ver": "573f98dbff9f49ffeb0b"
+        },
+        "wp-custom-header": {
+            "src": "/wp-includes/js/wp-custom-header.min.js",
+            "ver": false
+        },
+        "wp-customize-widgets": {
+            "src": "/wp-includes/js/dist/customize-widgets.min.js",
+            "ver": "3bebbde9a9f5d2d35fb3"
+        },
+        "wp-data": {
+            "src": "/wp-includes/js/dist/data.min.js",
+            "ver": "14a216e0932d72c22976"
+        },
+        "wp-data-controls": {
+            "src": "/wp-includes/js/dist/data-controls.min.js",
+            "ver": "7e8f932da184d5537725"
+        },
+        "wp-date": {
+            "src": "/wp-includes/js/dist/date.min.js",
+            "ver": "8173fc0fc12b7bb7eaf0"
+        },
+        "wp-deprecated": {
+            "src": "/wp-includes/js/dist/deprecated.min.js",
+            "ver": "fe587bac92b7d0ef760e"
+        },
+        "wp-dom": {
+            "src": "/wp-includes/js/dist/dom.min.js",
+            "ver": "c95f94cbbc1ac3fde84f"
+        },
+        "wp-dom-ready": {
+            "src": "/wp-includes/js/dist/dom-ready.min.js",
+            "ver": "3fe927cab37bf38d6a23"
+        },
+        "wp-edit-post": {
+            "src": "/wp-includes/js/dist/edit-post.min.js",
+            "ver": "a6cb1641d13f718c01bd"
+        },
+        "wp-edit-site": {
+            "src": "/wp-includes/js/dist/edit-site.min.js",
+            "ver": "008f89f2cb2ad17a5947"
+        },
+        "wp-edit-widgets": {
+            "src": "/wp-includes/js/dist/edit-widgets.min.js",
+            "ver": "e3dea93676b5aabfef8f"
+        },
+        "wp-editor": {
+            "src": "/wp-includes/js/dist/editor.min.js",
+            "ver": "af070cfff88093363220"
+        },
+        "wp-element": {
+            "src": "/wp-includes/js/dist/element.min.js",
+            "ver": "4a4370b2b349066fd440"
+        },
+        "wp-embed": {
+            "src": "/wp-includes/js/wp-embed.min.js",
+            "ver": false
+        },
+        "wp-escape-html": {
+            "src": "/wp-includes/js/dist/escape-html.min.js",
+            "ver": "87ebe53e97bba59805a5"
+        },
+        "wp-format-library": {
+            "src": "/wp-includes/js/dist/format-library.min.js",
+            "ver": "d69ac704b4a81b89c946"
+        },
+        "wp-hooks": {
+            "src": "/wp-includes/js/dist/hooks.min.js",
+            "ver": "f0f188028580e8dc1255"
+        },
+        "wp-html-entities": {
+            "src": "/wp-includes/js/dist/html-entities.min.js",
+            "ver": "a976ff3a0f00bc2999a3"
+        },
+        "wp-i18n": {
+            "src": "/wp-includes/js/dist/i18n.min.js",
+            "ver": "1dfe7db3940c23ea9216"
+        },
+        "wp-is-shallow-equal": {
+            "src": "/wp-includes/js/dist/is-shallow-equal.min.js",
+            "ver": "7ad271045c1fe60f5496"
+        },
+        "wp-keyboard-shortcuts": {
+            "src": "/wp-includes/js/dist/keyboard-shortcuts.min.js",
+            "ver": "37da95806f2339bc80d0"
+        },
+        "wp-keycodes": {
+            "src": "/wp-includes/js/dist/keycodes.min.js",
+            "ver": "d0b4204e4bbeb412df6e"
+        },
+        "wp-list-reusable-blocks": {
+            "src": "/wp-includes/js/dist/list-reusable-blocks.min.js",
+            "ver": "68a57d388ce085b9691e"
+        },
+        "wp-lists": {
+            "src": "/wp-includes/js/wp-lists.min.js",
+            "ver": false
+        },
+        "wp-media-utils": {
+            "src": "/wp-includes/js/dist/media-utils.min.js",
+            "ver": "07c1c94f9b21baa97a96"
+        },
+        "wp-mediaelement": {
+            "src": "/wp-includes/js/mediaelement/wp-mediaelement.min.js",
+            "ver": false
+        },
+        "wp-notices": {
+            "src": "/wp-includes/js/dist/notices.min.js",
+            "ver": "c09a068fdab0eb465e14"
+        },
+        "wp-nux": {
+            "src": "/wp-includes/js/dist/nux.min.js",
+            "ver": "1a78c05bba2c02820a7e"
+        },
+        "wp-patterns": {
+            "src": "/wp-includes/js/dist/patterns.min.js",
+            "ver": "be5af192f57cc14d340f"
+        },
+        "wp-playlist": {
+            "src": "/wp-includes/js/mediaelement/wp-playlist.min.js",
+            "ver": false
+        },
+        "wp-plugins": {
+            "src": "/wp-includes/js/dist/plugins.min.js",
+            "ver": "673d1e05ca49004ab160"
+        },
+        "wp-plupload": {
+            "src": "/wp-includes/js/plupload/wp-plupload.min.js",
+            "ver": false
+        },
+        "wp-pointer": {
+            "src": "/wp-includes/js/wp-pointer.min.js",
+            "ver": false
+        },
+        "wp-polyfill": {
+            "src": "/wp-includes/js/dist/vendor/wp-polyfill.min.js",
+            "ver": "3.15.0"
+        },
+        "wp-polyfill-dom-rect": {
+            "src": "/wp-includes/js/dist/vendor/wp-polyfill-dom-rect.min.js",
+            "ver": "4.8.0"
+        },
+        "wp-polyfill-element-closest": {
+            "src": "/wp-includes/js/dist/vendor/wp-polyfill-element-closest.min.js",
+            "ver": "3.0.2"
+        },
+        "wp-polyfill-fetch": {
+            "src": "/wp-includes/js/dist/vendor/wp-polyfill-fetch.min.js",
+            "ver": "3.6.20"
+        },
+        "wp-polyfill-formdata": {
+            "src": "/wp-includes/js/dist/vendor/wp-polyfill-formdata.min.js",
+            "ver": "4.0.10"
+        },
+        "wp-polyfill-inert": {
+            "src": "/wp-includes/js/dist/vendor/wp-polyfill-inert.min.js",
+            "ver": "3.1.3"
+        },
+        "wp-polyfill-node-contains": {
+            "src": "/wp-includes/js/dist/vendor/wp-polyfill-node-contains.min.js",
+            "ver": "4.8.0"
+        },
+        "wp-polyfill-object-fit": {
+            "src": "/wp-includes/js/dist/vendor/wp-polyfill-object-fit.min.js",
+            "ver": "2.3.5"
+        },
+        "wp-polyfill-url": {
+            "src": "/wp-includes/js/dist/vendor/wp-polyfill-url.min.js",
+            "ver": "3.6.4"
+        },
+        "wp-preferences": {
+            "src": "/wp-includes/js/dist/preferences.min.js",
+            "ver": "5a169e3fc0e657f74172"
+        },
+        "wp-preferences-persistence": {
+            "src": "/wp-includes/js/dist/preferences-persistence.min.js",
+            "ver": "a34abbdacd8f50f9acb1"
+        },
+        "wp-primitives": {
+            "src": "/wp-includes/js/dist/primitives.min.js",
+            "ver": "44cc5a35c7b9fe07a838"
+        },
+        "wp-priority-queue": {
+            "src": "/wp-includes/js/dist/priority-queue.min.js",
+            "ver": "6c0aa59b65d55dfd509b"
+        },
+        "wp-private-apis": {
+            "src": "/wp-includes/js/dist/private-apis.min.js",
+            "ver": "eb85f28c4c729bb4f002"
+        },
+        "wp-react-i18n": {
+            "src": "/wp-includes/js/dist/react-i18n.min.js",
+            "ver": "ba2bd3d7a3817f0494af"
+        },
+        "wp-redux-routine": {
+            "src": "/wp-includes/js/dist/redux-routine.min.js",
+            "ver": "acca2b4857d83ad1790e"
+        },
+        "wp-reusable-blocks": {
+            "src": "/wp-includes/js/dist/reusable-blocks.min.js",
+            "ver": "5161508c6662b8490ee8"
+        },
+        "wp-rich-text": {
+            "src": "/wp-includes/js/dist/rich-text.min.js",
+            "ver": "3e5852e42cee1c239bae"
+        },
+        "wp-router": {
+            "src": "/wp-includes/js/dist/router.min.js",
+            "ver": "dda75cd9ff9d7e0eb19f"
+        },
+        "wp-sanitize": {
+            "src": "/wp-includes/js/wp-sanitize.min.js",
+            "ver": false
+        },
+        "wp-server-side-render": {
+            "src": "/wp-includes/js/dist/server-side-render.min.js",
+            "ver": "83e806a0634df6b93530"
+        },
+        "wp-shortcode": {
+            "src": "/wp-includes/js/dist/shortcode.min.js",
+            "ver": "f6273476300cc5fad4cd"
+        },
+        "wp-style-engine": {
+            "src": "/wp-includes/js/dist/style-engine.min.js",
+            "ver": "914befb08774033e6265"
+        },
+        "wp-theme": {
+            "src": "/wp-includes/js/dist/theme.min.js",
+            "ver": "56a75cc08ae66c1fcb7a"
+        },
+        "wp-theme-plugin-editor": {
+            "src": "/wp-admin/js/theme-plugin-editor.min.js",
+            "ver": false
+        },
+        "wp-token-list": {
+            "src": "/wp-includes/js/dist/token-list.min.js",
+            "ver": "e86ab419d8302d57822c"
+        },
+        "wp-tooltip": {
+            "src": "/wp-includes/js/wp-tooltip.js",
+            "ver": false
+        },
+        "wp-undo-manager": {
+            "src": "/wp-includes/js/dist/undo-manager.min.js",
+            "ver": "4554fce6276d8910a4ae"
+        },
+        "wp-upload-media": {
+            "src": "/wp-includes/js/dist/upload-media.min.js",
+            "ver": "a2c026d433c295fd5145"
+        },
+        "wp-url": {
+            "src": "/wp-includes/js/dist/url.min.js",
+            "ver": "7b0de086d4ae11d55704"
+        },
+        "wp-util": {
+            "src": "/wp-includes/js/wp-util.min.js",
+            "ver": false
+        },
+        "wp-viewport": {
+            "src": "/wp-includes/js/dist/viewport.min.js",
+            "ver": "a56e3489ed4faeac7720"
+        },
+        "wp-warning": {
+            "src": "/wp-includes/js/dist/warning.min.js",
+            "ver": "a0978839debc564a6608"
+        },
+        "wp-widgets": {
+            "src": "/wp-includes/js/dist/widgets.min.js",
+            "ver": "087235ca647aa1a33227"
+        },
+        "wp-wordcount": {
+            "src": "/wp-includes/js/dist/wordcount.min.js",
+            "ver": "f0b1f0e977b2ff6e0132"
+        },
+        "wpdialogs": {
+            "src": "/wp-includes/js/wpdialog.min.js",
+            "ver": false
+        },
+        "wplink": {
+            "src": "/wp-includes/js/wplink.min.js",
+            "ver": false
+        },
+        "xfn": {
+            "src": "/wp-admin/js/xfn.min.js",
+            "ver": false
+        },
+        "zxcvbn-async": {
+            "src": "/wp-includes/js/zxcvbn-async.min.js",
+            "ver": "1.0"
+        }
+    }
+}

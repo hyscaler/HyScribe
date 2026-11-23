@@ -1,0 +1,122 @@
+# The rows PHP WordPress writes for the action media-save-attachment-trash-media-trash (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-18 07:28:10 to 2026-11-18 07:28:10 UTC.
+# %wp_posts:1% is 801.
+# %wp_posts:2% is 802.
+# %wp_posts:3% is 803.
+# %wp_posts:4% is 804.
+# %wp_posts:5% is 805.
+# %wp_posts:6% is 806.
+# %wp_posts:7% is 807.
+# %wp_posts:8% is 808.
+# %wp_posts:9% is 809.
+# %wp_posts:10% is 810.
+# %wp_posts:11% is 811.
+# %wp_posts:12% is 812.
+# %wp_posts:13% is 813.
+# %wp_posts:14% is 814.
+# %wp_posts:15% is 815.
+# %wp_posts:16% is 816.
+# %wp_posts:17% is 817.
+# %wp_posts:18% is 818.
+# %wp_posts:19% is 819.
+# %wp_posts:20% is 820.
+# %wp_posts:21% is 821.
+# %wp_posts:22% is 822.
+# %wp_posts:23% is 823.
+# %wp_posts:24% is 824.
+# %wp_posts:25% is 825.
+# %wp_posts:26% is 826.
+# %wp_posts:27% is 827.
+# %wp_posts:28% is 828.
+# %wp_posts:29% is 829.
+# %wp_posts:30% is 830.
+# %wp_posts:31% is 831.
+# %wp_postmeta:1% is 801.
+# %wp_postmeta:2% is 802.
+# %wp_postmeta:3% is 803.
+# %wp_postmeta:4% is 804.
+# %wp_postmeta:5% is 805.
+# %wp_postmeta:6% is 806.
+# %wp_postmeta:7% is 807.
+# %wp_postmeta:8% is 808.
+# %wp_postmeta:9% is 809.
+# %wp_postmeta:10% is 810.
+# %wp_postmeta:11% is 811.
+# %wp_postmeta:12% is 812.
+# %wp_postmeta:13% is 813.
+# %wp_postmeta:14% is 814.
+# %wp_postmeta:15% is 815.
+# %wp_postmeta:16% is 816.
+# %wp_postmeta:17% is 817.
+# %wp_postmeta:18% is 818.
+# %wp_postmeta:19% is 819.
+# %wp_postmeta:20% is 820.
+# %wp_postmeta:21% is 821.
+# %wp_postmeta:22% is 822.
+# %wp_postmeta:23% is 823.
+# %wp_postmeta:24% is 824.
+# %wp_postmeta:25% is 825.
+# %wp_postmeta:26% is 826.
+# %wp_postmeta:27% is 827.
+# %wp_postmeta:28% is 828.
+# %wp_postmeta:29% is 829.
+# %wp_postmeta:30% is 830.
+# %wp_postmeta:31% is 831.
+# %wp_postmeta:32% is 832.
+# %wp_postmeta:33% is 833.
+# %wp_postmeta:34% is 834.
+# %wp_postmeta:35% is 835.
+# %wp_postmeta:36% is 836.
+# %wp_postmeta:37% is 837.
+# %wp_postmeta:38% is 838.
+# %wp_postmeta:39% is 839.
+# %wp_postmeta:40% is 840.
+# %wp_postmeta:41% is 841.
+# %wp_postmeta:42% is 842.
+# %wp_postmeta:43% is 843.
+# %wp_postmeta:44% is 844.
+# %wp_postmeta:45% is 845.
+# %wp_postmeta:46% is 846.
+# %wp_postmeta:47% is 847.
+# %wp_postmeta:48% is 848.
+# %wp_postmeta:49% is 849.
+# %wp_postmeta:50% is 850.
+# %wp_postmeta:51% is 851.
+# %wp_postmeta:52% is 852.
+# %wp_postmeta:53% is 853.
+# %wp_postmeta:54% is 854.
+# %wp_postmeta:55% is 856.
+# %wp_postmeta:56% is 857.
+# %wp_postmeta:57% is 858.
+# %wp_postmeta:58% is 859.
+# %wp_comments:1% is 801.
+# %wp_users:1% is 2.
+# %wp_users:2% is 3.
+# %wp_usermeta:1% is 801.
+# %wp_usermeta:2% is 802.
+# %wp_usermeta:3% is 803.
+# %wp_usermeta:4% is 804.
+# %wp_usermeta:5% is 805.
+# %wp_usermeta:6% is 806.
+wp_comments	%wp_comments:1%	~	comment_approved	1	post-trashed
+wp_postmeta	%wp_postmeta:3%	~	meta_value	Alt "text" &amp; more	Changed
+wp_postmeta	%wp_postmeta:55%	+	meta_id	%wp_postmeta:55%
+wp_postmeta	%wp_postmeta:55%	+	meta_key	_wp_trash_meta_status
+wp_postmeta	%wp_postmeta:55%	+	meta_value	inherit
+wp_postmeta	%wp_postmeta:55%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:56%	+	meta_id	%wp_postmeta:56%
+wp_postmeta	%wp_postmeta:56%	+	meta_key	_wp_trash_meta_time
+wp_postmeta	%wp_postmeta:56%	+	meta_value	%unix%
+wp_postmeta	%wp_postmeta:56%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:57%	+	meta_id	%wp_postmeta:57%
+wp_postmeta	%wp_postmeta:57%	+	meta_key	_wp_desired_post_slug
+wp_postmeta	%wp_postmeta:57%	+	meta_value	sunset-dusk-sea
+wp_postmeta	%wp_postmeta:57%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:58%	+	meta_id	%wp_postmeta:58%
+wp_postmeta	%wp_postmeta:58%	+	meta_key	_wp_trash_meta_comments_status
+wp_postmeta	%wp_postmeta:58%	+	meta_value	a:1:{i:801;s:1:"1";}
+wp_postmeta	%wp_postmeta:58%	+	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	~	post_modified	2026-03-04 05:06:07	%now%
+wp_posts	%wp_posts:1%	~	post_modified_gmt	2026-03-04 05:06:07	%now%
+wp_posts	%wp_posts:1%	~	post_name	sunset-dusk-sea	sunset-dusk-sea__trashed
+wp_posts	%wp_posts:1%	~	post_status	inherit	trash

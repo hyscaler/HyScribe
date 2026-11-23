@@ -1,0 +1,202 @@
+# The writes the switch-back suite makes in HyScribe, in order, over a fresh
+# default install (crates/hyscribe/tests/switch_back.rs), before
+# reference/switch-back/run.sh serves the database with PHP WordPress:
+# case	user (admin or visitor)	method	path	body (- for none)	nonce action (- for none)	nonce field	status
+# The dashboard: its Quick Draft auto-draft (post 4), saved, and the screen's state.
+dashboard	admin	GET	/hs-admin/	-	-	-	200
+quickdraft	admin	POST	/hs-admin/post	action=post-quickdraft-save&post_ID=4&post_type=post&post_title=Switch+back+draft&content=Drafted+in+HyScribe.	add-post	_wpnonce	200
+welcome	admin	POST	/hs-admin/admin-ajax	action=update-welcome-panel&visible=0	welcome-panel-nonce	welcomepanelnonce	200
+closed-boxes	admin	POST	/hs-admin/admin-ajax	action=closed-postboxes&closed=dashboard_activity&hidden=dashboard_primary&page=dashboard	closedpostboxes	closedpostboxesnonce	200
+box-order	admin	POST	/hs-admin/admin-ajax	action=meta-box-order&order[normal]=dashboard_quick_press,dashboard_site_health&order[side]=dashboard_right_now&page_columns=2&page=dashboard	meta-box-order	_ajax_nonce	200
+hidden-columns	admin	POST	/hs-admin/admin-ajax	action=hidden-columns&hidden=author&page=edit-post	screen-options-nonce	screenoptionnonce	200
+per-page	admin	POST	/hs-admin/edit	wp_screen_options[option]=edit_post_per_page&wp_screen_options[value]=5	screen-options-nonce	screenoptionnonce	302
+# Categories and tags: a category (term 2) added with Ajax; post 1's Quick Edit adds tags 3 and 4.
+add-category	admin	POST	/hs-admin/admin-ajax	action=add-tag&screen=edit-category&taxonomy=category&post_type=post&tag-name=Switch+Category&slug=&parent=-1&description=	add-tag	_wpnonce_add-tag	200
+inline-post	admin	POST	/hs-admin/admin-ajax	action=inline-save&post_ID=1&post_type=post&screen=edit-post&post_view=list&post_status=&edit_date=&post_title=Hello+again&post_name=hello-again&mm=11&jj=16&aa=2026&hh=08&mn=08&ss=15&hidden_mm=11&hidden_jj=16&hidden_aa=2026&hidden_hh=08&hidden_mn=08&post_author=1&post_password=&post_category[]=0&post_category[]=1&post_category[]=2&tax_input[post_tag]=Switch,+Back&comment_status=open&ping_status=open&_status=publish&sticky=sticky&post_format=0	inlineeditnonce	_inline_edit	200
+inline-page	admin	POST	/hs-admin/admin-ajax	action=inline-save&post_ID=2&post_type=page&screen=edit-page&post_view=list&post_status=&edit_date=&post_title=Sample+Page+Edited&post_name=sample-page&mm=11&jj=16&aa=2026&hh=08&mn=08&ss=15&hidden_mm=11&hidden_jj=16&hidden_aa=2026&hidden_hh=08&hidden_mn=08&post_author=1&post_password=&post_parent=0&menu_order=3&page_template=default&_status=publish	inlineeditnonce	_inline_edit	200
+add-tag	admin	POST	/hs-admin/edit-tags	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&post_type=post&_wp_http_referer=%2Fwp-admin%2Fedit-tags.php%3Ftaxonomy%3Dpost_tag&tag-name=Form+tag&slug=&description=Added+by+the+form	add-tag	_wpnonce_add-tag	302
+add-doomed	admin	POST	/hs-admin/admin-ajax	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&post_type=post&tag-name=Doomed+tag&slug=&description=	add-tag	_wpnonce_add-tag	200
+add-bulk-doomed	admin	POST	/hs-admin/admin-ajax	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&post_type=post&tag-name=Bulk+doomed&slug=&description=	add-tag	_wpnonce_add-tag	200
+rename-tag	admin	POST	/hs-admin/admin-ajax	action=inline-save-tax&taxonomy=post_tag&tax_ID=5&name=Renamed+tag&slug=renamed-tag	taxinlineeditnonce	_inline_edit	200
+edit-category	admin	POST	/hs-admin/edit-tags	action=editedtag&tag_ID=2&taxonomy=category&_wp_http_referer=%2Fwp-admin%2Fterm.php%3Ftaxonomy%3Dcategory%26tag_ID%3D2&name=Switch+Category&slug=switch-category&parent=-1&description=Described+in+HyScribe	update-tag_2	_wpnonce	302
+delete-tag	admin	POST	/hs-admin/admin-ajax	action=delete-tag&tag_ID=6&taxonomy=post_tag	delete-tag_6	_ajax_nonce	200
+bulk-delete-tag	admin	POST	/hs-admin/edit-tags	action=delete&taxonomy=post_tag&delete_tags[]=7&_wp_http_referer=%2Fwp-admin%2Fedit-tags.php%3Ftaxonomy%3Dpost_tag	bulk-tags	_wpnonce	302
+# Posts: Bulk Edit (tag 8), trash and restore, a page trashed and the trash emptied, a new privacy policy page.
+bulk-edit	admin	GET	/hs-admin/edit?s=&post_status=all&post_type=post&action=edit&m=0&cat=0&paged=1&post_view=list&screen=edit-post&mode=list&bulk_edit=Update&post[]=1&post[]=4&post_category[]=0&indeterminate_post_category[]=1&indeterminate_post_category[]=2&tax_input[post_tag]=Bulk+tag&post_author=-1&comment_status=&ping_status=&_status=-1&post_format=-1&sticky=-1	-	bulk-posts	_wpnonce	302
+trash-post	admin	GET	/hs-admin/post?post=4&action=trash	-	trash-post_4	_wpnonce	302
+untrash-post	admin	GET	/hs-admin/post?post=4&action=untrash	-	untrash-post_4	_wpnonce	302
+trash-page	admin	GET	/hs-admin/edit?post_type=page&action=trash&post[]=3	-	bulk-posts	_wpnonce	302
+empty-trash	admin	GET	/hs-admin/edit?post_status=trash&post_type=page&delete_all=Empty+Trash&action=-1	-	bulk-posts	_wpnonce	302
+privacy-page	admin	POST	/hs-admin/options-privacy	action=create-privacy-page	create-privacy-page	_wpnonce	302
+# Comments: a visitor's (2, held) and the administrator's (3) from the front end, moderated, replied to (4) and edited.
+visitor-comment	visitor	POST	/wp-comments-post.php	comment_post_ID=1&author=Ann&email=ann%40example.test&url=&comment=A+visitor%27s+comment.	-	-	302
+admin-comment	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=The+administrator%27s+comment.	-	-	302
+approve	admin	POST	/hs-admin/admin-ajax	action=dim-comment&id=2&new=approved	approve-comment_2	_ajax_nonce	200
+reply	admin	POST	/hs-admin/admin-ajax	action=replyto-comment&comment_ID=2&comment_post_ID=1&content=A+reply+from+the+admin.&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	200
+quick-edit-comment	admin	POST	/hs-admin/admin-ajax	action=edit-comment&comment_ID=4&comment_post_ID=1&content=A+reply+edited+in+Quick+Edit.&status=0&position=-1&checkbox=1&mode=detail&p=	replyto-comment	_ajax_nonce-replyto-comment	200
+edit-comment	admin	POST	/hs-admin/comment	action=editedcomment&comment_ID=2&comment_post_ID=1&newcomment_author=Ann+B&newcomment_author_email=ann%40example.test&newcomment_author_url=&content=A+visitor%27s+comment%2C+edited+on+the+screen.&comment_status=1&aa=2026&mm=11&jj=16&hh=09&mn=30&ss=00&hidden_aa=2026&hidden_mm=11&hidden_jj=16&hidden_hh=09&hidden_mn=30	update-comment_2	_wpnonce	302
+spam	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=3&spam=1	delete-comment_3	_ajax_nonce	200
+unspam	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=3&unspam=1	delete-comment_3	_ajax_nonce	200
+trash-comment	admin	POST	/hs-admin/comment	action=trashcomment&c=3	delete-comment_3	_wpnonce	302
+delete-comment	admin	POST	/hs-admin/comment	deletecomment=1&c=3	delete-comment_3	_wpnonce	302
+unapprove-bulk	admin	GET	/hs-admin/edit-comments?action=unapprove&delete_comments[]=1	-	bulk-comments	_wpnonce	302
+approve-again	admin	GET	/hs-admin/comment?action=approvecomment&c=1	-	approve-comment_1	_wpnonce	302
+# Users: user 2 added, edited, its role changed and a reset link made; user 3 added, given post 4, deleted with it reassigned.
+add-user	admin	POST	/hs-admin/user-new	action=createuser&user_login=switchback&email=switchback%40example.test&first_name=Switch&last_name=Back&url=&pass1=Switch+back+1%21&pass2=Switch+back+1%21&role=author&createuser=Add+User	create-user	_wpnonce_create-user	302
+edit-user	admin	POST	/hs-admin/user-edit	action=update&user_id=2&email=switchback%40example.test&first_name=Switch&last_name=Back&nickname=Switcher&display_name=Switcher&role=editor&description=Edited+in+HyScribe.&pass1=&pass2=	update-user_2	_wpnonce	302
+promote	admin	GET	/hs-admin/users?changeit=Change&new_role=author&users[]=2	-	bulk-users	_wpnonce	302
+reset-link	admin	GET	/hs-admin/users?action=resetpassword&users[]=2	-	bulk-users	_wpnonce	302
+add-leaver	admin	POST	/hs-admin/user-new	action=createuser&user_login=leaver&email=leaver%40example.test&first_name=&last_name=&url=&pass1=Leaving+3%21&pass2=Leaving+3%21&role=author&createuser=Add+User	create-user	_wpnonce_create-user	302
+give-post	admin	POST	/hs-admin/admin-ajax	action=inline-save&post_ID=4&post_type=post&screen=edit-post&post_view=list&post_status=&edit_date=&post_title=Switch+back+draft&post_name=&mm=11&jj=16&aa=2026&hh=08&mn=08&ss=15&hidden_mm=11&hidden_jj=16&hidden_aa=2026&hidden_hh=08&hidden_mn=08&post_author=3&post_password=&post_category[]=0&post_category[]=2&tax_input[post_tag]=Bulk+tag&comment_status=open&ping_status=open&_status=draft&post_format=0	inlineeditnonce	_inline_edit	200
+delete-leaver	admin	POST	/hs-admin/users	action=dodelete&users[]=3&delete_option[3]=reassign&reassign_user[3]=1	delete-users	_wpnonce	302
+color-scheme	admin	POST	/hs-admin/admin-ajax	action=save-user-color-scheme&color_scheme=ocean	save-color-scheme	nonce	200
+profile	admin	POST	/hs-admin/profile	action=update&user_id=1&email=admin%40default-install.test&first_name=Ada&last_name=Admin&nickname=admin&display_name=Ada+Admin&url=http%3A%2F%2Fdefault-install.test&description=Saved+in+HyScribe.&pass1=&pass2=&admin_color=modern&admin_bar_front=1	update-user_1	_wpnonce	302
+# Settings, the permalinks last.
+general	admin	POST	/hs-admin/options	option_page=general&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-general.php&blogname=Switch+Back+Site&blogdescription=Saved+by+HyScribe&site_icon=0&new_admin_email=admin%40default-install.test&default_role=subscriber&WPLANG=&timezone_string=UTC%2B0&date_format=F+j%2C+Y&date_format_custom=F+j%2C+Y&time_format=g%3Ai+a&time_format_custom=g%3Ai+a&start_of_week=1	general-options	_wpnonce	302
+writing	admin	POST	/hs-admin/options	option_page=writing&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-writing.php&default_category=2&default_post_format=0&mailserver_url=mail.example.com&mailserver_port=110&mailserver_login=login%40example.com&mailserver_pass=&default_email_category=1&ping_sites=https%3A%2F%2Frpc.pingomatic.com%2F	writing-options	_wpnonce	302
+reading	admin	POST	/hs-admin/options	option_page=reading&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-reading.php&show_on_front=posts&posts_per_page=5&posts_per_rss=7&rss_use_excerpt=1&blog_public=1	reading-options	_wpnonce	302
+discussion	admin	POST	/hs-admin/options	option_page=discussion&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-discussion.php&default_pingback_flag=1&default_ping_status=open&default_comment_status=open&require_name_email=1&close_comments_days_old=14&show_comments_cookies_opt_in=1&thread_comments=1&thread_comments_depth=4&comments_per_page=50&default_comments_page=newest&comment_order=asc&comments_notify=1&moderation_notify=1&wp_notes_notify=1&comment_previously_approved=1&comment_max_links=3&moderation_keys=&disallowed_keys=&show_avatars=1&avatar_rating=G&avatar_default=identicon	discussion-options	_wpnonce	302
+media	admin	POST	/hs-admin/options	option_page=media&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-media.php&thumbnail_size_w=160&thumbnail_size_h=160&thumbnail_crop=1&medium_size_w=300&medium_size_h=300&large_size_w=1024&large_size_h=1024&uploads_use_yearmonth_folders=1	media-options	_wpnonce	302
+# Numeric permalinks, then a static front page whose save stores their rules,
+# then post names: only the Permalinks screen's view refreshes the rules.
+permalinks-numeric	admin	POST	/hs-admin/options-permalink	selection=%2Farchives%2F%25post_id%25&permalink_structure=%2Farchives%2F%25post_id%25&category_base=&tag_base=	update-permalink	_wpnonce	302
+reading-front	admin	POST	/hs-admin/options	option_page=reading&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-reading.php&show_on_front=page&page_on_front=2&page_for_posts=0&posts_per_page=5&posts_per_rss=7&rss_use_excerpt=1&blog_public=1	reading-options	_wpnonce	302
+permalinks	admin	POST	/hs-admin/options-permalink	selection=%2F%25postname%25%2F&permalink_structure=%2F%25postname%25%2F&category_base=&tag_base=	update-permalink	_wpnonce	302
+# The screen the save sends back to, which flushes the rewrite rules.
+permalinks-screen	admin	GET	/hs-admin/options-permalink?settings-updated=true	-	-	-	200
+# The REST API's writes: synced patterns, posts, pages and navigation menus
+# created, updated, trashed and deleted. check.php reads each object with
+# PHP's REST API and compares it with HyScribe's last answer; %case% names
+# the ID a case's answer gave, and objects made for later admin actions
+# (cases named scratch-) are not compared.
+rest-pattern	admin	POST	/?rest_route=/wp/v2/blocks	{"title":"A REST pattern","content":"<!-- wp:paragraph -->\n<p>Synced from REST.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+rest-pattern-update	admin	PATCH	/?rest_route=/wp/v2/blocks/%rest-pattern%	{"title":"A REST pattern, renamed"}	wp_rest	X-WP-Nonce	200
+rest-pattern-trashed	admin	POST	/?rest_route=/wp/v2/blocks	{"title":"Trashed pattern","content":"<!-- wp:paragraph -->\n<p>Gone soon.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+rest-pattern-trash	admin	DELETE	/?rest_route=/wp/v2/blocks/%rest-pattern-trashed%	-	wp_rest	X-WP-Nonce	200
+rest-post	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A REST post","content":"<!-- wp:paragraph -->\n<p>Written over REST.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:block {\"ref\":%rest-pattern%} /-->","excerpt":"Its excerpt","status":"publish","categories":[2],"tags":[3,8],"comment_status":"open","ping_status":"closed"}	wp_rest	X-WP-Nonce	201
+rest-post-update	admin	PUT	/?rest_route=/wp/v2/posts/%rest-post%	{"title":"A REST post, updated","sticky":true,"date":"2026-11-01T10:00:00"}	wp_rest	X-WP-Nonce	200
+rest-draft	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A REST draft","status":"draft"}	wp_rest	X-WP-Nonce	201
+rest-draft-patch	admin	PATCH	/?rest_route=/wp/v2/posts/%rest-draft%	{"excerpt":"Patched","slug":"rest-draft-slug","password":"pw"}	wp_rest	X-WP-Nonce	200
+rest-future	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A REST future post","status":"future","date_gmt":"2030-01-01T00:00:00Z"}	wp_rest	X-WP-Nonce	201
+rest-trashed	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Trashed over REST","status":"publish"}	wp_rest	X-WP-Nonce	201
+rest-trash	admin	DELETE	/?rest_route=/wp/v2/posts/%rest-trashed%	-	wp_rest	X-WP-Nonce	200
+rest-deleted	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Deleted over REST"}	wp_rest	X-WP-Nonce	201
+rest-delete	admin	DELETE	/?rest_route=/wp/v2/posts/%rest-deleted%&force=true	-	wp_rest	X-WP-Nonce	200
+rest-page	admin	POST	/?rest_route=/wp/v2/pages	{"title":"A REST page","parent":2,"menu_order":4,"status":"publish","content":"<!-- wp:paragraph -->\n<p>A page written over REST.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	201
+rest-page-update	admin	POST	/?rest_route=/wp/v2/pages/%rest-page%	{"title":"A REST page, updated","comment_status":"closed"}	wp_rest	X-WP-Nonce	200
+rest-nav	admin	POST	/?rest_route=/wp/v2/navigation	{"title":"REST menu","status":"publish","content":"<!-- wp:navigation-link {\"label\":\"REST link\",\"url\":\"https://example.test/\",\"kind\":\"custom\"} /-->"}	wp_rest	X-WP-Nonce	201
+rest-nav-update	admin	PUT	/?rest_route=/wp/v2/navigation/%rest-nav%	{"title":"REST menu, renamed"}	wp_rest	X-WP-Nonce	200
+rest-nav-draft	admin	POST	/?rest_route=/wp/v2/navigation	{"title":"REST draft menu","status":"draft"}	wp_rest	X-WP-Nonce	201
+rest-nav-delete	admin	DELETE	/?rest_route=/wp/v2/navigation/%rest-nav-draft%&force=true	-	wp_rest	X-WP-Nonce	200
+# Posts made over REST for the admin's actions: post.php's delete, the
+# bulk trash, restore and delete, and a revision restored (the older of two).
+scratch-a	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch A","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-b	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch B","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-c	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch C","status":"publish"}	wp_rest	X-WP-Nonce	201
+trash-a	admin	GET	/hs-admin/post?post=%scratch-a%&action=trash	-	trash-post_%scratch-a%	_wpnonce	302
+delete-a	admin	GET	/hs-admin/post?post=%scratch-a%&action=delete	-	delete-post_%scratch-a%	_wpnonce	302
+bulk-trash	admin	GET	/hs-admin/edit?action=trash&post[]=%scratch-b%&post[]=%scratch-c%	-	bulk-posts	_wpnonce	302
+bulk-untrash	admin	GET	/hs-admin/edit?post_status=trash&action=untrash&post[]=%scratch-b%	-	bulk-posts	_wpnonce	302
+bulk-delete	admin	GET	/hs-admin/edit?post_status=trash&action=delete&post[]=%scratch-c%	-	bulk-posts	_wpnonce	302
+scratch-rev	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Revised over REST","content":"<!-- wp:paragraph -->\n<p>First version.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-rev-2	admin	POST	/?rest_route=/wp/v2/posts/%scratch-rev%	{"content":"<!-- wp:paragraph -->\n<p>Second version.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	200
+scratch-rev-3	admin	POST	/?rest_route=/wp/v2/posts/%scratch-rev%	{"content":"<!-- wp:paragraph -->\n<p>Third version.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	200
+older-revision	admin	GET	/?rest_route=/wp/v2/posts/%scratch-rev%/revisions&per_page=1&page=2	-	wp_rest	X-WP-Nonce	200
+restore-revision	admin	GET	/hs-admin/revision?revision=%older-revision%&action=restore	-	restore-post_%older-revision%	_wpnonce	302
+# Post 1's edit lock, renewed by the heartbeat.
+heartbeat-lock	admin	POST	/hs-admin/admin-ajax	action=heartbeat&data[wp-refresh-post-lock][post_id]=1&interval=60&screen_id=post&has_focus=true	heartbeat-nonce	_nonce	200
+# More comments from the administrator (5 to 8), each moderated every way.
+comment-5	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Moderated+twice.	-	-	302
+comment-6	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Spammed+and+back.	-	-	302
+comment-7	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trashed+for+good.	-	-	302
+comment-8	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Spam+emptied.	-	-	302
+bulk-spam	admin	POST	/hs-admin/edit-comments	action=spam&delete_comments[]=5&_wp_http_referer=%2Fwp-admin%2Fedit-comments.php	bulk-comments	_wpnonce	302
+bulk-unspam	admin	GET	/hs-admin/edit-comments?doaction=undo&action=unspam&ids=5	-	bulk-comments	_wpnonce	302
+unapprove-comment	admin	GET	/hs-admin/comment?action=unapprovecomment&c=5	-	approve-comment_5	_wpnonce	302
+bulk-approve	admin	GET	/hs-admin/edit-comments?action=approve&delete_comments[]=5	-	bulk-comments	_wpnonce	302
+dim-unapprove	admin	POST	/hs-admin/admin-ajax	action=dim-comment&id=5&new=unapproved	approve-comment_5	_ajax_nonce	200
+spam-comment	admin	GET	/hs-admin/comment?action=spamcomment&c=6	-	delete-comment_6	_wpnonce	302
+unspam-comment	admin	GET	/hs-admin/comment?action=unspamcomment&c=6	-	delete-comment_6	_wpnonce	302
+trash-comment-6	admin	GET	/hs-admin/comment?action=trashcomment&c=6	-	delete-comment_6	_wpnonce	302
+untrash-comment	admin	GET	/hs-admin/comment?action=untrashcomment&c=6	-	delete-comment_6	_wpnonce	302
+bulk-trash-comment	admin	GET	/hs-admin/edit-comments?action=trash&delete_comments[]=7	-	bulk-comments	_wpnonce	302
+bulk-untrash-comment	admin	GET	/hs-admin/edit-comments?action=untrash&ids=7	-	bulk-comments	_wpnonce	302
+ajax-trash-comment	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=7&trash=1	delete-comment_7	_ajax_nonce	200
+ajax-untrash-comment	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=7&untrash=1	delete-comment_7	_ajax_nonce	200
+ajax-delete-to-trash	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=7&delete=1	delete-comment_7	_ajax_nonce	200
+bulk-delete-comment	admin	GET	/hs-admin/edit-comments?action=delete&delete_comments[]=7	-	bulk-comments	_wpnonce	302
+ajax-spam-comment	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=8&spam=1	delete-comment_8	_ajax_nonce	200
+empty-spam	admin	GET	/hs-admin/edit-comments?delete_all=Empty+Spam&action=-1&comment_status=spam&pagegen_timestamp=2099-01-01+00%3A00%3A00	-	bulk-comments	_wpnonce	302
+# A tag deleted from its row link (term 9).
+add-row-doomed	admin	POST	/hs-admin/admin-ajax	action=add-tag&screen=edit-post_tag&taxonomy=post_tag&post_type=post&tag-name=Row+doomed&slug=&description=	add-tag	_wpnonce_add-tag	200
+delete-tag-row	admin	GET	/hs-admin/edit-tags?action=delete&taxonomy=post_tag&tag_ID=9	-	delete-tag_9	_wpnonce	302
+# User 2's reset link from its edit screen; the administrator's list mode
+# and welcome panel; a change of the admin email, dismissed, then made again.
+password-reset	admin	POST	/hs-admin/admin-ajax	action=send-password-reset&user_id=2	reset-password-for-2	nonce	200
+list-mode	admin	GET	/hs-admin/edit?mode=excerpt	-	-	-	200
+welcome-shown	admin	GET	/hs-admin/?welcome=1	-	-	-	200
+admin-email	admin	POST	/hs-admin/options	option_page=general&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-general.php&blogname=Switch+Back+Site&blogdescription=Saved+by+HyScribe&site_icon=0&new_admin_email=new-admin%40example.test&default_role=subscriber&WPLANG=&timezone_string=UTC%2B0&date_format=F+j%2C+Y&date_format_custom=F+j%2C+Y&time_format=g%3Ai+a&time_format_custom=g%3Ai+a&start_of_week=1	general-options	_wpnonce	302
+general-notices	admin	GET	/hs-admin/options-general?settings-updated=true	-	-	-	200
+dismiss-email	admin	GET	/hs-admin/options?dismiss=new_admin_email	-	dismiss-1-new_admin_email	_wpnonce	302
+admin-email-again	admin	POST	/hs-admin/options	option_page=general&action=update&_wp_http_referer=%2Fwp-admin%2Foptions-general.php&blogname=Switch+Back+Site&blogdescription=Saved+by+HyScribe&site_icon=0&new_admin_email=new-admin%40example.test&default_role=subscriber&WPLANG=&timezone_string=UTC%2B0&date_format=F+j%2C+Y&date_format_custom=F+j%2C+Y&time_format=g%3Ai+a&time_format_custom=g%3Ai+a&start_of_week=1	general-options	_wpnonce	302
+# Uploads: images over REST (one attached to the REST post and made its featured image) and
+# through async-upload (a plain upload and the media modal's), changed and deleted.
+rest-media	admin	POST	/?rest_route=/wp/v2/media	upload:file:wide.jpg:title=REST+image&alt_text=A+wide+REST+picture&caption=REST+caption&post=%rest-post%	wp_rest	X-WP-Nonce	201
+rest-media-png	admin	POST	/?rest_route=/wp/v2/media	upload:file:large.png:title=REST+png&status=publish	wp_rest	X-WP-Nonce	201
+rest-featured	admin	POST	/?rest_route=/wp/v2/posts/%rest-post%	{"featured_media":%rest-media%}	wp_rest	X-WP-Nonce	200
+async-plain	admin	POST	/hs-admin/async-upload	upload:async-upload:small.jpg:short=1&post_id=%rest-page%	media-form	_wpnonce	200
+async-modal	admin	POST	/hs-admin/async-upload	upload:async-upload:orient-6.jpg:action=upload-attachment&name=orient-6.jpg	media-form	_wpnonce	200
+async-gif	admin	POST	/hs-admin/async-upload	upload:async-upload:still.gif:action=upload-attachment&name=still.gif&post_id=%rest-post%	media-form	_wpnonce	200
+rest-media-edit	admin	POST	/?rest_route=/wp/v2/media	upload:file:small.jpg:title=Edited+later&alt_text=Alt+before&caption=Caption+before	wp_rest	X-WP-Nonce	201
+rest-media-doomed	admin	POST	/?rest_route=/wp/v2/media	upload:file:wide.jpg:title=Doomed+picture&post=%rest-post%	wp_rest	X-WP-Nonce	201
+rest-media-update	admin	POST	/?rest_route=/wp/v2/media/%rest-media-edit%	{"title":"Edited by REST","alt_text":"Alt after","caption":"Caption after","description":"Described by REST","post":%rest-page%,"slug":"edited-by-rest"}	wp_rest	X-WP-Nonce	200
+rest-media-delete	admin	DELETE	/?rest_route=/wp/v2/media/%rest-media-doomed%&force=true	-	wp_rest	X-WP-Nonce	200
+# The site editor's saves over REST: global styles, a template and a template part
+# of the theme customised, a new template and part, one deleted, then a page using
+# the new template.
+se-single	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"single","theme":"twentytwentyfive","title":"Single Posts","description":"Customised in HyScribe","content":"<!-- wp:template-part {\"slug\":\"header\",\"tagName\":\"header\"} /-->\n\n<!-- wp:paragraph -->\n<p>Single template saved from HyScribe.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:post-featured-image /-->\n\n<!-- wp:post-title /-->\n\n<!-- wp:post-content /-->\n\n<!-- wp:comments -->\n<div class=\"wp-block-comments\"><!-- wp:comment-template -->\n<!-- wp:comment-content /-->\n<!-- /wp:comment-template --></div>\n<!-- /wp:comments -->\n\n<!-- wp:template-part {\"slug\":\"footer\",\"tagName\":\"footer\"} /-->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-footer	admin	POST	/?rest_route=/wp/v2/template-parts	{"slug":"footer","theme":"twentytwentyfive","area":"footer","title":"Footer","content":"<!-- wp:paragraph -->\n<p>Footer saved from HyScribe.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-part	admin	POST	/?rest_route=/wp/v2/template-parts	{"slug":"switch-back-part","theme":"twentytwentyfive","area":"uncategorized","title":"Switch back part","content":"<!-- wp:paragraph -->\n<p>A part made in HyScribe.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+# The global styles post PHP creates when its themes route links it, which HyScribe's does too.
+# into it), added as PHP stores it; the guid carries the site's address.
+se-seed	admin	GET	/?rest_route=/wp/v2/themes&status=active	-	wp_rest	X-WP-Nonce	200
+se-styles	admin	POST	/?rest_route=/wp/v2/global-styles/%se-seed%	{"styles":{"color":{"background":"#fdf2d0","text":"#1b1b1b"},"typography":{"fontSize":"19px"}},"settings":{"color":{"custom":false}}}	wp_rest	X-WP-Nonce	200
+se-custom	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"switch-back-template","theme":"twentytwentyfive","title":"Switch back template","description":"A template made in HyScribe","content":"<!-- wp:template-part {\"slug\":\"header\",\"tagName\":\"header\"} /-->\n\n<!-- wp:paragraph -->\n<p>Custom template saved from HyScribe.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:template-part {\"slug\":\"switch-back-part\"} /-->\n\n<!-- wp:post-content /-->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-custom-update	admin	POST	/?rest_route=/wp/v2/templates/twentytwentyfive//switch-back-template	{"title":"Switch back template, renamed"}	wp_rest	X-WP-Nonce	200
+se-doomed	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"doomed-template","theme":"twentytwentyfive","title":"Doomed template","content":"<!-- wp:paragraph -->\n<p>Gone soon.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-doomed-delete	admin	DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//doomed-template&force=true	-	wp_rest	X-WP-Nonce	200
+se-page	admin	POST	/?rest_route=/wp/v2/pages	{"title":"Templated page","status":"publish","template":"switch-back-template","content":"<!-- wp:paragraph -->\n<p>A page in the new template.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	201
+# The Trash off (EMPTY_TRASH_DAYS=0 in .env): trashing deletes for good.
+trash-off	-	RESTART	EMPTY_TRASH_DAYS=0 DISABLE_WP_CRON=true	-	-	-	-
+scratch-d	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch D","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-e	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Scratch E","status":"draft"}	wp_rest	X-WP-Nonce	201
+trash-off-post	admin	GET	/hs-admin/post?post=%scratch-d%&action=trash	-	trash-post_%scratch-d%	_wpnonce	302
+trash-off-bulk	admin	GET	/hs-admin/edit?action=trash&post[]=%scratch-e%	-	bulk-posts	_wpnonce	302
+comment-9	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trash+off%2C+deleted.	-	-	302
+comment-10	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trash+off%2C+deleted+with+Ajax.	-	-	302
+trash-off-comment	admin	GET	/hs-admin/comment?action=trashcomment&c=9	-	delete-comment_9	_wpnonce	302
+trash-off-ajax	admin	POST	/hs-admin/admin-ajax	action=delete-comment&id=10&trash=1	delete-comment_10	_ajax_nonce	200
+# Cron (DISABLE_WP_CRON, so only hyscribe cron run works): a post scheduled 65 seconds ahead
+# (PHP publishes a date within the current minute at once) published, a post and a comment
+# trashed 40 days ago deleted.
+cron-restart	-	RESTART	EMPTY_TRASH_DAYS=30 DISABLE_WP_CRON=true	-	-	-	-
+scratch-cron-future	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A cron scheduled post","content":"<!-- wp:paragraph -->\n<p>Published by HyScribe cron.</p>\n<!-- /wp:paragraph -->","status":"future","date_gmt":"%now+65%"}	wp_rest	X-WP-Nonce	201
+scratch-cron-old	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A cron trashed post","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-cron-old-trash	admin	DELETE	/?rest_route=/wp/v2/posts/%scratch-cron-old%	-	wp_rest	X-WP-Nonce	200
+comment-11	admin	POST	/wp-comments-post.php	comment_post_ID=1&comment=Trashed+and+forgotten.	-	-	302
+trash-comment-11	admin	GET	/hs-admin/comment?action=trashcomment&c=11	-	delete-comment_11	_wpnonce	302
+age-trash	-	SQL	UPDATE wp_postmeta SET meta_value = CAST(meta_value AS UNSIGNED) - 3456000 WHERE meta_key = '_wp_trash_meta_time' AND post_id = %scratch-cron-old%; UPDATE wp_commentmeta SET meta_value = CAST(meta_value AS UNSIGNED) - 3456000 WHERE meta_key = '_wp_trash_meta_time' AND comment_id = 11	-	-	-	-
+wait-for-future	-	SLEEP	67	-	-	-	-
+cron-run	-	CRON	-	-	-	-	-
+# Themes: Twenty Twenty-Four activated and its next load, then the Twenty Twenty-Five the site had.
+theme-switch	admin	GET	/hs-admin/themes?action=activate&stylesheet=twentytwentyfour	-	switch-theme_twentytwentyfour	_wpnonce	302
+theme-view	admin	GET	/hs-admin/themes?activated=true	-	-	-	200
+theme-back	admin	GET	/hs-admin/themes?action=activate&stylesheet=twentytwentyfive	-	switch-theme_twentytwentyfive	_wpnonce	302
+theme-back-view	admin	GET	/hs-admin/themes?activated=true	-	-	-	200
+# Plugins (MVP 11.3): the site's own plugin, Hello Dolly, active and missing from HyScribe; the test
+# extension installed (`hyscribe plugin install`), the screen shown, the extension activated beside it.
+plugins-original	-	SQL	UPDATE wp_options SET option_value = 'a:1:{i:0;s:9:"hello.php";}' WHERE option_name = 'active_plugins'	-	-	-	-
+plugin-install	-	INSTALL	-	-	-	-	-
+plugins-view	admin	GET	/hs-admin/plugins	-	-	-	200
+plugin-activate	admin	GET	/hs-admin/plugins?action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=	-	activate-plugin_hyscribe-test/hyscribe-test.php	_wpnonce	302
+plugins-activated	admin	GET	/hs-admin/plugins?activate=true&plugin_status=all&paged=1&s=	-	-	-	200

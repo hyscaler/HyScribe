@@ -1,0 +1,44 @@
+# The rows PHP WordPress writes for the action update-post-slug-and-date (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-14 19:46:26 to 2026-11-14 19:46:26 UTC.
+# %wp_posts:1% is 5.
+# %wp_posts:2% is 6.
+# %wp_postmeta:1% is 3.
+# %wp_postmeta:2% is 4.
+# %wp_postmeta:3% is 5.
+# %wp_postmeta:4% is 6.
+# %wp_options:1% is 130.
+wp_postmeta	%wp_postmeta:3%	+	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	+	meta_key	_wp_old_slug
+wp_postmeta	%wp_postmeta:3%	+	meta_value	a-write-oracle-post
+wp_postmeta	%wp_postmeta:3%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:4%	+	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	+	meta_key	_wp_old_date
+wp_postmeta	%wp_postmeta:4%	+	meta_value	2025-06-07
+wp_postmeta	%wp_postmeta:4%	+	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	~	post_date	2025-06-07 08:09:10	2026-01-02 03:04:05
+wp_posts	%wp_posts:1%	~	post_modified	2025-06-07 08:09:10	%now%
+wp_posts	%wp_posts:1%	~	post_modified_gmt	2025-06-07 08:09:10	%now%
+wp_posts	%wp_posts:1%	~	post_name	a-write-oracle-post	a-new-slug
+wp_posts	%wp_posts:2%	+	ID	%wp_posts:2%
+wp_posts	%wp_posts:2%	+	comment_count	0
+wp_posts	%wp_posts:2%	+	comment_status	closed
+wp_posts	%wp_posts:2%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:2%
+wp_posts	%wp_posts:2%	+	menu_order	0
+wp_posts	%wp_posts:2%	+	ping_status	closed
+wp_posts	%wp_posts:2%	+	pinged	
+wp_posts	%wp_posts:2%	+	post_author	1
+wp_posts	%wp_posts:2%	+	post_content	Its content.
+wp_posts	%wp_posts:2%	+	post_content_filtered	
+wp_posts	%wp_posts:2%	+	post_date	%now%
+wp_posts	%wp_posts:2%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:2%	+	post_excerpt	
+wp_posts	%wp_posts:2%	+	post_mime_type	
+wp_posts	%wp_posts:2%	+	post_modified	%now%
+wp_posts	%wp_posts:2%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:2%	+	post_name	%wp_posts:1%-revision-v1
+wp_posts	%wp_posts:2%	+	post_parent	%wp_posts:1%
+wp_posts	%wp_posts:2%	+	post_password	
+wp_posts	%wp_posts:2%	+	post_status	inherit
+wp_posts	%wp_posts:2%	+	post_title	A write oracle post
+wp_posts	%wp_posts:2%	+	post_type	revision
+wp_posts	%wp_posts:2%	+	to_ping	

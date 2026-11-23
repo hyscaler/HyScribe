@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The users routes for reference/rest/golden.sh (method, target, flags) with
+# the public users endpoint off (REST_PUBLIC_USERS=off): people-off.php makes
+# no user count as having published posts for a visitor.
+GET	/?rest_route=/wp/v2/users
+GET	/?rest_route=/wp/v2/users&per_page=1&page=2
+GET	/?rest_route=/wp/v2/users&has_published_posts=page
+GET	/?rest_route=/wp/v2/users&has_published_posts=0
+GET	/?rest_route=/wp/v2/users&search=admin
+GET	/?rest_route=/wp/v2/users&include=1
+GET	/?rest_route=/wp/v2/users&context=embed
+GET	/?rest_route=/wp/v2/users&context=edit
+GET	/?rest_route=/wp/v2/users&who=authors
+GET	/?rest_route=/wp/v2/users&_envelope
+GET	/?rest_route=/wp/v2/users/1
+GET	/?rest_route=/wp/v2/users/1&context=embed
+GET	/?rest_route=/wp/v2/users/701
+GET	/?rest_route=/wp/v2/users/999
+GET	/?rest_route=/wp/v2/users/me
+HEAD	/?rest_route=/wp/v2/users
+HEAD	/?rest_route=/wp/v2/users/1
+GET	/?rest_route=/wp/v2/users/1&_embed
+GET	/?rest_route=/wp/v2/posts/1&_embed=author
+GET	/wp-json/wp/v2/users	pretty

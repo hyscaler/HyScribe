@@ -1,0 +1,17 @@
+<div id="screen-options-wrap" class="hidden" tabindex="-1" aria-label="Screen Options Tab">
+<form id='adv-settings' method='post'>
+		<fieldset class="metabox-prefs">
+		<legend>Columns</legend>
+		%labels%		</fieldset>
+				<fieldset class="screen-options">
+		<legend>Pagination</legend>
+							<label for="%option%">Number of items per page:</label>
+				<input type="number" step="1" min="1" max="999" class="screen-per-page small-text" name="wp_screen_options[value]"
+					id="%option%"
+					value="%per_page%" />
+							<input type="hidden" name="wp_screen_options[option]" value="%option%" />
+%view_mode%		</fieldset>
+		<p class="submit"><input type="submit" name="screen-options-apply" id="screen-options-apply" class="button button-primary" value="Apply"  /></p>
+<input type="hidden" id="screenoptionnonce" name="screenoptionnonce" value="%nonce%" />
+</form>
+</div>

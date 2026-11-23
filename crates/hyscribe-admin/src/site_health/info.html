@@ -1,0 +1,48 @@
+<div class="health-check-header">
+	<div class="health-check-title-section">
+		<h1>
+			Site Health		</h1>
+	</div>
+
+	
+	<div class="health-check-title-section site-health-progress-wrapper loading hide-if-no-js">
+		<div class="site-health-progress">
+			<svg aria-hidden="true" focusable="false" width="100%" height="100%" viewBox="0 0 200 200" version="1.1" xmlns="http://www.w3.org/2000/svg">
+				<circle r="90" cx="100" cy="100" fill="transparent" stroke-dasharray="565.48" stroke-dashoffset="0"></circle>
+				<circle id="bar" r="90" cx="100" cy="100" fill="transparent" stroke-dasharray="565.48" stroke-dashoffset="0"></circle>
+			</svg>
+		</div>
+		<div class="site-health-progress-label">
+			Results are still loading&hellip;		</div>
+	</div>
+
+	<nav class="health-check-tabs-wrapper hide-if-no-js tab-count-2" aria-label="Secondary menu">
+		<a href="%status_url%" class="health-check-tab ">Status</a><a href="%info_url%" class="health-check-tab active">Info</a>
+			</nav>
+</div>
+
+<hr class="wp-header-end">
+
+<div class="notice notice-error hide-if-js"><p>The Site Health check requires JavaScript.</p></div>
+<div class="health-check-body health-check-debug-tab hide-if-no-js">
+	
+	<h2>
+		Site Health Info	</h2>
+
+	<p>
+		This page can show you every detail about the configuration of your HyScribe website. For any improvements that could be made, see the <a href="%status_link%">Site Health Status</a> page.	</p>
+	<p>
+		If you want to export a handy list of all the information on this page, you can use the button below to copy it to the clipboard. You can then paste it in a text file and save it to your device, or paste it in an email exchange with a support engineer or theme/plugin developer for example.	</p>
+
+	<div class="site-health-copy-buttons">
+		<div class="copy-button-wrapper">
+			<button type="button" class="button copy-button" data-clipboard-text="%clipboard%">
+				Copy site info to clipboard			</button>
+			<span class="success hidden" aria-hidden="true">Copied!</span>
+		</div>
+	</div>
+
+	<div id="health-check-debug" class="health-check-accordion">
+
+%sections%			</div>
+</div>

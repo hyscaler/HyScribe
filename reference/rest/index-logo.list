@@ -1,0 +1,5 @@
+# The REST index for reference/rest/golden.sh over index-logo.sql: the Site
+# Logo block's option before the theme's logo, and images that are posts.
+GET	/?rest_route=/&_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front
+GET	/?rest_route=/&_fields=_links
+GET	/?rest_route=/&_fields=site_logo,site_icon,_embedded&_embed

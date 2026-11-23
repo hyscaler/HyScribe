@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Deletes for reference/rest/golden.sh (method, target, flags) with the Trash
+# off: trash-off.php sets EMPTY_TRASH_DAYS to 0, as HyScribe's .env key of
+# that name serves it (flag notrash). Without force PHP refuses them before
+# writing anything.
+DELETE	/?rest_route=/wp/v2/posts/1	notrash
+DELETE	/?rest_route=/wp/v2/posts/1&force=0	notrash
+DELETE	/?rest_route=/wp/v2/pages/2	notrash
+DELETE	/?rest_route=/wp/v2/posts/999	notrash
+DELETE	/?rest_route=/wp/v2/comments/1	notrash
+DELETE	/?rest_route=/wp/v2/comments/1&force=false	notrash
+DELETE	/?rest_route=/wp/v2/comments/999	notrash

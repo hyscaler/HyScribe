@@ -1,0 +1,61 @@
+# The rows PHP WordPress writes for the action navigation-fallback-single-other (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-19 14:23:17 to 2026-11-19 14:23:17 UTC.
+# %wp_posts:1% is 45.
+# %wp_posts:2% is 46.
+# %wp_posts:3% is 47.
+# %wp_posts:4% is 48.
+# %wp_postmeta:1% is 245.
+# %wp_postmeta:2% is 246.
+# %wp_postmeta:3% is 247.
+# %wp_postmeta:4% is 248.
+# %wp_postmeta:5% is 249.
+# %wp_postmeta:6% is 250.
+# %wp_postmeta:7% is 251.
+# %wp_postmeta:8% is 252.
+# %wp_postmeta:9% is 253.
+# %wp_postmeta:10% is 254.
+# %wp_postmeta:11% is 255.
+# %wp_postmeta:12% is 256.
+# %wp_postmeta:13% is 257.
+# %wp_postmeta:14% is 258.
+# %wp_postmeta:15% is 259.
+# %wp_postmeta:16% is 260.
+# %wp_postmeta:17% is 261.
+# %wp_postmeta:18% is 262.
+# %wp_postmeta:19% is 263.
+# %wp_postmeta:20% is 264.
+# %wp_postmeta:21% is 265.
+# %wp_postmeta:22% is 266.
+# %wp_postmeta:23% is 267.
+# %wp_postmeta:24% is 268.
+# %wp_terms:1% is 9001.
+# %wp_terms:2% is 9002.
+# %wp_terms:3% is 9009.
+# %wp_term_taxonomy:1% is 9001.
+# %wp_term_taxonomy:2% is 9002.
+# %wp_term_taxonomy:3% is 9003.
+# %wp_term_taxonomy:4% is 9010.
+# %wp_options:1% is 133.
+wp_posts	%wp_posts:4%	+	ID	%wp_posts:4%
+wp_posts	%wp_posts:4%	+	comment_count	0
+wp_posts	%wp_posts:4%	+	comment_status	closed
+wp_posts	%wp_posts:4%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:4%
+wp_posts	%wp_posts:4%	+	menu_order	0
+wp_posts	%wp_posts:4%	+	ping_status	closed
+wp_posts	%wp_posts:4%	+	pinged	
+wp_posts	%wp_posts:4%	+	post_author	0
+wp_posts	%wp_posts:4%	+	post_content	<!-- wp:navigation-link {"className":" menu-item menu-item-type-post_type menu-item-object-post current-menu-item","description":"","id":"1","kind":"post-type","label":"Hello world!","opensInNewTab":false,"rel":null,"title":"","type":"post","url":"http://127.0.0.1:8081/?p=1"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category","description":"","id":"1","kind":"taxonomy","label":"Uncategorized","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=1"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-post-ancestor current-menu-parent current-post-parent","description":"","id":"9002","kind":"taxonomy","label":"Child Category","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=9002"} /-->
+wp_posts	%wp_posts:4%	+	post_content_filtered	
+wp_posts	%wp_posts:4%	+	post_date	%now%
+wp_posts	%wp_posts:4%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:4%	+	post_excerpt	
+wp_posts	%wp_posts:4%	+	post_mime_type	
+wp_posts	%wp_posts:4%	+	post_modified	%now%
+wp_posts	%wp_posts:4%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:4%	+	post_name	single-other
+wp_posts	%wp_posts:4%	+	post_parent	0
+wp_posts	%wp_posts:4%	+	post_password	
+wp_posts	%wp_posts:4%	+	post_status	publish
+wp_posts	%wp_posts:4%	+	post_title	Single other
+wp_posts	%wp_posts:4%	+	post_type	wp_navigation
+wp_posts	%wp_posts:4%	+	to_ping	

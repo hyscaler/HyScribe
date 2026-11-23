@@ -1,0 +1,191 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The key list and index kept in `hyscribe/registry/` (ADR 0024), verified again
+//! when read, and `state`, the highest serials accepted, so neither goes back.
+
+use std::fs;
+use std::io::ErrorKind;
+use std::path::Path;
+
+use hyscribe_ext::faults::seconds;
+use hyscribe_ext::installed::{read_at_most, replace};
+use hyscribe_ext::signature::{MAX_BYTES as MAX_SIGNATURE, PublicKey};
+
+use crate::index::{self, Index};
+use crate::keys::{self, KeyList};
+
+/// The highest serials accepted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct State {
+    /// The key list's.
+    pub keys: u64,
+    /// The index's.
+    pub index: u64,
+}
+
+impl State {
+    /// `keys <serial>` and `index <serial>`, each on its own line.
+    pub fn parse(bytes: &[u8]) -> Option<State> {
+        let text = std::str::from_utf8(bytes).ok()?;
+        let (keys, index) = text.strip_suffix('\n')?.split_once('\n')?;
+        let serial = |line: &str, name: &str| seconds(line.strip_prefix(name)?.strip_prefix(' ')?);
+        Some(State {
+            keys: serial(keys, "keys")?,
+            index: serial(index, "index")?,
+        })
+    }
+
+    /// The file's text.
+    pub fn text(&self) -> String {
+        format!("keys {}\nindex {}\n", self.keys, self.index)
+    }
+}
+
+/// A kept file, none when there is none.
+fn file(folder: &Path, name: &str, max: u64) -> Result<Option<Vec<u8>>, String> {
+    match read_at_most(&folder.join(name), max) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("registry/{name} cannot be read: {e}")),
+    }
+}
+
+/// `state`, all zeros when there is none; one that does not read refuses
+/// everything kept.
+fn state(folder: &Path) -> Result<State, String> {
+    let read = file(folder, "state", 64)?;
+    let state = read.map(|bytes| State::parse(&bytes).ok_or("registry/state does not read"));
+    state.unwrap_or(Ok(State::default())).map_err(String::from)
+}
+
+/// Keeps `serial` as the highest accepted, by `set`, unless one is higher;
+/// only checks it when not `keeping`.
+fn raise(
+    folder: &Path,
+    serial: u64,
+    set: fn(&mut State) -> &mut u64,
+    keeping: bool,
+) -> Result<(), String> {
+    let mut state = state(folder)?;
+    let kept = set(&mut state);
+    if serial < *kept {
+        return Err(format!(
+            "it is older than one already accepted (serial {serial} < {kept})"
+        ));
+    }
+    if serial > *kept && keeping {
+        *kept = serial;
+        let written = replace(&folder.join("state"), state.text().as_bytes());
+        written.map_err(|e| format!("registry/state cannot be written: {e}"))?;
+    }
+    Ok(())
+}
+
+/// The kept key list, verified against `roots` at `now`: none when there
+/// is none, refused when it does not verify or goes back.
+pub fn keys(folder: &Path, roots: &[PublicKey], now: u64) -> Result<Option<KeyList>, String> {
+    read_keys(folder, roots, now, true)
+}
+
+/// [`keys`], raising `state` only when `keeping`.
+fn read_keys(
+    folder: &Path,
+    roots: &[PublicKey],
+    now: u64,
+    keeping: bool,
+) -> Result<Option<KeyList>, String> {
+    let Some(bytes) = file(folder, "keys.json", keys::MAX_BYTES)? else {
+        return Ok(None);
+    };
+    let mut signatures = Vec::new();
+    for n in 1..=3 {
+        signatures.extend(file(
+            folder,
+            &format!("keys.json.{n}.minisig"),
+            MAX_SIGNATURE,
+        )?);
+    }
+    let list = KeyList::verify(&bytes, &signatures, roots, now)?;
+    let raised = raise(folder, list.serial, |state| &mut state.keys, keeping);
+    raised.map_err(|e| format!("registry/keys.json: {e}"))?;
+    Ok(Some(list))
+}
+
+/// The kept index, verified against `keys` at `now`: none when there is
+/// none, refused when it does not verify or goes back.
+pub fn index(folder: &Path, keys: &KeyList, now: u64) -> Result<Option<Index>, String> {
+    read_index(folder, keys, now, true)
+}
+
+/// [`index`], raising `state` only when `keeping`.
+fn read_index(
+    folder: &Path,
+    keys: &KeyList,
+    now: u64,
+    keeping: bool,
+) -> Result<Option<Index>, String> {
+    let Some(bytes) = file(folder, "index.json", index::MAX_BYTES)? else {
+        return Ok(None);
+    };
+    let signature = file(folder, "index.json.minisig", MAX_SIGNATURE)?;
+    let signature = signature.ok_or("registry/index.json has no index.json.minisig beside it")?;
+    let index = Index::verify(&bytes, &signature, keys, now)?;
+    let raised = raise(folder, index.serial, |state| &mut state.index, keeping);
+    raised.map_err(|e| format!("registry/index.json: {e}"))?;
+    Ok(Some(index))
+}
+
+/// The kept index as a page shows it, writing nothing: none when no key
+/// list or index is kept, refused when either does not verify at `now`.
+pub fn shown(folder: &Path, roots: &[PublicKey], now: u64) -> Result<Option<Index>, String> {
+    let Some(keys) = read_keys(folder, roots, now, false)? else {
+        return Ok(None);
+    };
+    read_index(folder, &keys, now, false)
+}
+
+/// A fetched key list and index with their signatures, verified: the key
+/// list's three places, none where the registry has no signature.
+pub struct Verified<'a> {
+    /// `keys.json` and its signatures.
+    pub keys: (&'a [u8], &'a [Option<Vec<u8>>]),
+    /// `index.json` and its signature.
+    pub index: (&'a [u8], &'a [u8]),
+    /// Their serials.
+    pub serials: State,
+}
+
+/// Keeps a verified key list and index in place of the kept ones, unless
+/// either goes back; `state` is written last, so a failure leaves nothing
+/// that reads as accepted but was not.
+pub fn keep(folder: &Path, verified: &Verified<'_>) -> Result<(), String> {
+    let kept = state(folder)?;
+    let serials = verified.serials;
+    if serials.keys < kept.keys || serials.index < kept.index {
+        return Err(format!(
+            "the registry's files are older than those kept (keys {} < {} or index {} < {})",
+            serials.keys, kept.keys, serials.index, kept.index
+        ));
+    }
+    let (keys, signatures) = verified.keys;
+    let state = serials.text();
+    let mut files = vec![("keys.json".to_string(), Some(keys))];
+    let places = signatures.iter().zip(1..);
+    files.extend(places.map(|(s, n)| (format!("keys.json.{n}.minisig"), s.as_deref())));
+    files.push(("index.json".into(), Some(verified.index.0)));
+    files.push(("index.json.minisig".into(), Some(verified.index.1)));
+    files.push(("state".into(), Some(state.as_bytes())));
+    let written = fs::create_dir_all(folder).and_then(|()| {
+        files.iter().try_for_each(|(name, bytes)| match bytes {
+            Some(bytes) => replace(&folder.join(name), bytes),
+            None => match fs::remove_file(folder.join(name)) {
+                Err(e) if e.kind() != ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            },
+        })
+    });
+    written.map_err(|e| format!("registry/ cannot be written: {e}"))
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,79 @@
+# The rows PHP WordPress writes for the action navigation-fallback-category (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-19 14:23:18 to 2026-11-19 14:23:18 UTC.
+# %wp_posts:1% is 49.
+# %wp_posts:2% is 50.
+# %wp_posts:3% is 51.
+# %wp_posts:4% is 52.
+# %wp_posts:5% is 53.
+# %wp_posts:6% is 54.
+# %wp_postmeta:1% is 269.
+# %wp_postmeta:2% is 270.
+# %wp_postmeta:3% is 271.
+# %wp_postmeta:4% is 272.
+# %wp_postmeta:5% is 273.
+# %wp_postmeta:6% is 274.
+# %wp_postmeta:7% is 275.
+# %wp_postmeta:8% is 276.
+# %wp_postmeta:9% is 277.
+# %wp_postmeta:10% is 278.
+# %wp_postmeta:11% is 279.
+# %wp_postmeta:12% is 280.
+# %wp_postmeta:13% is 281.
+# %wp_postmeta:14% is 282.
+# %wp_postmeta:15% is 283.
+# %wp_postmeta:16% is 284.
+# %wp_postmeta:17% is 285.
+# %wp_postmeta:18% is 286.
+# %wp_postmeta:19% is 287.
+# %wp_postmeta:20% is 288.
+# %wp_postmeta:21% is 289.
+# %wp_postmeta:22% is 290.
+# %wp_postmeta:23% is 291.
+# %wp_postmeta:24% is 292.
+# %wp_postmeta:25% is 293.
+# %wp_postmeta:26% is 294.
+# %wp_postmeta:27% is 295.
+# %wp_postmeta:28% is 296.
+# %wp_postmeta:29% is 297.
+# %wp_postmeta:30% is 298.
+# %wp_postmeta:31% is 299.
+# %wp_postmeta:32% is 300.
+# %wp_postmeta:33% is 301.
+# %wp_postmeta:34% is 302.
+# %wp_postmeta:35% is 303.
+# %wp_postmeta:36% is 304.
+# %wp_postmeta:37% is 305.
+# %wp_postmeta:38% is 306.
+# %wp_postmeta:39% is 307.
+# %wp_postmeta:40% is 308.
+# %wp_terms:1% is 9001.
+# %wp_terms:2% is 9002.
+# %wp_terms:3% is 9010.
+# %wp_term_taxonomy:1% is 9001.
+# %wp_term_taxonomy:2% is 9002.
+# %wp_term_taxonomy:3% is 9003.
+# %wp_term_taxonomy:4% is 9011.
+# %wp_options:1% is 134.
+wp_posts	%wp_posts:6%	+	ID	%wp_posts:6%
+wp_posts	%wp_posts:6%	+	comment_count	0
+wp_posts	%wp_posts:6%	+	comment_status	closed
+wp_posts	%wp_posts:6%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:6%
+wp_posts	%wp_posts:6%	+	menu_order	0
+wp_posts	%wp_posts:6%	+	ping_status	closed
+wp_posts	%wp_posts:6%	+	pinged	
+wp_posts	%wp_posts:6%	+	post_author	0
+wp_posts	%wp_posts:6%	+	post_content	<!-- wp:navigation-submenu {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-category-ancestor current-menu-ancestor current-menu-parent current-category-parent","description":"","id":"9001","kind":"taxonomy","label":"Parent Category","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=9001"} --><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category current-menu-item","description":"","id":"9002","kind":"taxonomy","label":"Child Category","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=9002"} /--><!-- /wp:navigation-submenu --><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-category","description":"","id":"1","kind":"taxonomy","label":"Uncategorized","opensInNewTab":false,"rel":null,"title":"","type":"category","url":"http://127.0.0.1:8081/?cat=1"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-post_type menu-item-object-post","description":"","id":"1","kind":"post-type","label":"Hello world!","opensInNewTab":false,"rel":null,"title":"","type":"post","url":"http://127.0.0.1:8081/?p=1"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-taxonomy menu-item-object-post_tag","description":"","id":"9002","kind":"taxonomy","label":"Child Category","opensInNewTab":false,"rel":null,"title":"","type":"post_tag","url":"http://127.0.0.1:8081/?tag=child-category"} /-->
+wp_posts	%wp_posts:6%	+	post_content_filtered	
+wp_posts	%wp_posts:6%	+	post_date	%now%
+wp_posts	%wp_posts:6%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:6%	+	post_excerpt	
+wp_posts	%wp_posts:6%	+	post_mime_type	
+wp_posts	%wp_posts:6%	+	post_modified	%now%
+wp_posts	%wp_posts:6%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:6%	+	post_name	category-archive
+wp_posts	%wp_posts:6%	+	post_parent	0
+wp_posts	%wp_posts:6%	+	post_password	
+wp_posts	%wp_posts:6%	+	post_status	publish
+wp_posts	%wp_posts:6%	+	post_title	Category archive
+wp_posts	%wp_posts:6%	+	post_type	wp_navigation
+wp_posts	%wp_posts:6%	+	to_ping	

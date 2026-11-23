@@ -1,0 +1,135 @@
+# The block editor's preloads for reference/rest/golden.sh (method, target, flags) over
+# preloads.sql: every ported route's description (OPTIONS), and the active theme.
+# hash keeps a body's SHA-256.
+OPTIONS	/?rest_route=/wp/v2/posts	hash
+OPTIONS	/?rest_route=/wp/v2/posts/1	hash
+OPTIONS	/?rest_route=/wp/v2/posts/1/revisions	hash
+OPTIONS	/?rest_route=/wp/v2/posts/1/revisions/3	hash
+OPTIONS	/?rest_route=/wp/v2/posts/1/autosaves	hash
+OPTIONS	/?rest_route=/wp/v2/posts/1/autosaves/3	hash
+OPTIONS	/?rest_route=/wp/v2/pages	hash
+OPTIONS	/?rest_route=/wp/v2/pages/2	hash
+OPTIONS	/?rest_route=/wp/v2/pages/2/revisions	hash
+OPTIONS	/?rest_route=/wp/v2/pages/2/revisions/3	hash
+OPTIONS	/?rest_route=/wp/v2/pages/2/autosaves	hash
+OPTIONS	/?rest_route=/wp/v2/pages/2/autosaves/3	hash
+OPTIONS	/?rest_route=/wp/v2/media	hash
+OPTIONS	/?rest_route=/wp/v2/media/1	hash
+OPTIONS	/?rest_route=/wp/v2/menu-items	hash
+OPTIONS	/?rest_route=/wp/v2/menu-items/1	hash
+OPTIONS	/?rest_route=/wp/v2/menu-items/1/autosaves	hash
+OPTIONS	/?rest_route=/wp/v2/menu-items/1/autosaves/3	hash
+OPTIONS	/?rest_route=/wp/v2/blocks	hash
+OPTIONS	/?rest_route=/wp/v2/blocks/1	hash
+OPTIONS	/?rest_route=/wp/v2/blocks/1/revisions	hash
+OPTIONS	/?rest_route=/wp/v2/blocks/1/revisions/3	hash
+OPTIONS	/?rest_route=/wp/v2/blocks/1/autosaves	hash
+OPTIONS	/?rest_route=/wp/v2/blocks/1/autosaves/3	hash
+OPTIONS	/?rest_route=/wp/v2/templates	hash
+OPTIONS	/?rest_route=/wp/v2/templates/lookup	hash
+OPTIONS	/?rest_route=/wp/v2/templates/twentytwentyfive//index	hash
+OPTIONS	/?rest_route=/wp/v2/template-parts	hash
+OPTIONS	/?rest_route=/wp/v2/template-parts/lookup	hash
+OPTIONS	/?rest_route=/wp/v2/template-parts/twentytwentyfive//header	hash
+OPTIONS	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive/variations	hash
+OPTIONS	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive	hash
+OPTIONS	/?rest_route=/wp/v2/global-styles/901	hash
+OPTIONS	/?rest_route=/wp/v2/navigation	hash
+OPTIONS	/?rest_route=/wp/v2/navigation/1	hash
+OPTIONS	/?rest_route=/wp/v2/navigation/1/revisions	hash
+OPTIONS	/?rest_route=/wp/v2/navigation/1/revisions/3	hash
+OPTIONS	/?rest_route=/wp/v2/navigation/1/autosaves	hash
+OPTIONS	/?rest_route=/wp/v2/navigation/1/autosaves/3	hash
+OPTIONS	/?rest_route=/wp/v2/types	hash
+OPTIONS	/?rest_route=/wp/v2/types/post	hash
+OPTIONS	/?rest_route=/wp/v2/statuses	hash
+OPTIONS	/?rest_route=/wp/v2/statuses/publish	hash
+OPTIONS	/?rest_route=/wp/v2/taxonomies	hash
+OPTIONS	/?rest_route=/wp/v2/taxonomies/category	hash
+OPTIONS	/?rest_route=/wp/v2/categories	hash
+OPTIONS	/?rest_route=/wp/v2/categories/1	hash
+OPTIONS	/?rest_route=/wp/v2/tags	hash
+OPTIONS	/?rest_route=/wp/v2/tags/1	hash
+OPTIONS	/?rest_route=/wp/v2/menus	hash
+OPTIONS	/?rest_route=/wp/v2/menus/1	hash
+OPTIONS	/?rest_route=/wp/v2/wp_pattern_category	hash
+OPTIONS	/?rest_route=/wp/v2/wp_pattern_category/1	hash
+OPTIONS	/?rest_route=/wp/v2/users	hash
+OPTIONS	/?rest_route=/wp/v2/users/1	hash
+OPTIONS	/?rest_route=/wp/v2/users/me	hash
+OPTIONS	/?rest_route=/wp/v2/comments	hash
+OPTIONS	/?rest_route=/wp/v2/comments/1	hash
+OPTIONS	/?rest_route=/wp/v2/search	hash
+OPTIONS	/?rest_route=/wp/v2/block-types	hash
+OPTIONS	/?rest_route=/wp/v2/block-types/core	hash
+OPTIONS	/?rest_route=/wp/v2/block-types/core/paragraph	hash
+OPTIONS	/?rest_route=/wp/v2/settings	hash
+OPTIONS	/?rest_route=/wp/v2/themes	hash
+OPTIONS	/?rest_route=/wp/v2/themes/twentytwentyfive	hash
+OPTIONS	/?rest_route=/wp/v2/block-patterns/patterns	hash
+OPTIONS	/?rest_route=/wp/v2/block-patterns/categories	hash
+OPTIONS	/?rest_route=/wp/v2/menu-locations	hash
+OPTIONS	/?rest_route=/wp/v2/menu-locations/primary	hash
+OPTIONS	/?rest_route=/wp/v2/posts&context=edit	hash
+OPTIONS	/?rest_route=/wp/v2/pages&context=edit&_fields=namespace,methods
+OPTIONS	/?rest_route=/wp/v2/global-styles/901&context=edit&_fields=methods
+OPTIONS	/?rest_route=/wp/v2/settings&context=edit&_fields=namespace
+OPTIONS	/?rest_route=/wp/v2/posts/1&_fields=methods,endpoints.0.methods,schema.title
+OPTIONS	/?rest_route=/wp/v2/posts/1&context=edit&_fields=methods
+OPTIONS	/?rest_route=/wp/v2/types&_fields=_links,schema.properties.slug
+OPTIONS	/?rest_route=/wp/v2/comments&author_ip=1.2.3.4&_fields=methods
+OPTIONS	/?rest_route=/wp/v2/media/1/&_fields=namespace
+OPTIONS	/?rest_route=/WP/V2/Posts/&_fields=namespace,_links
+OPTIONS	/?rest_route=/wp/v2/themes&status=active&_fields=methods
+OPTIONS	/?rest_route=/wp/v2/themes/twentytwentyfive&_fields=methods
+OPTIONS	/?rest_route=/wp/v2/themes/twentytwentyfour&_fields=methods
+OPTIONS	/?rest_route=/wp/v2/block-types/core/paragraph&_envelope&_fields=namespace
+OPTIONS	/?rest_route=/wp/v2/statuses&_pretty&_fields=namespace,_links
+OPTIONS	/?rest_route=/wp/v2/statuses&_jsonp=cb&_fields=namespace
+OPTIONS	/?rest_route=/wp/v2/types/post&_embed&_fields=namespace
+OPTIONS	/?rest_route=/wp/v2/types	nononce,hash
+OPTIONS	/?rest_route=/wp/v2/types/post	origin,hash
+OPTIONS	/wp-json/wp/v2/posts	pretty,hash
+OPTIONS	/wp-json/wp/v2/types?_fields=_links	pretty
+GET	/?rest_route=/wp/v2/types&_method=OPTIONS&_fields=namespace
+OPTIONS	/?rest_route=/
+OPTIONS	/?rest_route=/wp/v2
+OPTIONS	/?rest_route=/wp/v2/plugins
+OPTIONS	/?rest_route=/wp/v2/global-styles/901/revisions
+OPTIONS	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive/variations/x
+OPTIONS	/?rest_route=/wp/v2/nope/1
+GET	/?rest_route=/wp/v2/themes&context=edit&status=active	hash
+GET	/?rest_route=/wp/v2/themes&status=active	hash
+GET	/?rest_route=/wp/v2/themes&status=active&_fields=stylesheet
+GET	/?rest_route=/wp/v2/themes&status=active&_fields=stylesheet,template,_links
+GET	/?rest_route=/wp/v2/themes&status[]=active&_fields=name,author.raw,theme_supports.align-wide,theme_supports.nope,tags.nope
+GET	/?rest_route=/wp/v2/themes&status=active&_fields=theme_supports.nope,description.raw
+GET	/?rest_route=/wp/v2/themes&status=active&_embed&_fields=_embedded,stylesheet
+GET	/?rest_route=/wp/v2/themes&status=active&_envelope&_fields=version
+GET	/?rest_route=/wp/v2/themes&status=active&context=bogus&_fields=version,screenshot
+GET	/?rest_route=/wp/v2/themes&status=active,active&_fields=stylesheet	skip=administrator
+HEAD	/?rest_route=/wp/v2/themes&status=active
+GET	/?rest_route=/wp/v2/themes/twentytwentyfive	hash
+GET	/?rest_route=/wp/v2/themes/twentytwentyfive&_fields=_links,screenshot,stylesheet_uri,template_uri
+GET	/?rest_route=/wp/v2/themes/twenty%2574wentyfive&_fields=stylesheet,default_template_part_areas
+GET	/?rest_route=/wp/v2/themes/twentytwentyfive&context=embed&_fields=status,is_block_theme,requires_wp
+HEAD	/?rest_route=/wp/v2/themes/twentytwentyfive
+GET	/wp-json/wp/v2/themes?status=active&_fields=_links,stylesheet_uri	pretty
+GET	/wp-json/wp/v2/themes/twentytwentyfive?_fields=_links	pretty
+# site-editor.php's preloads.
+GET	/?rest_route=/wp/v2/types&context=view	hash
+GET	/?rest_route=/wp/v2/types/wp_template&context=edit	hash
+GET	/?rest_route=/wp/v2/types/wp_template_part&context=edit	hash
+GET	/?rest_route=/wp/v2/templates&context=edit&per_page=-1	hash
+GET	/?rest_route=/wp/v2/template-parts&context=edit&per_page=-1
+GET	/?rest_route=/wp/v2/global-styles/901&context=edit
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive&context=view	hash
+GET	/?rest_route=/wp/v2/global-styles/themes/twentytwentyfive/variations&context=view	hash
+GET	/?rest_route=/wp/v2/navigation&context=edit&per_page=100&order=desc&orderby=date&status[0]=publish&status[1]=draft
+GET	/?rest_route=/wp/v2/settings
+GET	/?rest_route=/wp/v2/block-patterns/categories	hash
+GET	/?rest_route=/&_fields=description,gmt_offset,home,image_max_bit_depth,image_sizes,image_size_threshold,image_strip_meta,name,site_icon,site_icon_url,site_logo,timezone_string,url,page_for_posts,page_on_front,show_on_front
+GET	/?rest_route=/wp/v2/templates/lookup&slug=front-page	hash
+GET	/?rest_route=/wp/v2/templates/lookup&slug=home	hash
+GET	/?rest_route=/wp/v2/pages/2&context=edit	hash
+GET	/?rest_route=/wp/v2/templates/lookup&slug=page-sample-page	hash

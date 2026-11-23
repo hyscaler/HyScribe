@@ -1,0 +1,71 @@
+
+<div class="wrap nosubsub">
+	<h1>Export Personal Data</h1>
+	<p>This tool helps site owners comply with local laws and regulations by exporting known data for a given user in a .zip file.</p>
+	<hr class="wp-header-end" />
+
+	
+	<form action="%url%" method="post" class="wp-privacy-request-form">
+		<h2>Add Data Export Request</h2>
+		<div class="wp-privacy-request-form-field">
+		<table class="form-table">
+				<tr>
+					<th scope="row">
+						<label for="username_or_email_for_privacy_request">Username or email address</label>
+					</th>
+					<td>
+						<input type="text" required class="regular-text ltr" id="username_or_email_for_privacy_request" name="username_or_email_for_privacy_request" />
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">
+						Confirmation email					</th>
+					<td>
+						<input type="checkbox" name="send_confirmation_email" id="send_confirmation_email" value="1" checked="checked" />
+						<label for="send_confirmation_email">
+							Send personal data export confirmation email.						</label>
+					</td>
+				</tr>
+			</table>
+			<p class="submit">
+				<input type="submit" name="submit" id="submit" class="button" value="Send Request"  />			</p>
+		</div>
+		<input type="hidden" id="_wpnonce" name="_wpnonce" value="%request_nonce%" />%referer%		<input type="hidden" name="action" value="add_export_personal_data_request" />
+		<input type="hidden" name="type_of_action" value="export_personal_data" />
+	</form>
+	<hr />
+
+	<h2 class='screen-reader-text'>Filter export personal data list</h2>%views%
+	<form class="search-form wp-clearfix">
+		%search%		<input type="hidden" name="filter-status" value="%filter_status%" />
+		<input type="hidden" name="orderby" value="%orderby%" />
+		<input type="hidden" name="order" value="%order%" />
+	</form>
+
+	<form method="post">
+		<input type="hidden" id="_wpnonce" name="_wpnonce" value="%bulk_nonce%" />%referer%	<div class="tablenav top">
+
+				<div class="alignleft actions bulkactions%bulk_class%">
+			%bulk_top%		</div>
+		%pages_top%
+		<br class="clear" />
+	</div>
+		<h2 class='screen-reader-text'>Export personal data list</h2><table class="wp-list-table widefat fixed striped table-view-list privacy_requests">
+			<thead>
+	<tr>
+		%head%	</tr>
+	</thead>
+
+	<tbody id="the-list"
+		 data-wp-lists='list:privacy_request'		>
+		%rows%	</tbody>
+
+	<tfoot>
+	<tr>
+		%foot%	</tr>
+	</tfoot>
+
+</table>
+%bottom%			</form>
+</div>
+

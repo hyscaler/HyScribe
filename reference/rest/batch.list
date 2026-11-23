@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Batch requests (batch/v1) for reference/rest/golden.sh (method, target,
+# flags, body): the batch's own arguments, each request's path, method,
+# body and headers, the routes that do not allow batching, both validation
+# modes, and requests that write (restore), on the default install. A batch
+# with a request HyScribe does not port, such as a menu item, is answered
+# 501 before anything is written (refused), whatever its permission check
+# says, as its arguments are not ported.
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/wp/v2/posts","body":{"title":"Batch","status":"draft"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"method":"PUT","path":"/wp/v2/posts/1","body":{"title":"Renamed"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"method":"DELETE","path":"/wp/v2/posts/1"}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/wp/v2/posts","body":{"title":"One"}},{"path":"/wp/v2/pages","body":{"title":"Two","status":"publish"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/wp/v2/posts","body":{"title":"Ok"}},{"path":"/wp/v2/posts","body":{"status":"bogus"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"validation":"require-all-validate","requests":[{"path":"/wp/v2/posts","body":{"title":"Ok"}},{"path":"/wp/v2/posts","body":{"status":"bogus"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"validation":"require-all-validate","requests":[{"path":"/wp/v2/posts","body":{"title":"Valid"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/wp/v2/posts","body":{"title":"x"}},{"method":"DELETE","path":"/wp/v2/posts/1"}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/wp/v2/posts?_fields=id,title&context=edit","body":{"title":"Fields"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/wp/v2/posts","body":{"title":"Headers"},"headers":{"X-Test":"y","Content-Type":["application/json"]}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/wp/v2/types"}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/wp/v2/settings","body":{"title":"No"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/batch/v1","body":{"requests":[]}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"http:///x"},{"path":"/wp/v2/posts","body":{"title":"After"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"validation":"require-all-validate","requests":[{"path":"http:///x"},{"path":"/wp/v2/types"}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"method":"GET","path":"/wp/v2/posts"}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/wp/v2/posts","body":"x"}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"body":{"title":"x"}}]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":"x"}
+POST	/?rest_route=/batch/v1	json,restore	{"validation":"bogus","requests":[]}
+POST	/?rest_route=/batch/v1	json,restore	{"requests":[{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"},{"path":"/x"}]}
+POST	/?rest_route=/batch/v1	json,restore,refused	{"requests":[{"path":"/wp/v2/menu-items","body":{"title":"M","menus":0}}]}
+POST	/?rest_route=/batch/v1	json,restore
+POST	/?rest_route=/batch/v1	form,restore	requests[0][path]=/wp/v2/posts&requests[0][body][title]=Form
+POST	/?rest_route=/batch/v1&_envelope	json,restore	{"requests":[{"path":"/wp/v2/types"}]}
+GET	/?rest_route=/batch/v1
+OPTIONS	/?rest_route=/batch/v1

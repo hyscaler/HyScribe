@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The site of a handler that reads nothing of it but `admin_url()` and
+//! the configuration's constants.
+
+use hyscribe_admin::actions::ActionSite;
+use hyscribe_auth::caps::{CapPost, CapabilityData};
+use hyscribe_config::Constants;
+use hyscribe_phpser::Value;
+
+use super::super::Acting;
+use super::SITE;
+
+/// A site any other read of fails the test: the write oracle's
+/// `admin_url()`, its constants, by default HyScribe's, whether it has no
+/// uploads folder, and its plugins folder.
+#[derive(Default)]
+pub(in crate::admin::saves) struct Unread(
+    pub Constants,
+    pub bool,
+    pub Option<hyscribe_ext::Runtime>,
+);
+
+impl CapabilityData for Unread {
+    fn option(&self, _: &str) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn user_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn user_exists(&self, _: u64) -> bool {
+        unreachable!()
+    }
+    fn post(&self, _: u64) -> Option<CapPost> {
+        unreachable!()
+    }
+    fn post_meta(&self, _: u64, _: &str) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn comment_post(&self, _: u64) -> Option<u64> {
+        unreachable!()
+    }
+    fn term_taxonomy(&self, _: u64) -> Option<String> {
+        unreachable!()
+    }
+    fn constant(&self, _: &str) -> bool {
+        unreachable!()
+    }
+}
+
+impl ActionSite for Unread {
+    fn current_user_can(&self, _: &str, _: &[Value]) -> bool {
+        unreachable!()
+    }
+    fn verify_nonce(&self, _: &[u8], _: &str) -> bool {
+        unreachable!()
+    }
+    fn validate_redirect(&self, _: &[u8]) -> Vec<u8> {
+        unreachable!()
+    }
+    fn comment_approved(&self, _: u64) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn user_roles(&self) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+    fn lock_holder(&self, _: u64) -> Option<String> {
+        unreachable!()
+    }
+    fn user_option(&self, _: &str) -> Option<Vec<u8>> {
+        unreachable!()
+    }
+}
+
+impl Acting for Unread {
+    fn admin_url(&self, path: &str) -> String {
+        format!("{SITE}/hs-admin/{}", hyscribe_admin::menu::link(path))
+    }
+    fn comment_url(&self, _: u64) -> String {
+        unreachable!()
+    }
+    fn user_can(&self, _: u64, _: &str) -> bool {
+        unreachable!()
+    }
+    fn create_nonce(&self, action: &str) -> String {
+        format!("nonce-{action}")
+    }
+    fn constants(&self) -> Constants {
+        self.0
+    }
+    fn nonce_state(&self, _: &[u8], _: &str) -> u8 {
+        unreachable!()
+    }
+    fn logged_in(&self) -> bool {
+        unreachable!()
+    }
+    fn delete_files(&self, _: Vec<(Vec<u8>, Vec<u8>)>) -> bool {
+        !self.1
+    }
+    fn extensions(&self) -> Option<&hyscribe_ext::Runtime> {
+        self.2.as_ref()
+    }
+    fn outbox(&self) -> &crate::mail::Outbox {
+        crate::mail::tests::outbox()
+    }
+}

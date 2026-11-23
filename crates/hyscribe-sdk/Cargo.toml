@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+[package]
+name = "hyscribe-sdk"
+description = "HyScribe's extension SDK 0.3: WordPress's hooks, options, transients, meta, queries, REST routes, shortcodes, blocks, assets, cron, mail, capabilities and classic themes' template tags for a WebAssembly component (ADR 0022, 0023)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# The SDK and its WIT are Apache-2.0 OR MIT, so extensions may carry any licence.
+license = "Apache-2.0 OR MIT"
+repository.workspace = true
+publish.workspace = true
+
+[features]
+# A classic theme: the `theme` world's bindings in place of the `plugin`
+# world's (ADR 0023), exported with `theme!`.
+theme = []
+
+[dependencies]
+# A classic theme's templates (ADR 0023): the SDK ties askama's output to
+# WordPress's escaping and bytes; ports add `derive` and `config`.
+askama = { version = "=0.16.1", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+askama = { version = "=0.16.1", default-features = false, features = ["alloc", "derive"] }
+
+# Only a component uses the bindings: built for wasm32-wasip2, they import
+# the SDK's interfaces and nothing from WASI.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wit-bindgen = { version = "=0.57.1", default-features = false, features = ["macros", "realloc"] }
+dlmalloc = { version = "=0.2.14", features = ["global"] }
+
+# The workspace's lints, with `unsafe_code` denied rather than forbidden:
+# the bindings wit-bindgen generates for the guest side, inside the
+# sandbox, are allowed it in that one module.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

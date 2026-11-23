@@ -1,0 +1,47 @@
+# The rows PHP WordPress writes for the action navigation-fallback-page-ancestor (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-19 13:09:42 to 2026-11-19 13:09:42 UTC.
+# %wp_posts:1% is 57.
+# %wp_posts:2% is 58.
+# %wp_posts:3% is 59.
+# %wp_posts:4% is 60.
+# %wp_postmeta:1% is 291.
+# %wp_postmeta:2% is 292.
+# %wp_postmeta:3% is 293.
+# %wp_postmeta:4% is 294.
+# %wp_postmeta:5% is 295.
+# %wp_postmeta:6% is 296.
+# %wp_postmeta:7% is 297.
+# %wp_postmeta:8% is 298.
+# %wp_postmeta:9% is 299.
+# %wp_postmeta:10% is 300.
+# %wp_postmeta:11% is 301.
+# %wp_postmeta:12% is 302.
+# %wp_postmeta:13% is 303.
+# %wp_postmeta:14% is 304.
+# %wp_postmeta:15% is 305.
+# %wp_postmeta:16% is 306.
+# %wp_terms:1% is 9008.
+# %wp_term_taxonomy:1% is 9008.
+wp_posts	%wp_posts:4%	+	ID	%wp_posts:4%
+wp_posts	%wp_posts:4%	+	comment_count	0
+wp_posts	%wp_posts:4%	+	comment_status	closed
+wp_posts	%wp_posts:4%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:4%
+wp_posts	%wp_posts:4%	+	menu_order	0
+wp_posts	%wp_posts:4%	+	ping_status	closed
+wp_posts	%wp_posts:4%	+	pinged	
+wp_posts	%wp_posts:4%	+	post_author	0
+wp_posts	%wp_posts:4%	+	post_content	<!-- wp:navigation-submenu {"className":" menu-item menu-item-type-post_type menu-item-object-page current-page-ancestor current-menu-ancestor current-menu-parent current-page-parent current_page_parent current_page_ancestor","description":"","id":"2","kind":"post-type","label":"Sample Page","opensInNewTab":false,"rel":null,"title":"","type":"page","url":"http://127.0.0.1:8081/?page_id=2"} --><!-- wp:navigation-link {"className":" menu-item menu-item-type-post_type menu-item-object-page menu-item-privacy-policy current-menu-item page_item page-item-3 current_page_item","description":"","id":"3","kind":"post-type","label":"Privacy Policy","opensInNewTab":false,"rel":null,"title":"","type":"page","url":"http://127.0.0.1:8081/?page_id=3"} /--><!-- /wp:navigation-submenu -->
+wp_posts	%wp_posts:4%	+	post_content_filtered	
+wp_posts	%wp_posts:4%	+	post_date	%now%
+wp_posts	%wp_posts:4%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:4%	+	post_excerpt	
+wp_posts	%wp_posts:4%	+	post_mime_type	
+wp_posts	%wp_posts:4%	+	post_modified	%now%
+wp_posts	%wp_posts:4%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:4%	+	post_name	page-ancestor
+wp_posts	%wp_posts:4%	+	post_parent	0
+wp_posts	%wp_posts:4%	+	post_password	
+wp_posts	%wp_posts:4%	+	post_status	publish
+wp_posts	%wp_posts:4%	+	post_title	Page ancestor
+wp_posts	%wp_posts:4%	+	post_type	wp_navigation
+wp_posts	%wp_posts:4%	+	to_ping	

@@ -1,0 +1,20 @@
+# The navigation fallback route (WP_REST_Navigation_Fallback_Controller) for reference/rest/golden.sh over a site that
+# has navigation menus (navigation-fallback-existing.sql): it answers the most recently published one and writes
+# nothing, so the run fails if a request writes (method, target, flags).
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_embed=1
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_embed
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_embed=true&_locale=user
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_locale=user
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=edit
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=embed
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=view
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=bogus
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context[]=view
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_fields=id
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_fields=_links
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_fields=id&_embed=1
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_fields=_embedded&_embed=1
+HEAD	/?rest_route=/wp-block-editor/v1/navigation-fallback
+OPTIONS	/?rest_route=/wp-block-editor/v1/navigation-fallback

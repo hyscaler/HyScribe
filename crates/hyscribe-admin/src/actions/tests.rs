@@ -1,0 +1,1095 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+use hyscribe_auth::caps::{CapPost, User as Capabilities};
+use hyscribe_phpser::parse_str;
+
+use super::*;
+use crate::tests::options;
+
+/// User 1 with a role's capabilities over the default install and
+/// `reference/action-checks/content.sql`, as
+/// `reference/admin-menu/as-role.php` sets PHP up; a valid nonce is
+/// `%nonce:<action>%`.
+struct Oracle {
+    role: &'static str,
+    /// A fresh edit lock of user 801's on every post.
+    lock: bool,
+    /// The user's `media_library_mode`.
+    mode: Option<&'static str>,
+}
+
+fn role(role: &'static str) -> Oracle {
+    Oracle {
+        role,
+        lock: false,
+        mode: Some("list"),
+    }
+}
+
+fn cap_post(id: u64, author: u64, status: &str, post_type: &str) -> CapPost {
+    CapPost {
+        id,
+        author,
+        status: status.into(),
+        post_type: post_type.into(),
+        parent: 0,
+    }
+}
+
+impl CapabilityData for Oracle {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        options().get(name).cloned()
+    }
+    fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        let role = match id {
+            1 => self.role,
+            801 => "author",
+            _ => return None,
+        };
+        // `role+cap` grants the role and a capability of its own.
+        let caps: Vec<String> = role
+            .split('+')
+            .map(|cap| format!("s:{}:\"{cap}\";b:1;", cap.len()))
+            .collect();
+        (key == "wp_capabilities")
+            .then(|| format!("a:{}:{{{}}}", caps.len(), caps.concat()).into_bytes())
+    }
+    fn user_exists(&self, id: u64) -> bool {
+        matches!(id, 1 | 801)
+    }
+    fn post(&self, id: u64) -> Option<CapPost> {
+        match id {
+            1 => Some(cap_post(1, 1, "publish", "post")),
+            2 => Some(cap_post(2, 1, "publish", "page")),
+            3 => Some(cap_post(3, 1, "draft", "page")),
+            801 => Some(cap_post(801, 801, "publish", "post")),
+            802 => Some(cap_post(802, 1, "trash", "post")),
+            803 => Some(cap_post(803, 1, "publish", "unregistered")),
+            804 => Some(cap_post(804, 1, "inherit", "attachment")),
+            _ => None,
+        }
+    }
+    fn post_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        match (id, key) {
+            (802, "_wp_trash_meta_status") => Some(b"publish".to_vec()),
+            _ => None,
+        }
+    }
+    fn comment_post(&self, id: u64) -> Option<u64> {
+        match id {
+            1 => Some(1),
+            801 => Some(802),
+            _ => None,
+        }
+    }
+    fn term_taxonomy(&self, id: u64) -> Option<String> {
+        match id {
+            1 => Some("category".into()),
+            801 => Some("post_tag".into()),
+            _ => None,
+        }
+    }
+    fn constant(&self, name: &str) -> bool {
+        name == "DISALLOW_UNFILTERED_HTML"
+    }
+}
+
+impl ActionSite for Oracle {
+    fn current_user_can(&self, cap: &str, args: &[Value]) -> bool {
+        Capabilities::load(self, "wp_", 1).has_cap(self, cap, args)
+    }
+    fn verify_nonce(&self, nonce: &[u8], action: &str) -> bool {
+        nonce == format!("%nonce:{action}%").as_bytes()
+    }
+    fn validate_redirect(&self, location: &[u8]) -> Vec<u8> {
+        let local = location.starts_with(b"http://127.0.0.1:8081/");
+        if local { location.to_vec() } else { Vec::new() }
+    }
+    fn comment_approved(&self, id: u64) -> Option<Vec<u8>> {
+        match id {
+            1 => Some(b"1".to_vec()),
+            2 => Some(b"spam".to_vec()),
+            3 => Some(b"post-trashed".to_vec()),
+            4 => Some(b"0".to_vec()),
+            5 => Some(b"trash".to_vec()),
+            801 => Some(b"post-trashed".to_vec()),
+            _ => None,
+        }
+    }
+    fn user_roles(&self) -> Option<Vec<u8>> {
+        options().get("wp_user_roles").cloned()
+    }
+    fn lock_holder(&self, _: u64) -> Option<String> {
+        self.lock.then(|| "<b>other</b>".to_string())
+    }
+    fn user_option(&self, _: &str) -> Option<Vec<u8>> {
+        self.mode.map(|mode| mode.as_bytes().to_vec())
+    }
+}
+
+const HOME: &str = "http://127.0.0.1:8081";
+
+/// `$_GET` or `$_POST` of `query`.
+fn fields(query: &str) -> Vec<(Key, Value)> {
+    match parse_str(query.as_bytes()) {
+        Value::Array(fields) => fields,
+        _ => Vec::new(),
+    }
+}
+
+/// The checks of `target` (a screen and its query, as PHP's under
+/// `/wp-admin/`) with `body`, `None` for one that is not an action.
+fn check(
+    site: &Oracle,
+    target: &str,
+    body: Option<&str>,
+    referer: Option<&[u8]>,
+) -> Option<Checked> {
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let (get, post) = (fields(query), fields(body.unwrap_or_default()));
+    let uri = format!("/wp-admin/{target}");
+    let asked = Asked {
+        get: &get,
+        post: &post,
+        referer,
+        uri: uri.as_bytes(),
+        home: HOME,
+        user: 1,
+        now: 0,
+        ip: b"",
+        agent: b"",
+    };
+    let screen = path.strip_suffix(".php").unwrap();
+    if screen == "admin-ajax" {
+        return Some(admin_ajax(Some(site), &asked));
+    }
+    admin(site, screen, &asked, body.is_some())
+}
+
+/// What PHP sends for `refusal`, on the default install, which is public.
+fn sent(refusal: &Refusal) -> Vec<u8> {
+    match &refusal.body {
+        Body::Page(title, message) => crate::die::page(true, title, message),
+        Body::Text(text) => text.clone().into_bytes(),
+        Body::Json(json) => json.as_bytes().to_vec(),
+    }
+}
+
+/// Whether PHP's answer refuses: an error status, `wp_die()`'s page, an
+/// Ajax `-1` or `0`, or `wp_send_json_error()`'s answer.
+fn is_refusal(status: u16, body: &[u8]) -> bool {
+    status >= 400
+        || matches!(body, b"-1" | b"0")
+        || body.starts_with(b"{\"success\":false")
+        || String::from_utf8_lossy(body).contains("<body id=\"error-page\">")
+}
+
+/// The request of a golden row: the target and body, the nonce of the
+/// variant placed in its field, and whether a referer is sent.
+fn golden_request(case: &str, variant: &str) -> (String, Option<String>, bool) {
+    let fields: Vec<&str> = case.split('\t').collect();
+    let [_, method, target, body, action, field] = fields[..6] else {
+        panic!("{case}");
+    };
+    let nonce = match variant {
+        "none" => None,
+        "wrong" => Some("0123456789".to_string()),
+        "other" => Some("%other%".to_string()),
+        _ => Some(format!("%nonce:{action}%")),
+    };
+    let mut data = (body != "-").then(|| body.to_string());
+    let mut target = target.to_string();
+    if let Some(nonce) = nonce {
+        let field = format!("{field}={nonce}");
+        match method {
+            "POST" => data = Some(data.map_or(field.clone(), |d| format!("{d}&{field}"))),
+            _ => target = format!("{target}&{field}"),
+        }
+    }
+    (target, data, fields.len() > 6)
+}
+
+/// Every action of `reference/action-checks/golden.sh`, as each role with
+/// each nonce, is refused as PHP refuses it, and answered 501 where PHP
+/// goes on: to its first write, or to an answer that is not ported.
+#[test]
+fn refusals_match_php() {
+    let cases = include_str!("../../../../reference/action-checks/cases.list");
+    let golden = include_str!("../../tests/golden/action-checks.tsv");
+    let referer = b"http://127.0.0.1:8081/wp-admin/edit.php?paged=2&updated=1";
+    let (mut refused, mut accepted, mut failures) = (0, 0, Vec::new());
+    for row in golden.lines() {
+        let [who, name, variant, status, body] = row.split('\t').collect::<Vec<_>>()[..] else {
+            panic!("{row}");
+        };
+        let case = cases
+            .lines()
+            .find(|line| line.starts_with(&format!("{name}\t")));
+        let (target, data, flagged) = golden_request(case.unwrap(), variant);
+        let referer = flagged.then_some(&referer[..]);
+        let what = format!("{who} {name} {variant}");
+        let ours = check(&role(who), &target, data.as_deref(), referer).expect(&what);
+        // PHP stopped before its first write: 200 and no body.
+        let status: u16 = status.parse().unwrap_or(200);
+        let php = hyscribe_testkit::unhex(body);
+        match ours {
+            Err(refusal) if refusal.status == status && sent(&refusal) == php => refused += 1,
+            Ok(()) if !is_refusal(status, &php) => accepted += 1,
+            ours => failures.push(format!(
+                "{what}: {ours:?}\n  php: {status} {}",
+                String::from_utf8_lossy(&php)
+            )),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert!(refused > 0 && accepted > 0);
+}
+
+/// The checks' outcome: none for a request that is not an action, the
+/// status of a refusal, or 501 for a request that goes on.
+fn outcome(site: &Oracle, target: &str, body: Option<&str>) -> Option<u16> {
+    let checked = check(site, target, body, None);
+    checked.map(|checked| checked.map_or_else(|refusal| refusal.status, |()| 501))
+}
+
+/// `_wpnonce` for `action`.
+fn nonce(action: &str) -> String {
+    format!("_wpnonce=%nonce:{action}%")
+}
+
+/// The action a request past its checks names for its handler.
+#[test]
+fn actions_are_named_as_php_names_them() {
+    for (screen, query, expected) in [
+        ("users", "changeit=Change&action=delete", "promote"),
+        ("users", "action=resetpassword", "resetpassword"),
+        ("users", "action=-1", ""),
+        ("edit", "changeit=Change&action=trash", "trash"),
+        ("edit", "action=-1&delete_all=Empty+Trash", "delete_all"),
+        ("edit", "action=trash&filter_action=Filter", ""),
+        ("post", "action=trash&deletepost=Delete", "delete"),
+        ("post", "action=trash", "trash"),
+        ("edit-comments", "delete_all2=1&action=spam", "delete_all"),
+        ("edit-comments", "action=-1", ""),
+        ("comment", "action=cdc", "delete"),
+        ("comment", "action=mac&dt=x", "approve"),
+        ("comment", "action=approve&dt=spam", "spam"),
+        ("comment", "action=approve&dt=trash", "trash"),
+        (
+            "comment",
+            "action=approvecomment&deletecomment=1",
+            "deletecomment",
+        ),
+        ("options", "adminhash=x&action=update", "adminhash"),
+        ("options", "adminhash=&dismiss=new_admin_email", "dismiss"),
+        ("options", "dismiss=x&action=update", "update"),
+        // The names of the checked arguments' handlers are never asked for.
+        ("options", "action=dismiss", ""),
+        ("options", "action=adminhash", ""),
+        ("options-privacy", "action=create-privacy-page", ""),
+        ("edit-tags", "action=delete&delete_tags[]=2", "bulk-delete"),
+        ("edit-tags", "action=-1", ""),
+        (
+            "plugins",
+            "action=deactivate-selected",
+            "deactivate-selected",
+        ),
+        ("plugins", "action=-1", ""),
+    ] {
+        // `post.php`'s and `comment.php`'s Delete buttons are posted.
+        let (get, post) = match query.split_once("&deletepost") {
+            Some((get, rest)) => (fields(get), fields(&format!("deletepost{rest}"))),
+            None => (
+                fields(query),
+                fields(
+                    query
+                        .strip_prefix("action=approvecomment&")
+                        .unwrap_or_default(),
+                ),
+            ),
+        };
+        let asked = Asked {
+            get: &get,
+            post: &post,
+            referer: None,
+            uri: b"/wp-admin/",
+            home: HOME,
+            user: 1,
+            now: 0,
+            ip: b"",
+            agent: b"",
+        };
+        assert_eq!(
+            action(screen, &asked),
+            expected.as_bytes(),
+            "{screen} {query}"
+        );
+    }
+}
+
+/// The Privacy screen's actions are checked outside its policy guide, with
+/// their own nonces, for those who may manage privacy options.
+#[test]
+fn privacy_actions() {
+    let (admin, editor) = (role("administrator"), role("editor"));
+    let set = format!("action=set-privacy-page&{}", nonce("set-privacy-page"));
+    let file = "options-privacy.php";
+    assert_eq!(outcome(&admin, file, Some(&set)), Some(501));
+    let guide = "options-privacy.php?tab=policyguide";
+    assert_eq!(outcome(&admin, guide, Some(&set)), None);
+    assert_eq!(outcome(&admin, file, Some("x=1")), None);
+    let unsigned = "action=set-privacy-page";
+    assert_eq!(outcome(&admin, file, Some(unsigned)), Some(403));
+    assert_eq!(outcome(&editor, file, Some(&set)), Some(403));
+}
+
+/// Requests the goldens leave out: those that are not actions, those whose
+/// next step is not ported, and arguments PHP reads oddly.
+#[test]
+fn what_is_not_ported_goes_on() {
+    let admin = role("administrator");
+    let (bulk, users) = (nonce("bulk-posts"), nonce("bulk-users"));
+    let update = format!("action=update&{}", nonce("update-options"));
+    for (target, body, expected) in [
+        ("edit.php".to_string(), None, None),
+        ("comment.php?action=editcomment&c=1".into(), None, None),
+        ("edit.php?action=-1".into(), None, None),
+        ("edit.php?action=".into(), None, None),
+        (
+            "edit.php?action=trash&filter_action=Filter".into(),
+            None,
+            None,
+        ),
+        (
+            "edit.php?action=trash&post_type=nope".into(),
+            None,
+            Some(501),
+        ),
+        (
+            format!("edit.php?action=trash&post_type=post&post[]=1&{bulk}"),
+            None,
+            Some(501),
+        ),
+        ("edit.php?action=trash&p=1".into(), None, Some(501)),
+        (
+            format!("edit.php?delete_all=1&post_status=trash&{bulk}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!("edit.php?action=trash&ids[]=1&{bulk}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!("edit.php?action=trash&post=1&{bulk}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!("edit.php?action=trash&media=0&{bulk}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!("edit.php?action=trash&post[]=&{bulk}"),
+            None,
+            Some(500),
+        ),
+        (
+            format!("edit.php?action=edit&post[]=1&{bulk}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!("edit.php?action[]=trash&post[]=1&{bulk}"),
+            None,
+            Some(501),
+        ),
+        ("post.php?post=1".into(), None, None),
+        ("post.php?action=edit&post=1".into(), None, None),
+        (
+            "post.php".into(),
+            Some("action=editpost&post_ID=1".to_string()),
+            Some(403),
+        ),
+        (
+            format!("post.php?{}", nonce("update-post_1")),
+            Some("action=editpost&post_ID=1".to_string()),
+            Some(501),
+        ),
+        (
+            format!("post.php?action=trash&post=-1&{}", nonce("trash-post_-1")),
+            None,
+            Some(410),
+        ),
+        (
+            format!("post.php?action=trash&post=803&{}", nonce("trash-post_803")),
+            None,
+            Some(400),
+        ),
+        (
+            "post.php".into(),
+            Some("action=trash&post_ID=1&post_type[]=post".into()),
+            Some(400),
+        ),
+        ("edit-tags.php?taxonomy=post_tag".into(), None, None),
+        ("edit-tags.php?action=delete".into(), None, Some(501)),
+        (
+            "edit-tags.php?action=delete&taxonomy=nav_menu".into(),
+            None,
+            Some(501),
+        ),
+        (
+            "edit-tags.php?action=delete&taxonomy=post_tag".into(),
+            None,
+            Some(501),
+        ),
+        (
+            "edit-tags.php?action=edit&taxonomy=post_tag&tag_ID=801".into(),
+            None,
+            Some(501),
+        ),
+        ("edit-comments.php".into(), None, None),
+        (
+            format!("edit-comments.php?delete_all=1&{}", nonce("bulk-comments")),
+            None,
+            Some(501),
+        ),
+        ("users.php".into(), None, None),
+        (
+            format!("users.php?changeit=1&new_role=editor&{users}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!("users.php?changeit=1&new_role[]=editor&users[]=801&{users}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!("users.php?changeit=1&users[]=801&{users}"),
+            None,
+            Some(403),
+        ),
+        (
+            format!("users.php?changeit=1&new_role=editor&users[]=1&{users}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!(
+                "users.php?action=dodelete&users[]=801&{}",
+                nonce("delete-users")
+            ),
+            None,
+            Some(501),
+        ),
+        (
+            format!("users.php?action=resetpassword&{users}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!("users.php?action=resetpassword&users[]=1&users[]=9&{users}"),
+            None,
+            Some(501),
+        ),
+        (
+            format!("users.php?action=delete&users[]=801&{users}"),
+            None,
+            Some(501),
+        ),
+        (
+            "users.php?action=custom&users[]=801".into(),
+            None,
+            Some(501),
+        ),
+        ("user-new.php".into(), None, None),
+        (
+            "user-new.php".into(),
+            Some("action=adduser&_wpnonce_add-user=%nonce:add-user%".into()),
+            Some(501),
+        ),
+        ("profile.php".into(), None, None),
+        (
+            "profile.php".into(),
+            Some("action=update&user_id=9".into()),
+            Some(500),
+        ),
+        (
+            "user-edit.php".into(),
+            Some("action=update".into()),
+            Some(500),
+        ),
+        ("profile.php?newuseremail=x".into(), None, Some(501)),
+        (
+            format!(
+                "profile.php?dismiss=1_new_email&{}",
+                nonce("dismiss-1_new_email")
+            ),
+            None,
+            Some(501),
+        ),
+        ("profile.php?dismiss=1_new_email".into(), None, Some(403)),
+        (
+            "user-edit.php?user_id=801&dismiss=1_new_email".into(),
+            None,
+            None,
+        ),
+        ("options.php".into(), None, Some(501)),
+        ("options.php?adminhash=x".into(), None, Some(501)),
+        (
+            "options.php?dismiss=new_admin_email".into(),
+            None,
+            Some(403),
+        ),
+        ("options.php".into(), Some(update.clone()), Some(501)),
+        (
+            "options.php?option_page=options".into(),
+            Some(update),
+            Some(501),
+        ),
+        (
+            "options.php".into(),
+            Some(format!(
+                "action=update&option_page=0&{}",
+                nonce("0-options")
+            )),
+            Some(403),
+        ),
+        (
+            "options.php".into(),
+            Some(format!(
+                "action=update&option_page=misc&{}",
+                nonce("misc-options")
+            )),
+            Some(501),
+        ),
+        ("options-permalink.php".into(), None, None),
+        (
+            "options-permalink.php".into(),
+            Some("category_base=x".into()),
+            Some(403),
+        ),
+        ("themes.php".into(), None, None),
+        (
+            "themes.php?action=delete&stylesheet=twentytwentyfive".into(),
+            None,
+            Some(501),
+        ),
+        (
+            format!("themes.php?action=activate&{}", nonce("switch-theme_")),
+            None,
+            Some(501),
+        ),
+        ("index.php?action=trash".into(), None, None),
+        (
+            "edit.php?action=trash&post_type=post&post[]=1".into(),
+            None,
+            Some(403),
+        ),
+        (
+            "users.php?action=delete&users[]=801".into(),
+            None,
+            Some(403),
+        ),
+        (
+            "options.php?adminhash=x".into(),
+            Some("action=update".into()),
+            Some(501),
+        ),
+        (
+            "options.php?adminhash=0".into(),
+            Some("action=update".into()),
+            Some(403),
+        ),
+        (
+            "options.php?option_page=misc".into(),
+            Some(format!("action=update&{}", nonce("misc-options"))),
+            Some(501),
+        ),
+    ] {
+        assert_eq!(
+            outcome(&admin, &target, body.as_deref()),
+            expected,
+            "{target} {body:?}"
+        );
+    }
+}
+
+/// The checks that read a lock or the role: a locked post is skipped by
+/// the bulk trash, refused by `post.php` and by Quick Edit.
+#[test]
+fn locks_and_roles() {
+    let locked = Oracle {
+        lock: true,
+        ..role("administrator")
+    };
+    let bulk = nonce("bulk-posts");
+    let trash = format!("edit.php?action=trash&post[]=1&{bulk}");
+    assert_eq!(outcome(&locked, &trash, None), Some(501));
+    let untrash = format!("edit.php?action=untrash&post[]=1&{bulk}");
+    assert_eq!(outcome(&locked, &untrash, None), Some(500));
+    let single = format!("post.php?action=trash&post=1&{}", nonce("trash-post_1"));
+    let editing = "You cannot move this item to the Trash. <b>other</b> is currently editing.";
+    let refused = check(&locked, &single, None, None);
+    assert_eq!(refused, Some(Err(died(409, editing))));
+    // The trashed post would refuse, were it not locked.
+    let trashed = format!("edit.php?action=trash&post[]=802&{bulk}");
+    assert_eq!(outcome(&locked, &trashed, None), Some(501));
+    let trashed = format!("post.php?action=trash&post=802&{}", nonce("trash-post_802"));
+    assert_eq!(outcome(&locked, &trashed, None), Some(409));
+    for (kind, body) in [("post", "post_ID=1"), ("page", "post_ID=2&post_type=page")] {
+        let body = format!("action=inline-save&{body}&_inline_edit=%nonce:inlineeditnonce%");
+        let disabled = format!(
+            "Saving is disabled: &lt;b&gt;other&lt;/b&gt; is currently editing this {kind}."
+        );
+        let refused = check(&locked, "admin-ajax.php", Some(&body), None);
+        assert_eq!(refused, Some(Err(ajax(200, &disabled))));
+    }
+    let untrash = format!("post.php?action=untrash&post=1&{}", nonce("untrash-post_1"));
+    assert_eq!(outcome(&locked, &untrash, None), Some(500));
+    let activate = "themes.php?action=activate";
+    let options = role("editor+edit_theme_options");
+    assert_eq!(outcome(&options, activate, None), Some(501));
+    assert_eq!(outcome(&role("subscriber"), activate, None), Some(403));
+}
+
+/// `wp_get_referer()` prefers `_wp_http_referer`, and gives nothing for the
+/// page itself or another site.
+#[test]
+fn referers() {
+    let admin = role("administrator");
+    let link = |target: &str, referer: Option<&[u8]>| {
+        let Some(Err(Refusal {
+            body: Body::Page(_, message),
+            ..
+        })) = check(&admin, target, None, referer)
+        else {
+            panic!("{target}");
+        };
+        message.contains("href")
+    };
+    let given = "edit.php?action=trash&_wp_http_referer=http://127.0.0.1:8081/wp-admin/x.php";
+    assert!(link(given, None));
+    let target = "edit.php?action=trash";
+    assert!(!link(target, Some(b"/wp-admin/edit.php?action=trash")));
+    assert!(!link(
+        target,
+        Some(b"http://127.0.0.1:8081/wp-admin/edit.php?action=trash")
+    ));
+    assert!(!link(target, Some(b"http://elsewhere.test/")));
+    assert!(!link(target, Some(b"0")));
+}
+
+/// `admin-ajax.php` before the actions: the action given, and the user.
+#[test]
+fn ajax_shell() {
+    let ajax = |site: Option<&dyn ActionSite>, query: &str, body: &str| {
+        let (get, post) = (fields(query), fields(body));
+        let asked = Asked {
+            get: &get,
+            post: &post,
+            referer: None,
+            uri: b"/wp-admin/admin-ajax.php",
+            home: HOME,
+            user: 1,
+            now: 0,
+            ip: b"",
+            agent: b"",
+        };
+        admin_ajax(site, &asked).map_or_else(|refusal| refusal.status, |()| 501)
+    };
+    assert_eq!(ajax(None, "", "action[]=x"), 400);
+    assert_eq!(ajax(None, "", "action=heartbeat"), 501);
+    assert_eq!(ajax(None, "", "action=generate-password"), 501);
+    assert_eq!(ajax(None, "", "action=delete-tag"), 400);
+    let admin = role("administrator");
+    let site: Option<&dyn ActionSite> = Some(&admin);
+    assert_eq!(ajax(site, "", "action=x&wp_customize=on"), 501);
+    assert_eq!(ajax(site, "", "action=check_plugin_dependencies"), 501);
+    assert_eq!(ajax(site, "action=rest-nonce", ""), 501);
+    assert_eq!(ajax(site, "action=heartbeat", ""), 400);
+    // A heartbeat without its nonce is `wp_send_json_error()`'s.
+    assert_eq!(ajax(site, "action=rest-nonce", "action=heartbeat"), 200);
+    assert_eq!(ajax(site, "", "action=heartbeat&_nonce=0"), 200);
+    assert_eq!(ajax(site, "", "action=heartbeat&_nonce=x"), 501);
+}
+
+/// No other branch lets a write past its own checks: the Customizer's
+/// flags, an email change's confirmation or dismissal, an array role.
+#[test]
+fn no_branch_skips_a_write_s_checks() {
+    let (subscriber, admin) = (role("subscriber"), role("administrator"));
+    let passed = |site: &Oracle, target: &str, body: Option<&str>| {
+        check(site, target, body, None).is_some_and(|checked| checked.is_ok())
+    };
+    for body in [
+        "action=delete-tag&tag_ID=1&wp_customize=on",
+        "action=destroy-sessions&user_id=801&customize_changeset_uuid=x",
+        "action=customize_save&wp_customize=on",
+    ] {
+        assert!(!passed(&subscriber, "admin-ajax.php", Some(body)), "{body}");
+        assert!(!passed(&admin, "admin-ajax.php", Some(body)), "{body}");
+        let refused = outcome(&subscriber, "admin-ajax.php", Some(body));
+        assert_eq!(refused, Some(501), "{body}");
+    }
+    let dismiss = nonce("dismiss-1_new_email");
+    for target in [
+        "profile.php?newuseremail=x".to_string(),
+        "user-edit.php?user_id=1&newuseremail=x".to_string(),
+        format!("profile.php?dismiss=1_new_email&{dismiss}"),
+    ] {
+        let update = Some("action=update");
+        assert_eq!(outcome(&admin, &target, update), Some(403), "{target}");
+    }
+    let users = nonce("bulk-users");
+    let array = format!("users.php?changeit=1&new_role[]=editor&users[]=801&{users}");
+    assert!(!passed(&admin, &array, None));
+    assert_eq!(outcome(&admin, &array, None), Some(501));
+}
+
+/// The users list's refusals of a role that may list users but not change
+/// them, which no core role is, and of a term that does not exist.
+#[test]
+fn refusals_of_other_roles() {
+    let lister = role("editor+list_users");
+    let users = nonce("bulk-users");
+    for (target, expected) in [
+        (
+            format!("users.php?changeit=1&new_role=editor&users[]=801&{users}"),
+            403,
+        ),
+        (
+            format!("users.php?action=resetpassword&users[]=801&{users}"),
+            500,
+        ),
+        (
+            format!("users.php?action=resetpassword&users[]=1&{users}"),
+            501,
+        ),
+        (
+            format!(
+                "users.php?action=dodelete&users[]=801&delete_option=delete&{}",
+                nonce("delete-users")
+            ),
+            403,
+        ),
+    ] {
+        assert_eq!(outcome(&lister, &target, None), Some(expected), "{target}");
+    }
+    let deleting = format!(
+        "users.php?action=dodelete&users[]=801&{}",
+        nonce("delete-users")
+    );
+    assert_eq!(outcome(&lister, &deleting, None), Some(501));
+    let resetting = format!("users.php?action=resetpassword&users[]=1&users[]=801&{users}");
+    assert_eq!(outcome(&lister, &resetting, None), Some(500));
+    let tag = "action=add-tag&taxonomy=&_wpnonce_add-tag=%nonce:add-tag%";
+    assert_eq!(
+        outcome(&role("contributor"), "admin-ajax.php", Some(tag)),
+        Some(200)
+    );
+    let edited = format!(
+        "action=editedtag&taxonomy=post_tag&tag_ID=9&{}",
+        nonce("update-tag_9")
+    );
+    let admin = role("administrator");
+    assert_eq!(outcome(&admin, "edit-tags.php", Some(&edited)), Some(403));
+}
+
+/// The Ajax actions' checks past their nonce, where the goldens do not go.
+#[test]
+fn ajax_actions() {
+    let admin = role("administrator");
+    for (body, expected) in [
+        (
+            "action=add-tag&taxonomy=nope&_wpnonce_add-tag=%nonce:add-tag%",
+            501,
+        ),
+        ("action=add-tag&_wpnonce_add-tag=%nonce:add-tag%", 501),
+        (
+            "action=inline-save-tax&taxonomy=post_tag&_inline_edit=%nonce:taxinlineeditnonce%",
+            200,
+        ),
+        (
+            "action=inline-save&_inline_edit=%nonce:inlineeditnonce%",
+            200,
+        ),
+        (
+            "action=closed-postboxes&hidden[]=x&closedpostboxesnonce=%nonce:closedpostboxes%",
+            501,
+        ),
+        (
+            "action=hidden-columns&page[]=x&screenoptionnonce=%nonce:screen-options-nonce%",
+            200,
+        ),
+        (
+            "action=meta-box-order&_ajax_nonce=%nonce:meta-box-order%",
+            501,
+        ),
+        ("action=delete-comment&id=9", 501),
+        ("action=delete-comment&id=-1", 501),
+        ("action=dim-comment&id=1&new=approved", 501),
+        ("action=dim-comment&id=2&new=spam", 501),
+        ("action=dim-comment&id=4&new=unapproved", 501),
+        ("action=dim-comment&id=5&new=trash", 501),
+        ("action=dim-comment&id=3&new=", 403),
+        (
+            "action=dim-comment&id=3&_wpnonce=%nonce:approve-comment_3%",
+            501,
+        ),
+        (
+            "action=save-user-color-scheme&nonce=%nonce:save-color-scheme%",
+            200,
+        ),
+    ] {
+        assert_eq!(
+            outcome(&admin, "admin-ajax.php", Some(body)),
+            Some(expected),
+            "{body}"
+        );
+    }
+    let dim = "action=dim-comment&id=2&_wpnonce=%nonce:approve-comment_2%";
+    assert_eq!(
+        outcome(&role("contributor"), "admin-ajax.php", Some(dim)),
+        Some(200)
+    );
+}
+
+/// `post.php`'s Quick Draft: `exit` for who may not write posts, the form
+/// for a bad nonce or an empty form, else the referer of its post's type
+/// and `edit_post()`'s capability; and the Screen Options form on any screen.
+#[test]
+fn quick_drafts_and_screen_options() {
+    let draft = |id: &str, rest: &str| {
+        format!(
+            "action=post-quickdraft-save&post_ID={id}&post_title=T&_wpnonce=%nonce:add-post%{rest}"
+        )
+    };
+    for (who, body, expected) in [
+        ("subscriber", draft("1", ""), 200),
+        ("administrator", draft("1", "&_wpnonce=bad"), 501),
+        ("administrator", draft("99", ""), 403),
+        ("administrator", draft("2", ""), 403),
+        ("administrator", draft("1", "&post_type=post"), 501),
+        ("author", draft("801", ""), 500),
+        ("author", draft("801", "&post_title=+"), 501),
+        ("author", draft("801", "&content[]=x"), 501),
+        ("author", draft("801", "&post_title[]=x"), 501),
+    ] {
+        assert_eq!(
+            outcome(&role(who), "post.php", Some(&body)),
+            Some(expected),
+            "{who} {body}"
+        );
+    }
+    let admin = role("administrator");
+    assert_eq!(
+        outcome(
+            &admin,
+            "post.php?action=post-quickdraft-save&post_ID=1",
+            None
+        ),
+        None
+    );
+    let options = "wp_screen_options[option]=edit_per_page&screenoptionnonce=";
+    let valid = format!("{options}%nonce:screen-options-nonce%");
+    for (target, body, expected) in [
+        ("index.php", valid.as_str(), Some(501)),
+        ("edit.php", options, Some(403)),
+        ("index.php", "wp_screen_options=x", None),
+    ] {
+        assert_eq!(
+            outcome(&admin, target, Some(body)),
+            expected,
+            "{target} {body}"
+        );
+    }
+    let post = fields(&valid);
+    for (screen, expected) in [("edit", "screen-options"), ("admin-ajax", "")] {
+        let asked = Asked {
+            get: &[],
+            post: &post,
+            referer: None,
+            uri: b"/wp-admin/",
+            home: HOME,
+            user: 1,
+            now: 0,
+            ip: b"",
+            agent: b"",
+        };
+        assert_eq!(action(screen, &asked), expected.as_bytes(), "{screen}");
+    }
+}
+
+/// `upload.php`'s bulk actions in list mode: the grid, a screen of its own
+/// and no action are not actions; who may not upload, or has no valid
+/// nonce, is refused; what `wp_trash_post()`, `wp_untrash_post()` and
+/// `wp_delete_attachment()` fail on dies, and the rest goes on.
+#[test]
+fn media_bulk_actions_are_checked_as_php_checks_them() {
+    let bulk = nonce("bulk-media");
+    let upload = |query: &str| format!("upload.php?{query}&{bulk}");
+    let delete = upload("action=delete&media[]=804");
+    for mode in [Some("grid"), Some(""), None] {
+        let site = Oracle {
+            mode,
+            ..role("administrator")
+        };
+        assert_eq!(outcome(&site, &delete, None), None, "{mode:?}");
+    }
+    let site = role("administrator");
+    assert_eq!(
+        outcome(&site, &upload("mode=list&action=trash"), None),
+        None
+    );
+    assert_eq!(outcome(&site, "upload.php", None), None);
+    assert_eq!(outcome(&role("subscriber"), &delete, None), Some(403));
+    let unsigned = "upload.php?action=delete&media[]=804";
+    assert_eq!(outcome(&site, unsigned, None), Some(403));
+    for (query, expected) in [
+        ("action=trash&media[]=802", 500),
+        ("action=trash&media[]=801", 501),
+        ("action=untrash&media[]=801", 500),
+        ("action=untrash&media[]=802", 501),
+        ("action=delete&media[]=801", 500),
+        ("action=delete&media[]=804", 501),
+        ("action=delete&media[]=999", 500),
+        ("action=delete&ids=804,801", 501),
+        ("action=delete&ids=999,804", 500),
+        ("action=delete&ids[]=804", 501),
+        ("action=attach&found_post_id=1&media[]=804", 501),
+    ] {
+        let status = outcome(&site, &upload(query), None);
+        assert_eq!(status, Some(expected), "{query}");
+    }
+    // Who may not delete the post is refused.
+    let author = role("author");
+    let status = outcome(&author, &upload("action=delete&media[]=801"), None);
+    assert_eq!(status, Some(500));
+    // Nothing to check without an attachment, which a parsed request never lacks.
+    let none = [(Key::String(b"media".to_vec()), Value::Array(Vec::new()))];
+    let asked = Asked {
+        get: &[],
+        post: &none,
+        referer: None,
+        uri: b"/wp-admin/upload.php",
+        home: HOME,
+        user: 1,
+        now: 0,
+        ip: b"",
+        agent: b"",
+    };
+    let trash = Value::String(b"trash".to_vec());
+    assert_eq!(media_bulk(&site, &asked, &trash), Ok(()));
+}
+
+/// `wp_ajax_save_attachment_compat()` does not read fields that are no list.
+#[test]
+fn attachment_fields_that_are_no_list_are_not_ported() {
+    let site = role("administrator");
+    let nonce = "nonce=%nonce:update-post_804%";
+    let sent = |fields: &str| {
+        let body = format!("action=save-attachment-compat&id=804&{nonce}{fields}");
+        outcome(&site, "admin-ajax.php", Some(&body))
+    };
+    assert_eq!(sent("&attachments=x"), Some(501));
+    assert_eq!(sent("&attachments[804][a]=b"), Some(501));
+}
+
+/// `wp_ajax_delete_post()`: its nonce, and a post the user may delete.
+#[test]
+fn deleting_a_post_by_ajax_is_checked_as_php_checks_it() {
+    let site = role("administrator");
+    let sent = |id: u64, nonce: &str| {
+        let body = format!("action=delete-post&id={id}&{nonce}");
+        outcome(&site, "admin-ajax.php", Some(&body))
+    };
+    assert_eq!(sent(804, "_ajax_nonce=%nonce:delete-post_804%"), Some(501));
+    assert_eq!(sent(804, "_ajax_nonce=wrong"), Some(403));
+    assert_eq!(sent(999, "_ajax_nonce=%nonce:delete-post_999%"), Some(200));
+}
+
+/// What `current_action()` makes of the media list's arguments: attaching,
+/// detaching and emptying the Trash, from either button.
+#[test]
+fn the_media_lists_actions_are_named_as_php_names_them() {
+    let named = |query: &str| {
+        let get = fields(query);
+        let asked = Asked {
+            get: &get,
+            post: &[],
+            referer: None,
+            uri: b"/wp-admin/upload.php",
+            home: HOME,
+            user: 1,
+            now: 0,
+            ip: b"",
+            agent: b"",
+        };
+        media_action(&asked).map(|action| action.to_php_string())
+    };
+    let some = |name: &str| Some(name.as_bytes().to_vec());
+    assert_eq!(named("media[]=1&found_post_id=2"), some("attach"));
+    assert_eq!(named("media[]=1&parent_post_id=2"), some("detach"));
+    assert_eq!(named("delete_all=1"), some("delete_all"));
+    assert_eq!(named("delete_all2=1"), some("delete_all"));
+    assert_eq!(named("action=trash"), some("trash"));
+    assert_eq!(named("found_post_id=2"), None);
+}
+
+/// `wp_ajax_save_attachment()` answers an error before it saves, for a
+/// request without what it needs, a nonce, or a post that is no attachment.
+#[test]
+fn attachment_saves_that_php_answers_an_error_are_refused() {
+    let site = role("administrator");
+    let sent = |body: &str| outcome(&site, "admin-ajax.php", Some(body));
+    let nonce = "nonce=%nonce:update-post_804%";
+    let saved = format!("action=save-attachment&id=804&changes[title]=x&{nonce}");
+    assert_eq!(sent(&saved), Some(501));
+    let unchanged = format!("action=save-attachment&id=804&{nonce}");
+    assert_eq!(sent(&unchanged), Some(200));
+    assert_eq!(sent("action=save-attachment&changes[title]=x"), Some(200));
+    assert_eq!(
+        sent("action=save-attachment&id=0&changes[title]=x"),
+        Some(200)
+    );
+    let wrong = "action=save-attachment&id=804&changes[title]=x&nonce=wrong";
+    assert_eq!(sent(wrong), Some(403));
+    let post = "action=save-attachment&id=1&changes[title]=x&nonce=%nonce:update-post_1%";
+    assert_eq!(sent(post), Some(200));
+}
+
+/// `plugins.php`'s actions: activating and deactivating one plugin by its
+/// nonce, deleting refused as `delete_plugins` is never granted, and the
+/// others, clearing the recently active list among them, not ported.
+#[test]
+fn plugin_actions() {
+    let admin = role("administrator");
+    let file = "hyscribe-test/hyscribe-test.php";
+    assert_eq!(outcome(&admin, "plugins.php", None), None);
+    for action in ["activate", "deactivate"] {
+        let target = format!("plugins.php?action={action}&plugin={file}");
+        let nonced = format!("{target}&{}", nonce(&format!("{action}-plugin_{file}")));
+        assert_eq!(outcome(&admin, &nonced, None), Some(501), "{action}");
+        assert_eq!(outcome(&admin, &target, None), Some(403), "{action}");
+        assert_eq!(
+            outcome(&role("editor"), &nonced, None),
+            Some(403),
+            "{action}"
+        );
+    }
+    let delete = format!(
+        "plugins.php?action=delete-selected&checked[]={file}&{}",
+        nonce("bulk-plugins")
+    );
+    assert_eq!(outcome(&admin, &delete, None), Some(500));
+    let clear = Some("clear-recent-list=Clear+List&action=-1");
+    assert_eq!(outcome(&admin, "plugins.php", clear), Some(501));
+    assert_eq!(
+        outcome(&admin, "plugins.php?action=resume", None),
+        Some(501)
+    );
+}

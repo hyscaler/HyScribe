@@ -1,0 +1,43 @@
+<div class="privacy-settings-header">
+	<div class="privacy-settings-title-section">
+		<h1>
+			Privacy		</h1>
+	</div>
+
+	<nav class="privacy-settings-tabs-wrapper hide-if-no-js" aria-label="Secondary menu">
+		<a href="%settings_url%" class="privacy-settings-tab active" aria-current="true">
+			Settings		</a>
+
+		<a href="%guide_url%" class="privacy-settings-tab">
+			Policy Guide		</a>
+	</nav>
+</div>
+
+<hr class="wp-header-end">
+
+<div class="notice notice-error hide-if-js"><p>The Privacy Settings require JavaScript.</p></div>
+<div class="privacy-settings-body hide-if-no-js">
+	<h2>Privacy Settings</h2>
+	<p>
+		As a website owner, you may need to follow national or international privacy laws. For example, you may need to create and display a privacy policy.		If you already have a Privacy Policy page, please select it below. If not, please create one.	</p>
+	<p>
+		The new page will include help and suggestions for your privacy policy.		However, it is your responsibility to use those resources correctly, to provide the information that your privacy policy requires, and to keep that information current and accurate.	</p>
+	<p>
+		After your Privacy Policy page is set, you should edit it.		You should also review your privacy policy from time to time, especially after installing or updating any themes or plugins. There may be changes or new suggested information for you to consider adding to your policy.	</p>
+	<p>
+%links%Need help putting together your new Privacy Policy page? <a href="%guide_url%" >Check out the privacy policy guide</a> for recommendations on what content to include, along with policies suggested by your plugins and theme.	</p>
+	<hr>
+		<table class="form-table tools-privacy-policy-page" role="presentation">
+		<tr>
+			<th scope="row">
+				<label for="create-page">
+				%create%				</label>
+			</th>
+			<td>
+				<form class="wp-create-privacy-page" method="post">
+					<input type="hidden" name="action" value="create-privacy-page" />
+					%create_nonce%<input type="submit" name="submit" id="create-page" class="button" value="Create"  />				</form>
+			</td>
+		</tr>
+%choose%			</table>
+</div>

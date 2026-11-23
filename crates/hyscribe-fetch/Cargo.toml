@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "hyscribe-fetch"
+description = "The outbound HTTP client, behind WordPress's URL checks and HyScribe's address rules (ADR 0019)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+http-body-util = "0.1.5"
+hyper = { version = "1.12", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
+hyscribe-kses.workspace = true
+ring = { version = "0.17.14", default-features = false }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+openssl-probe = "0.2.2"
+tokio = { version = "1", features = ["net", "rt", "time"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+
+[dev-dependencies]
+hyscribe-testkit.workspace = true
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

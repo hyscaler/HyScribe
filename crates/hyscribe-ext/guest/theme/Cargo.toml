@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# The test theme (ADR 0023): drives every call of the SDK's `theme` world
+# and its `render` export for the host's tests; built from source by
+# ../build.sh, outside the host's workspace, for wasm32-wasip2.
+[package]
+name = "hyscribe-ext-theme"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+hyscribe-sdk = { path = "../../../hyscribe-sdk", features = ["theme"] }

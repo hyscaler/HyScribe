@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+# The test theme's manifest: the grants its calls are checked against, the
+# same as tests/guest/mod.rs gives the host's tests. A theme's name and
+# headers are its public/style.css's (ADR 0023).
+
+[extension]
+kind = "theme"
+id = "hyscribe-theme"
+version = "0.1.0"
+sdk = "0.3"
+compatibility = "full"
+license = "Apache-2.0 OR MIT"
+
+[hooks]
+filters = ["ext_theme", "ext_theme_head"]
+actions = ["wp_enqueue_scripts", "wp_head", "wp_footer"]

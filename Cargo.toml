@@ -1,0 +1,97 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/hyscaler/HyScribe"
+publish = false
+
+[workspace.dependencies]
+hyscribe-admin = { path = "crates/hyscribe-admin" }
+hyscribe-assets = { path = "crates/hyscribe-assets" }
+hyscribe-auth = { path = "crates/hyscribe-auth" }
+hyscribe-config = { path = "crates/hyscribe-config" }
+hyscribe-db = { path = "crates/hyscribe-db" }
+hyscribe-ext = { path = "crates/hyscribe-ext" }
+hyscribe-fetch = { path = "crates/hyscribe-fetch" }
+hyscribe-html = { path = "crates/hyscribe-html" }
+hyscribe-http = { path = "crates/hyscribe-http" }
+hyscribe-image = { path = "crates/hyscribe-image" }
+hyscribe-kses = { path = "crates/hyscribe-kses" }
+hyscribe-mail = { path = "crates/hyscribe-mail" }
+hyscribe-model = { path = "crates/hyscribe-model" }
+hyscribe-service = { path = "crates/hyscribe-service" }
+hyscribe-phpser = { path = "crates/hyscribe-phpser" }
+hyscribe-render = { path = "crates/hyscribe-render" }
+hyscribe-registry = { path = "crates/hyscribe-registry" }
+hyscribe-rest = { path = "crates/hyscribe-rest" }
+hyscribe-theme-json = { path = "crates/hyscribe-theme-json" }
+hyscribe-testkit = { path = "crates/hyscribe-testkit" }
+hyscribe-write = { path = "crates/hyscribe-write" }
+clap = { version = "4.5", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+dotenvy = "0.15"
+icu_normalizer = { version = "2.4", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "2.4", default-features = false, features = ["compiled_data"] }
+# IANA 2026e, the release the oracle PHP bundles.
+jiff-tzdb = "=0.1.9"
+proptest = "1.7"
+sha2 = { version = "0.11", default-features = false }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
+# Unwind, so a decoder panic ends only its image job (hyscribe-image's pool).
+panic = "unwind"
+strip = true
+
+# bcrypt at cost 12 takes seconds unoptimized.
+[profile.dev.package.blowfish]
+opt-level = 3
+
+# The codecs decode and quantise the image goldens' corpus (hyscribe-image).
+[profile.dev.package.color_quant]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
+[profile.dev.package.jpeg-encoder]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.image-webp]
+opt-level = 3
+
+[profile.dev.package.gif]
+opt-level = 3
+
+# Mutation runs of the image crate replay its corpus: optimised, its
+# overflow checks kept (cargo-mutants --profile mutants).
+[profile.mutants]
+inherits = "dev"
+
+[profile.mutants.package.hyscribe-image]
+opt-level = 2

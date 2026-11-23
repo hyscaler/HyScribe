@@ -1,0 +1,398 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The REST API (hyscribe-rest, ADR 0013) at `?rest_route=` and, with
+//! pretty permalinks, `/wp-json/`: the request read, the logged in cookie
+//! checked against HyScribe's sessions, and the answer sent.
+
+use std::cell::OnceCell;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use axum::body::{Body, Bytes};
+use axum::http::{HeaderMap, HeaderValue, Method, Uri, header};
+use axum::response::Response;
+use hyscribe_admin::login::Site as LoginSite;
+use hyscribe_auth::caps::{CapabilityData, User as Capabilities};
+use hyscribe_fetch::{Args, Error as FetchError, Fetched};
+use hyscribe_model::{Comment, CommentQuery, CommentRow, Post, Term, TermQuery, User, UserQuery};
+use hyscribe_phpser::{Key, Value, addslashes, is_empty_string, parse_str};
+use hyscribe_render::link::rest_url;
+use hyscribe_render::permalinks::{Permalinks, author_posts_url, permalink};
+use hyscribe_render::site::Site as RenderSite;
+use hyscribe_rest::{Answer, Preloaded, Served, preload};
+use hyscribe_write::options::{expire_site_transient, set_site_transient};
+use tokio::runtime::Handle;
+
+use crate::login::{LoginReads, Names, cookie, cookies, joined};
+use crate::{Site, now, trackback};
+
+/// The `rest_route` query var, `rest_api_loaded()` serves the request when
+/// it is not empty: `$_GET`'s, slashed as WordPress slashes it, else the
+/// rewrite rules'. Any other value than a string is not ported.
+pub(crate) fn route(uri: &Uri, query: &HashMap<String, String>) -> Option<Option<Vec<u8>>> {
+    let get = parse_str(uri.query().unwrap_or_default().as_bytes());
+    let route = match get.get_str("rest_route") {
+        Some(Value::String(route)) => addslashes(route),
+        Some(_) => return Some(None),
+        None => query.get("rest_route")?.as_bytes().to_vec(),
+    };
+    (!is_empty_string(&route)).then_some(Some(route))
+}
+
+/// The request as the API reads it.
+pub(crate) struct Asked {
+    pub(crate) method: Method,
+    pub(crate) uri: Uri,
+    pub(crate) headers: HeaderMap,
+    pub(crate) body: Bytes,
+    pub(crate) route: Vec<u8>,
+    /// The connection's address.
+    pub(crate) peer: Option<std::net::IpAddr>,
+}
+
+/// The answer to a REST request, read on a blocking thread.
+pub(crate) async fn respond(site: &Arc<Site>, asked: Asked) -> Response {
+    let site = Arc::clone(site);
+    let (now, handle) = (now(), Handle::current());
+    joined(
+        tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
+            answer(&site, &asked, now, handle)
+        }))
+        .await,
+    )
+}
+
+/// The site and user as the API reads them.
+struct Rest<'a> {
+    reads: LoginReads<'a>,
+    site: &'a Site,
+    /// The user of the logged in cookie, 0 for none.
+    user: u64,
+    caps: OnceCell<Capabilities>,
+}
+
+impl hyscribe_rest::Site for Rest<'_> {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        CapabilityData::option(&self.reads, name)
+    }
+
+    fn rest_url(&self, path: &str) -> String {
+        let url = rest_url(self.site.home.as_bytes(), &self.site.permalinks(), path);
+        String::from_utf8_lossy(&url).into_owned()
+    }
+
+    fn verify_nonce(&self, nonce: &[u8]) -> bool {
+        self.reads.verify_nonce(nonce, "wp_rest")
+    }
+
+    fn create_nonce(&self) -> String {
+        self.reads.nonce("wp_rest")
+    }
+
+    fn nonce(&self, action: &str) -> String {
+        self.reads.nonce(action)
+    }
+
+    fn can(&self, user: u64, cap: &str, args: &[Value]) -> bool {
+        // Another user's, such as a comment's author.
+        if user != self.user && user != 0 {
+            let caps = Capabilities::load(&self.reads, self.site.db.prefix(), user);
+            return caps.has_cap(&self.reads, cap, args);
+        }
+        let caps = || {
+            self.caps
+                .get_or_init(|| Capabilities::load(&self.reads, self.site.db.prefix(), self.user))
+        };
+        user != 0 && caps().has_cap(&self.reads, cap, args)
+    }
+
+    fn public_users(&self) -> bool {
+        self.site.public_users
+    }
+    fn uses_trash(&self) -> bool {
+        self.site.constants.empty_trash_days != 0
+    }
+    fn uses_media_trash(&self) -> bool {
+        self.uses_trash() && self.site.constants.media_trash
+    }
+
+    fn reads(&self) -> &dyn RenderSite {
+        &self.reads.reads
+    }
+
+    fn theme(&self) -> &hyscribe_render::theme::Theme {
+        &self.site.theme
+    }
+
+    fn terms(&self, query: &TermQuery) -> Vec<Term> {
+        RenderSite::term_query(&self.reads.reads, query)
+    }
+
+    fn count_terms(&self, query: &TermQuery) -> u64 {
+        self.reads.reads.wait(self.site.db.term_query_count(query))
+    }
+
+    fn term_link(&self, taxonomy: &str, term: &Term) -> String {
+        let link = hyscribe_render::permalinks::term_link(&self.reads.reads, taxonomy, term);
+        String::from_utf8_lossy(&link).into_owned()
+    }
+
+    fn table_prefix(&self) -> String {
+        self.site.db.prefix().into()
+    }
+
+    fn comments(&self, query: &CommentQuery) -> Vec<CommentRow> {
+        self.reads.reads.wait(self.site.db.comment_query(query))
+    }
+
+    fn count_comments(&self, query: &CommentQuery) -> u64 {
+        self.reads
+            .reads
+            .wait(self.site.db.count_comment_query(query))
+    }
+
+    fn comment_link(&self, comment: &Comment) -> String {
+        let post = (comment.post_id != 0)
+            .then(|| RenderSite::post(&self.reads.reads, comment.post_id))
+            .flatten();
+        let link = post.map(|post| permalink(&self.reads.reads, &post));
+        let link = String::from_utf8_lossy(&link.unwrap_or_default()).into_owned();
+        let links = Permalinks::of(&self.reads.reads);
+        let link = if links.pretty() {
+            links.trailing(&link)
+        } else {
+            link
+        };
+        format!("{link}#comment-{}", comment.id)
+    }
+
+    fn users(&self, query: &UserQuery) -> Vec<User> {
+        self.reads.reads.wait(self.site.db.user_query(query))
+    }
+
+    fn count_users(&self, query: &UserQuery) -> u64 {
+        self.reads.reads.wait(self.site.db.count_user_query(query))
+    }
+
+    fn user_meta(&self, id: u64, key: &str) -> Option<Vec<u8>> {
+        CapabilityData::user_meta(&self.reads, id, key)
+    }
+
+    fn user_registered(&self, id: u64) -> String {
+        self.reads.reads.wait(self.site.db.user_registered(id))
+    }
+
+    fn allcaps(&self, id: u64) -> Vec<(Key, Value)> {
+        let user = Capabilities::load(&self.reads, self.site.db.prefix(), id);
+        user.allcaps().to_vec()
+    }
+
+    fn author_link(&self, user: &User) -> String {
+        let id = i64::try_from(user.id).unwrap_or_default();
+        let link = author_posts_url(&self.reads.reads, id);
+        String::from_utf8_lossy(&link).into_owned()
+    }
+
+    fn has_posts(&self, author: u64, types: &[(String, bool)]) -> bool {
+        self.reads.reads.wait(self.site.db.has_posts(author, types))
+    }
+
+    fn posts_of_type(&self, post_type: &str) -> Vec<Post> {
+        let reads = &self.reads.reads;
+        reads.wait(self.site.db.posts_of_type(post_type))
+    }
+
+    fn revisions(&self, post: u64) -> Vec<u64> {
+        self.reads.reads.wait(self.site.db.revisions(post))
+    }
+
+    fn image_size(&self, file: &str) -> Option<Option<(u32, u32)>> {
+        let uploads = self.site.uploads.as_ref()?;
+        Some(uploads.image_size(file))
+    }
+
+    fn wp_hash(&self, data: &[u8]) -> Option<String> {
+        RenderSite::wp_hash(&self.reads.reads, data)
+    }
+
+    fn embed_secret(&self) -> String {
+        hyscribe_render::head::embed_secret()
+    }
+
+    fn outbound(&self) -> bool {
+        self.site.fetch.is_some()
+    }
+
+    fn fetch(&self, url: &[u8], args: Args) -> Option<Result<Fetched, FetchError>> {
+        let home = self.site.home.as_bytes();
+        let reads = &self.reads.reads;
+        let fetch =
+            |client: &Arc<hyscribe_fetch::Client>| reads.block_on(client.get(url, home, args));
+        self.site.fetch.as_ref().map(fetch)
+    }
+
+    fn set_site_transient(&self, name: &str, value: &[u8], expiration: i64) {
+        let value = Value::String(value.to_vec());
+        // PHP goes on whether the cache is written or not; after a failed
+        // statement the commit fails too.
+        if let Some(writer) = &self.site.writer {
+            self.reads.reads.block_on(async {
+                for mut write in writer.begin().await.into_iter() {
+                    let _ = set_site_transient(&mut write, name, &value, expiration).await;
+                    let _ = write.commit().await;
+                }
+            });
+        }
+    }
+
+    fn expire_site_transient(&self, name: &str) {
+        if let Some(writer) = &self.site.writer {
+            self.reads.reads.block_on(async {
+                for mut write in writer.begin().await.into_iter() {
+                    let _ = expire_site_transient(&mut write, name).await;
+                    let _ = write.commit().await;
+                }
+            });
+        }
+    }
+}
+
+fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
+    let header = |name: &str| asked.headers.get(name).map(HeaderValue::as_bytes);
+    let cookies = cookies(
+        asked
+            .headers
+            .get_all(header::COOKIE)
+            .iter()
+            .map(HeaderValue::as_bytes),
+    );
+    let post = asked.method == Method::POST;
+    let mut reads = LoginReads::new(site, handle.clone(), now);
+    let logged_in = cookie(&cookies, &Names::new(site).logged_in());
+    let (user, token) = reads.logged_in_user(logged_in, post).unwrap_or_default();
+    reads.act_as(user, token.clone());
+    let rest = Rest {
+        reads,
+        site,
+        user,
+        caps: OnceCell::new(),
+    };
+    let entries = |value: Value| value.as_array().unwrap_or_default().to_vec();
+    let get = entries(parse_str(asked.uri.query().unwrap_or_default().as_bytes()));
+    // An upload's form is `$_POST` and `$_FILES`, as PHP reads it; the REST
+    // API reads no body of a GET, so only the route decides.
+    let max = site.upload_max();
+    let upload = crate::uploads::takes_upload(&asked.uri)
+        .then(|| crate::uploads::form(&asked.headers, &asked.body, max))
+        .flatten();
+    let (form, files) = match upload {
+        Some((form, files)) => (entries(form), files),
+        None if post => (
+            entries(trackback::form(&asked.headers, &asked.body)),
+            Vec::new(),
+        ),
+        None => (Vec::new(), Vec::new()),
+    };
+    // Read as a form, which PHP has made of it.
+    let content_type = match files.is_empty() {
+        true => header("content-type"),
+        false => Some(&b"application/x-www-form-urlencoded"[..]),
+    };
+    let remote = crate::comment_post::client_addr(site, &asked.headers, asked.peer);
+    let postpass = cookie(&cookies, &format!("wp-postpass_{}", Names::new(site).hash)).is_some();
+    let request = hyscribe_rest::Request {
+        method: asked.method.as_str(),
+        route: &asked.route,
+        uri: asked
+            .uri
+            .path_and_query()
+            .map_or(b"/", |uri| uri.as_str().as_bytes()),
+        get: &get,
+        post: &form,
+        cookie_user: user,
+        origin: header("origin"),
+        nonce: header("x-wp-nonce"),
+        remote_addr: &remote,
+        postpass,
+        user_agent: header("user-agent"),
+        method_override: header("x-http-method-override"),
+        content_type,
+        body: &asked.body,
+        host: header("host"),
+        now,
+    };
+    let answered = hyscribe_rest::answer(&rest, &request);
+    let unfiltered_upload = hyscribe_rest::Site::can(&rest, user, "unfiltered_upload", &[]);
+    let Rest { reads, .. } = rest;
+    if let Err(err) = reads.reads.finish() {
+        return crate::html(crate::database_error(site, &err));
+    }
+    match answered {
+        Answer::Served(served) => sent(served),
+        Answer::Write(pending) => match &pending.plan.write {
+            hyscribe_rest::Write::Upload(upload) => {
+                let upload = upload.as_ref().clone();
+                let incoming = (&asked.headers, &asked.body, &files[..]);
+                let asker = (user, token, now, handle);
+                uploads::answer(
+                    site,
+                    &request,
+                    (*pending, &upload),
+                    asker,
+                    incoming,
+                    unfiltered_upload,
+                )
+            }
+            _ => writes::answer(site, &request, *pending, (user, token, now, handle)),
+        },
+    }
+}
+
+/// The block editor's preloads of `paths` as the admin's user reads them
+/// (`block_editor_rest_api_preload()`), over a read of the site of its own;
+/// `None` where one is not ported.
+pub(crate) fn preloads(
+    admin: &LoginReads,
+    (user, host): (u64, &str),
+    paths: &[(&'static str, String)],
+) -> Option<Value> {
+    let mut reads = LoginReads::new(admin.site, Handle::current(), admin.now);
+    reads.act_as(user, admin.session_token().to_vec());
+    let rest = Rest {
+        reads,
+        site: admin.site,
+        user,
+        caps: OnceCell::new(),
+    };
+    let answered = |method: &str, path: &str| match preload(
+        &rest,
+        (user, host.as_bytes(), admin.now),
+        method,
+        path.as_bytes(),
+    ) {
+        Preloaded::Kept(data, headers) => Some(Some((data, headers))),
+        Preloaded::Left => Some(None),
+        Preloaded::NotPorted => None,
+    };
+    let memo = hyscribe_admin::editor::page::preloaded(paths, &answered);
+    let Rest { reads, .. } = rest;
+    let finished = reads.reads.finish().is_ok();
+    memo.filter(|_| finished)
+}
+
+/// The answer the API served.
+fn sent(served: Served) -> Response {
+    let response = served.headers.into_iter().fold(
+        Response::builder().status(served.status),
+        |response, (name, value)| response.header(name, value),
+    );
+    // Every header is the site's URL escaped, a request header's value or
+    // fixed text, which HTTP carries.
+    response.body(Body::from(served.body)).unwrap_or_default()
+}
+
+mod uploads;
+mod writes;
+
+#[cfg(test)]
+pub(crate) mod tests;

@@ -1,0 +1,14 @@
+# The rows PHP WordPress writes for the action admin-terms-edited (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-15 09:38:05 to 2026-11-15 09:38:05 UTC.
+# %wp_terms:1% is 6.
+# %wp_terms:2% is 7.
+# %wp_term_taxonomy:1% is 6.
+# %wp_term_taxonomy:2% is 7.
+# %wp_options:1% is 136.
+# %wp_options:2% is 137.
+wp_options	category_children	~	option_id	%wp_options:1%	%wp_options:2%
+wp_options	category_children	~	option_value	a:0:{}	a:1:{i:%wp_terms:1%;a:1:{i:0;i:%wp_terms:2%;}}
+wp_term_taxonomy	%wp_term_taxonomy:2%	~	description		Line x
+wp_term_taxonomy	%wp_term_taxonomy:2%	~	parent	0	%wp_terms:1%
+wp_terms	%wp_terms:2%	~	name	Oracle edited	Oracle "edited"
+wp_terms	%wp_terms:2%	~	slug	oracle-edited	oracle-edited-slug

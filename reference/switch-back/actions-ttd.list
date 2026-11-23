@@ -1,0 +1,49 @@
+# The switch-back suite over the Theme Test Data (HYSCRIBE_SWITCH_BACK_FIXTURE=ttd): a
+# site with plain permalinks and many posts, written by HyScribe over REST (the same
+# cases as actions.list, whose IDs the default install fixes), then served by PHP.
+# case	user (admin or visitor)	method	path	body (- for none)	nonce action (- for none)	nonce field	status
+rest-pattern	admin	POST	/?rest_route=/wp/v2/blocks	{"title":"A REST pattern","content":"<!-- wp:paragraph -->\n<p>Synced from REST.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+rest-pattern-update	admin	PATCH	/?rest_route=/wp/v2/blocks/%rest-pattern%	{"title":"A REST pattern, renamed"}	wp_rest	X-WP-Nonce	200
+rest-post	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A REST post","content":"<!-- wp:paragraph -->\n<p>Written over REST.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:block {\"ref\":%rest-pattern%} /-->","excerpt":"Its excerpt","status":"publish","categories":[1],"comment_status":"open","ping_status":"closed"}	wp_rest	X-WP-Nonce	201
+rest-post-update	admin	PUT	/?rest_route=/wp/v2/posts/%rest-post%	{"title":"A REST post, updated","sticky":true,"date":"2026-11-01T10:00:00"}	wp_rest	X-WP-Nonce	200
+rest-draft	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A REST draft","status":"draft"}	wp_rest	X-WP-Nonce	201
+rest-future	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A REST future post","status":"future","date_gmt":"2030-01-01T00:00:00Z"}	wp_rest	X-WP-Nonce	201
+rest-trashed	admin	POST	/?rest_route=/wp/v2/posts	{"title":"Trashed over REST","status":"publish"}	wp_rest	X-WP-Nonce	201
+rest-trash	admin	DELETE	/?rest_route=/wp/v2/posts/%rest-trashed%	-	wp_rest	X-WP-Nonce	200
+rest-page	admin	POST	/?rest_route=/wp/v2/pages	{"title":"A REST page","menu_order":4,"status":"publish","content":"<!-- wp:paragraph -->\n<p>A page written over REST.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	201
+rest-page-update	admin	POST	/?rest_route=/wp/v2/pages/%rest-page%	{"title":"A REST page, updated","comment_status":"closed"}	wp_rest	X-WP-Nonce	200
+rest-settings	admin	POST	/?rest_route=/wp/v2/settings	{"title":"Switch back over the Theme Test Data","description":"Saved by HyScribe"}	wp_rest	X-WP-Nonce	200
+ttd-comment	visitor	POST	/wp-comments-post.php	comment_post_ID=%rest-post%&author=Ann&email=ann%40example.test&url=&comment=A+visitor+comment+over+the+Theme+Test+Data.	-	-	302
+# Uploads
+rest-media	admin	POST	/?rest_route=/wp/v2/media	upload:file:wide.jpg:title=REST+image&alt_text=A+wide+REST+picture&caption=REST+caption&post=%rest-post%	wp_rest	X-WP-Nonce	201
+rest-media-png	admin	POST	/?rest_route=/wp/v2/media	upload:file:large.png:title=REST+png&status=publish	wp_rest	X-WP-Nonce	201
+rest-featured	admin	POST	/?rest_route=/wp/v2/posts/%rest-post%	{"featured_media":%rest-media%}	wp_rest	X-WP-Nonce	200
+async-plain	admin	POST	/hs-admin/async-upload	upload:async-upload:small.jpg:short=1&post_id=%rest-page%	media-form	_wpnonce	200
+async-modal	admin	POST	/hs-admin/async-upload	upload:async-upload:orient-6.jpg:action=upload-attachment&name=orient-6.jpg	media-form	_wpnonce	200
+async-gif	admin	POST	/hs-admin/async-upload	upload:async-upload:still.gif:action=upload-attachment&name=still.gif&post_id=%rest-post%	media-form	_wpnonce	200
+rest-media-edit	admin	POST	/?rest_route=/wp/v2/media	upload:file:small.jpg:title=Edited+later&alt_text=Alt+before&caption=Caption+before	wp_rest	X-WP-Nonce	201
+rest-media-doomed	admin	POST	/?rest_route=/wp/v2/media	upload:file:wide.jpg:title=Doomed+picture&post=%rest-post%	wp_rest	X-WP-Nonce	201
+rest-media-update	admin	POST	/?rest_route=/wp/v2/media/%rest-media-edit%	{"title":"Edited by REST","alt_text":"Alt after","caption":"Caption after","description":"Described by REST","post":%rest-page%,"slug":"edited-by-rest"}	wp_rest	X-WP-Nonce	200
+rest-media-delete	admin	DELETE	/?rest_route=/wp/v2/media/%rest-media-doomed%&force=true	-	wp_rest	X-WP-Nonce	200
+# The site editor's saves
+se-single	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"single","theme":"twentytwentyfive","title":"Single Posts","description":"Customised in HyScribe","content":"<!-- wp:template-part {\"slug\":\"header\",\"tagName\":\"header\"} /-->\n\n<!-- wp:paragraph -->\n<p>Single template saved from HyScribe.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:post-featured-image /-->\n\n<!-- wp:post-title /-->\n\n<!-- wp:post-content /-->\n\n<!-- wp:comments -->\n<div class=\"wp-block-comments\"><!-- wp:comment-template -->\n<!-- wp:comment-content /-->\n<!-- /wp:comment-template --></div>\n<!-- /wp:comments -->\n\n<!-- wp:template-part {\"slug\":\"footer\",\"tagName\":\"footer\"} /-->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-footer	admin	POST	/?rest_route=/wp/v2/template-parts	{"slug":"footer","theme":"twentytwentyfive","area":"footer","title":"Footer","content":"<!-- wp:paragraph -->\n<p>Footer saved from HyScribe.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-part	admin	POST	/?rest_route=/wp/v2/template-parts	{"slug":"switch-back-part","theme":"twentytwentyfive","area":"uncategorized","title":"Switch back part","content":"<!-- wp:paragraph -->\n<p>A part made in HyScribe.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+# The global styles post PHP creates when its themes route links it, which HyScribe's does too.
+# into it), added as PHP stores it; the guid carries the site's address.
+se-seed	admin	GET	/?rest_route=/wp/v2/themes&status=active	-	wp_rest	X-WP-Nonce	200
+se-styles	admin	POST	/?rest_route=/wp/v2/global-styles/%se-seed%	{"styles":{"color":{"background":"#fdf2d0","text":"#1b1b1b"},"typography":{"fontSize":"19px"}},"settings":{"color":{"custom":false}}}	wp_rest	X-WP-Nonce	200
+se-custom	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"switch-back-template","theme":"twentytwentyfive","title":"Switch back template","description":"A template made in HyScribe","content":"<!-- wp:template-part {\"slug\":\"header\",\"tagName\":\"header\"} /-->\n\n<!-- wp:paragraph -->\n<p>Custom template saved from HyScribe.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:template-part {\"slug\":\"switch-back-part\"} /-->\n\n<!-- wp:post-content /-->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-custom-update	admin	POST	/?rest_route=/wp/v2/templates/twentytwentyfive//switch-back-template	{"title":"Switch back template, renamed"}	wp_rest	X-WP-Nonce	200
+se-doomed	admin	POST	/?rest_route=/wp/v2/templates	{"slug":"doomed-template","theme":"twentytwentyfive","title":"Doomed template","content":"<!-- wp:paragraph -->\n<p>Gone soon.</p>\n<!-- /wp:paragraph -->","status":"publish"}	wp_rest	X-WP-Nonce	201
+se-doomed-delete	admin	DELETE	/?rest_route=/wp/v2/templates/twentytwentyfive//doomed-template&force=true	-	wp_rest	X-WP-Nonce	200
+se-page	admin	POST	/?rest_route=/wp/v2/pages	{"title":"Templated page","status":"publish","template":"switch-back-template","content":"<!-- wp:paragraph -->\n<p>A page in the new template.</p>\n<!-- /wp:paragraph -->"}	wp_rest	X-WP-Nonce	201
+# Cron
+cron-restart	-	RESTART	EMPTY_TRASH_DAYS=30 DISABLE_WP_CRON=true	-	-	-	-
+scratch-cron-future	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A cron scheduled post","content":"<!-- wp:paragraph -->\n<p>Published by HyScribe cron.</p>\n<!-- /wp:paragraph -->","status":"future","date_gmt":"%now+65%"}	wp_rest	X-WP-Nonce	201
+scratch-cron-old	admin	POST	/?rest_route=/wp/v2/posts	{"title":"A cron trashed post","status":"publish"}	wp_rest	X-WP-Nonce	201
+scratch-cron-old-trash	admin	DELETE	/?rest_route=/wp/v2/posts/%scratch-cron-old%	-	wp_rest	X-WP-Nonce	200
+age-trash	-	SQL	UPDATE wp_postmeta SET meta_value = CAST(meta_value AS UNSIGNED) - 3456000 WHERE meta_key = '_wp_trash_meta_time' AND post_id = %scratch-cron-old%	-	-	-	-
+wait-for-future	-	SLEEP	67	-	-	-	-
+cron-run	-	CRON	-	-	-	-	-
+

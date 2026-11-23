@@ -1,0 +1,19 @@
+# The navigation fallback route (WP_REST_Navigation_Fallback_Controller) for reference/rest/golden.sh, over the default
+# install without a wp_navigation post (navigation-fallback.sql takes out the one php.sh's first page view writes). The
+# first request of an identity who may writes the post, so every request restores the database after it
+# (method, target, flags). The same over a site that has the post is navigation-fallback-existing.list.
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_embed=1	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_embed	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=edit	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=embed	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=view	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=bogus	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context=	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&context[]=view	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_fields=id	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_fields=_links	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_fields=id&_embed=1	restore
+GET	/?rest_route=/wp-block-editor/v1/navigation-fallback&_fields=_embedded&_embed=1	restore
+HEAD	/?rest_route=/wp-block-editor/v1/navigation-fallback	restore
+OPTIONS	/?rest_route=/wp-block-editor/v1/navigation-fallback	restore

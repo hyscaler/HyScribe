@@ -1,0 +1,64 @@
+# The rows PHP WordPress writes for the action navigation-fallback-home-link (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-19 13:09:44 to 2026-11-19 13:09:44 UTC.
+# %wp_posts:1% is 77.
+# %wp_posts:2% is 78.
+# %wp_posts:3% is 79.
+# %wp_posts:4% is 80.
+# %wp_posts:5% is 81.
+# %wp_postmeta:1% is 411.
+# %wp_postmeta:2% is 412.
+# %wp_postmeta:3% is 413.
+# %wp_postmeta:4% is 414.
+# %wp_postmeta:5% is 415.
+# %wp_postmeta:6% is 416.
+# %wp_postmeta:7% is 417.
+# %wp_postmeta:8% is 418.
+# %wp_postmeta:9% is 419.
+# %wp_postmeta:10% is 420.
+# %wp_postmeta:11% is 421.
+# %wp_postmeta:12% is 422.
+# %wp_postmeta:13% is 423.
+# %wp_postmeta:14% is 424.
+# %wp_postmeta:15% is 425.
+# %wp_postmeta:16% is 426.
+# %wp_postmeta:17% is 427.
+# %wp_postmeta:18% is 428.
+# %wp_postmeta:19% is 429.
+# %wp_postmeta:20% is 430.
+# %wp_postmeta:21% is 431.
+# %wp_postmeta:22% is 432.
+# %wp_postmeta:23% is 433.
+# %wp_postmeta:24% is 434.
+# %wp_postmeta:25% is 435.
+# %wp_postmeta:26% is 436.
+# %wp_postmeta:27% is 437.
+# %wp_postmeta:28% is 438.
+# %wp_postmeta:29% is 439.
+# %wp_postmeta:30% is 440.
+# %wp_postmeta:31% is 441.
+# %wp_postmeta:32% is 442.
+# %wp_terms:1% is 9012.
+# %wp_term_taxonomy:1% is 9012.
+wp_posts	%wp_posts:5%	+	ID	%wp_posts:5%
+wp_posts	%wp_posts:5%	+	comment_count	0
+wp_posts	%wp_posts:5%	+	comment_status	closed
+wp_posts	%wp_posts:5%	+	guid	http://127.0.0.1:8081/?p=%wp_posts:5%
+wp_posts	%wp_posts:5%	+	menu_order	0
+wp_posts	%wp_posts:5%	+	ping_status	closed
+wp_posts	%wp_posts:5%	+	pinged	
+wp_posts	%wp_posts:5%	+	post_author	0
+wp_posts	%wp_posts:5%	+	post_content	<!-- wp:navigation-link {"className":" menu-item menu-item-type-custom menu-item-object-custom current-menu-item current_page_item menu-item-home","description":"","id":null,"kind":"custom","label":"Home","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"http://127.0.0.1:8081/"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-custom menu-item-object-custom current-menu-item current_page_item menu-item-home","description":"","id":null,"kind":"custom","label":"Home again","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"https://127.0.0.1:8081"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-custom menu-item-object-custom","description":"","id":null,"kind":"custom","label":"Elsewhere","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"https://example.test/"} /--><!-- wp:navigation-link {"className":" menu-item menu-item-type-custom menu-item-object-custom current-menu-item current_page_item","description":"","id":null,"kind":"custom","label":"Relative","opensInNewTab":false,"rel":null,"title":"","type":"custom","url":"/"} /-->
+wp_posts	%wp_posts:5%	+	post_content_filtered	
+wp_posts	%wp_posts:5%	+	post_date	%now%
+wp_posts	%wp_posts:5%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:5%	+	post_excerpt	
+wp_posts	%wp_posts:5%	+	post_mime_type	
+wp_posts	%wp_posts:5%	+	post_modified	%now%
+wp_posts	%wp_posts:5%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:5%	+	post_name	home-link
+wp_posts	%wp_posts:5%	+	post_parent	0
+wp_posts	%wp_posts:5%	+	post_password	
+wp_posts	%wp_posts:5%	+	post_status	publish
+wp_posts	%wp_posts:5%	+	post_title	Home link
+wp_posts	%wp_posts:5%	+	post_type	wp_navigation
+wp_posts	%wp_posts:5%	+	to_ping	

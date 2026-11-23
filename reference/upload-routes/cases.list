@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The uploads reference/upload-routes/golden.sh sends as a visitor and as
+# each role: method<TAB>target<TAB>flags<TAB>file<TAB>fields. The file is
+# one of crates/hyscribe-image/tests/corpus, or of the files golden.sh
+# makes (evil.php, page.html, notes.txt, fake.jpg, empty.jpg, over.jpg),
+# as its name, or source:name to send it under another name. Fields are
+# URL-encoded pairs, sent as form fields beside the file, or as the query
+# of a raw body; - for none. Flags: form sends a multipart form with the
+# file as async-upload, restfile with the file as file; raw sends the file
+# as the body with Content-Type (type=) and Content-Disposition;
+# nodisposition and notype leave those out; nonce adds the user's
+# media-form nonce as _wpnonce, wrongnonce a wrong one. A REST request
+# carries the user's REST nonce.
+POST	/wp-admin/async-upload.php	form,nonce	photo.jpg	action=upload-attachment&name=photo.jpg
+POST	/wp-admin/async-upload.php	form,nonce	small.jpg	action=upload-attachment&name=small.jpg&post_id=1
+POST	/wp-admin/async-upload.php	form,nonce	big.jpg	action=upload-attachment&name=big.jpg
+POST	/wp-admin/async-upload.php	form,nonce	rgba.png:My Picture (1).PNG	action=upload-attachment&name=My+Picture+%281%29.PNG
+POST	/wp-admin/async-upload.php	form,nonce	small.jpg	action=upload-attachment&name=small.jpg&post_id=2
+POST	/wp-admin/async-upload.php	form,nonce	small.jpg	action=upload-attachment&name=small.jpg&post_id=999
+POST	/wp-admin/async-upload.php	form,wrongnonce	small.jpg	action=upload-attachment&name=small.jpg
+POST	/wp-admin/async-upload.php	form	small.jpg	action=upload-attachment&name=small.jpg
+POST	/wp-admin/async-upload.php	form,nonce	evil.php	action=upload-attachment&name=evil.php
+POST	/wp-admin/async-upload.php	form,nonce	page.html	action=upload-attachment&name=page.html
+POST	/wp-admin/async-upload.php	form,nonce	empty.jpg	action=upload-attachment&name=empty.jpg
+POST	/wp-admin/async-upload.php	form,nonce	over.jpg	action=upload-attachment&name=over.jpg
+POST	/wp-admin/async-upload.php	form,nonce	notes.txt	action=upload-attachment&name=notes.txt
+POST	/wp-admin/async-upload.php	form,nonce	fake.jpg	action=upload-attachment&name=fake.jpg
+POST	/wp-admin/async-upload.php	form,nonce	small.jpg	post_id=1&short=1
+POST	/wp-admin/async-upload.php	form,nonce	small.jpg	short=1
+POST	/wp-admin/async-upload.php	form,nonce	evil.php	short=1
+POST	/wp-admin/async-upload.php	form,wrongnonce	small.jpg	short=1
+POST	/wp-admin/media-new.php	form,nonce	small.jpg	html-upload=Upload&post_id=0
+POST	/wp-admin/media-new.php	form,nonce	evil.php	html-upload=Upload
+POST	/wp-admin/media-new.php	form,wrongnonce	small.jpg	html-upload=Upload
+POST	/wp-admin/media-new.php	form,nonce	small.jpg	post_id=1
+POST	/wp-admin/async-upload.php	form,nonce	small.jpg	action=upload-attachment&name=small.jpg&post_id=900
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg	photo.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg	small.jpg	title=Raw+title&alt_text=An+alt&caption=A+caption&description=Described&post=1
+POST	/?rest_route=/wp/v2/media	restfile	rgba.png	title=A+form+upload&alt_text=Alt&post=1
+POST	/?rest_route=/wp/v2/media	restfile	small.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg,nodisposition	small.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,notype	small.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg	empty.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=text/plain	evil.php	-
+POST	/?rest_route=/wp/v2/media	restfile	evil.php	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg	small.jpg	post=2
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg	small.jpg	post=999
+POST	/wp-admin/async-upload.php	form,nonce	orient-6.jpg	action=upload-attachment&name=orient-6.jpg
+POST	/wp-admin/async-upload.php	form,nonce	big-orient-6.jpg	action=upload-attachment&name=big-orient-6.jpg
+POST	/wp-admin/async-upload.php	form,nonce	big.png	action=upload-attachment&name=big.png
+POST	/wp-admin/async-upload.php	form,nonce	edge-2560.jpg	action=upload-attachment&name=edge-2560.jpg
+POST	/wp-admin/async-upload.php	form,nonce	edge-2561.jpg	action=upload-attachment&name=edge-2561.jpg
+POST	/wp-admin/media-new.php	form,nonce	big.jpg	html-upload=Upload&post_id=0
+POST	/wp-admin/media-new.php	form,nonce	orient-6.jpg	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg	big.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg	orient-6.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg	big-orient-6.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg	big-orient-3.jpg	-
+POST	/?rest_route=/wp/v2/media	restfile	big.png	-
+POST	/?rest_route=/wp/v2/media	restfile	big-indexed.png	title=Big+indexed&post=1
+POST	/?rest_route=/wp/v2/media	restfile	big-rgba.png	-
+POST	/?rest_route=/wp/v2/media	restfile	edge-2561.jpg	-
+POST	/wp-admin/async-upload.php	form,nonce	plain.txt	action=upload-attachment&name=plain.txt
+POST	/wp-admin/async-upload.php	form,nonce	words.csv	action=upload-attachment&name=words.csv
+POST	/wp-admin/async-upload.php	form,nonce	commas.txt	action=upload-attachment&name=commas.txt
+POST	/wp-admin/async-upload.php	form,nonce	captions.vtt	action=upload-attachment&name=captions.vtt
+POST	/wp-admin/async-upload.php	form,nonce	event.ics	action=upload-attachment&name=event.ics
+POST	/wp-admin/async-upload.php	form,nonce	script.txt	action=upload-attachment&name=script.txt
+POST	/wp-admin/async-upload.php	form,nonce	sample.docx	action=upload-attachment&name=sample.docx
+POST	/wp-admin/async-upload.php	form,nonce	sample.xlsx	action=upload-attachment&name=sample.xlsx
+POST	/wp-admin/async-upload.php	form,nonce	sample.odt	action=upload-attachment&name=sample.odt
+POST	/wp-admin/async-upload.php	form,nonce	sample.ods	action=upload-attachment&name=sample.ods
+POST	/wp-admin/async-upload.php	form,nonce	sample.zip	action=upload-attachment&name=sample.zip
+POST	/wp-admin/async-upload.php	form,nonce	sample.rtf	action=upload-attachment&name=sample.rtf
+POST	/wp-admin/async-upload.php	form,nonce	sample.tar	action=upload-attachment&name=sample.tar
+POST	/wp-admin/async-upload.php	form,nonce	sample.gz	action=upload-attachment&name=sample.gz
+POST	/wp-admin/async-upload.php	form,nonce	sample.doc	action=upload-attachment&name=sample.doc
+POST	/wp-admin/async-upload.php	form,nonce	sample.pdf	action=upload-attachment&name=sample.pdf
+POST	/wp-admin/async-upload.php	form,nonce	sample.zip:sample.docx	action=upload-attachment&name=sample.docx
+POST	/wp-admin/async-upload.php	form,nonce	sample.docx:sample.zip	action=upload-attachment&name=sample.zip
+POST	/wp-admin/async-upload.php	form,nonce	plain.txt:plain.pdf	action=upload-attachment&name=plain.pdf
+POST	/wp-admin/async-upload.php	form,nonce	sample.pdf:sample.txt	action=upload-attachment&name=sample.txt
+POST	/wp-admin/async-upload.php	form,nonce	random.bin:random.mp3	action=upload-attachment&name=random.mp3
+POST	/wp-admin/async-upload.php	form,nonce	cbr.mp3	action=upload-attachment&name=cbr.mp3
+POST	/wp-admin/async-upload.php	form,nonce	noxing.mp3	action=upload-attachment&name=noxing.mp3
+POST	/wp-admin/async-upload.php	form,nonce	tagged.mp3	action=upload-attachment&name=tagged.mp3
+POST	/wp-admin/async-upload.php	form,nonce	tone.wav	action=upload-attachment&name=tone.wav
+POST	/wp-admin/async-upload.php	form,nonce	tone.flac	action=upload-attachment&name=tone.flac
+POST	/wp-admin/async-upload.php	form,nonce	tone.ogg	action=upload-attachment&name=tone.ogg
+POST	/wp-admin/async-upload.php	form,nonce	tone.m4a	action=upload-attachment&name=tone.m4a
+POST	/wp-admin/async-upload.php	form,nonce	tone.aac	action=upload-attachment&name=tone.aac
+POST	/wp-admin/async-upload.php	form,nonce	tone.wma	action=upload-attachment&name=tone.wma
+POST	/wp-admin/async-upload.php	form,nonce	tune.mid	action=upload-attachment&name=tune.mid
+POST	/wp-admin/async-upload.php	form,nonce	clip.mp4	action=upload-attachment&name=clip.mp4
+POST	/wp-admin/async-upload.php	form,nonce	clip-audio.mp4	action=upload-attachment&name=clip-audio.mp4
+POST	/wp-admin/async-upload.php	form,nonce	clip.mov	action=upload-attachment&name=clip.mov
+POST	/wp-admin/async-upload.php	form,nonce	clip.avi	action=upload-attachment&name=clip.avi
+POST	/wp-admin/async-upload.php	form,nonce	clip.webm	action=upload-attachment&name=clip.webm
+POST	/wp-admin/async-upload.php	form,nonce	clip.3gp	action=upload-attachment&name=clip.3gp
+POST	/wp-admin/async-upload.php	form,nonce	clip.flv	action=upload-attachment&name=clip.flv
+POST	/wp-admin/async-upload.php	form,nonce	sample.docx	post_id=1&short=1
+POST	/wp-admin/media-new.php	form,nonce	plain.txt	html-upload=Upload&post_id=0
+POST	/wp-admin/media-new.php	form,nonce	sample.docx	html-upload=Upload&post_id=0
+POST	/wp-admin/media-new.php	form,nonce	commas.txt	html-upload=Upload
+POST	/wp-admin/media-new.php	form,nonce	tone.wav	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	raw,type=text/plain	plain.txt	-
+POST	/?rest_route=/wp/v2/media	raw,type=text/plain	plain.txt	title=Notes&alt_text=An+alt&caption=A+caption&description=Described&post=1
+POST	/?rest_route=/wp/v2/media	raw,type=text/plain	commas.txt	-
+POST	/?rest_route=/wp/v2/media	raw,type=application/pdf	sample.pdf	-
+POST	/?rest_route=/wp/v2/media	raw,type=application/octet-stream	sample.docx	-
+POST	/?rest_route=/wp/v2/media	restfile	sample.docx	title=A+form+document&post=1
+POST	/?rest_route=/wp/v2/media	restfile	sample.zip	-
+POST	/?rest_route=/wp/v2/media	restfile	sample.xlsx	-
+POST	/?rest_route=/wp/v2/media	raw,type=audio/mpeg	cbr.mp3	-
+POST	/?rest_route=/wp/v2/media	raw,type=audio/mpeg	tagged.mp3	title=Own+title
+POST	/?rest_route=/wp/v2/media	restfile	tone.wav	-
+POST	/?rest_route=/wp/v2/media	raw,type=video/mp4	clip.mp4	-
+POST	/?rest_route=/wp/v2/media	restfile	clip.mov	post=2
+POST	/?rest_route=/wp/v2/media	raw,type=application/octet-stream	random.bin:random.mp3	-
+POST	/?rest_route=/wp/v2/media	raw,type=text/plain	sample.docx:sample.zip	-

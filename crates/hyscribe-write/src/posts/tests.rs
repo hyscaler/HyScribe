@@ -1,0 +1,2639 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The post functions against the write oracle's goldens
+//! (`reference/writes/actions.php` and `actions-posts.php`): each setup
+//! writes what PHP's does, and the action must write PHP's rows.
+
+use super::*;
+use hyscribe_db::{CommentFields, Connection, Writer};
+use hyscribe_testkit::{fixture_database, writes::check_writes};
+use std::result::Result as StdResult;
+
+use crate::terms::{Taxonomy, wp_set_object_terms};
+use crate::tests::{MISSING, ONE_AT_A_TIME, admin, connection, writer};
+
+pub(crate) fn shown(err: impl std::fmt::Debug) -> String {
+    format!("{err:?}")
+}
+
+/// Runs `f` as one action on the oracle's connection, as `ctx`.
+pub(crate) async fn act<T>(
+    writer: &Writer,
+    conn: &mut Connection,
+    ctx: &Context,
+    f: impl AsyncFnOnce(&mut Write<'_>, &Context) -> Result<T>,
+) -> StdResult<T, String> {
+    let mut write = writer.begin_on(conn).await.map_err(shown)?;
+    let value = f(&mut write, ctx).await.map_err(shown)?;
+    write.commit().await.map_err(shown)?;
+    Ok(value)
+}
+
+/// `$posts_insert( $args )` of actions-posts.php, and actions.php's
+/// `$new_post( $status )` with `status`.
+pub(crate) fn oracle_post(status: &str) -> PostArgs {
+    PostArgs {
+        title: b"A write oracle post".to_vec(),
+        content: b"Its content.".to_vec(),
+        status: status.into(),
+        author: Some(1),
+        ..PostArgs::default()
+    }
+}
+
+pub(crate) async fn insert_post(
+    writer: &Writer,
+    conn: &mut Connection,
+    args: PostArgs,
+) -> StdResult<u64, String> {
+    act(writer, conn, &admin(), async |w, ctx| {
+        wp_insert_post(w, ctx, args).await
+    })
+    .await
+}
+
+/// `$posts_comment()`: a comment and its meta, raw.
+async fn comment(
+    conn: &mut Connection,
+    (post, id, parent): (u64, u64, u64),
+    approved: &str,
+) -> StdResult<(), String> {
+    sqlx::query(
+        "INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_parent, comment_author, \
+         comment_date, comment_date_gmt, comment_content, comment_approved) VALUES (?, ?, ?, \
+         'A reader', '2026-01-01 00:00:00', '2026-01-01 00:00:00', 'A comment.', ?)",
+    )
+    .bind(id)
+    .bind(post)
+    .bind(parent)
+    .bind(approved)
+    .execute(&mut *conn)
+    .await
+    .map_err(shown)?;
+    sqlx::query(
+        "INSERT INTO wp_commentmeta (comment_id, meta_key, meta_value) VALUES (?, 'oracle', ?)",
+    )
+    .bind(id)
+    .bind(approved)
+    .execute(&mut *conn)
+    .await
+    .map_err(shown)?;
+    Ok(())
+}
+
+/// `$posts_with_comments()`.
+async fn with_comments(writer: &Writer, conn: &mut Connection) -> StdResult<u64, String> {
+    let id = insert_post(writer, conn, oracle_post("publish")).await?;
+    comment(conn, (id, 901, 0), "1").await?;
+    comment(conn, (id, 902, 0), "0").await?;
+    comment(conn, (id, 903, 0), "1").await?;
+    Ok(id)
+}
+
+/// `$posts_future()`.
+pub(crate) fn future_post() -> PostArgs {
+    PostArgs {
+        import_id: 900,
+        date: "2030-01-01 10:00:00".into(),
+        ..oracle_post("publish")
+    }
+}
+
+pub(crate) async fn check<T>(
+    golden: &str,
+    setup: impl AsyncFnOnce(&mut Connection) -> StdResult<T, String>,
+    action: impl AsyncFnOnce(&mut Connection, T) -> StdResult<(), String>,
+) {
+    let result = check_writes(&fixture_database(), golden, setup, action).await;
+    if let Err(differences) = result {
+        panic!("{differences}");
+    }
+}
+
+#[tokio::test]
+async fn inserts_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    check(
+        "insert-draft-post",
+        async |_| Ok(()),
+        async |conn, ()| {
+            insert_post(writer, conn, oracle_post("draft"))
+                .await
+                .map(drop)
+        },
+    )
+    .await;
+    check(
+        "insert-colliding-slugs",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let titled = |title: &str, post_type: &str| PostArgs {
+                title: title.as_bytes().to_vec(),
+                post_type: post_type.into(),
+                ..oracle_post("publish")
+            };
+            for (title, post_type) in [
+                ("Hello world!", "post"),
+                ("Hello world!", "post"),
+                ("Feed", "post"),
+                ("", "post"),
+                ("Sample Page", "page"),
+                ("page2", "page"),
+            ] {
+                insert_post(writer, conn, titled(title, post_type)).await?;
+            }
+            Ok(())
+        },
+    )
+    .await;
+    check(
+        "insert-future-post",
+        async |_| Ok(()),
+        async |conn, ()| insert_post(writer, conn, future_post()).await.map(drop),
+    )
+    .await;
+    check(
+        "insert-private-post",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let args = PostArgs {
+                title: b"A private post".to_vec(),
+                password: b"secret".to_vec(),
+                ..oracle_post("private")
+            };
+            insert_post(writer, conn, args).await.map(drop)
+        },
+    )
+    .await;
+    check(
+        "insert-pages-with-parent",
+        async |_| Ok(()),
+        async |conn, ()| {
+            for parent in [2, 2, 0] {
+                let args = PostArgs {
+                    title: b"Child".to_vec(),
+                    post_type: "page".into(),
+                    parent,
+                    menu_order: 3,
+                    ..oracle_post("publish")
+                };
+                insert_post(writer, conn, args).await?;
+            }
+            Ok(())
+        },
+    )
+    .await;
+    check(
+        "insert-pending-post-without-capability",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let ctx = Context {
+                user: 0,
+                can_publish: false,
+                ..admin()
+            };
+            let args = PostArgs {
+                name: Some(b"chosen".to_vec()),
+                ..oracle_post("pending")
+            };
+            act(writer, conn, &ctx, async |w, ctx| {
+                wp_insert_post(w, ctx, args).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+    check(
+        "insert-sanitized-post",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let args = PostArgs {
+                title: b"  <b>Bold</b> <script>alert(1)</script>title\t ".to_vec(),
+                content: b"<p onclick=\"x()\">Para</p><script>bad()</script>\
+                    <a href=\"javascript:x()\">link</a>"
+                    .to_vec(),
+                excerpt: b"<em>ok</em><iframe src=\"https://example.test/\"></iframe>".to_vec(),
+                comment_status: "Closed".into(),
+                ping_status: "CLOSED".into(),
+                password: b"pw".to_vec(),
+                to_ping: b"http://a.test/one ftp://b.test\nhttps://c.test/two not-a-url".to_vec(),
+                menu_order: 5,
+                ..oracle_post("Publish")
+            };
+            insert_post(writer, conn, args).await.map(drop)
+        },
+    )
+    .await;
+    // `$posts_html`, filtered, then as a user with `unfiltered_html`.
+    for (golden, unfiltered_html) in [
+        ("insert-html-post", false),
+        ("insert-html-post-unfiltered-html", true),
+    ] {
+        let ctx = Context {
+            unfiltered_html,
+            ..admin()
+        };
+        check(
+            golden,
+            async |_| Ok(()),
+            async |conn, ()| {
+                let args = PostArgs {
+                    title: b"  <b>Bold</b> <script>alert(1)</script>title\t ".to_vec(),
+                    content: b"<p onclick=\"x()\">Para &#128; &#150;</p><script>bad()</script>\
+                        <a href=\"javascript:x()\">link</a>"
+                        .to_vec(),
+                    content_filtered: b"<script>kept()</script>&#128;".to_vec(),
+                    excerpt: b"<em>&#153;</em><iframe src=\"https://example.test/\"></iframe>"
+                        .to_vec(),
+                    ..oracle_post("publish")
+                };
+                act(writer, conn, &ctx, async |w, ctx| {
+                    wp_insert_post(w, ctx, args).await
+                })
+                .await
+                .map(drop)
+            },
+        )
+        .await;
+    }
+    check(
+        "insert-reclaims-trashed-slug",
+        async |conn| {
+            let taken = || PostArgs {
+                title: b"Taken".to_vec(),
+                ..oracle_post("publish")
+            };
+            let id = insert_post(writer, conn, taken()).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                trash_status(w, id).await
+            })
+            .await?;
+            Ok(taken())
+        },
+        async |conn, taken| insert_post(writer, conn, taken).await.map(drop),
+    )
+    .await;
+}
+
+/// `$posts_every_status()`.
+async fn every_status(w: &mut Write<'_>, ctx: &Context) -> Result<()> {
+    for (n, post_type) in ["post", "page"].into_iter().enumerate() {
+        let args = PostArgs {
+            import_id: 910 + n as u64,
+            post_type: post_type.into(),
+            title: b"A scheduled post".to_vec(),
+            date: "2030-01-01 10:00:00".into(),
+            ..oracle_post("publish")
+        };
+        wp_insert_post(w, ctx, args).await?;
+    }
+    for post_type in ["post", "page"] {
+        let dated = |status| PostArgs {
+            post_type: post_type.into(),
+            date: "2026-03-07 10:00:00".into(),
+            ..oracle_post(status)
+        };
+        let id = wp_insert_post(w, ctx, dated("publish")).await?;
+        let private = PostArgs {
+            title: b"A private post".to_vec(),
+            ..dated("private")
+        };
+        wp_insert_post(w, ctx, private).await?;
+        wp_update_post(w, ctx, id, &|args| args.title = b"A renamed post".to_vec()).await?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn guids_under_pretty_permalinks_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let custom = b"/%category%/%author%/%postname%/";
+    for (golden, structure) in [
+        ("day-and-name", &b"/%year%/%monthnum%/%day%/%postname%/"[..]),
+        ("month-and-name", b"/%year%/%monthnum%/%postname%/"),
+        ("numeric", b"/archives/%post_id%"),
+        ("post-name", b"/%postname%/"),
+        ("custom", custom),
+    ] {
+        check(
+            &format!("insert-posts-under-{golden}-permalinks"),
+            async |conn| set_option(writer, conn, "permalink_structure", structure).await,
+            async |conn, ()| act(writer, conn, &admin(), every_status).await,
+        )
+        .await;
+    }
+    check(
+        "insert-posts-in-categories-under-permalinks",
+        async |conn| set_option(writer, conn, "permalink_structure", custom).await,
+        async |conn, ()| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                let no = crate::terms::TermArgs::default();
+                let parent =
+                    crate::terms::wp_insert_term(w, Taxonomy::Category, b"Parent", &no).await?;
+                let args = crate::terms::TermArgs {
+                    parent: Some(parent.term_id as i64),
+                    ..no
+                };
+                let child =
+                    crate::terms::wp_insert_term(w, Taxonomy::Category, b"Child", &args).await?;
+                for category in [vec![child.term_id], vec![child.term_id, 1], vec![MISSING]] {
+                    let args = PostArgs {
+                        category: Some(category),
+                        ..oracle_post("publish")
+                    };
+                    wp_insert_post(w, ctx, args).await?;
+                }
+                let page = PostArgs {
+                    post_type: "page".into(),
+                    parent: 2,
+                    ..oracle_post("publish")
+                };
+                wp_insert_post(w, ctx, page).await?;
+                let visitor = Context {
+                    user: 0,
+                    can_publish: false,
+                    ..ctx.clone()
+                };
+                wp_insert_post(w, &visitor, oracle_post("private")).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+    check(
+        "insert-posts-in-odd-categories-under-permalinks",
+        async |conn| {
+            set_option(writer, conn, "permalink_structure", custom).await?;
+            for (id, parent) in [(970, 971), (971, 970), (972, MISSING)] {
+                raw_term(conn, id, (&format!("Odd {id}"), "category"), 0).await?;
+                sqlx::query(
+                    "UPDATE wp_terms AS t INNER JOIN wp_term_taxonomy AS tt ON t.term_id = \
+                     tt.term_id SET t.slug = REPLACE(t.slug, ' ', '-'), tt.parent = ? WHERE \
+                     t.term_id = ?",
+                )
+                .bind(parent)
+                .bind(id)
+                .execute(&mut *conn)
+                .await
+                .map_err(shown)?;
+            }
+            set_option(
+                writer,
+                conn,
+                "default_category",
+                MISSING.to_string().as_bytes(),
+            )
+            .await
+        },
+        async |conn, ()| {
+            for (category, author) in [(Some(vec![971]), 1), (Some(vec![972]), 1), (None, MISSING)]
+            {
+                let args = PostArgs {
+                    category,
+                    author: Some(author),
+                    ..oracle_post("publish")
+                };
+                insert_post(writer, conn, args).await?;
+            }
+            Ok(())
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn database_errors_end_pretty_guids() {
+    let child = async |w: &mut Write<'_>, _: &Context| {
+        set(w, "permalink_structure", b"/%category%/%postname%/").await?;
+        let mut parent = 1;
+        for name in [&b"Child"[..], b"Grandchild"] {
+            let args = crate::terms::TermArgs {
+                parent: Some(parent),
+                ..crate::terms::TermArgs::default()
+            };
+            let term = crate::terms::wp_insert_term(w, Taxonomy::Category, name, &args).await?;
+            parent = term.term_id as i64;
+        }
+        Ok(parent as u64)
+    };
+    every_cut(child, async |w, ctx, child| {
+        for category in [vec![child], vec![MISSING]] {
+            let args = PostArgs {
+                category: Some(category),
+                ..oracle_post("private")
+            };
+            wp_insert_post(w, ctx, args).await?;
+        }
+        let page = PostArgs {
+            post_type: "page".into(),
+            parent: 2,
+            ..oracle_post("publish")
+        };
+        wp_insert_post(w, ctx, page).await.map(drop)
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn updates_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let update = async |conn: &mut Connection, id, change: fn(&mut PostArgs)| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_update_post(w, ctx, id, &change).await
+        })
+        .await
+        .map(drop)
+    };
+    check(
+        "publish-post",
+        async |conn| insert_post(writer, conn, oracle_post("draft")).await,
+        async |conn, id| update(conn, id, |args| args.status = "publish".into()).await,
+    )
+    .await;
+    check(
+        "update-post-title",
+        async |conn| insert_post(writer, conn, oracle_post("publish")).await,
+        async |conn, id| update(conn, id, |args| args.title = b"A renamed post".to_vec()).await,
+    )
+    .await;
+    check(
+        "update-post-to-draft",
+        async |conn| insert_post(writer, conn, oracle_post("publish")).await,
+        async |conn, id| update(conn, id, |args| args.status = "draft".into()).await,
+    )
+    .await;
+    check(
+        "update-post-slug-and-date",
+        async |conn| {
+            let args = PostArgs {
+                date: "2025-06-07 08:09:10".into(),
+                ..oracle_post("publish")
+            };
+            insert_post(writer, conn, args).await
+        },
+        async |conn, id| {
+            update(conn, id, |args| {
+                args.name = Some(b"A new slug".to_vec());
+                args.date = "2026-01-02 03:04:05".into();
+            })
+            .await
+        },
+    )
+    .await;
+    check(
+        "update-post-with-footnotes",
+        async |conn| {
+            let id = insert_post(writer, conn, oracle_post("publish")).await?;
+            let note = b"[{\"id\":\"n1\",\"content\":\"A note.\"}]";
+            act(writer, conn, &admin(), async |w, _| {
+                Ok(
+                    w.add_meta(hyscribe_db::Meta::Post, id, "footnotes", Some(note))
+                        .await?,
+                )
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, |args| args.title = b"A renamed post".to_vec()).await,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn trash_and_delete_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let trash = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_trash_post(w, ctx, id).await
+        })
+        .await
+        .map(drop)
+    };
+    let untrash = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_untrash_post(w, ctx, id, false).await
+        })
+        .await
+        .map(drop)
+    };
+    let delete = async |conn: &mut Connection, id, force| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_delete_post(w, ctx, id, force).await
+        })
+        .await
+        .map(drop)
+    };
+    check(
+        "trash-post",
+        async |conn| insert_post(writer, conn, oracle_post("publish")).await,
+        async |conn, id| trash(conn, id).await,
+    )
+    .await;
+    check(
+        "untrash-post",
+        async |conn| {
+            let id = insert_post(writer, conn, oracle_post("publish")).await?;
+            trash(conn, id).await?;
+            Ok(id)
+        },
+        async |conn, id| untrash(conn, id).await,
+    )
+    .await;
+    check(
+        "trash-future-post",
+        async |conn| insert_post(writer, conn, future_post()).await,
+        async |conn, id| trash(conn, id).await,
+    )
+    .await;
+    check(
+        "trash-post-with-comments",
+        async |conn| with_comments(writer, conn).await,
+        async |conn, id| trash(conn, id).await,
+    )
+    .await;
+    check(
+        "untrash-post-with-comments",
+        async |conn| {
+            let id = with_comments(writer, conn).await?;
+            trash(conn, id).await?;
+            Ok(id)
+        },
+        async |conn, id| untrash(conn, id).await,
+    )
+    .await;
+    check(
+        "trash-sticky-post",
+        async |conn| {
+            let args = PostArgs {
+                import_id: 930,
+                ..oracle_post("publish")
+            };
+            let id = insert_post(writer, conn, args).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                set(w, "sticky_posts", b"a:1:{i:0;i:930;}").await
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| trash(conn, id).await,
+    )
+    .await;
+    check(
+        "delete-post-with-comments",
+        async |conn| {
+            let id = with_comments(writer, conn).await?;
+            act(writer, conn, &admin(), async |w, ctx| {
+                wp_update_post(w, ctx, id, &|args| args.title = b"A renamed post".to_vec()).await
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| delete(conn, id, true).await,
+    )
+    .await;
+    check(
+        "delete-post-to-trash",
+        async |conn| insert_post(writer, conn, oracle_post("publish")).await,
+        async |conn, id| delete(conn, id, false).await,
+    )
+    .await;
+    check(
+        "delete-front-page-with-children",
+        async |conn| {
+            let page = |title: &[u8], parent| PostArgs {
+                title: title.to_vec(),
+                post_type: "page".into(),
+                parent,
+                ..oracle_post("publish")
+            };
+            let parent = PostArgs {
+                import_id: 910,
+                ..page(b"Parent", 0)
+            };
+            let id = insert_post(writer, conn, parent).await?;
+            insert_post(writer, conn, page(b"Kid", id)).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                set(w, "show_on_front", b"page").await?;
+                set(w, "page_on_front", b"910").await
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| delete(conn, id, true).await,
+    )
+    .await;
+}
+
+/// A post's status made `trash` with no other write.
+async fn trash_status(w: &mut Write<'_>, id: u64) -> Result<u64> {
+    let mut post = existing(w, id).await?;
+    post.status = "trash".into();
+    Ok(w.update_post(id, &post).await?)
+}
+
+/// `$posts_trash_raw()`: the status changed without wp_trash_post().
+async fn trash_raw(writer: &Writer, conn: &mut Connection, id: u64) -> StdResult<u64, String> {
+    act(writer, conn, &admin(), async |w, _| {
+        trash_status(w, id).await
+    })
+    .await?;
+    Ok(id)
+}
+
+/// `update_option()` of a value stored as `raw`, unserialized first.
+async fn set(w: &mut Write<'_>, name: &str, raw: &[u8]) -> Result<()> {
+    let value = hyscribe_phpser::unserialize(raw).unwrap_or_else(|| Value::String(raw.to_vec()));
+    crate::options::update_option(w, name, &value, None).await?;
+    Ok(())
+}
+
+/// `update_option()` as a setup makes it.
+async fn set_option(
+    writer: &Writer,
+    conn: &mut Connection,
+    name: &str,
+    value: &[u8],
+) -> StdResult<(), String> {
+    act(writer, conn, &admin(), async |w, _| {
+        set(w, name, value).await
+    })
+    .await
+}
+
+#[tokio::test]
+async fn edge_cases_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let publish =
+        async |conn: &mut Connection| insert_post(writer, conn, oracle_post("publish")).await;
+    let update = async |conn: &mut Connection, id, change: &dyn Fn(&mut PostArgs)| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_update_post(w, ctx, id, &change).await
+        })
+        .await
+        .map(drop)
+    };
+    let trash = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_trash_post(w, ctx, id).await
+        })
+        .await
+        .map(drop)
+    };
+    let delete = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_delete_post(w, ctx, id, true).await
+        })
+        .await
+        .map(drop)
+    };
+    check("insert-over-existing-post", publish, async |conn, id| {
+        let args = PostArgs {
+            id,
+            title: b"Rewritten".to_vec(),
+            content: b"New.".to_vec(),
+            status: "publish".into(),
+            ..PostArgs::default()
+        };
+        insert_post(writer, conn, args).await.map(drop)
+    })
+    .await;
+    check(
+        "update-post-category",
+        async |conn| {
+            for sql in [
+                "INSERT INTO wp_terms (term_id, name, slug, term_group) \
+                 VALUES (950, 'Oracle', 'oracle', 0)",
+                "INSERT INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, \
+                 parent, count) VALUES (950, 950, 'category', '', 0, 0)",
+            ] {
+                sqlx::raw_sql(sql)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(shown)?;
+            }
+            publish(conn).await
+        },
+        async |conn, id| {
+            update(conn, id, &|args| {
+                args.category = Some(vec![950, MISSING, 950])
+            })
+            .await
+        },
+    )
+    .await;
+    check(
+        "update-page-parents",
+        async |conn| {
+            let page = |title: &[u8], parent| PostArgs {
+                title: title.to_vec(),
+                post_type: "page".into(),
+                parent,
+                ..oracle_post("publish")
+            };
+            let a = insert_post(writer, conn, page(b"A", 0)).await?;
+            let b = insert_post(writer, conn, page(b"B", a)).await?;
+            let c = insert_post(writer, conn, page(b"C", 0)).await?;
+            Ok((a, b, c))
+        },
+        async |conn, (a, b, c)| {
+            for (id, parent) in [(a, b), (c, a), (b, b)] {
+                update(conn, id, &|args| args.parent = parent).await?;
+            }
+            Ok(())
+        },
+    )
+    .await;
+    check(
+        "insert-dated-posts",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let dated = [
+                PostArgs {
+                    date: "2020-01-02 03:04:05".into(),
+                    ..oracle_post("future")
+                },
+                PostArgs {
+                    date_gmt: "2024-05-06 07:08:09".into(),
+                    ..oracle_post("publish")
+                },
+                oracle_post(""),
+                PostArgs {
+                    date: "2023-01-01 00:00:00".into(),
+                    ..oracle_post("draft")
+                },
+                PostArgs {
+                    title: b"Only a title".to_vec(),
+                    content: Vec::new(),
+                    ..oracle_post("publish")
+                },
+            ];
+            for args in dated {
+                insert_post(writer, conn, args).await?;
+            }
+            Ok(())
+        },
+    )
+    .await;
+    check(
+        "delete-privacy-policy-page",
+        async |_| Ok(()),
+        async |conn, ()| delete(conn, 3).await,
+    )
+    .await;
+    check(
+        "trash-posts-page",
+        async |conn| {
+            let args = PostArgs {
+                import_id: 940,
+                title: b"Blog".to_vec(),
+                post_type: "page".into(),
+                ..oracle_post("publish")
+            };
+            let id = insert_post(writer, conn, args).await?;
+            set_option(writer, conn, "page_for_posts", b"940").await?;
+            Ok(id)
+        },
+        trash,
+    )
+    .await;
+    check(
+        "delete-post-with-comment-replies",
+        async |conn| {
+            let id = publish(conn).await?;
+            comment(conn, (id, 901, 902), "1").await?;
+            comment(conn, (id, 902, 0), "1").await?;
+            comment(conn, (1, 903, 901), "1").await?;
+            Ok(id)
+        },
+        delete,
+    )
+    .await;
+    check(
+        "trash-post-named-trashed",
+        async |conn| {
+            let args = PostArgs {
+                title: b"Gone__trashed".to_vec(),
+                ..oracle_post("publish")
+            };
+            insert_post(writer, conn, args).await
+        },
+        trash,
+    )
+    .await;
+    check(
+        "update-numeric-slug-under-pretty-permalinks",
+        async |conn| {
+            let id = publish(conn).await?;
+            update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await?;
+            set_option(writer, conn, "permalink_structure", b"/%postname%/").await?;
+            Ok(id)
+        },
+        async |conn, id| {
+            for name in [&b"12"[..], b"plain-words", b"00"] {
+                update(conn, id, &|args| args.name = Some(name.to_vec())).await?;
+            }
+            Ok(())
+        },
+    )
+    .await;
+    check(
+        "update-post-slug-back",
+        async |conn| {
+            let id = publish(conn).await?;
+            update(conn, id, &|args| args.name = Some(b"second".to_vec())).await?;
+            Ok(id)
+        },
+        async |conn, id| {
+            update(conn, id, &|args| {
+                args.name = Some(b"a-write-oracle-post".to_vec())
+            })
+            .await
+        },
+    )
+    .await;
+    check(
+        "insert-long-colliding-slugs",
+        async |_| Ok(()),
+        async |conn, ()| {
+            for _ in 0..2 {
+                let args = PostArgs {
+                    title: b"a-".repeat(100),
+                    ..oracle_post("publish")
+                };
+                insert_post(writer, conn, args).await?;
+            }
+            Ok(())
+        },
+    )
+    .await;
+    check(
+        "untrash-post-without-desired-slug",
+        async |conn| {
+            let id = publish(conn).await?;
+            trash_raw(writer, conn, id).await
+        },
+        async |conn, id| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                wp_untrash_post(w, ctx, id, false).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+    check(
+        "insert-post-without-pingbacks",
+        async |conn| set_option(writer, conn, "default_pingback_flag", b"0").await,
+        async |conn, ()| publish(conn).await.map(drop),
+    )
+    .await;
+    check(
+        "publish-post-without-guid",
+        async |conn| {
+            let id = insert_post(writer, conn, oracle_post("draft")).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                Ok(w.set_post_guid(id, b"").await?)
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.status = "publish".into()).await,
+    )
+    .await;
+    check(
+        "update-auto-draft",
+        async |conn| insert_post(writer, conn, oracle_post("auto-draft")).await,
+        async |conn, id| update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await,
+    )
+    .await;
+    check(
+        "update-post-with-autosave",
+        async |conn| {
+            let id = publish(conn).await?;
+            // _wp_put_post_revision( $post, true ).
+            act(writer, conn, &admin(), async |w, ctx| {
+                let post = w.post(id).await?.ok_or(Error::Refused("invalid_post"))?;
+                let args = PostArgs {
+                    title: post.title,
+                    content: post.content,
+                    excerpt: post.excerpt,
+                    parent: id,
+                    status: "inherit".into(),
+                    post_type: "revision".into(),
+                    name: Some(format!("{id}-autosave-v1").into_bytes()),
+                    date: post.modified,
+                    date_gmt: post.modified_gmt,
+                    ..PostArgs::default()
+                };
+                insert(w, ctx, args, None).await.map(drop)
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await,
+    )
+    .await;
+    check(
+        "trash-hello-world",
+        async |_| Ok(()),
+        async |conn, ()| trash(conn, 1).await,
+    )
+    .await;
+}
+
+/// Runs `f` as an action on the fixture inside a transaction that is
+/// rolled back.
+async fn rolled_back<T>(f: impl AsyncFnOnce(&mut Write<'_>, &Context) -> Result<T>) -> Result<T> {
+    let writer = writer().await;
+    let mut conn = connection().await;
+    let mut outer = sqlx::Connection::begin(&mut conn).await.unwrap();
+    let mut write = writer.begin_on(&mut outer).await.unwrap();
+    f(&mut write, &admin()).await
+}
+
+fn unported<T>(result: Result<T>) -> bool {
+    matches!(result, Err(Error::Unported(_)))
+}
+
+fn invalid<T>(result: Result<T>, code: &str) -> bool {
+    matches!(result, Err(Error::Refused(found)) if found == code)
+}
+
+async fn insert_rolled_back(args: PostArgs) -> Result<u64> {
+    rolled_back(async |w, ctx| wp_insert_post(w, ctx, args).await).await
+}
+
+/// `wp_delete_attachment()` refuses what is no attachment, and an
+/// attachment the theme's or site's logo uses, or with a header or
+/// background image set, is not ported, nor through `wp_delete_post()`.
+#[tokio::test]
+async fn attachment_deletes_stop_as_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let post = rolled_back(async |w, ctx| wp_delete_attachment(w, ctx, 1, true).await);
+    assert_eq!(post.await.unwrap(), None);
+    let missing = rolled_back(async |w, ctx| wp_delete_attachment(w, ctx, MISSING, true).await);
+    assert_eq!(missing.await.unwrap(), None);
+    let mods = "theme_mods_twentytwentyfive";
+    for (name, raw) in [
+        (mods, "a:1:{s:11:\"custom_logo\";i:%id%;}"),
+        (mods, "a:1:{s:12:\"header_image\";s:1:\"x\";}"),
+        (mods, "a:1:{s:16:\"background_image\";s:1:\"x\";}"),
+        ("site_logo", "%id%"),
+        ("", ""),
+    ] {
+        let deleted = rolled_back(async |w, ctx| {
+            let args = PostArgs {
+                title: b"A file".to_vec(),
+                mime_type: "image/png".into(),
+                ..PostArgs::default()
+            };
+            let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+            if name.is_empty() {
+                return wp_delete_post(w, ctx, id, true).await.map(|_| None);
+            }
+            set(w, name, raw.replace("%id%", &id.to_string()).as_bytes()).await?;
+            wp_delete_attachment(w, ctx, id, true).await
+        })
+        .await;
+        assert!(unported(deleted), "{name} {raw}");
+    }
+    // A file by its absolute path is not ported.
+    let absolute = rolled_back(async |w, ctx| {
+        let args = PostArgs {
+            title: b"A file".to_vec(),
+            mime_type: "image/png".into(),
+            ..PostArgs::default()
+        };
+        let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+        let file = Value::String(b"/srv/a.png".to_vec());
+        let key = "_wp_attached_file";
+        crate::options::update_metadata(w, Meta::Post, id, key, &file, &Value::Null).await?;
+        wp_delete_attachment(w, ctx, id, true).await
+    })
+    .await;
+    assert!(unported(absolute));
+}
+
+/// An attachment is trashed only with `MEDIA_TRASH` and a Trash that is kept,
+/// and never by a forced delete.
+#[tokio::test]
+async fn attachments_are_trashed_by_the_constants() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let deleted = async |media_trash: bool, empty_trash_days: u32, force: bool| {
+        let kept = rolled_back(async |w, ctx| {
+            let args = PostArgs {
+                title: b"A file".to_vec(),
+                mime_type: "image/png".into(),
+                ..PostArgs::default()
+            };
+            let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+            let constants = hyscribe_config::Constants {
+                media_trash,
+                empty_trash_days,
+                ..ctx.constants
+            };
+            let ctx = Context {
+                constants,
+                ..ctx.clone()
+            };
+            let done = wp_delete_attachment(w, &ctx, id, force).await?;
+            Ok(done.map(|done| matches!(done, AttachmentDeleted::Trashed)))
+        });
+        kept.await.unwrap()
+    };
+    assert_eq!(deleted(true, 30, false).await, Some(true));
+    assert_eq!(deleted(false, 30, false).await, Some(false));
+    assert_eq!(deleted(true, 0, false).await, Some(false));
+    assert_eq!(deleted(true, 30, true).await, Some(false));
+}
+
+/// An attachment that inherits keeps its old slug when it is renamed, one of
+/// another status does not.
+#[tokio::test]
+async fn attachments_keep_their_old_slugs_while_they_inherit() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let old_slugs = async |status: &'static str| {
+        let slugs = rolled_back(async |w, ctx| {
+            let args = PostArgs {
+                title: b"A file".to_vec(),
+                mime_type: "image/png".into(),
+                ..PostArgs::default()
+            };
+            let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+            wp_update_post(w, ctx, id, &|args| {
+                args.name = Some(b"renamed".to_vec());
+                args.status = status.into();
+            })
+            .await?;
+            Ok(crate::options::get_metadata(w, Meta::Post, id, "_wp_old_slug").await?)
+        });
+        slugs.await.unwrap()
+    };
+    assert_eq!(old_slugs("inherit").await.len(), 1);
+    assert!(old_slugs("private").await.is_empty());
+}
+
+/// What no ported function takes, a post of a type other than the ported
+/// ones, is refused by each of them.
+#[tokio::test]
+async fn other_post_types_are_refused() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let refused = rolled_back(async |w, ctx| {
+        let post = existing(w, 1).await?;
+        let menu = PostFields {
+            post_type: "nav_menu_item".into(),
+            ..post
+        };
+        let id = w.insert_post(&menu).await?;
+        let updated = wp_update_post(w, ctx, id, &|_| ()).await.map(drop);
+        let trashed = wp_trash_post(w, ctx, id).await.map(drop);
+        let deleted = wp_delete_post(w, ctx, id, true).await.map(drop);
+        let slug = wp_unique_post_slug(w, b"x".to_vec(), (id, "publish"), "nav_menu_item", 0);
+        let slug = slug.await.map(drop);
+        let menu = PostArgs {
+            post_type: "nav_menu_item".into(),
+            ..oracle_post("publish")
+        };
+        let inserted = wp_insert_post(w, ctx, menu).await.map(drop);
+        Ok([updated, trashed, deleted, slug, inserted])
+    })
+    .await;
+    for result in refused.unwrap() {
+        assert!(unported(result));
+    }
+}
+
+#[tokio::test]
+async fn what_php_refuses_is_refused() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let empty = PostArgs {
+        title: Vec::new(),
+        content: b"0".to_vec(),
+        ..oracle_post("publish")
+    };
+    assert!(invalid(insert_rolled_back(empty).await, "empty_content"));
+    let excerpt = PostArgs {
+        title: Vec::new(),
+        content: Vec::new(),
+        excerpt: b"An excerpt.".to_vec(),
+        ..oracle_post("publish")
+    };
+    assert!(insert_rolled_back(excerpt).await.is_ok());
+    let missing = PostArgs {
+        id: 999_999,
+        ..oracle_post("publish")
+    };
+    assert!(invalid(insert_rolled_back(missing).await, "invalid_post"));
+    let update = rolled_back(async |w, ctx| wp_update_post(w, ctx, 999_999, &|_| ()).await).await;
+    assert!(invalid(update, "invalid_post"));
+    let day = PostArgs {
+        date: "2026-02-30 00:00:00".into(),
+        ..oracle_post("publish")
+    };
+    assert!(invalid(insert_rolled_back(day).await, "invalid_date"));
+    let db = fixture_database();
+    let closed = hyscribe_config::Database { port: 1, ..db };
+    let Err(err) = Writer::open(&closed, hyscribe_config::Mode::Primary).await else {
+        panic!("no database on port 1");
+    };
+    assert!(matches!(Error::from(err), Error::Db(_)));
+}
+
+/// Templates and parts, whose rows the REST goldens check
+/// (`rest-templates-*`, `rest-template-parts-*`): their theme and area by
+/// name, a new term made and counted over the types it is of, their
+/// `meta_input`, slugs unique within the theme of the post or else the
+/// active one, nothing in them refused, and deleting a part leaves its terms.
+#[tokio::test]
+async fn templates_take_their_terms() {
+    let one = ONE_AT_A_TIME.lock().await;
+    // A statement that fails stops a template's update or insert there,
+    // its slug checked in its theme, its terms or its meta.
+    let mut budget = 0;
+    loop {
+        let result = rolled_back(async |w, ctx| {
+            let template = || PostArgs {
+                post_type: "wp_template".into(),
+                status: "publish".into(),
+                name: Some(b"index".to_vec()),
+                title: b"Index".to_vec(),
+                tax_input: vec![(Taxonomy::WpTheme, b"twentytwentyfive".to_vec())],
+                meta_input: vec![("origin", Value::String(b"theme".to_vec()))],
+                ..PostArgs::default()
+            };
+            let first = wp_insert_post(w, ctx, template()).await?;
+            w.fail_after(budget);
+            // Updated, its slug is checked within its own theme term.
+            let renamed = |args: &mut PostArgs| args.name = Some(b"index".to_vec());
+            wp_update_post(w, ctx, first, &renamed).await?;
+            wp_insert_post(w, ctx, template()).await
+        })
+        .await;
+        match result {
+            Err(Error::Db(_)) => budget += 1,
+            done => {
+                done.unwrap();
+                break;
+            }
+        }
+    }
+    assert!(budget > 5);
+    drop(one);
+    templates_are_written().await;
+}
+
+async fn templates_are_written() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let found = rolled_back(async |w, ctx| {
+        let template = |post_type: &str, theme: &str, area: Option<&str>| {
+            let mut tax_input = vec![(Taxonomy::WpTheme, theme.as_bytes().to_vec())];
+            tax_input
+                .extend(area.map(|area| (Taxonomy::TemplatePartArea, area.as_bytes().to_vec())));
+            PostArgs {
+                post_type: post_type.into(),
+                status: "publish".into(),
+                name: Some(b"index".to_vec()),
+                title: b"Index".to_vec(),
+                content: b"<!-- wp:paragraph /-->".to_vec(),
+                tax_input,
+                meta_input: vec![("origin", Value::String(b"theme".to_vec()))],
+                ..PostArgs::default()
+            }
+        };
+        let first =
+            wp_insert_post(w, ctx, template("wp_template", "twentytwentyfive", None)).await?;
+        let second =
+            wp_insert_post(w, ctx, template("wp_template", "twentytwentyfive", None)).await?;
+        let third =
+            wp_insert_post(w, ctx, template("wp_template", "twentytwentyfive", None)).await?;
+        // A long slug taken is cut to leave room for its suffix.
+        let long = PostArgs {
+            name: Some(b"a".repeat(200)),
+            ..template("wp_template", "twentytwentyfive", None)
+        };
+        wp_insert_post(w, ctx, long.clone()).await?;
+        let cut = wp_insert_post(w, ctx, long).await?;
+        let cut = w.post(cut).await?.map(|post| post.name).unwrap_or_default();
+        // A pattern's category counts published patterns.
+        let pattern = PostArgs {
+            post_type: "wp_block".into(),
+            ..oracle_post("publish")
+        };
+        let pattern = wp_insert_post(w, ctx, pattern).await?;
+        let terms = [TermRef::Text(b"Headers")];
+        wp_set_object_terms(w, pattern, &terms, Taxonomy::PatternCategory, false).await?;
+        let (category, _) = w.object_terms(pattern, "wp_pattern_category").await?[0];
+        let category = w.term_in("wp_pattern_category", category).await?;
+        let third = w
+            .post(third)
+            .await?
+            .map(|post| post.name)
+            .unwrap_or_default();
+        let counted = category.map(|term| term.count);
+        assert_eq!((third, counted), (b"index-3".to_vec(), Some(1)));
+        assert_eq!(cut, [b"a".repeat(198), b"-2".to_vec()].concat());
+        let other = wp_insert_post(w, ctx, template("wp_template", "other", None)).await?;
+        // Updated, its slug is unique within its own theme.
+        let renamed = |args: &mut PostArgs| args.name = Some(b"index".to_vec());
+        wp_update_post(w, ctx, other, &renamed).await?;
+        let part = wp_insert_post(
+            w,
+            ctx,
+            template("wp_template_part", "twentytwentyfive", Some("header")),
+        )
+        .await?;
+        let mut names = Vec::new();
+        for id in [first, second, other, part] {
+            names.push(w.post(id).await?.map(|post| post.name).unwrap_or_default());
+        }
+        let origin = get_metadata(w, Meta::Post, first, "origin").await?;
+        let (area, _) = w.object_terms(part, "wp_template_part_area").await?[0];
+        let area = w
+            .term_in("wp_template_part_area", area)
+            .await?
+            .unwrap_or_default();
+        let (theme, _) = w.object_terms(part, "wp_theme").await?[0];
+        let theme = w.term_in("wp_theme", theme).await?.unwrap_or_default();
+        let empty = PostArgs {
+            title: Vec::new(),
+            content: Vec::new(),
+            ..template("wp_template", "twentytwentyfive", None)
+        };
+        let refused = wp_insert_post(w, ctx, empty).await;
+        // A long percent-encoded slug, taken, is not cut short.
+        let long = PostArgs {
+            name: Some(b"%c3%a9".repeat(40)),
+            ..template("wp_template", "twentytwentyfive", None)
+        };
+        wp_insert_post(w, ctx, long.clone()).await?;
+        let cut = wp_insert_post(w, ctx, long).await;
+        let deleted = wp_delete_post(w, ctx, part, true).await?;
+        let left = w.object_terms(part, "wp_theme").await?;
+        Ok((
+            names,
+            origin,
+            (area.name, area.count, theme.count),
+            (refused, cut),
+            deleted,
+            left,
+        ))
+    })
+    .await
+    .unwrap();
+    let (names, origin, counts, refused, deleted, left) = found;
+    let names: Vec<&[u8]> = names.iter().map(Vec::as_slice).collect();
+    assert_eq!(names, [&b"index"[..], b"index-2", b"index", b"index"]);
+    assert_eq!(origin, vec![Value::String(b"theme".to_vec())]);
+    assert_eq!(counts, (b"header".to_vec(), 1, 6));
+    assert!(invalid(refused.0, "empty_content") && unported(refused.1));
+    assert!(deleted && left.is_empty());
+}
+
+/// Navigation menus and synced patterns, whose rows the REST goldens check
+/// (`rest-navigation-*`, `rest-blocks-*`): a pattern with nothing in it is
+/// refused as a post is, a menu is not, and both are core types, whose
+/// GUIDs follow the posts' permalink structure, their slugs unique per type;
+/// a pattern in a category leaves it when deleted, its count recomputed.
+#[tokio::test]
+async fn navigation_menus_and_patterns() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let empty = |post_type: &str| PostArgs {
+        post_type: post_type.into(),
+        title: Vec::new(),
+        content: Vec::new(),
+        ..oracle_post("publish")
+    };
+    assert!(invalid(
+        insert_rolled_back(empty("wp_block")).await,
+        "empty_content"
+    ));
+    for post_type in ["wp_navigation", "wp_block"] {
+        let (post, typed, id) = rolled_back(async |w, ctx| {
+            set(w, "permalink_structure", b"/%postname%/").await?;
+            let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+            let args = PostArgs {
+                post_type: post_type.into(),
+                ..oracle_post("publish")
+            };
+            let typed = wp_insert_post(w, ctx, args).await?;
+            Ok((w.post(id).await?, w.post(typed).await?, typed))
+        })
+        .await
+        .unwrap();
+        let (post, typed) = (post.unwrap(), typed.unwrap());
+        assert!(post.guid.ends_with(b"/a-write-oracle-post/"), "{post_type}");
+        assert_eq!(typed.guid, post.guid, "{post_type} {id}");
+        assert_eq!(typed.comment_status, "closed", "{post_type}");
+    }
+    assert!(insert_rolled_back(empty("wp_navigation")).await.is_ok());
+    let categorised = rolled_back(async |w, ctx| {
+        let args = PostArgs {
+            post_type: "wp_block".into(),
+            ..oracle_post("publish")
+        };
+        let id = wp_insert_post(w, ctx, args).await?;
+        let term = w.insert_term(b"Headers", b"headers", 0).await?;
+        let taxonomy = (term, "wp_pattern_category");
+        let term_taxonomy = w.insert_term_taxonomy(taxonomy, b"", 0).await?;
+        w.add_relationship(id, term_taxonomy).await?;
+        w.set_term_count(term_taxonomy, 1).await?;
+        let deleted = wp_delete_post(w, ctx, id, true).await?;
+        let left = w.term_post_count(term_taxonomy, &["publish"], &["wp_block"]);
+        Ok((
+            deleted,
+            left.await?,
+            w.object_terms(id, "wp_pattern_category").await?,
+        ))
+    })
+    .await;
+    assert_eq!(categorised.unwrap(), (true, 0, Vec::new()));
+}
+
+/// A user theme.json saved without `unfiltered_html` loses its insecure
+/// values, as `wp_filter_global_styles_post()` leaves it; other content
+/// only goes through kses.
+#[tokio::test]
+async fn global_styles_content_is_filtered() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let styles = br#"{"version":3,"isGlobalStylesUserThemeJSON":true,"styles":{"color":{"text":"red","background":"expression(1)"},"css":"x"}}"#;
+    let stored = rolled_back(async |w, ctx| {
+        let args = PostArgs {
+            content: styles.to_vec(),
+            content_filtered: b"<script>x</script>".to_vec(),
+            ..oracle_post("publish")
+        };
+        let id = wp_insert_post(w, ctx, args).await?;
+        existing(w, id).await
+    })
+    .await
+    .unwrap();
+    let kept =
+        br#"{"version":3,"styles":{"color":{"text":"red"}},"isGlobalStylesUserThemeJSON":true}"#;
+    assert_eq!(stored.content, kept);
+    assert_eq!(stored.content_filtered, b"x");
+}
+
+#[tokio::test]
+async fn what_hyscribe_does_not_port_is_refused() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let attachment = PostArgs {
+        post_type: "attachment".into(),
+        ..oracle_post("inherit")
+    };
+    assert!(unported(insert_rolled_back(attachment).await));
+    for date in ["", "2026-01-01 00:00:00"] {
+        let gmt = PostArgs {
+            date: date.into(),
+            date_gmt: "2026-01-01".into(),
+            ..oracle_post("publish")
+        };
+        assert!(unported(insert_rolled_back(gmt).await));
+    }
+    let page = || PostArgs {
+        post_type: "page".into(),
+        ..oracle_post("publish")
+    };
+    let menus = rolled_back(async |w, ctx| {
+        let options = b"a:1:{s:8:\"auto_add\";a:1:{i:0;i:5;}}";
+        set(w, "nav_menu_options", options).await?;
+        wp_insert_post(w, ctx, page()).await
+    })
+    .await;
+    assert!(unported(menus));
+    let menu_item = rolled_back(async |w, ctx| {
+        w.add_meta(
+            hyscribe_db::Meta::Post,
+            2,
+            "_menu_item_object_id",
+            Some(b"1"),
+        )
+        .await?;
+        wp_delete_post(w, ctx, 1, true).await
+    })
+    .await;
+    assert!(unported(menu_item));
+    let looped = rolled_back(async |w, ctx| {
+        let a = wp_insert_post(w, ctx, page()).await?;
+        let b = wp_insert_post(
+            w,
+            ctx,
+            PostArgs {
+                parent: a,
+                ..page()
+            },
+        )
+        .await?;
+        let c = wp_insert_post(w, ctx, page()).await?;
+        let post = w.post(a).await?.ok_or(Error::Refused("invalid_post"))?;
+        w.update_post(a, &PostFields { parent: b, ..post }).await?;
+        wp_update_post(w, ctx, c, &|args| args.parent = a).await
+    })
+    .await;
+    assert!(unported(looped));
+    let old_cron = rolled_back(async |w, ctx| {
+        set(w, "cron", b"a:0:{}").await?;
+        wp_insert_post(w, ctx, oracle_post("publish")).await
+    })
+    .await;
+    assert!(unported(old_cron));
+}
+
+#[tokio::test]
+async fn posts_that_are_not_there_or_already_done_write_nothing() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let done = rolled_back(async |w, ctx| {
+        let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        Ok([
+            wp_trash_post(w, ctx, 999_999).await?,
+            wp_untrash_post(w, ctx, 999_999, false).await?,
+            wp_untrash_post(w, ctx, id, false).await?,
+            wp_delete_post(w, ctx, 999_999, true).await?,
+            wp_trash_post(w, ctx, id).await?,
+            wp_trash_post(w, ctx, id).await?,
+        ])
+    })
+    .await;
+    assert_eq!(done.unwrap(), [false, false, false, false, true, false]);
+}
+
+#[tokio::test]
+async fn odd_stored_values_are_read_as_php_reads_them() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    // A cron option that is not an array starts a new one.
+    let cron = rolled_back(async |w, ctx| {
+        set(w, "cron", b"s:3:\"bad\";").await?;
+        wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        Ok(w.option_value("cron").await?.unwrap_or_default())
+    })
+    .await;
+    let cron = String::from_utf8(cron.unwrap()).unwrap();
+    assert!(
+        cron.starts_with("a:2:{i:")
+            && cron.ends_with(
+                ";a:2:{s:8:\"schedule\";b:0;s:4:\"args\";a:0:{}}}}s:7:\"version\";i:2;}"
+            )
+    );
+    // So does a sticky_posts option that is not an array.
+    let sticky = rolled_back(async |w, ctx| {
+        set(w, "sticky_posts", b"s:1:\"x\";").await?;
+        wp_trash_post(w, ctx, 1).await
+    })
+    .await;
+    assert!(sticky.unwrap());
+    // A taken import_id gives way to the next ID.
+    let taken = PostArgs {
+        import_id: 1,
+        ..oracle_post("draft")
+    };
+    assert!(insert_rolled_back(taken).await.unwrap() > 3);
+}
+
+#[tokio::test]
+async fn the_last_published_post_matches_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let trash = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_trash_post(w, ctx, id).await
+        })
+        .await
+        .map(drop)
+    };
+    check(
+        "trash-last-published-post",
+        async |conn| {
+            let id = insert_post(writer, conn, oracle_post("publish")).await?;
+            trash(conn, 1).await?;
+            Ok(id)
+        },
+        trash,
+    )
+    .await;
+}
+
+/// Runs `action` after `setup` with each statement budget in turn until
+/// it runs through: each spent budget must come back as a database error.
+async fn every_cut(
+    setup: impl AsyncFn(&mut Write<'_>, &Context) -> Result<u64>,
+    action: impl AsyncFn(&mut Write<'_>, &Context, u64) -> Result<()>,
+) {
+    let ctx = admin();
+    let setup = async |w: &mut Write<'_>| setup(w, &ctx).await.unwrap();
+    crate::tests::fails_at_each_step(setup, async |w, id| action(w, &ctx, id).await).await;
+}
+
+#[tokio::test]
+async fn database_errors_end_every_function() {
+    let none = async |_: &mut Write<'_>, _: &Context| Ok(0);
+    let publish = async |w: &mut Write<'_>, ctx: &Context| {
+        wp_insert_post(w, ctx, oracle_post("publish")).await
+    };
+    let page = |title: &str, parent| PostArgs {
+        title: title.as_bytes().to_vec(),
+        post_type: "page".into(),
+        parent,
+        ..oracle_post("publish")
+    };
+    let inserting = |args: PostArgs| {
+        async move |w: &mut Write<'_>, ctx: &Context, _| {
+            wp_insert_post(w, ctx, args.clone()).await.map(drop)
+        }
+    };
+    let updating = |change: fn(&mut PostArgs)| {
+        async move |w: &mut Write<'_>, ctx: &Context, id| {
+            wp_update_post(w, ctx, id, &change).await.map(drop)
+        }
+    };
+    let trashing =
+        async |w: &mut Write<'_>, ctx: &Context, id| wp_trash_post(w, ctx, id).await.map(drop);
+    let deleting = async |w: &mut Write<'_>, ctx: &Context, id| {
+        wp_delete_post(w, ctx, id, true).await.map(drop)
+    };
+    let with_comments = async |w: &mut Write<'_>, ctx: &Context| {
+        let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        wp_update_post(w, ctx, id, &|args| args.title = b"A renamed post".to_vec()).await?;
+        let reply = CommentFields {
+            post_id: id,
+            author: b"A reader".to_vec(),
+            author_email: Vec::new(),
+            author_url: Vec::new(),
+            author_ip: Vec::new(),
+            date: "2026-01-01 00:00:00".into(),
+            date_gmt: "2026-01-01 00:00:00".into(),
+            content: b"A comment.".to_vec(),
+            karma: 0,
+            approved: "1".into(),
+            agent: Vec::new(),
+            comment_type: "comment".into(),
+            parent: 0,
+            user_id: 0,
+        };
+        let first = w.insert_comment(&reply).await?;
+        w.add_meta(hyscribe_db::Meta::Comment, first, "oracle", Some(b"1"))
+            .await?;
+        w.insert_comment(&CommentFields {
+            parent: first,
+            approved: "0".into(),
+            ..reply
+        })
+        .await?;
+        Ok(id)
+    };
+    // An attachment with a comment: updated, deleted, and trashed then deleted.
+    let attachment = async |w: &mut Write<'_>, ctx: &Context| {
+        let args = PostArgs {
+            title: b"A file".to_vec(),
+            mime_type: "image/png".into(),
+            ..PostArgs::default()
+        };
+        let id = wp_insert_attachment(w, ctx, args, "2026/05/a.png").await?;
+        let reply = CommentFields {
+            post_id: id,
+            author: b"A reader".to_vec(),
+            author_email: Vec::new(),
+            author_url: Vec::new(),
+            author_ip: Vec::new(),
+            date: "2026-01-01 00:00:00".into(),
+            date_gmt: "2026-01-01 00:00:00".into(),
+            content: b"A comment.".to_vec(),
+            karma: 0,
+            approved: "1".into(),
+            agent: Vec::new(),
+            comment_type: "comment".into(),
+            parent: 0,
+            user_id: 0,
+        };
+        w.insert_comment(&reply).await?;
+        Ok(id)
+    };
+    every_cut(
+        attachment,
+        updating(|args| args.title = b"A renamed file".to_vec()),
+    )
+    .await;
+    let deleting_file = async |w: &mut Write<'_>, ctx: &Context, id| {
+        wp_delete_attachment(w, ctx, id, true).await.map(drop)
+    };
+    every_cut(attachment, deleting_file).await;
+    let trashing_file = async |w: &mut Write<'_>, ctx: &Context, id| {
+        let ctx = Context {
+            constants: hyscribe_config::Constants {
+                media_trash: true,
+                ..ctx.constants
+            },
+            ..ctx.clone()
+        };
+        let trashed = wp_delete_attachment(w, &ctx, id, false).await?;
+        assert_eq!(trashed, Some(AttachmentDeleted::Trashed));
+        wp_delete_attachment(w, &ctx, id, false).await.map(drop)
+    };
+    every_cut(attachment, trashing_file).await;
+    every_cut(none, inserting(oracle_post("publish"))).await;
+    every_cut(none, inserting(future_post())).await;
+    every_cut(
+        none,
+        inserting(PostArgs {
+            title: Vec::new(),
+            ..oracle_post("publish")
+        }),
+    )
+    .await;
+    every_cut(none, inserting(page("Sample Page", 0))).await;
+    every_cut(
+        none,
+        inserting(PostArgs {
+            title: b"Hello world!".to_vec(),
+            ..oracle_post("publish")
+        }),
+    )
+    .await;
+    every_cut(
+        publish,
+        updating(|args| args.title = b"A renamed post".to_vec()),
+    )
+    .await;
+    every_cut(publish, updating(|args| args.name = Some(b"12".to_vec()))).await;
+    every_cut(
+        async |w, ctx| wp_insert_post(w, ctx, oracle_post("draft")).await,
+        updating(|args| args.status = "publish".into()),
+    )
+    .await;
+    // Published without a GUID: the transition gives it one.
+    every_cut(
+        async |w, ctx| {
+            let id = wp_insert_post(w, ctx, oracle_post("draft")).await?;
+            w.set_post_guid(id, b"").await?;
+            Ok(id)
+        },
+        updating(|args| args.status = "publish".into()),
+    )
+    .await;
+    every_cut(
+        async |w, ctx| {
+            let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+            trash_status(w, id).await?;
+            Ok(id)
+        },
+        inserting(oracle_post("publish")),
+    )
+    .await;
+    every_cut(
+        async |w, ctx| {
+            let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+            wp_update_post(w, ctx, id, &|args| args.name = Some(b"second".to_vec())).await
+        },
+        updating(|args| args.name = Some(b"a-write-oracle-post".to_vec())),
+    )
+    .await;
+    every_cut(
+        async |w, ctx| {
+            let a = wp_insert_post(w, ctx, page("A", 0)).await?;
+            wp_insert_post(w, ctx, page("B", a)).await
+        },
+        updating(|args| args.parent = 2),
+    )
+    .await;
+    every_cut(
+        async |w, ctx| {
+            let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+            w.add_meta(hyscribe_db::Meta::Post, id, "footnotes", Some(b"[]"))
+                .await?;
+            wp_update_post(w, ctx, id, &|args| args.title = b"A renamed post".to_vec()).await?;
+            Ok(id)
+        },
+        updating(|args| args.title = b"Renamed again".to_vec()),
+    )
+    .await;
+    every_cut(with_comments, trashing).await;
+    every_cut(
+        async |w, ctx| {
+            let id = with_comments(w, ctx).await?;
+            wp_trash_post(w, ctx, id).await?;
+            Ok(id)
+        },
+        async |w, ctx, id| wp_untrash_post(w, ctx, id, false).await.map(drop),
+    )
+    .await;
+    every_cut(with_comments, deleting).await;
+    every_cut(
+        async |w, ctx| wp_insert_post(w, ctx, future_post()).await,
+        trashing,
+    )
+    .await;
+    every_cut(
+        async |w, ctx| {
+            let id = wp_insert_post(w, ctx, page("Front", 0)).await?;
+            wp_insert_post(w, ctx, page("Kid", id)).await?;
+            let front = id.to_string();
+            set(w, "show_on_front", b"page").await?;
+            set(w, "page_on_front", front.as_bytes()).await?;
+            set(w, "page_for_posts", front.as_bytes()).await?;
+            set(w, "wp_page_for_privacy_policy", front.as_bytes()).await?;
+            set(w, "sticky_posts", format!("a:1:{{i:0;i:{id};}}").as_bytes()).await?;
+            Ok(id)
+        },
+        deleting,
+    )
+    .await;
+    every_cut(
+        async |w, ctx| {
+            let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+            wp_trash_post(w, ctx, 1).await?;
+            Ok(id)
+        },
+        trashing,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn attachments_are_not_ported() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let attachment = async |w: &mut Write<'_>, status: &str| -> Result<u64> {
+        let post = existing(w, 1).await?;
+        let fields = PostFields {
+            post_type: "attachment".into(),
+            status: status.into(),
+            ..post
+        };
+        Ok(w.insert_post(&fields).await?)
+    };
+    // Its own functions update, trash and delete it, which the media library's
+    // write oracle matches; `wp_delete_post()` leaves its files, so it refuses.
+    let refused = rolled_back(async |w, ctx| {
+        let id = attachment(w, "inherit").await?;
+        wp_delete_post(w, ctx, id, true).await.map(drop)
+    })
+    .await;
+    assert!(unported(refused));
+}
+
+/// `wp_insert_attachment()`'s own rules, which the uploads' write oracle
+/// tests in `hyscribe-http` match row for row: a status other than the
+/// kept ones becomes `inherit`, the slug is unique across every type and
+/// no feed's, comments take the default and pings are closed, the GUID is
+/// the file's URL, and the file is `_wp_attached_file`.
+#[tokio::test]
+async fn attachments_are_inserted_as_php_inserts_them() {
+    let one = ONE_AT_A_TIME.lock().await;
+    let args = |title: &str, status: &str| PostArgs {
+        title: title.as_bytes().to_vec(),
+        status: status.into(),
+        mime_type: "image/jpeg".into(),
+        guid: b"http://example.test/wp-content/uploads/a.jpg".to_vec(),
+        ..PostArgs::default()
+    };
+    rolled_back(async |w, ctx| {
+        let id =
+            wp_insert_attachment(w, ctx, args("Sample Page", "publish"), "2026/11/a.jpg").await?;
+        let post = existing(w, id).await?;
+        assert_eq!(post.post_type, "attachment");
+        assert_eq!(
+            (post.status.as_str(), &post.name[..]),
+            ("inherit", &b"sample-page-2"[..])
+        );
+        assert_eq!(
+            (post.comment_status.as_str(), post.ping_status.as_str()),
+            ("open", "closed")
+        );
+        assert_eq!(post.guid, b"http://example.test/wp-content/uploads/a.jpg");
+        let file = get_metadata(w, Meta::Post, id, "_wp_attached_file").await?;
+        assert_eq!(file, [Value::String(b"2026/11/a.jpg".to_vec())]);
+        let kept = wp_insert_attachment(w, ctx, args("feed", "private"), "b.jpg").await?;
+        let post = existing(w, kept).await?;
+        assert_eq!(
+            (post.status.as_str(), &post.name[..]),
+            ("private", &b"feed-2"[..])
+        );
+        // A future date does not schedule an attachment.
+        let dated = PostArgs {
+            date: "2099-01-01 00:00:00".into(),
+            ..args("Later", "future")
+        };
+        let later = wp_insert_attachment(w, ctx, dated, "c.jpg").await?;
+        assert_eq!(existing(w, later).await?.status, "inherit");
+        // An ID given is not an update: the upload is always a new post.
+        let given = PostArgs {
+            id: 1,
+            ..args("New", "inherit")
+        };
+        let new = wp_insert_attachment(w, ctx, given, "e.jpg").await?;
+        assert_ne!(new, 1);
+        assert_eq!(existing(w, 1).await?.post_type, "post");
+        Ok(())
+    })
+    .await
+    .unwrap();
+    drop(one);
+    every_cut(
+        async |_: &mut Write<'_>, _: &Context| Ok(0),
+        async |w: &mut Write<'_>, ctx: &Context, _| {
+            wp_insert_attachment(w, ctx, args("Hello world!", ""), "d.jpg")
+                .await
+                .map(drop)
+        },
+    )
+    .await;
+}
+
+/// Text that is not valid UTF-8 is refused as `wpdb::process_fields()`
+/// refuses it, its `$last_error` naming each column in the row's order.
+#[tokio::test]
+async fn invalid_text_is_refused_as_wpdb_refuses_it() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let last_error = |args: PostArgs| async {
+        match insert_rolled_back(args).await {
+            Err(Error::InvalidText(last_error)) => last_error,
+            other => panic!("{other:?}"),
+        }
+    };
+    let one = PostArgs {
+        content: b"x\xffy".to_vec(),
+        ..oracle_post("draft")
+    };
+    assert_eq!(
+        last_error(one).await,
+        "WordPress database error: Processing the value for the following field failed: \
+         post_content. The supplied value may be too long or contains invalid data."
+    );
+    let many = PostArgs {
+        title: b"a\xedb".to_vec(),
+        excerpt: b"\xc0\xaf".to_vec(),
+        password: b"\xfe".to_vec(),
+        pinged: b"\xf5\x80\x80\x80".to_vec(),
+        ..oracle_post("draft")
+    };
+    assert_eq!(
+        last_error(many).await,
+        "WordPress database error: Processing the values for the following fields failed: \
+         post_title, post_excerpt, post_password, pinged. The supplied values may be too long \
+         or contain invalid data."
+    );
+}
+
+#[tokio::test]
+async fn rare_values_are_kept_as_php_keeps_them() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let mime = rolled_back(async |w, ctx| {
+        let args = PostArgs {
+            mime_type: "Text/pl ain<+*.-".into(),
+            ..oracle_post("draft")
+        };
+        let id = wp_insert_post(w, ctx, args).await?;
+        Ok(existing(w, id).await?.mime_type)
+    })
+    .await;
+    assert_eq!(mime.unwrap(), "Text/plain+*.-");
+    // Duplicates go when a sticky post leaves the list.
+    let sticky = rolled_back(async |w, ctx| {
+        let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        let list = format!("a:4:{{i:0;i:{id};i:1;i:7;i:2;s:1:\"7\";i:3;i:{id};}}");
+        set(w, "sticky_posts", list.as_bytes()).await?;
+        wp_trash_post(w, ctx, id).await?;
+        Ok(w.option_value("sticky_posts").await?.unwrap_or_default())
+    })
+    .await;
+    assert_eq!(sticky.unwrap(), b"a:1:{i:0;i:7;}");
+    // A comment left post-trashed comes back unapproved.
+    let restored = rolled_back(async |w, ctx| {
+        let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        w.insert_comment(&CommentFields {
+            post_id: id,
+            author: Vec::new(),
+            author_email: Vec::new(),
+            author_url: Vec::new(),
+            author_ip: Vec::new(),
+            date: "2026-01-01 00:00:00".into(),
+            date_gmt: "2026-01-01 00:00:00".into(),
+            content: b"A comment.".to_vec(),
+            karma: 0,
+            approved: "post-trashed".into(),
+            agent: Vec::new(),
+            comment_type: "comment".into(),
+            parent: 0,
+            user_id: 0,
+        })
+        .await?;
+        wp_trash_post(w, ctx, id).await?;
+        wp_untrash_post(w, ctx, id, false).await?;
+        Ok(w.post_comments(id).await?)
+    })
+    .await;
+    let statuses: Vec<String> = restored.unwrap().into_iter().map(|(_, s)| s).collect();
+    assert_eq!(statuses, ["0"]);
+}
+
+#[tokio::test]
+async fn long_encoded_slugs_are_not_ported() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let encoded = |prefix: &str| PostArgs {
+        name: Some([prefix.as_bytes(), &b"%c3%a9".repeat(33)].concat()),
+        ..oracle_post("publish")
+    };
+    let collided = rolled_back(async |w, ctx| {
+        wp_insert_post(w, ctx, encoded("a")).await?;
+        wp_insert_post(w, ctx, encoded("a")).await
+    })
+    .await;
+    assert!(unported(collided));
+    let trashed = rolled_back(async |w, ctx| {
+        let id = wp_insert_post(w, ctx, encoded("")).await?;
+        wp_trash_post(w, ctx, id).await
+    })
+    .await;
+    assert!(unported(trashed));
+}
+
+#[tokio::test]
+async fn database_errors_end_the_rarer_paths() {
+    let publish = async |w: &mut Write<'_>, ctx: &Context| {
+        wp_insert_post(w, ctx, oracle_post("publish")).await
+    };
+    let page = |title: &str, parent| PostArgs {
+        title: title.as_bytes().to_vec(),
+        post_type: "page".into(),
+        parent,
+        ..oracle_post("publish")
+    };
+    every_cut(publish, async |w, ctx, id| {
+        let args = PostArgs {
+            id,
+            title: b"Rewritten".to_vec(),
+            content: b"New.".to_vec(),
+            ..oracle_post("publish")
+        };
+        wp_insert_post(w, ctx, args).await.map(drop)
+    })
+    .await;
+    every_cut(
+        async |_, _| Ok(0),
+        async |w, ctx, _| {
+            let args = PostArgs {
+                to_ping: b"http://a.test/".to_vec(),
+                ..oracle_post("publish")
+            };
+            wp_insert_post(w, ctx, args).await.map(drop)
+        },
+    )
+    .await;
+    // A parent four steps from the top, and one that would make a loop.
+    for loops in [false, true] {
+        every_cut(
+            async |w, ctx| {
+                let a = wp_insert_post(w, ctx, page("A", 0)).await?;
+                let mut parent = wp_insert_post(w, ctx, page("B", a)).await?;
+                if loops {
+                    return Ok(a * 1_000_000 + parent);
+                }
+                for title in ["C", "D"] {
+                    parent = wp_insert_post(w, ctx, page(title, parent)).await?;
+                }
+                Ok(wp_insert_post(w, ctx, page("E", 0)).await? * 1_000_000 + parent)
+            },
+            async |w, ctx, ids| {
+                let (id, parent) = (ids / 1_000_000, ids % 1_000_000);
+                wp_update_post(w, ctx, id, &|args| args.parent = parent)
+                    .await
+                    .map(drop)
+            },
+        )
+        .await;
+    }
+    every_cut(
+        async |w, ctx| {
+            let args = PostArgs {
+                name: Some(b"12".to_vec()),
+                date: "2025-06-07 08:09:10".into(),
+                ..oracle_post("publish")
+            };
+            wp_insert_post(w, ctx, args).await
+        },
+        async |w, ctx, id| {
+            wp_update_post(w, ctx, id, &|args| args.date = "2026-01-02 03:04:05".into())
+                .await
+                .map(drop)
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn post_formats_are_not_ported() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let deleted = rolled_back(async |w, ctx| {
+        let term = w.insert_term(b"Aside", b"post-format-aside", 0).await?;
+        let format = w
+            .insert_term_taxonomy((term, "post_format"), b"", 0)
+            .await?;
+        let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        w.add_relationship(id, format).await?;
+        wp_delete_post(w, ctx, id, true).await
+    })
+    .await;
+    assert!(unported(deleted));
+}
+
+#[test]
+fn term_errors_are_post_errors() {
+    let unported = Error::from(crate::terms::TermError::Unported("x"));
+    assert!(matches!(unported, Error::Unported("x")));
+    let invalid = Error::from(crate::terms::TermError::InvalidTerm);
+    assert!(matches!(invalid, Error::Refused("invalid_term")));
+}
+
+#[tokio::test]
+async fn revisions_copy_footnotes_as_stored() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let copied = rolled_back(async |w, ctx| {
+        let id = wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        let meta = hyscribe_db::Meta::Post;
+        let values: [&[u8]; 3] = [b"a:1:{i:0;s:3:\"a\\b\";}", b"i:5;", b"x\\y"];
+        for value in values {
+            w.add_meta(meta, id, "footnotes", Some(value)).await?;
+        }
+        wp_update_post(w, ctx, id, &|args| args.title = b"Renamed".to_vec()).await?;
+        let revision = w.revision_ids(id).await?.first().copied().unwrap_or(0);
+        let rows = w.object_meta(meta, revision).await?;
+        Ok(rows.into_iter().map(|(_, value)| value).collect::<Vec<_>>())
+    })
+    .await;
+    let expected: Vec<Option<Vec<u8>>> = vec![
+        Some(b"a:1:{i:0;s:3:\"a\\b\";}".to_vec()),
+        Some(b"5".to_vec()),
+        Some(b"x\\y".to_vec()),
+    ];
+    assert_eq!(copied.unwrap(), expected);
+}
+
+/// The user `wp_delete_user()` takes with its posts, and the posts.
+async fn poster(w: &mut Write<'_>, ctx: &Context) -> Result<u64> {
+    let login = b"oracle-poster";
+    let data = crate::users::UserData {
+        user_login: Some(login.to_vec()),
+        user_pass: Some(b"A pass phrase".to_vec()),
+        user_email: Some(b"oracle-poster@example.test".to_vec()),
+        ..crate::users::UserData::default()
+    };
+    let id = crate::users::wp_insert_user(w, &data).await?;
+    let post = PostArgs {
+        author: Some(id),
+        ..oracle_post("publish")
+    };
+    wp_insert_post(w, ctx, post.clone()).await?;
+    let page = PostArgs {
+        title: b"A page".to_vec(),
+        post_type: "page".into(),
+        ..post
+    };
+    wp_insert_post(w, ctx, page).await?;
+    Ok(id)
+}
+
+#[tokio::test]
+async fn a_users_posts_go_with_it_as_in_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    check(
+        "user-delete-with-posts",
+        async |conn| act(writer, conn, &admin(), async |w, ctx| poster(w, ctx).await).await,
+        async |conn, id| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                crate::users::wp_delete_user(w, id, None, ctx)
+                    .await
+                    .map(drop)
+            })
+            .await
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn database_errors_end_a_users_post_deletion() {
+    every_cut(poster, async |w, ctx, id| {
+        crate::users::wp_delete_user(w, id, None, ctx)
+            .await
+            .map(drop)
+    })
+    .await;
+}
+
+/// Term `id` named `name` in `taxonomy`, written raw as the setups do.
+async fn raw_term(
+    conn: &mut Connection,
+    id: u64,
+    (name, taxonomy): (&str, &str),
+    count: u64,
+) -> StdResult<(), String> {
+    sqlx::query("INSERT INTO wp_terms (term_id, name, slug, term_group) VALUES (?, ?, ?, 0)")
+        .bind(id)
+        .bind(name)
+        .bind(name.to_lowercase())
+        .execute(&mut *conn)
+        .await
+        .map_err(shown)?;
+    sqlx::query(
+        "INSERT INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, \
+         parent, count) VALUES (?, ?, ?, '', 0, ?)",
+    )
+    .bind(id)
+    .bind(id)
+    .bind(taxonomy)
+    .bind(count)
+    .execute(&mut *conn)
+    .await
+    .map_err(shown)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn rarer_saves_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    let update = async |conn: &mut Connection, id, change: &dyn Fn(&mut PostArgs)| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_update_post(w, ctx, id, change).await
+        })
+        .await
+        .map(drop)
+    };
+    let trash = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_trash_post(w, ctx, id).await
+        })
+        .await
+        .map(drop)
+    };
+    let delete = async |conn: &mut Connection, id| {
+        act(writer, conn, &admin(), async |w, ctx| {
+            wp_delete_post(w, ctx, id, true).await
+        })
+        .await
+        .map(drop)
+    };
+    let insert = async |conn: &mut Connection, args| insert_post(writer, conn, args).await;
+    check(
+        "update-categorized-post",
+        async |conn| {
+            raw_term(conn, 950, ("Oracle", "category"), 0).await?;
+            let args = PostArgs {
+                category: Some(vec![950]),
+                ..oracle_post("publish")
+            };
+            insert(conn, args).await
+        },
+        async |conn, id| {
+            update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await?;
+            let args = PostArgs {
+                id,
+                title: b"Rewritten".to_vec(),
+                content: b"New.".to_vec(),
+                status: "publish".into(),
+                ..PostArgs::default()
+            };
+            insert(conn, args).await.map(drop)
+        },
+    )
+    .await;
+    check(
+        "publish-dated-drafts",
+        async |conn| {
+            let draft = || PostArgs {
+                date: "2025-01-01 00:00:00".into(),
+                ..oracle_post("draft")
+            };
+            Ok((insert(conn, draft()).await?, insert(conn, draft()).await?))
+        },
+        async |conn, (first, second)| {
+            update(conn, first, &|args| args.status = "publish".into()).await?;
+            update(conn, second, &|args| {
+                args.status = "publish".into();
+                args.edit_date = true;
+            })
+            .await
+        },
+    )
+    .await;
+    check(
+        "update-unpublished-post-keeps-date",
+        async |conn| {
+            let args = PostArgs {
+                date: "2025-02-03 10:00:00".into(),
+                ..oracle_post("publish")
+            };
+            let id = insert(conn, args).await?;
+            update(conn, id, &|args| args.status = "draft".into()).await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await,
+    )
+    .await;
+    check(
+        "insert-pending-post",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let args = PostArgs {
+                name: Some(b"chosen".to_vec()),
+                ..oracle_post("pending")
+            };
+            insert(conn, args).await.map(drop)
+        },
+    )
+    .await;
+    check(
+        "update-post-with-stray-desired-slug",
+        async |conn| {
+            let id = insert(conn, oracle_post("publish")).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                let meta = hyscribe_db::Meta::Post;
+                Ok(
+                    w.add_meta(meta, id, "_wp_desired_post_slug", Some(b"elsewhere"))
+                        .await?,
+                )
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await,
+    )
+    .await;
+    check(
+        "trash-post-beside-trashed-namesake",
+        async |conn| {
+            let titled = |title: &[u8]| PostArgs {
+                title: title.to_vec(),
+                ..oracle_post("publish")
+            };
+            let id = insert(conn, titled(b"Taken")).await?;
+            let trashed = insert(conn, titled(b"Other")).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                trash_status(w, trashed).await?;
+                Ok(w.set_post_name(trashed, b"taken").await?)
+            })
+            .await?;
+            Ok(id)
+        },
+        trash,
+    )
+    .await;
+    check(
+        "publish-post-with-custom-guid",
+        async |conn| {
+            let id = insert(conn, oracle_post("draft")).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                Ok(w.set_post_guid(id, b"urn:oracle:custom").await?)
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.status = "publish".into()).await,
+    )
+    .await;
+    check(
+        "update-post-name-with-autosave",
+        async |conn| {
+            let id = insert(conn, oracle_post("publish")).await?;
+            autosave(writer, conn, id).await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.name = Some(b"renamed".to_vec())).await,
+    )
+    .await;
+    check(
+        "update-post-twice",
+        async |conn| {
+            let id = insert(conn, oracle_post("publish")).await?;
+            update(conn, id, &|args| args.title = b"A renamed post".to_vec()).await?;
+            Ok(id)
+        },
+        async |conn, id| update(conn, id, &|args| args.title = b"Renamed again".to_vec()).await,
+    )
+    .await;
+    check(
+        "delete-tagged-post",
+        async |conn| {
+            raw_term(conn, 960, ("Tagged", "post_tag"), 1).await?;
+            let id = insert(conn, oracle_post("publish")).await?;
+            act(writer, conn, &admin(), async |w, _| {
+                Ok(w.add_relationship(id, 960).await?)
+            })
+            .await?;
+            Ok(id)
+        },
+        delete,
+    )
+    .await;
+    check(
+        "insert-inherit-post",
+        async |_| Ok(()),
+        async |conn, ()| {
+            let args = PostArgs {
+                title: b"Hello world!".to_vec(),
+                ..oracle_post("inherit")
+            };
+            insert(conn, args).await.map(drop)
+        },
+    )
+    .await;
+    check(
+        "delete-draft-post",
+        async |conn| insert(conn, oracle_post("draft")).await,
+        delete,
+    )
+    .await;
+    // `EMPTY_TRASH_DAYS` 0 deletes unforced as `wp_delete_post()` forced.
+    let no_trash = Context {
+        constants: hyscribe_config::Constants {
+            empty_trash_days: 0,
+            ..hyscribe_config::Constants::default()
+        },
+        ..admin()
+    };
+    check(
+        "delete-draft-post",
+        async |conn| insert(conn, oracle_post("draft")).await,
+        async |conn, id| {
+            act(writer, conn, &no_trash, async |w, ctx| {
+                wp_delete_post(w, ctx, id, false).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+    // So does `wp_trash_post()`, which then calls it forced.
+    check(
+        "delete-draft-post",
+        async |conn| insert(conn, oracle_post("draft")).await,
+        async |conn, id| {
+            act(writer, conn, &no_trash, async |w, ctx| {
+                wp_trash_post(w, ctx, id).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+}
+
+/// `_wp_put_post_revision( get_post( $id ), true )`.
+async fn autosave(writer: &Writer, conn: &mut Connection, id: u64) -> StdResult<(), String> {
+    act(writer, conn, &admin(), async |w, ctx| {
+        let post = existing(w, id).await?;
+        let args = PostArgs {
+            title: post.title,
+            content: post.content,
+            excerpt: post.excerpt,
+            parent: id,
+            status: "inherit".into(),
+            post_type: "revision".into(),
+            name: Some(format!("{id}-autosave-v1").into_bytes()),
+            date: post.modified,
+            date_gmt: post.modified_gmt,
+            ..PostArgs::default()
+        };
+        insert(w, ctx, args, None).await.map(drop)
+    })
+    .await
+}
+
+#[tokio::test]
+async fn edge_values_are_read_as_php_reads_them() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    // A new post cannot close a loop, even under a parent in one.
+    let looped = rolled_back(async |w, ctx| {
+        let page = || PostArgs {
+            post_type: "page".into(),
+            ..oracle_post("publish")
+        };
+        let a = wp_insert_post(w, ctx, page()).await?;
+        let b = wp_insert_post(
+            w,
+            ctx,
+            PostArgs {
+                parent: a,
+                ..page()
+            },
+        )
+        .await?;
+        let post = existing(w, a).await?;
+        w.update_post(a, &PostFields { parent: b, ..post }).await?;
+        let c = wp_insert_post(
+            w,
+            ctx,
+            PostArgs {
+                parent: a,
+                ..page()
+            },
+        )
+        .await?;
+        Ok(existing(w, c).await?.parent == a)
+    })
+    .await;
+    assert!(looped.unwrap());
+    // A do_pings event already due later is not scheduled again.
+    let later = rolled_back(async |w, ctx| {
+        let at = ctx.now + 3600;
+        let cron = format!(
+            "a:2:{{i:{at};a:1:{{s:8:\"do_pings\";a:1:{{s:32:\"40cd750bba9870f18aada2478b24840a\";\
+             a:2:{{s:8:\"schedule\";b:0;s:4:\"args\";a:0:{{}}}}}}}}s:7:\"version\";i:2;}}"
+        );
+        set(w, "cron", cron.as_bytes()).await?;
+        wp_insert_post(w, ctx, oracle_post("publish")).await?;
+        Ok(w.option_value("cron").await?.unwrap_or_default() == cron.as_bytes())
+    })
+    .await;
+    assert!(later.unwrap());
+    // A cron array without its version, but with events, is still old.
+    let old = rolled_back(async |w, ctx| {
+        set(w, "cron", b"a:1:{i:5;a:0:{}}").await?;
+        wp_insert_post(w, ctx, oracle_post("publish")).await
+    })
+    .await;
+    assert!(unported(old));
+}
+
+/// What the posts list's actions need beyond the core functions: the
+/// trashed notice's Undo, sticky posts and the default page template.
+#[tokio::test]
+async fn list_actions_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = &writer().await;
+    check(
+        "untrash-post-to-previous-status",
+        async |conn| {
+            let id = insert_post(writer, conn, oracle_post("publish")).await?;
+            act(writer, conn, &admin(), async |w, ctx| {
+                wp_trash_post(w, ctx, id).await
+            })
+            .await?;
+            Ok(id)
+        },
+        async |conn, id| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                wp_untrash_post(w, ctx, id, true).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+    check(
+        "stick-and-unstick-posts",
+        async |conn| {
+            let args = PostArgs {
+                import_id: 970,
+                ..oracle_post("publish")
+            };
+            insert_post(writer, conn, args).await
+        },
+        async |conn, id| {
+            act(writer, conn, &admin(), async |w, _| {
+                stick_post(w, id).await?;
+                stick_post(w, id).await?;
+                stick_post(w, 1).await?;
+                unstick_post(w, MISSING).await
+            })
+            .await
+        },
+    )
+    .await;
+    check(
+        "update-page-template",
+        async |conn| {
+            let args = PostArgs {
+                post_type: "page".into(),
+                ..oracle_post("publish")
+            };
+            insert_post(writer, conn, args).await
+        },
+        async |conn, id| {
+            act(writer, conn, &admin(), async |w, ctx| {
+                let template = |args: &mut PostArgs| args.page_template = b"default".to_vec();
+                wp_update_post(w, ctx, id, &template).await
+            })
+            .await
+            .map(drop)
+        },
+    )
+    .await;
+    // A theme's own template, and a sticky list that is not a list.
+    let themed = rolled_back(async |w, ctx| {
+        let template = |args: &mut PostArgs| args.page_template = b"page-no-title".to_vec();
+        wp_update_post(w, ctx, 2, &template).await
+    })
+    .await;
+    assert!(unported(themed));
+    let listed = rolled_back(async |w, _| {
+        set(w, "sticky_posts", b"none").await?;
+        unstick_post(w, 1).await?;
+        stick_post(w, 1).await?;
+        Ok(w.option_value("sticky_posts").await?.unwrap_or_default())
+    })
+    .await;
+    assert_eq!(listed.unwrap(), b"a:1:{i:0;i:1;}");
+    // Quick Edit's slug of a draft, made unique as if it were published.
+    let slugs = rolled_back(async |w, _| {
+        let slug = || b"hello-world".to_vec();
+        let taken = wp_unique_post_slug(w, slug(), (0, "publish"), "post", 0).await?;
+        let free = wp_unique_post_slug(w, slug(), (1, "publish"), "post", 0).await?;
+        Ok((taken, free))
+    })
+    .await;
+    assert_eq!(
+        slugs.unwrap(),
+        (b"hello-world-2".to_vec(), b"hello-world".to_vec())
+    );
+    let other = rolled_back(async |w, _| {
+        wp_unique_post_slug(w, b"x".to_vec(), (0, "publish"), "attachment", 0).await
+    })
+    .await;
+    assert_eq!(other.unwrap(), b"x");
+}
+
+#[tokio::test]
+async fn database_errors_end_the_list_actions() {
+    let publish = async |w: &mut Write<'_>, ctx: &Context| {
+        wp_insert_post(w, ctx, oracle_post("publish")).await
+    };
+    every_cut(
+        async |w, ctx| {
+            let id = publish(w, ctx).await?;
+            wp_trash_post(w, ctx, id).await?;
+            Ok(id)
+        },
+        async |w, ctx, id| wp_untrash_post(w, ctx, id, true).await.map(drop),
+    )
+    .await;
+    every_cut(publish, async |w, _, id| {
+        stick_post(w, id).await?;
+        unstick_post(w, id).await
+    })
+    .await;
+    every_cut(
+        async |w, ctx| {
+            let page = PostArgs {
+                post_type: "page".into(),
+                ..oracle_post("publish")
+            };
+            wp_insert_post(w, ctx, page).await
+        },
+        async |w, ctx, id| {
+            let template = |args: &mut PostArgs| args.page_template = b"default".to_vec();
+            wp_update_post(w, ctx, id, &template).await.map(drop)
+        },
+    )
+    .await;
+}
+
+/// `get_default_post_to_edit( 'post', true )` and the user option the Quick
+/// Draft form keeps it in (`actions-dashboard.php`).
+async fn auto_draft(w: &mut Write<'_>, ctx: &Context) -> Result<u64> {
+    let id = get_default_post_to_edit(w, ctx, "post").await?;
+    let key = "wp_dashboard_quick_press_last_post_id";
+    let option = Value::Int(id.cast_signed());
+    crate::options::update_metadata(w, Meta::User, 1, key, &option, &Value::Null).await?;
+    Ok(id)
+}
+
+/// The Quick Draft form's auto-draft, the first with the daily deletion of
+/// old ones scheduled; a default post format is not ported.
+#[tokio::test]
+async fn auto_drafts_match_php() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let writer = writer().await;
+    let draft = async |conn: &mut Connection| act(&writer, conn, &admin(), auto_draft).await;
+    let again = async |conn: &mut Connection, _| draft(conn).await.map(drop);
+    check("admin-quick-press", async |_| Ok(()), again).await;
+    let stale = async |conn: &mut Connection| {
+        let id = draft(conn).await?;
+        act(&writer, conn, &admin(), async |w, ctx| {
+            wp_update_post(w, ctx, id, &|args| args.status = "draft".into()).await
+        })
+        .await
+        .map(drop)
+    };
+    check("admin-quick-press-stale", stale, again).await;
+    let format = rolled_back(async |w, ctx| {
+        set(w, "default_post_format", b"aside").await?;
+        get_default_post_to_edit(w, ctx, "post").await
+    })
+    .await;
+    assert!(unported(format));
+}
+
+#[tokio::test]
+async fn database_errors_end_auto_drafts() {
+    every_cut(
+        async |_, _| Ok(0),
+        async |w, ctx, _| auto_draft(w, ctx).await.map(drop),
+    )
+    .await;
+}

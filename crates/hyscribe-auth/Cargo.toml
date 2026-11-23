@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "hyscribe-auth"
+description = "WordPress password hashing and checking"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+blake2 = { version = "0.10.6", default-features = false }
+blowfish = { version = "0.10", features = ["bcrypt"] }
+hyscribe-phpser.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+hyscribe-testkit.workspace = true
+tempfile = "3"
+
+[lints]
+workspace = true

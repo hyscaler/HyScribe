@@ -2,12 +2,15 @@
 # Gates from docs/TESTING.md and docs/SECURITY_MODEL.md. Actions are
 # pinned to commit SHAs.
 #
-# Every job runs on the self-hosted runner of the CI machine (label hyscribe), inside
+# Every job runs on the project's self-hosted runner (label hyscribe), inside
 # a throwaway container of a pinned Rust image: nothing stays on the machine
 # between jobs except the named cache volumes hyscribe-cargo (cargo home and
-# tools) and hyscribe-sccache. The runner takes only pushes to development
-# and main and manual runs, never pull requests (a pull request from a fork
-# would run its code on that machine). Fixture containers start through the
+# tools) and hyscribe-sccache. The gates run for a release tag (v*), beside
+# the release build, and by hand; never for pull requests (a pull request
+# from a fork would run its code on that machine). Day to day, the same gates
+# run before a merge before a merge. The runner's paths come from the
+# repository variables HYSCRIBE_CI_WORK, HYSCRIBE_CI_DOCKER and
+# HYSCRIBE_CI_FIXTURES. Fixture containers start through the
 # runner's rootless Docker (scripts/ci-net.sh joins them to the job).
 # Mutation testing runs before a merge, not here. The containers run
 # as root; the steps that run HyScribe or its tests go through
@@ -16,8 +19,7 @@ name: CI
 
 on:
   push:
-    branches: [development, main]
-    paths-ignore: ["**.md", "docs/**"]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -348,6 +350,7 @@ jobs:
         run: |
           docker rm -f "hs-shots-php-$HYSCRIBE_DB_PORT" "hs-shots-hyscribe-$HYSCRIBE_DB_PORT" || true
           reference/default-install/db.sh down || true
+          scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
 
   fuzz:
     # Last: one runner takes the jobs in turn, and the fuzz run is the longest.

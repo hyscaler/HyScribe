@@ -470,7 +470,35 @@ fn a_theme_renders_over_the_loop_and_its_tags() {
     assert_eq!(host.render("index.php"), Ok(b"<head>index.php".to_vec()));
     assert_eq!(template::is("is_home", &[]), Ok(true));
     assert_eq!(template::is("is_page", &[Value::Int(2)]), Ok(false));
+    host.state(|state| state.refused.insert("is_home".into()));
+    assert_eq!(
+        template::is("is_home", &[]),
+        Err(SdkError::Invalid(
+            "is_home is not served by the test host".into()
+        ))
+    );
+    host.state(|state| state.refused.clear());
     assert_eq!(template::get("get_the_ID", &[]), Ok(Value::Int(4)));
+    host.state(|state| {
+        let named = "get_the_ID[Int(2)]".to_string();
+        state.values.insert(named.clone(), Value::Int(2));
+        state
+            .printed
+            .insert("wp_head[Int(2)]".into(), b"<two>".to_vec());
+    });
+    assert_eq!(
+        template::get("get_the_ID", &[Value::Int(2)]),
+        Ok(Value::Int(2))
+    );
+    assert_eq!(
+        template::get("get_the_ID", &[Value::Int(3)]),
+        Ok(Value::Int(4))
+    );
+    assert_eq!(
+        template::print("wp_head", &[Value::Int(2)]),
+        Ok(b"<two>".to_vec())
+    );
+    assert_eq!(template::print("wp_head", &[]), Ok(b"<head>".to_vec()));
     assert_eq!(
         template::get("get_bloginfo", &[]),
         Err(SdkError::Invalid(

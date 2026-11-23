@@ -46,6 +46,14 @@ pub fn print(name: &str, args: &[crate::Value]) -> Result<Html, crate::SdkError>
     crate::template::print(name, args).map(|bytes| Safe(Raw(bytes)))
 }
 
+impl Raw {
+    /// Whether the host printed nothing, as PHP's `if ( $markup )` tests
+    /// what a tag answered.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 /// Never shown as text: a filter that takes text gets a marker character
 /// standing for itself. Markup is only written into a render, kept aside.
 impl fmt::Display for Raw {

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Every value a template prints goes through the SDK's esc_html() (ADR 0023).
+[general]
+dirs = ["templates"]
+
+[[escaper]]
+path = "::hyscribe_sdk::page::Esc"
+extensions = ["html"]

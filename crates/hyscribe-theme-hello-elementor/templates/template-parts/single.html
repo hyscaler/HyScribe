@@ -1,0 +1,14 @@
+
+<main id="content" {{ post_class }}>
+
+	{% if let Some(title) = title %}		<div class="page-header">
+			{{ title }}		</div>
+	{% endif %}
+	<div class="page-content">
+		{{ content }}
+		{{ link_pages }}
+		{% if let Some(tags) = tags %}		<div class="post-tags">
+			{{ tags }}		</div>
+		{% endif %}	</div>
+
+	

@@ -484,12 +484,13 @@ impl std::fmt::Debug for Running {
     }
 }
 
-/// The extensions of a page view on `site`, if any are active.
-pub(crate) fn request(site: &Site) -> Option<Running> {
+/// The extensions of a page view on `site`, if any are active; `admin` for
+/// a request to the admin.
+pub(crate) fn request(site: &Site, admin: bool) -> Option<Running> {
     let runtime = site.extensions.as_ref();
     runtime.and_then(|runtime| {
         let outbound = Outbound(site.fetch.clone(), site.home.clone(), Handle::current());
-        let theme = Arc::new(Theme::default());
+        let theme = Arc::new(Theme::new(admin));
         let live = Live(
             Through::Own(site.writer.clone(), Handle::current()),
             Some(outbound),
@@ -510,6 +511,21 @@ pub(crate) fn request(site: &Site) -> Option<Running> {
             themes: runtime.themes().to_path_buf(),
         })
     })
+}
+
+/// Whether PHP's `is_admin()` is true for a request to `path`: hs-admin's,
+/// or a PHP file of `wp-admin` that hs-admin answers.
+pub(crate) fn admin_request(path: &str) -> bool {
+    let wp_admin = path.strip_prefix("/wp-admin/");
+    path.starts_with("/hs-admin/")
+        || wp_admin.is_some_and(|file| file.is_empty() || file.ends_with(".php"))
+}
+
+/// `after_setup_theme`, fired once the extensions are loaded as
+/// `wp-settings.php` fires it once the theme's `functions.php` is: the
+/// features their callbacks add are the request's (ADR 0023).
+pub(crate) fn after_setup_theme() {
+    tokio::task::block_in_place(|| hooks::do_action("after_setup_theme", &[]));
 }
 
 /// `running`'s request as the dispatcher of the hooks fired within it.

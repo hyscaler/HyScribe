@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Hello Elementor's manifest (ADR 0023): the options and hooks its port
+# uses. Its name and headers are its public/style.css's.
+
+[extension]
+kind = "theme"
+id = "hello-elementor"
+version = "3.5.2"
+sdk = "0.3"
+compatibility = "full"
+license = "AGPL-3.0-or-later"
+
+[capabilities]
+options = [
+  "hello_theme_version", "thread_comments",
+  "hello_elementor_settings_description_meta_tag", "hello_elementor_settings_skip_link",
+  "hello_elementor_settings_header_footer", "hello_elementor_settings_page_title",
+  "hello_elementor_settings_hello_style", "hello_elementor_settings_hello_theme",
+]
+
+[hooks]
+actions = ["after_setup_theme", "wp_enqueue_scripts", "wp_head"]
+filters = [
+  "body_class", "hello_elementor_enable_skip_link", "hello_elementor_header_footer",
+  "hello_elementor_page_title", "hello_elementor_enqueue_style",
+  "hello_elementor_enqueue_theme_style",
+]

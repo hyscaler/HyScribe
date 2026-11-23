@@ -119,7 +119,7 @@ impl Classic {
             "in_the_loop" => self.in_the_loop,
             "has_custom_logo" => logo(site, &self.theme.1).is_some(),
             // The front end, in English.
-            "is_author" | "is_admin" | "is_rtl" => false,
+            "is_author" | "is_rtl" => false,
             _ => return Err(Unserved),
         })
     }

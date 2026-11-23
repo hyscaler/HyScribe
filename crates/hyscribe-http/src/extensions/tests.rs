@@ -321,7 +321,7 @@ fn what_is_not_served_yet() {
     let no_page = Err("no page is being rendered".to_string());
     assert_eq!(live.enqueue(AssetKind::Style, "h"), no_page);
     assert_eq!(live.add_inline(AssetKind::Script, "h", "", false), unserved);
-    let call = hyscribe_ext::ThemeCall::ContentWidth(800);
+    let call = hyscribe_ext::ThemeCall::ThumbnailSize(1, 1, Value::Null);
     assert_eq!(live.theme("t", &call), Err(UNSERVED.to_string()));
     let call = hyscribe_ext::ThemeCall::HavePosts;
     assert_eq!(
@@ -353,7 +353,7 @@ fn active_plugins_files() {
 #[tokio::test]
 async fn no_extensions_without_a_plugins_folder() {
     let site = crate::tests::oracle_site().await;
-    assert!(request(&site).is_none());
+    assert!(request(&site, false).is_none());
 }
 
 /// A fault is logged with its extension, hook, callback and fault.
@@ -421,4 +421,35 @@ async fn a_panic_on_the_extensions_thread_is_the_action_s() {
             Box::new(|_| panic!("in the extensions' thread")),
         )
         .await;
+}
+
+/// `is_admin()` is true for hs-admin's requests and wp-admin's PHP files,
+/// not for the front end or wp-admin's static files.
+#[test]
+fn admin_requests_are_hs_admin_s_and_wp_admin_s_php_files() {
+    for path in [
+        "/hs-admin/",
+        "/hs-admin/edit",
+        "/wp-admin/",
+        "/wp-admin/edit.php",
+    ] {
+        assert!(admin_request(path), "{path}");
+    }
+    for path in [
+        "/",
+        "/hs-admin",
+        "/wp-admin",
+        "/wp-admin/css/common.css",
+        "/?p=1",
+    ] {
+        assert!(!admin_request(path), "{path}");
+    }
+}
+
+/// A request fires `after_setup_theme` once its extensions are loaded.
+#[tokio::test(flavor = "multi_thread")]
+async fn after_setup_theme_fires_for_the_extensions() {
+    let ((), fired) = hyscribe_testkit::hooks::recorded(&[], after_setup_theme);
+    let hooks: Vec<&str> = fired.iter().map(|(hook, _, _)| hook.as_str()).collect();
+    assert_eq!(hooks, ["after_setup_theme"]);
 }

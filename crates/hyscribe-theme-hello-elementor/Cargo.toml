@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Hello Elementor 3.5.2 ported to HyScribe (MVP 10.5, ADR 0023): its
+# templates and functions.php as a classic theme component. Hello's own code
+# is GPL-3.0-or-later (themes/README.md), so the port may be AGPL-3.0-or-later.
+# Built for wasm32-wasip2 by scripts/package.sh before the binary, which
+# embeds it; tested natively against the SDK's test host.
+[package]
+name = "hyscribe-theme-hello-elementor"
+description = "Hello Elementor 3.5.2 ported as a HyScribe classic theme component"
+version = "3.5.2"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# `config` reads askama.toml, where the SDK's escaper is named (ADR 0023).
+askama = { version = "=0.16.1", default-features = false, features = ["alloc", "derive", "config"] }
+hyscribe-sdk = { path = "../hyscribe-sdk", features = ["theme"] }
+
+# The workspace's lints, with `unsafe_code` denied rather than forbidden:
+# the component's exports, which the SDK's `theme!` writes for wasm32 only,
+# are allowed it in that one module.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

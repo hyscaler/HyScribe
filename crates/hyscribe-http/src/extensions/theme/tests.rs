@@ -434,7 +434,7 @@ async fn the_front_end_renders_the_classic_theme_s_template() {
     let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary).await;
     let site = site.with_writer(writer.unwrap());
     let site = Arc::new(site.with_extensions(&plugins, &themes));
-    let running = crate::extensions::request(&site).unwrap();
+    let running = crate::extensions::request(&site, false).unwrap();
     assert_eq!(format!("{running:?}"), "Running");
     let response = served(&site, "/").await;
     assert_eq!(response.status(), 200);
@@ -721,4 +721,27 @@ async fn styles_are_served_as_far_as_ported() {
     })
     .await
     .unwrap();
+}
+
+/// Hello's setup calls are taken as PHP takes them: `register_nav_menus()`
+/// adds `menus` and `add_editor_style()` adds `editor-style`, once each;
+/// `is_admin()` answers outside a page, true for an admin request.
+#[test]
+fn setup_calls_are_taken_as_php_takes_them() {
+    let theme = Theme::default();
+    let calls = [
+        ThemeCall::NavMenus(vec![("menu-1".into(), "Header".into())]),
+        ThemeCall::NavMenus(vec![("menu-2".into(), "Footer".into())]),
+        ThemeCall::EditorStyle(vec!["assets/css/editor-styles.css".into()]),
+        ThemeCall::ContentWidth(800),
+    ];
+    for call in calls {
+        assert_eq!(theme.answer(&call), Ok(Value::Null));
+    }
+    assert_eq!(lock(&theme.0).supports, ["menus", "editor-style"]);
+    let admin = ThemeCall::Conditional("is_admin".into(), Vec::new());
+    assert_eq!(theme.answer(&admin), Ok(Value::Bool(false)));
+    assert_eq!(Theme::new(true).answer(&admin), Ok(Value::Bool(true)));
+    let given = ThemeCall::Conditional("is_admin".into(), vec![Value::Int(1)]);
+    assert_eq!(Theme::new(true).answer(&given), Err(NO_PAGE.into()));
 }

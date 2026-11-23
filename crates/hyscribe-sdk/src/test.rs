@@ -186,9 +186,13 @@ pub struct State {
     pub resets: u32,
     /// The conditional tags that are true.
     pub conditionals: BTreeSet<String>,
-    /// What each printing template tag prints; one not here is refused.
+    /// The conditional tags the host does not serve.
+    pub refused: BTreeSet<String>,
+    /// What each printing template tag prints, by name, or by name and
+    /// the debug form of its arguments (`get_bloginfo[Text("name")]`),
+    /// which is tried first; one not here is refused.
     pub printed: BTreeMap<String, Vec<u8>>,
-    /// What each template tag answering a value answers.
+    /// What each template tag answering a value answers, keyed as `printed`.
     pub values: BTreeMap<String, Value>,
     /// Theme features and their arguments.
     pub supports: Vec<(String, Vec<Value>)>,

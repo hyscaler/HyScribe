@@ -21,6 +21,12 @@ case "$target" in
     # ring's objects are static and need no C library, so Rust's own linker
     # cross-links them with Rust's bundled musl.
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld
+    # wasmtime's C helpers include the C library's headers: musl's own for
+    # arm64 (Debian's musl-dev:arm64), not the hosts's glibc ones.
+    musl=/usr/include/aarch64-linux-musl
+    if [ -z "${CFLAGS_aarch64_unknown_linux_musl:-}" ] && [ -d "$musl" ]; then
+      export CFLAGS_aarch64_unknown_linux_musl="-nostdinc -isystem $musl -isystem $(clang -print-resource-dir)/include"
+    fi
     ;;
   *) echo "unsupported target: $target" >&2; exit 2 ;;
 esac

@@ -915,6 +915,29 @@ fn the_start_log_says_whether_fetches_are_on() {
     assert!(outbound_line(Some(&bare)).ends_with("no certificate store was found"));
 }
 
+/// The tasks' shared log passes every call through to the one log.
+#[test]
+fn the_shared_log_writes_through() {
+    /// A log that says when it was flushed.
+    struct Log(Vec<u8>);
+    impl Write for Log {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.write(buf)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.0.extend_from_slice(b"|");
+            Ok(())
+        }
+    }
+    let mut out = Log(Vec::new());
+    let log = std::sync::Mutex::new(&mut out as &mut dyn Write);
+    let mut shared = Shared(&log);
+    assert_eq!(shared.write(b"a").unwrap(), 1);
+    writeln!(shared, "b").unwrap();
+    shared.flush().unwrap();
+    assert_eq!(out.0, b"ab\n|");
+}
+
 /// A raw HTTP/1.1 request to the local server, returning the raw response.
 fn http(port: u16, request: &str) -> String {
     use std::io::{Read, Write};
@@ -1658,13 +1681,10 @@ impl hyscribe_fetch::Net for Local {
     }
 }
 
-/// The registry commands over a test registry listing no plugin, signed
-/// by the test roots this build trusts.
-#[test]
-fn registry_commands_reach_the_registry() {
-    use hyscribe_registry::install::{Allow, Update};
+/// A test registry listing no plugin, signed by the test roots this build
+/// trusts, and a client reaching it for every host.
+pub(crate) fn test_registry() -> (hyscribe_testkit::registry::Served, hyscribe_fetch::Client) {
     use hyscribe_testkit::minisign::{Key, key_list, sign_keys};
-    use registry::Asked;
 
     let served = hyscribe_testkit::registry::Served::start().unwrap();
     let now = signed::now();
@@ -1690,6 +1710,17 @@ fn registry_commands_reach_the_registry() {
     let net = std::sync::Arc::new(Local(served.address));
     let roots = hyscribe_testkit::registry::roots();
     let client = hyscribe_fetch::Client::new(roots, net, std::sync::Arc::new(()));
+    (served, client)
+}
+
+/// The registry commands over a test registry listing no plugin, signed
+/// by the test roots this build trusts.
+#[test]
+fn registry_commands_reach_the_registry() {
+    use hyscribe_registry::install::{Allow, Update};
+    use registry::Asked;
+
+    let (served, client) = test_registry();
     let home = tempfile::tempdir().unwrap();
     let env = [
         ("DB_NAME", "x"),

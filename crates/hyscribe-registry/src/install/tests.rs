@@ -360,6 +360,26 @@ async fn updates_check_and_install_the_newest() {
     assert_eq!(check, "Every plugin from the registry is up to date.\n");
 }
 
+/// The kept index offers a newer version to a plugin the registry signed
+/// only, never to one an operator's key signed.
+#[tokio::test]
+async fn offers_go_to_the_registry_s_plugins_only() {
+    let test = Test::new(&[release("0.1.0"), release("0.2.0")], &[]);
+    test.install("hyscribe-test", Some("0.1.0"), Allow::default())
+        .await
+        .unwrap();
+    let registry = test.folder.path().join("registry");
+    let index = crate::kept::shown(&registry, &test.roots, NOW);
+    let index = index.unwrap().unwrap();
+    let plugins = installed::list(&test.folder.path().join("plugins"));
+    let offered = offer(&plugins[0], &index);
+    assert_eq!(offered, Some(&("0.3".to_string(), "0.2.0".to_string())));
+    let mut origin = test.origin();
+    origin.signer = origin.signer.map(|(_, key)| (Signer::Trusted, key));
+    origin::write(&plugins[0].folder, &origin).unwrap();
+    assert_eq!(offer(&plugins[0], &index), None);
+}
+
 #[tokio::test]
 async fn a_refreshed_index_revokes_what_it_lists() {
     let test = Test::new(&[release("0.1.0"), release("0.2.0")], &[]);

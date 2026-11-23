@@ -173,8 +173,8 @@ fn told_answer(answer: Result<Value, String>) -> Vec<u8> {
 /// Hello's template tags answer on each page of
 /// `reference/pages/default.list` as PHP answers them where its template
 /// loader has picked the template, over the default install and with a
-/// custom logo and menus; author archives, which HyScribe answers 404
-///, are left out.
+/// custom logo and menus; author archives, which HyScribe answers 404,
+/// are left out.
 #[tokio::test(flavor = "multi_thread")]
 async fn hello_s_tags_answer_as_php() {
     let _saves = crate::admin::tests::SAVES.lock().await;

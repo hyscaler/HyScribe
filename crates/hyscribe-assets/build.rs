@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Embeds the files of `wp-includes` and `wp-admin` from the pinned WordPress release
-//!: downloaded, or read from `HYSCRIBE_WORDPRESS_TARBALL` for
+//! Embeds the files of `wp-includes` and `wp-admin` from the pinned WordPress release:
+//! downloaded, or read from `HYSCRIBE_WORDPRESS_TARBALL` for
 //! offline builds, and checked against its SHA-256 before anything in it
 //! is used. PHP is left out, and so is a `.js` or `.css` that has a `.min`
 //! twin, which pages only request with `SCRIPT_DEBUG`. A theme the release
 //! no longer bundles comes from its pinned wordpress.org archive
-//! (`themes/pinned.tsv`, an open question), checked the same way before it is unpacked
+//! (`themes/pinned.tsv`), checked the same way before it is unpacked
 //! (`HYSCRIBE_THEME_ZIPS` is a folder of them for offline builds). Each file served
 //! from the release, the embedded themes' too, keeps its modification time
 //! and SHA-256 for `Last-Modified` and `ETag`. A pinned theme ported as a

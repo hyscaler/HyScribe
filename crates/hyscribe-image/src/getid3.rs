@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! What getID3 makes of an audio or video upload, as
-//! `wp_read_audio_metadata()` and `wp_read_video_metadata()` keep it
-//!: HyScribe's own bounded readers of the container headers, each
+//! `wp_read_audio_metadata()` and `wp_read_video_metadata()` keep it:
+//! HyScribe's own bounded readers of the container headers, each
 //! for the files it reads as getID3 does and [`Unported`] for every other
 //! shape. Matched to PHP by `reference/getid3/golden.sh`.
 

@@ -50,8 +50,8 @@ use crate::outbound::insert_navigation;
 /// The current user, their session's token, the time and the runtime.
 pub(super) type Asker = (u64, Vec<u8>, i64, Handle);
 
-/// The answer to a write whose checks passed: refused without a writer
-///, else `pending`'s plan written in one action and the answer made
+/// The answer to a write whose checks passed: refused without a writer,
+/// else `pending`'s plan written in one action and the answer made
 /// from the site reloaded; 501 for what `hyscribe-write` does not port,
 /// and the database error page for an error, the write rolled back.
 pub(super) fn answer(

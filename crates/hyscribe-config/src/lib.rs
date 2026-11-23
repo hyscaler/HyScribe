@@ -283,6 +283,10 @@ pub struct Config {
     /// `EXTENSION_REGISTRY`: the hosted registry's base URL, HTTPS only,
     /// ending in `/` (ADR 0024); none until the project's own is named.
     pub extension_registry: Option<String>,
+    /// `EXTENSION_UPDATE_CHECK`: `on` lets the service fetch the registry's
+    /// key list and index every 12 hours, with `HTTP_OUTBOUND=on` and
+    /// `EXTENSION_REGISTRY` set (ADR 0024). Default off.
+    pub extension_update_check: bool,
     /// The capability constants.
     pub constants: Constants,
     /// The login rate limits.
@@ -449,6 +453,11 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         .filter(|key| !key.is_empty());
     let extension_trusted_keys = extension_trusted_keys.map(String::from).collect();
     let extension_registry = get("EXTENSION_REGISTRY").map(registry).transpose()?;
+    let extension_update_check = boolean(
+        get("EXTENSION_UPDATE_CHECK"),
+        "EXTENSION_UPDATE_CHECK",
+        false,
+    )?;
 
     if boolean(get("MULTISITE"), "MULTISITE", false)? {
         return Err(invalid("MULTISITE", "multisite networks are not supported"));
@@ -543,6 +552,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         embed_allowed,
         extension_trusted_keys,
         extension_registry,
+        extension_update_check,
         constants,
         login_limits,
         disable_wp_cron: boolean(get("DISABLE_WP_CRON"), "DISABLE_WP_CRON", false)?,

@@ -1101,12 +1101,32 @@ fn edit_args(query: &str) -> Option<EditArgs> {
     Some(args)
 }
 
-/// An installed extension as the Plugins screen lists it.
-fn listed(installed: hyscribe_ext::installed::Installed) -> Plugin {
+/// An installed extension as the Plugins screen lists it, with what its
+/// `origin.txt` and the kept `index` say of it.
+fn listed(
+    installed: hyscribe_ext::installed::Installed,
+    index: Option<&hyscribe_registry::index::Index>,
+) -> Plugin {
+    use hyscribe_admin::plugins::{Origin, Update};
+    use hyscribe_ext::origin::{self, Signer};
+    let read = origin::read(&installed.folder).ok().flatten();
+    let shown = match read.as_ref().map(|origin| &origin.signer) {
+        Some(None) => Origin::Unsigned,
+        Some(Some((Signer::Trusted, _))) => Origin::Trusted,
+        _ => Origin::Unremarked,
+    };
+    let revoked = read.and_then(|origin| origin.revoked);
+    let offer = index.and_then(|index| hyscribe_registry::install::offer(&installed, index));
+    let update = match (revoked, offer) {
+        (Some((_, reason)), _) => Some(Update::Revoked(reason)),
+        (None, Some((_, version))) => Some(Update::Offer(version.clone())),
+        (None, None) => None,
+    };
     let manifest = installed.manifest;
     let limits = manifest.limits;
     let asked = |time: std::time::Duration| u64::try_from(time.as_millis()).unwrap_or(u64::MAX);
     Plugin {
+        id: manifest.id,
         file: manifest.replaces.unwrap_or_default(),
         grants: manifest.grants.listed(),
         sensitive: manifest.grants.sensitive.into_iter().collect(),
@@ -1122,16 +1142,26 @@ fn listed(installed: hyscribe_ext::installed::Installed) -> Plugin {
         plugin_uri: manifest.plugin_uri,
         approved: installed.approved,
         disabled: installed.disabled,
+        origin: shown,
+        update,
     }
 }
 
 impl crate::Site {
     /// The extensions installed in the plugins folder, as the Plugins
-    /// screen lists them; none without the folder.
-    pub(crate) fn installed_plugins(&self) -> Vec<Plugin> {
+    /// screen lists them at `now` (none without the folder), and whether
+    /// the kept registry index is out of date.
+    pub(crate) fn installed_plugins(&self, now: i64) -> (Vec<Plugin>, bool) {
         let runtime = self.extensions.as_deref();
         let found = runtime.map(|runtime| hyscribe_ext::installed::list(runtime.plugins()));
-        found.unwrap_or_default().into_iter().map(listed).collect()
+        let kept = self.registry.as_deref().map(|(folder, roots)| {
+            let now = u64::try_from(now).unwrap_or_default();
+            hyscribe_registry::kept::shown(folder, roots, now)
+        });
+        let index = kept.as_ref().and_then(|kept| kept.as_ref().ok()?.as_ref());
+        let plugins = found.unwrap_or_default().into_iter();
+        let plugins = plugins.map(|installed| listed(installed, index)).collect();
+        (plugins, kept.is_some_and(|kept| kept.is_err()))
     }
 }
 
@@ -1494,8 +1524,13 @@ fn screen(
         "/hs-admin/update-core" => Answer::from_page(None),
         // The installed extensions listed.
         "/hs-admin/plugins" => {
-            let installed = admin.site.installed_plugins();
-            plugins(admin, &request, &installed, &PluginArgs::parse(query)?)?
+            let (installed, stale) = admin.site.installed_plugins(admin.reads.now);
+            plugins(
+                admin,
+                &request,
+                (&installed, stale),
+                &PluginArgs::parse(query)?,
+            )?
         }
         "/hs-admin/site-health" if !admin.can("view_site_health_checks") => Answer::from_page(None),
         // The Info tab of the bundled theme, and the Status tab with

@@ -18,6 +18,7 @@ fn folder(php: &str) -> String {
 /// The plugin the test extension stands in for, as its manifest has it.
 pub(crate) fn installed() -> Plugin {
     Plugin {
+        id: "hyscribe-test".into(),
         file: "hyscribe-test/hyscribe-test.php".into(),
         name: "HyScribe Test".into(),
         description: "Drives every call of the extension SDK for HyScribe's tests.".into(),
@@ -30,6 +31,8 @@ pub(crate) fn installed() -> Plugin {
         limits: None,
         approved: true,
         disabled: false,
+        origin: Origin::Unremarked,
+        update: None,
     }
 }
 
@@ -54,15 +57,48 @@ fn plugins_are_php_s() {
     let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
     for (role, php) in &rows {
         let php = php.as_deref().map(folder);
-        let ours = plugins(role, &request, &[], &Args::default()).unwrap();
+        let ours = plugins(role, &request, (&[], false), &Args::default()).unwrap();
         failures.extend(check(role, ours, php.as_ref()));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(rows.len(), 13);
 }
 
+/// The reason the x24revoked variant gives.
+const REASON: &str = "a <b>bad</b> build";
+
+/// PHP's page of an x24 variant (ADR 0024) as HyScribe shows it: the
+/// plugin's row with `update`, as PHP's has only for those who may update;
+/// the details link opening the plugin's site in a new tab instead of
+/// ThickBox; and for a revocation, its sentence instead of the offer.
+fn with_update(variant: &str, php: String) -> String {
+    let row = [
+        "<tr class=\"active\" data-slug",
+        "<tr class=\"inactive\" data-slug",
+    ];
+    let found = row.iter().find(|row| php.contains(*row)).unwrap();
+    let php = php.replacen(found, &found.replace("\" data", " update\" data"), 1);
+    let thickbox = "?TB_iframe=true&#038;width=600&#038;height=800\" class=\"thickbox open-plugin-details-modal\"";
+    assert!(php.contains(thickbox), "{variant}");
+    let php = php.replacen(
+        thickbox,
+        "\" target=\"_blank\" rel=\"noopener noreferrer\"",
+        1,
+    );
+    if variant != "x24revoked" {
+        return php;
+    }
+    let (before, offer) = php
+        .split_once("There is a new version of HyScribe Test")
+        .unwrap();
+    let after = offer.split_once("details</a>.").unwrap().1;
+    format!(
+        "{before}The registry revoked version 0.1.0 of HyScribe Test: <em>a &lt;b&gt;bad&lt;/b&gt; build</em>.{after}"
+    )
+}
+
 /// With the test extension installed, each recorded view is PHP's but for
-/// HyScribe's own part of the rows.
+/// HyScribe's own part of the rows; the x24 variants with its update rows.
 #[test]
 fn installed_plugins_are_listed_as_php_lists_them() {
     let mut failures = Vec::new();
@@ -77,6 +113,16 @@ fn installed_plugins_are_listed_as_php_lists_them() {
         }
         count += 1;
         let php = folder(&hs_admin_page(&String::from_utf8(unhex(page)).unwrap()));
+        let update = match variant {
+            "x24revoked" => Some(Update::Revoked(REASON.into())),
+            _ if variant.starts_with("x24") => Some(Update::Offer("0.2.0".into())),
+            _ => None,
+        };
+        let php = if update.is_some() {
+            with_update(variant, php)
+        } else {
+            php
+        };
         let site = Role(Box::leak(format!("{variant}:{role}").into_boxed_str()));
         let uri = format!("/hs-admin/plugins{query}");
         let canonical = format!(
@@ -87,13 +133,14 @@ fn installed_plugins_are_listed_as_php_lists_them() {
         let args = Args::parse(query.trim_start_matches('?')).unwrap();
         let plugin = Plugin {
             approved: variant != "x13inactive",
+            update,
             ..installed()
         };
-        let Some(Answer::Page(ours)) = plugins(&site, &request, &[plugin], &args) else {
+        let Some(Answer::Page(ours)) = plugins(&site, &request, (&[plugin], false), &args) else {
             panic!("{variant} {query}");
         };
         let shown = ours.contains("hyscribe-grants");
-        let inactive = php.contains("<tr class=\"inactive\"");
+        let inactive = php.contains("<tr class=\"inactive");
         assert_eq!(shown, inactive, "{variant} {query}");
         let ours = without_grants(&ours);
         if ours != php {
@@ -104,7 +151,7 @@ fn installed_plugins_are_listed_as_php_lists_them() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(count, 14);
+    assert_eq!(count, 18);
 }
 
 #[test]
@@ -155,15 +202,21 @@ fn unusual_active_plugins_are_not_ported() {
     let canonical = format!("{SITE}/hs-admin/plugins");
     let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
     let site = Role("o36bad:administrator");
-    assert_eq!(plugins(&site, &request, &[], &Args::default()), None);
+    assert_eq!(
+        plugins(&site, &request, (&[], false), &Args::default()),
+        None
+    );
     let editor = Role("o36bad:editor");
-    let refused = plugins(&editor, &request, &[], &Args::default());
+    let refused = plugins(&editor, &request, (&[], false), &Args::default());
     assert!(matches!(refused, Some(Answer::Denied(_))));
     let site = Role("x13badrecent:administrator");
-    assert_eq!(plugins(&site, &request, &[], &Args::default()), None);
+    assert_eq!(
+        plugins(&site, &request, (&[], false), &Args::default()),
+        None
+    );
     // One who may not activate gets no Activate link, nor the screen.
     let editor = Role("x13inactive:editor");
-    let refused = plugins(&editor, &request, &[installed()], &Args::default());
+    let refused = plugins(&editor, &request, (&[installed()], false), &Args::default());
     assert!(matches!(refused, Some(Answer::Denied(_))));
 }
 
@@ -232,6 +285,44 @@ fn grants_are_listed_before_approval() {
     assert!(stopped.starts_with("<div class=\"hyscribe-grants") && stopped.contains("stopped"));
 }
 
+/// Where an unsigned or operator-signed package came from is said even on
+/// an active, approved plugin's row (ADR 0024).
+#[test]
+fn origins_are_told() {
+    let told = |origin| {
+        grants(
+            &Plugin {
+                origin,
+                ..installed()
+            },
+            true,
+        )
+    };
+    assert_eq!(
+        told(Origin::Unsigned),
+        "<div class=\"hyscribe-grants notice notice-warning notice-alt inline\"><p>Unsigned package, installed from a local file by the server&#8217;s operator.</p></div>"
+    );
+    assert_eq!(
+        told(Origin::Trusted),
+        "<div class=\"hyscribe-grants notice notice-warning notice-alt inline\"><p>Signed by a key this site trusts.</p></div>"
+    );
+}
+
+/// A kept registry index out of date gives a notice of HyScribe's own.
+#[test]
+fn a_stale_index_is_told() {
+    let canonical = format!("{SITE}/hs-admin/plugins");
+    let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
+    let site = Role("x13inactive:administrator");
+    let page = |stale| match plugins(&site, &request, (&[installed()], stale), &Args::default()) {
+        Some(Answer::Page(page)) => page,
+        _ => panic!("no page"),
+    };
+    let notice = format!("<div class=\"notice notice-warning\"><p>{STALE}</p></div>");
+    assert!(page(true).contains(&notice));
+    assert!(!page(false).contains(STALE));
+}
+
 /// Two plugins of one name get row ids that stay apart, and a plugin
 /// without a description, author or links shows none.
 #[test]
@@ -253,9 +344,12 @@ fn rows_of_bare_plugins() {
     let site = Role("x13inactive:administrator");
     let canonical = format!("{SITE}/hs-admin/plugins");
     let request = request(&canonical, "/hs-admin/plugins", &BROWSER);
-    let Some(Answer::Page(page)) =
-        plugins(&site, &request, &[bare, twin, triplet], &Args::default())
-    else {
+    let Some(Answer::Page(page)) = plugins(
+        &site,
+        &request,
+        (&[bare, twin, triplet], false),
+        &Args::default(),
+    ) else {
         panic!("no page");
     };
     assert!(page.contains("id=\"activate-bare\"") && page.contains("id=\"activate-bare-2\""));
@@ -266,7 +360,8 @@ fn rows_of_bare_plugins() {
         author_uri: String::new(),
         ..installed()
     };
-    let Some(Answer::Page(page)) = plugins(&site, &request, &[author], &Args::default()) else {
+    let Some(Answer::Page(page)) = plugins(&site, &request, (&[author], false), &Args::default())
+    else {
         panic!("no page");
     };
     assert!(page.contains("Version 0.1.0 | By HyScribe | "));

@@ -141,6 +141,9 @@ pub struct Site {
     uploads: Option<Arc<Uploads>>,
     /// The extensions installed in `hyscribe/plugins/` (MVP 11.3).
     extensions: Option<Arc<hyscribe_ext::Runtime>>,
+    /// The registry's kept files, `hyscribe/registry/`, and the root keys
+    /// they are verified against (ADR 0024).
+    registry: Option<Arc<(std::path::PathBuf, Vec<hyscribe_ext::signature::PublicKey>)>>,
     /// The extensions a page view runs, once the site is loaded for it.
     running: Option<extensions::Running>,
     /// The installation as configured, which the admin shows.
@@ -221,6 +224,7 @@ impl Site {
             limiter: Arc::new(login::limits::Limiter::new(Default::default())),
             uploads: None,
             extensions: None,
+            registry: None,
             running: None,
             install: unconfigured(),
             fetch: None,
@@ -277,6 +281,7 @@ impl Site {
             limiter: Arc::clone(&self.limiter),
             uploads: self.uploads.clone(),
             extensions: self.extensions.clone(),
+            registry: self.registry.clone(),
             running: None,
             install: Arc::clone(&self.install),
             fetch: self.fetch.clone(),
@@ -342,6 +347,19 @@ impl Site {
         let runtime = hyscribe_ext::Runtime::new(plugins, themes);
         Site {
             extensions: Some(Arc::new(runtime)),
+            ..self
+        }
+    }
+
+    /// The site whose registry files are kept in `folder`, verified
+    /// against `roots`; tests pass their own roots, never configuration.
+    pub fn with_registry(
+        self,
+        folder: &std::path::Path,
+        roots: Vec<hyscribe_ext::signature::PublicKey>,
+    ) -> Site {
+        Site {
+            registry: Some(Arc::new((folder.to_path_buf(), roots))),
             ..self
         }
     }

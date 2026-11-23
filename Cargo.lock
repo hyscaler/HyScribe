@@ -1203,6 +1203,7 @@ dependencies = [
  "hyscribe-mail",
  "hyscribe-model",
  "hyscribe-phpser",
+ "hyscribe-registry",
  "hyscribe-render",
  "hyscribe-rest",
  "hyscribe-service",

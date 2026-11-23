@@ -92,6 +92,32 @@ fn writable(path: &Path) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// A page reads the kept index without writing `state`, and gets none
+/// without a key list or an index, an error when either fails at its time.
+#[test]
+fn shows_the_kept_index_without_writing() {
+    let folder = tempfile::tempdir().unwrap();
+    let folder = folder.path();
+    assert_eq!(shown(folder, &test_roots(), NOW), Ok(None));
+    keep_keys(folder, 3);
+    assert_eq!(shown(folder, &test_roots(), NOW), Ok(None));
+    keep_index(folder, 5);
+    let index = shown(folder, &test_roots(), NOW).unwrap().unwrap();
+    assert_eq!(index.serial, 5);
+    assert!(!folder.join("state").exists());
+    let expired = shown(folder, &test_roots(), NOW + 5).unwrap_err();
+    assert_eq!(expired, format!("index.json expired at {}", NOW + 5));
+    fs::write(folder.join("state"), "keys 3\nindex 6\n").unwrap();
+    let back = "registry/index.json: it is older than one already accepted (serial 5 < 6)";
+    assert_eq!(shown(folder, &test_roots(), NOW), Err(back.into()));
+    fs::write(folder.join("state"), "keys 4\nindex 0\n").unwrap();
+    let back = "registry/keys.json: it is older than one already accepted (serial 3 < 4)";
+    assert_eq!(shown(folder, &test_roots(), NOW), Err(back.into()));
+    fs::write(folder.join("state"), "keys 2\nindex 4\n").unwrap();
+    assert!(shown(folder, &test_roots(), NOW).unwrap().is_some());
+    assert_eq!(kept_state(folder), "keys 2\nindex 4\n");
+}
+
 #[test]
 fn refuses_what_does_not_verify_or_read() {
     let folder = tempfile::tempdir().unwrap();

@@ -492,6 +492,13 @@ async fn the_front_end_renders_the_classic_theme_s_template() {
         let kept = "a:1:{s:18:\"custom_css_post_id\";i:-1;}";
         assert_eq!(written, [kept][..visit.min(1)], "{visit}");
     }
+    // The site's own styles changed, the global styles are built again.
+    let styled = "UPDATE wp_posts SET post_content = '{\"version\": 3, \
+        \"isGlobalStylesUserThemeJSON\": true, \"styles\": {\"color\": {\"text\": \"#123456\"}}}' \
+        WHERE ID = 9701";
+    conn.execute(styled).await.unwrap();
+    let page = crate::admin::tests::page_of(served(&site, "/?page_id=2").await).await;
+    assert!(page.contains("#123456"), "{page}");
 }
 
 /// PHP's heads and footers, `reference/classic-head/golden.sh`.
@@ -697,6 +704,15 @@ async fn styles_are_served_as_far_as_ported() {
         let href = "href='http://127.0.0.1:8081/wp-content/plugins/a-plugin/a.css?ver=7.1.3'";
         assert!(printed.contains(href), "{printed}");
         assert!(!printed.contains("unknown"));
+        // The title tag as the theme supports it, and no feed links.
+        assert!(!printed.contains("<title>"));
+        let support = ThemeCall::AddSupport("title-tag".into(), Vec::new());
+        theme.answer(&support).unwrap();
+        let Ok(Value::String(printed)) = theme.answer(&head) else {
+            panic!("no head");
+        };
+        let printed = String::from_utf8(printed).unwrap();
+        assert!(printed.contains("<title></title>") && !printed.contains("application/rss+xml"));
         // `wp_head()` takes no arguments, and a page that ended is gone.
         let given = ThemeCall::Print("wp_head".into(), vec![Value::Int(1)]);
         assert_eq!(theme.answer(&given), Err(UNSERVED.into()));

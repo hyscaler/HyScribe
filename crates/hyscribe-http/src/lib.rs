@@ -1664,7 +1664,7 @@ fn classic_global_styles(
         .classic_styled
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((_, _, global)) = built.as_ref().filter(|(j, u, _)| *j == json && *u == user) {
+    if let Some((_, _, global)) = built.as_ref().filter(|(j, u, _)| (j, u) == (&json, &user)) {
         return Some(global.clone());
     }
     let global = Arc::new(theme::classic_global_styles(&json, user.as_deref()));

@@ -163,6 +163,8 @@ async fn looked_up(setup: impl AsyncFnOnce(&mut Write<'_>)) -> Result<Value> {
 
 #[tokio::test]
 async fn the_custom_css_lookup_is_kept_as_php_keeps_it() {
+    // Its options lock rows the oracle cases write too.
+    let _one = ONE_AT_A_TIME.lock().await;
     let mods =
         |value: &str| format!("a:2:{{s:4:\"seen\";b:1;s:18:\"custom_css_post_id\";{value}}}");
     let parsed = |value: &str| hyscribe_phpser::unserialize(mods(value).as_bytes()).unwrap();

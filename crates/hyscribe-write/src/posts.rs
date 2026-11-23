@@ -9,7 +9,7 @@
 
 use hyscribe_config::Constants;
 use hyscribe_db::{PostFields, Write};
-use hyscribe_phpser::Value;
+use hyscribe_phpser::{Key, Value};
 use hyscribe_render::formatting::sanitize_title;
 
 use crate::options::{Meta, add_metadata, delete_metadata, get_metadata, update_metadata};
@@ -406,6 +406,13 @@ pub async fn get_user_global_styles_post_id(
     Ok(id)
 }
 
+/// Whether the theme mods `mods` keep `wp_get_custom_css_post()`'s finding
+/// of no post, `custom_css_post_id` -1, which it does not look up again.
+pub fn custom_css_none_kept(mods: &[(Key, Value)]) -> bool {
+    let key = crate::themes::key("custom_css_post_id");
+    mods.iter().any(|(k, v)| *k == key && *v == Value::Int(-1))
+}
+
 /// `wp_get_custom_css_post()`'s lookup for the active theme `stylesheet`
 /// (named `name`), kept in its theme mod `custom_css_post_id`: `-1` once
 /// it found no `custom_css` post. Finding one is not ported.
@@ -417,10 +424,12 @@ pub async fn custom_css_post_lookup(
     let mut mods = crate::themes::theme_mods_lookup(write, stylesheet, name)
         .await?
         .ok_or(Error::Unported("theme mods that are not an array"))?;
+    if custom_css_none_kept(&mods) {
+        return Ok(());
+    }
     let key = crate::themes::key("custom_css_post_id");
     let found = mods.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone());
     let kept = match found {
-        Some(Value::Int(-1)) => true,
         // No post has the ID 0, so `$post_id > 0` is the conversion's.
         Some(Value::Int(id)) => match u64::try_from(id) {
             Ok(id) => write.post(id).await?.is_some(),

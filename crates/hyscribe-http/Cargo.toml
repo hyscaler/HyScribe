@@ -26,6 +26,7 @@ hyscribe-kses.workspace = true
 hyscribe-mail.workspace = true
 hyscribe-model.workspace = true
 hyscribe-phpser.workspace = true
+hyscribe-registry.workspace = true
 hyscribe-render.workspace = true
 hyscribe-rest.workspace = true
 hyscribe-service.workspace = true

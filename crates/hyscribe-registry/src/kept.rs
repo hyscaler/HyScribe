@@ -58,8 +58,14 @@ fn state(folder: &Path) -> Result<State, String> {
     state.unwrap_or(Ok(State::default())).map_err(String::from)
 }
 
-/// Keeps `serial` as the highest accepted, by `set`, unless one is higher.
-fn raise(folder: &Path, serial: u64, set: fn(&mut State) -> &mut u64) -> Result<(), String> {
+/// Keeps `serial` as the highest accepted, by `set`, unless one is higher;
+/// only checks it when not `keeping`.
+fn raise(
+    folder: &Path,
+    serial: u64,
+    set: fn(&mut State) -> &mut u64,
+    keeping: bool,
+) -> Result<(), String> {
     let mut state = state(folder)?;
     let kept = set(&mut state);
     if serial < *kept {
@@ -67,7 +73,7 @@ fn raise(folder: &Path, serial: u64, set: fn(&mut State) -> &mut u64) -> Result<
             "it is older than one already accepted (serial {serial} < {kept})"
         ));
     }
-    if serial > *kept {
+    if serial > *kept && keeping {
         *kept = serial;
         let written = replace(&folder.join("state"), state.text().as_bytes());
         written.map_err(|e| format!("registry/state cannot be written: {e}"))?;
@@ -78,6 +84,16 @@ fn raise(folder: &Path, serial: u64, set: fn(&mut State) -> &mut u64) -> Result<
 /// The kept key list, verified against `roots` at `now`: none when there
 /// is none, refused when it does not verify or goes back.
 pub fn keys(folder: &Path, roots: &[PublicKey], now: u64) -> Result<Option<KeyList>, String> {
+    read_keys(folder, roots, now, true)
+}
+
+/// [`keys`], raising `state` only when `keeping`.
+fn read_keys(
+    folder: &Path,
+    roots: &[PublicKey],
+    now: u64,
+    keeping: bool,
+) -> Result<Option<KeyList>, String> {
     let Some(bytes) = file(folder, "keys.json", keys::MAX_BYTES)? else {
         return Ok(None);
     };
@@ -90,7 +106,7 @@ pub fn keys(folder: &Path, roots: &[PublicKey], now: u64) -> Result<Option<KeyLi
         )?);
     }
     let list = KeyList::verify(&bytes, &signatures, roots, now)?;
-    let raised = raise(folder, list.serial, |state| &mut state.keys);
+    let raised = raise(folder, list.serial, |state| &mut state.keys, keeping);
     raised.map_err(|e| format!("registry/keys.json: {e}"))?;
     Ok(Some(list))
 }
@@ -98,15 +114,34 @@ pub fn keys(folder: &Path, roots: &[PublicKey], now: u64) -> Result<Option<KeyLi
 /// The kept index, verified against `keys` at `now`: none when there is
 /// none, refused when it does not verify or goes back.
 pub fn index(folder: &Path, keys: &KeyList, now: u64) -> Result<Option<Index>, String> {
+    read_index(folder, keys, now, true)
+}
+
+/// [`index`], raising `state` only when `keeping`.
+fn read_index(
+    folder: &Path,
+    keys: &KeyList,
+    now: u64,
+    keeping: bool,
+) -> Result<Option<Index>, String> {
     let Some(bytes) = file(folder, "index.json", index::MAX_BYTES)? else {
         return Ok(None);
     };
     let signature = file(folder, "index.json.minisig", MAX_SIGNATURE)?;
     let signature = signature.ok_or("registry/index.json has no index.json.minisig beside it")?;
     let index = Index::verify(&bytes, &signature, keys, now)?;
-    let raised = raise(folder, index.serial, |state| &mut state.index);
+    let raised = raise(folder, index.serial, |state| &mut state.index, keeping);
     raised.map_err(|e| format!("registry/index.json: {e}"))?;
     Ok(Some(index))
+}
+
+/// The kept index as a page shows it, writing nothing: none when no key
+/// list or index is kept, refused when either does not verify at `now`.
+pub fn shown(folder: &Path, roots: &[PublicKey], now: u64) -> Result<Option<Index>, String> {
+    let Some(keys) = read_keys(folder, roots, now, false)? else {
+        return Ok(None);
+    };
+    read_index(folder, &keys, now, false)
 }
 
 /// A fetched key list and index with their signatures, verified: the key

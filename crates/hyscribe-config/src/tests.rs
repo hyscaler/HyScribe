@@ -62,6 +62,7 @@ fn defaults_are_safe() {
             rss_allowed_hosts: Vec::new(),
             extension_trusted_keys: Vec::new(),
             extension_registry: None,
+            extension_update_check: false,
             embed_allowed: EmbedAllowed {
                 providers: true,
                 hosts: Vec::new(),
@@ -617,6 +618,7 @@ fn every_boolean_key_takes_the_same_values() {
             "BEHIND_PROXY" => config.server.behind_proxy,
             "REST_PUBLIC_USERS" => config.rest_public_users,
             "HTTP_OUTBOUND" => config.http_outbound,
+            "EXTENSION_UPDATE_CHECK" => config.extension_update_check,
             "DISALLOW_UNFILTERED_HTML" => config.constants.disallow_unfiltered_html,
             _ => config.constants.allow_unfiltered_uploads,
         })
@@ -625,6 +627,7 @@ fn every_boolean_key_takes_the_same_values() {
         ("BEHIND_PROXY", false),
         ("REST_PUBLIC_USERS", true),
         ("HTTP_OUTBOUND", false),
+        ("EXTENSION_UPDATE_CHECK", false),
         ("DISALLOW_UNFILTERED_HTML", true),
         ("ALLOW_UNFILTERED_UPLOADS", false),
     ];

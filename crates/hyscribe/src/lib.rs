@@ -567,6 +567,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                     ))
                     .with_install(install(&config, &site.server.0))
                     .with_extensions(&home.join("plugins"), &home.join("themes"))
+                    .with_registry(&home.join("registry"), signed::roots())
                     .with_writer(writer);
             let fetch = config.http_outbound.then(outbound);
             let fetching = outbound_line(fetch.as_ref());
@@ -596,28 +597,34 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
             );
             let _ = writeln!(out, "{fetching}");
             let _ = writeln!(out, "{mailing}");
-            let (lines, cron) = cron::service(&config, site_paths.home());
+            let (mut lines, cron) = cron::service(&config, site_paths.home());
+            let (line, check) = updates::service(&config, site_paths.home(), outbound);
+            lines.extend(line);
             for line in lines {
                 let _ = writeln!(out, "{line}");
             }
             let _ = out.flush();
             // After the log lines, so `service start` returns with them logged.
             lock.listening();
-            let stop = std::sync::Arc::new(tokio::sync::Notify::new());
-            let stopping = stop.clone();
+            let stops = [(); 2].map(|()| std::sync::Arc::new(tokio::sync::Notify::new()));
+            let stopping = stops.clone();
             let server = hyscribe_http::serve(listener, site.clone(), async move {
                 // The sender only goes away after sending.
                 let number = stopped.await.unwrap_or(0);
                 seen.store(number, std::sync::atomic::Ordering::SeqCst);
-                stopping.notify_one();
+                stopping.iter().for_each(|stop| stop.notify_one());
             });
-            match (cron, site.writer()) {
-                (Some(cron), Some(writer)) => {
-                    let task = cron::task(&writer, &cron, (cron::EVERY, &stop), out);
-                    tokio::join!(server, task);
+            let log = std::sync::Mutex::new(&mut *out);
+            let cron = async {
+                if let (Some(cron), Some(writer)) = (cron, site.writer()) {
+                    let every = (cron::EVERY, &*stops[0]);
+                    cron::task(&writer, &cron, every, &mut Shared(&log)).await;
                 }
-                _ => server.await,
-            }
+            };
+            let every = (updates::EVERY, &*stops[1]);
+            let mut checks = Shared(&log);
+            let check = updates::task(check.as_ref(), every, &mut checks);
+            tokio::join!(server, cron, check);
             Ok(())
         })
     })?;
@@ -649,6 +656,36 @@ async fn open_writer<W: Write + ?Sized>(
         }
     }
     Ok(writer)
+}
+
+/// One log written by the service's tasks, a call at a time, so their
+/// lines never mix.
+struct Shared<'a, W: Write>(&'a std::sync::Mutex<W>);
+
+impl<W: Write> Write for Shared<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut out = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        out.write(buf)
+    }
+
+    fn write_fmt(&mut self, args: std::fmt::Arguments<'_>) -> std::io::Result<()> {
+        let mut out = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        out.write_fmt(args)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut out = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        out.flush()
+    }
 }
 
 /// Formats an I/O failure with what was being done.
@@ -809,6 +846,7 @@ mod cron;
 mod registry;
 mod setup;
 mod signed;
+mod updates;
 
 use setup::web::{Ended, SETUP_TIMEOUT, setup_mode};
 

@@ -443,7 +443,7 @@ impl Role {
             ("h9iconnone", "site_icon") => b"954",
             ("h9iconbig", "site_icon") => b"955",
             ("o36bad", "active_plugins") => b"s:3:\"abc\";",
-            ("x13active", "active_plugins") => {
+            ("x13active" | "x24active", "active_plugins") => {
                 b"a:1:{i:0;s:31:\"hyscribe-test/hyscribe-test.php\";}"
             }
             ("x13missing", "active_plugins") => {
@@ -1011,7 +1011,9 @@ impl PageSite for Role {
             };
             return Some(value.to_vec());
         }
-        if self.variant() == "x13hidden" && name == "managepluginscolumnshidden" {
+        if ["x13hidden", "x24hidden"].contains(&self.variant())
+            && name == "managepluginscolumnshidden"
+        {
             return Some(b"a:1:{i:0;s:11:\"description\";}".to_vec());
         }
         if self.variant() == "a5hidden" {

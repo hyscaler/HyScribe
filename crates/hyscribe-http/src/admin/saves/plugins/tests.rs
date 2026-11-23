@@ -783,7 +783,89 @@ fn limits_asked_for_are_listed() {
         approved: false,
         disabled: false,
     };
-    let plugin = crate::admin::listed(installed);
+    let plugin = crate::admin::listed(installed, None);
     assert_eq!(plugin.limits, Some((100, 250, 16)));
     assert_eq!(plugin.file, FILE);
+}
+
+/// Keeps in `folder` a key list of test roots 1 and 2 naming key 10 for the
+/// index, and an index of `serial` expiring at `expires` that lists the
+/// test extension with `latest` as its newest version.
+fn keep_registry(folder: &Path, (serial, expires): (u64, u64), latest: &str) {
+    use hyscribe_testkit::minisign::{Key, key_list, sign_keys};
+    std::fs::create_dir_all(folder).unwrap();
+    let keys = [(&Key(10), r#""index""#, expires - 2000, expires + 10)];
+    let list = key_list(1, expires + 10, &keys, &[]);
+    for (n, signature) in sign_keys(&list, 1, expires + 10, &[&Key(1), &Key(2)])
+        .iter()
+        .enumerate()
+    {
+        let file = folder.join(format!("keys.json.{}.minisig", n + 1));
+        std::fs::write(file, signature).unwrap();
+    }
+    std::fs::write(folder.join("keys.json"), list).unwrap();
+    let sdk = hyscribe_ext::manifest::SDK.last().unwrap();
+    let index = format!(
+        r#"{{"serial":{serial},"expires":{expires},"extensions":[{{"id":"hyscribe-test","kind":"plugin","latest":{{"{sdk}":"{latest}"}},"sha256":"{}","size":10}}],"revoked":[]}}"#,
+        "0".repeat(64)
+    );
+    let comment = format!("hyscribe-index serial={serial} expires={expires}");
+    let signature = Key(10).sign(index.as_bytes(), &comment);
+    std::fs::write(folder.join("index.json.minisig"), signature).unwrap();
+    std::fs::write(folder.join("index.json"), index).unwrap();
+}
+
+/// The kept registry index offers a newer version in PHP's update row,
+/// with the command that installs it; a revoked version gets an error row,
+/// an unsigned package says so, and an index out of date gives no rows
+/// and a notice. Rendering writes nothing to `registry/`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_screen_shows_what_the_kept_registry_says() {
+    use crate::admin::tests::{page_of, send};
+    use hyscribe_testkit::minisign::Key as Signer;
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies, plugins) = served("wordpress", None, dir.path()).await;
+    let registry = dir.path().join("registry");
+    let now = u64::try_from(crate::now()).unwrap();
+    keep_registry(&registry, (2, now + 1000), "0.2.0");
+    let roots = (1..=3).map(|seed| Signer(seed).public());
+    let roots = roots.filter_map(|key| hyscribe_ext::signature::PublicKey::parse(&key));
+    let site = std::sync::Arc::try_unwrap(site).ok().unwrap();
+    let site = std::sync::Arc::new(site.with_registry(&registry, roots.collect()));
+    let folder = plugins.path().join("hyscribe-test");
+    let sha256 = "a".repeat(64);
+    let origin = |text: String| std::fs::write(folder.join("origin.txt"), text).unwrap();
+    origin(format!("registry {} {sha256}\n", Signer(10).id()));
+    let page =
+        async || page_of(send(&site, "GET", "/hs-admin/plugins", &cookies, None).await).await;
+    let offered = page().await;
+    assert!(
+        offered.contains("<tr class=\"inactive update\""),
+        "{offered}"
+    );
+    assert!(offered.contains("<tr class=\"plugin-update-tr\" id=\"hyscribe-test-update\""));
+    assert!(offered.contains("View version 0.2.0 details</a>. Install it on the server with <code>hyscribe plugin update hyscribe-test</code>."));
+    assert!(!offered.contains("out of date"));
+    origin(format!(
+        "registry {} {sha256}\nrevoked 1 a <b>bad</b> build\n",
+        Signer(10).id()
+    ));
+    let revoked = page().await;
+    assert!(revoked.contains("notice-error notice-alt\"><p>The registry revoked version 0.1.0 of HyScribe Test: <em>a &lt;b&gt;bad&lt;/b&gt; build</em>."));
+    origin(format!("unsigned {sha256}\n"));
+    let unsigned = page().await;
+    assert!(unsigned.contains("<p>Unsigned package, installed from a local file"));
+    assert!(!unsigned.contains("hyscribe-test-update"));
+    origin(format!("trusted {} {sha256}\n", Signer(4).id()));
+    let trusted = page().await;
+    assert!(trusted.contains("<p>Signed by a key this site trusts.</p>"));
+    origin(format!("registry {} {sha256}\n", Signer(10).id()));
+    keep_registry(&registry, (3, now - 1), "0.2.0");
+    let stale = page().await;
+    assert!(stale.contains("The update information from the plugin registry is out of date"));
+    assert!(!stale.contains("hyscribe-test-update"));
+    assert!(!registry.join("state").exists());
+    std::fs::remove_dir_all(&registry).unwrap();
+    let none = page().await;
+    assert!(!none.contains("out of date") && !none.contains("hyscribe-test-update"));
 }

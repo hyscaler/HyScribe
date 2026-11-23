@@ -139,10 +139,23 @@ pub async fn update(
 
 /// Whether the registry signed the plugin's package: by name, or a local
 /// file with its signature.
-fn from_registry(plugin: &Installed) -> bool {
+pub fn from_registry(plugin: &Installed) -> bool {
     let read = origin::read(&plugin.folder).ok().flatten();
     let signer = read.and_then(|origin| origin.signer);
     signer.is_some_and(|(signer, _)| signer != Signer::Trusted)
+}
+
+/// The SDK and version the index offers a plugin from the registry: its
+/// `latest` for the newest SDK this binary links, when not the installed one.
+pub fn offer<'i>(plugin: &Installed, index: &'i Index) -> Option<&'i (String, String)> {
+    let manifest = &plugin.manifest;
+    let entry = index
+        .extension(&manifest.id)
+        .filter(|_| from_registry(plugin))?;
+    let mut linked = manifest::SDK.iter().rev();
+    linked
+        .find_map(|sdk| entry.latest.iter().find(|(listed, _)| listed == sdk))
+        .filter(|(_, version)| *version != manifest.version)
 }
 
 /// `--check`: each plugin from the registry with another version in the
@@ -156,13 +169,7 @@ fn offers(installed: &[Installed], index: &Index) -> String {
             let (id, version) = (&manifest.id, &manifest.version);
             text.push_str(&format!("{id} {version} is revoked: {reason}\n"));
         }
-        let latest = index.extension(&manifest.id).and_then(|entry| {
-            let mut linked = manifest::SDK.iter().rev();
-            linked
-                .find_map(|sdk| entry.latest.iter().find(|(listed, _)| listed == sdk))
-                .filter(|(_, version)| *version != manifest.version)
-        });
-        if let Some((sdk, version)) = latest {
+        if let Some((sdk, version)) = offer(plugin, index) {
             text.push_str(&format!(
                 "{} {} is installed; {version} is available (SDK {sdk}): `hyscribe plugin update {}`\n",
                 manifest.id, manifest.version, manifest.id

@@ -53,9 +53,33 @@ const TEMPORARY: [&[u8]; 11] = [
     b"_error_nonce",
 ];
 
+/// Where an extension's package came from, as its row tells it (ADR 0024):
+/// nothing for one the registry signed or one installed before signing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Origin {
+    /// Nothing to tell.
+    #[default]
+    Unremarked,
+    /// Signed by a key in `EXTENSION_TRUSTED_KEYS`.
+    Trusted,
+    /// Installed with `--unsigned`.
+    Unsigned,
+}
+
+/// What the registry says of an installed extension, in an update row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Update {
+    /// The kept index offers this version.
+    Offer(String),
+    /// The installed version is revoked, for this reason.
+    Revoked(String),
+}
+
 /// An installed extension, as the screen lists it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plugin {
+    /// The extension's id, which the commands name.
+    pub id: String,
     /// The plugin file it stands in for, as `active_plugins` names it.
     pub file: String,
     /// `Plugin Name`.
@@ -81,7 +105,14 @@ pub struct Plugin {
     pub approved: bool,
     /// Whether HyScribe stopped running it after its faults.
     pub disabled: bool,
+    /// Where its package came from.
+    pub origin: Origin,
+    /// What the registry says of it.
+    pub update: Option<Update>,
 }
+
+/// What the screen says when the kept index cannot offer updates.
+const STALE: &str = "The update information from the plugin registry is out of date, so no updates are shown. The service fetches it again when <code>EXTENSION_UPDATE_CHECK</code> is on, as <code>hyscribe plugin update --check</code> does.";
 
 /// The notice of an activation that ended in a fatal error. The frame PHP
 /// adds to show the error is taken out again by the notice's kses, so it
@@ -199,11 +230,12 @@ pub fn recently_activated(stored: Option<&[u8]>, now: i64) -> Option<Vec<(Key, V
     Some(kept.collect())
 }
 
-/// `plugins.php` for `request`, listing `installed` as `args` ask.
+/// `plugins.php` for `request`, listing `installed` as `args` ask; `stale`
+/// when the kept registry index is out of date.
 pub fn plugins(
     site: &dyn PostsSite,
     request: &Request,
-    installed: &[Plugin],
+    (installed, stale): (&[Plugin], bool),
     args: &Args,
 ) -> Option<Answer> {
     // Refused as PHP refuses, before anything is read.
@@ -315,9 +347,8 @@ pub fn plugins(
             single_row(
                 site,
                 plugin,
-                status,
-                active.contains(&plugin.file),
-                &hidden,
+                (status, active.contains(&plugin.file)),
+                (&hidden, shown),
                 &mut ids,
             )
         };
@@ -359,8 +390,14 @@ pub fn plugins(
     let notice = args.notice.map_or_else(String::new, |(notice, classes)| {
         wp_admin_notice(notice, "message", classes, true, "")
     });
+    let stale = if stale {
+        wp_admin_notice(STALE, "", "notice-warning", true, "")
+    } else {
+        String::new()
+    };
     let content = missing
         + &notice
+        + &stale
         + &fill(
             PAGE,
             &[
@@ -471,14 +508,14 @@ fn nonce_link(site: &dyn PostsSite, url: &str, action: &str) -> String {
     link(&esc_html(&url))
 }
 
-/// `single_row()` of `plugin` in the list of `status`, its row actions'
-/// ids kept unique across the rows in `ids`.
+/// `single_row()` of `plugin` in the list of `status`, active or not, of
+/// `shown` columns, its row actions' ids kept unique across the rows in
+/// `ids`; with its update row after it.
 fn single_row(
     site: &dyn PostsSite,
     plugin: &Plugin,
-    status: &str,
-    active: bool,
-    hidden: &[&str],
+    (status, active): (&str, bool),
+    (hidden, shown): (&[&str], usize),
     ids: &mut Vec<String>,
 ) -> String {
     let name = text(&wp_kses_plugin_data(plugin.name.as_bytes(), false));
@@ -523,6 +560,11 @@ fn single_row(
     );
     let actions = [(action, link)];
     let class = if active { "active" } else { "inactive" };
+    let update = if plugin.update.is_some() {
+        " update"
+    } else {
+        ""
+    };
     let checkbox = format!(
         "<label class=\"label-covers-full-cell\" for=\"checkbox_{0}\"><span class=\"screen-reader-text\">Select {name}</span></label><input type=\"checkbox\" name=\"checked[]\" value=\"{1}\" id=\"checkbox_{0}\" />",
         md5(plugin.file.as_bytes()),
@@ -557,21 +599,68 @@ fn single_row(
         ""
     };
     format!(
-        "<tr class=\"{class}\" data-slug=\"{}\" data-plugin=\"{}\"><td class='check-column'>{checkbox}</td><th scope='row' class='plugin-title column-primary' aria-label='{}'><strong>{name}</strong>{}</th><td class='column-description desc{hidden_class}'>\n\t\t\t\t\t\t<div class='plugin-description'><p>{description}</p></div>\n\t\t\t\t\t\t<div class='{class} second plugin-version-author-uri'>{}</div>{}</td></tr>",
+        "<tr class=\"{class}{update}\" data-slug=\"{}\" data-plugin=\"{}\"><td class='check-column'>{checkbox}</td><th scope='row' class='plugin-title column-primary' aria-label='{}'><strong>{name}</strong>{}</th><td class='column-description desc{hidden_class}'>\n\t\t\t\t\t\t<div class='plugin-description'><p>{description}</p></div>\n\t\t\t\t\t\t<div class='{class} second plugin-version-author-uri'>{}</div>{}</td></tr>",
         esc_attr(slug.as_bytes()),
         esc_attr(plugin.file.as_bytes()),
         esc_attr(name.as_bytes()),
         row_actions(&actions, true),
         meta.join(" | "),
         grants(plugin, active)
+    ) + &update_row(plugin, &name, active, shown)
+}
+
+/// `wp_plugin_update_row()`'s markup for a user who may not update, the
+/// details link opening the plugin's site in a new tab (ADR 0024), then
+/// the command that updates it; for a revoked version, an error row.
+fn update_row(plugin: &Plugin, name: &str, active: bool, shown: usize) -> String {
+    let Some(update) = &plugin.update else {
+        return String::new();
+    };
+    let id = esc_attr(plugin.id.as_bytes());
+    let (notice, said, then) = match update {
+        Update::Offer(version) => {
+            let version = esc_attr(version.as_bytes());
+            let label = esc_attr(format!("View {name} version {version} details").as_bytes());
+            let said = format!(
+                "There is a new version of {name} available. <a href=\"{}\" target=\"_blank\" rel=\"noopener noreferrer\" aria-label=\"{label}\">View version {version} details</a>.",
+                text(&esc_url(plugin.plugin_uri.as_bytes()))
+            );
+            let then =
+                format!(" Install it on the server with <code>hyscribe plugin update {id}</code>.");
+            ("notice-warning", said, then)
+        }
+        Update::Revoked(reason) => {
+            let said = format!(
+                "The registry revoked version {} of {name}: <em>{}</em>.",
+                esc_html(plugin.version.as_bytes()),
+                esc_html(reason.as_bytes())
+            );
+            let then = format!(
+                " It no longer runs: install a version that is not revoked with <code>hyscribe plugin update {id}</code>, or delete it with <code>hyscribe plugin delete {id}</code>."
+            );
+            ("notice-error", said, then)
+        }
+    };
+    format!(
+        "<tr class=\"plugin-update-tr{}\" id=\"{id}-update\" data-slug=\"{id}\" data-plugin=\"{}\"><td colspan=\"{shown}\" class=\"plugin-update colspanchange\"><div class=\"update-message notice inline {notice} notice-alt\"><p>{said}{then}</p></div></td></tr>",
+        if active { " active" } else { "" },
+        esc_attr(plugin.file.as_bytes())
     )
 }
 
 /// HyScribe's own part of a row, where `after_plugin_row_meta` prints:
-/// what an extension asks for, until its activation approves it, and why
-/// HyScribe stopped one. Nothing for an active, approved extension.
+/// where an unsigned or operator-signed package came from, what an
+/// extension asks for until its activation approves it, and why HyScribe
+/// stopped one. Nothing more for an active, approved extension.
 pub fn grants(plugin: &Plugin, active: bool) -> String {
-    let mut out = String::new();
+    let mut out = match plugin.origin {
+        Origin::Unremarked => String::new(),
+        Origin::Trusted => "<p>Signed by a key this site trusts.</p>".into(),
+        Origin::Unsigned => {
+            "<p>Unsigned package, installed from a local file by the server&#8217;s operator.</p>"
+                .into()
+        }
+    };
     if plugin.disabled {
         out.push_str("<p><strong>HyScribe stopped running this plugin after repeated faults.</strong> Deactivate and activate it again to run it.</p>");
     }

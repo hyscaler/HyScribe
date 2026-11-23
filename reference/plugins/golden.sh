@@ -5,7 +5,8 @@
 # test extension stands in for (reference/plugins/hyscribe-test, MVP 11.3),
 # installed in the container's plugins folder for the run and the only
 # plugin listed (variants.php):
-# - the screen in the variants of variants.php and query arguments, as
+# - the screen in the variants of variants.php (the x24 ones with update
+#   rows) and query arguments, as
 #   crates/hyscribe-admin/tests/golden/plugins.tsv:
 #   variant<TAB>query<TAB>role<TAB>hex(page)
 # - the actions of actions.list, each from the options as they were, as
@@ -72,7 +73,7 @@ mask() {
 state() {
   local active='a:0:{}' recent='' hooks=''
   case "$1" in
-    x13active) active="a:1:{i:0;s:31:\"$file\";}" ;;
+    x13active | x24active) active="a:1:{i:0;s:31:\"$file\";}" ;;
     x13hooks) active="a:1:{i:0;s:31:\"$file\";}" hooks=on ;;
     x13fail) hooks=trap ;;
     x13missing) active="a:2:{i:0;s:31:\"$file\";i:1;s:19:\"missing/missing.php\";}" ;;
@@ -112,6 +113,8 @@ screen x13recent '?plugin_status=recently_activated' administrator
 screen x13hidden '' administrator
 screen x13hooks '' administrator
 screen x13inactive '?error=true&plugin=hyscribe-test%2Fhyscribe-test.php&_error_nonce=0123456789' administrator
+# ADR 0024's update rows (variants.php).
+for variant in x24update x24active x24revoked x24hidden; do screen "$variant" '' administrator; done
 # The actions: each case's variant, role, and request with the nonce of
 # the action named (- for none).
 option() {

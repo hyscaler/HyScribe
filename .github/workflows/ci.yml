@@ -10,7 +10,8 @@
 # from a fork would run its code on that machine). Day to day, the same gates
 # run before a merge before a merge. The runner's paths come from the
 # repository variables HYSCRIBE_CI_WORK, HYSCRIBE_CI_DOCKER and
-# HYSCRIBE_CI_FIXTURES. Fixture containers start through the
+# HYSCRIBE_CI_FIXTURES; its work, caches and Docker live in memory, so builds
+# do not write to its disks, and it frees them after every job. Fixture containers start through the
 # runner's rootless Docker (scripts/ci-net.sh joins them to the job).
 # Mutation testing runs before a merge, not here. The containers run
 # as root; the steps that run HyScribe or its tests go through
@@ -44,6 +45,7 @@ jobs:
       env:
         CARGO_HOME: /cache/cargo
         SCCACHE_DIR: /cache/sccache
+        SCCACHE_CACHE_SIZE: 10G
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
       volumes:
@@ -104,6 +106,7 @@ jobs:
       env:
         CARGO_HOME: /cache/cargo
         SCCACHE_DIR: /cache/sccache
+        SCCACHE_CACHE_SIZE: 10G
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
       volumes:
@@ -171,6 +174,7 @@ jobs:
       env:
         CARGO_HOME: /cache/cargo
         SCCACHE_DIR: /cache/sccache
+        SCCACHE_CACHE_SIZE: 10G
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
       volumes:
@@ -219,6 +223,7 @@ jobs:
       env:
         CARGO_HOME: /cache/cargo
         SCCACHE_DIR: /cache/sccache
+        SCCACHE_CACHE_SIZE: 10G
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
       volumes:
@@ -296,6 +301,7 @@ jobs:
       env:
         CARGO_HOME: /cache/cargo
         SCCACHE_DIR: /cache/sccache
+        SCCACHE_CACHE_SIZE: 10G
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
       volumes:
@@ -362,6 +368,7 @@ jobs:
       env:
         CARGO_HOME: /cache/cargo
         SCCACHE_DIR: /cache/sccache
+        SCCACHE_CACHE_SIZE: 10G
         DOCKER_HOST: unix://${{ vars.HYSCRIBE_CI_DOCKER }}
         TMPDIR: ${{ vars.HYSCRIBE_CI_WORK }}/_ci-tmp
       volumes:

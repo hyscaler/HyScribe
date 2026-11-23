@@ -13,7 +13,7 @@
 # (reference/pages/options.php), with reference/themes/hierarchy.php telling
 # the template; both are must-use plugins for the run, removed after. Needs
 # reference/themes/pin.sh <slug> before php.sh up; start from a fresh
-# db.sh up (page views write, an open question) and reset it after.
+# db.sh up (page views write) and reset it after.
 set -euo pipefail
 
 SLUG="${1:-twentytwentyone}"

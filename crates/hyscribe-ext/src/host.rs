@@ -25,7 +25,7 @@ pub const TICK: Duration = Duration::from_millis(1);
 const STACK: usize = 512 << 10;
 
 /// The longest a call runs, its host calls included: a request's own
-/// limit (`REQUEST_TIME_LIMIT`, an open question).
+/// limit (`REQUEST_TIME_LIMIT`).
 const WALL: Duration = Duration::from_secs(30);
 
 /// The most elements a table may grow to.

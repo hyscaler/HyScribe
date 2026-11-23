@@ -5,7 +5,7 @@
 //! metadata of `wp_generate_attachment_metadata()`, made on the image
 //! worker pool (ADR 0015). A file is written under a temporary name and
 //! then linked to its own, so a crash leaves no half file, and never
-//! outside the uploads folder. What is not ported (an open question, ADR 0020: a
+//! outside the uploads folder. What is not ported (ADR 0020: a
 //! PDF's preview, audio and video getID3 reads in depth, a type libmagic
 //! gives two ways) is answered 501, and the file it wrote is deleted.
 

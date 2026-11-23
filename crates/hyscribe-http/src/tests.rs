@@ -1416,7 +1416,7 @@ async fn feeds_match_php() {
 }
 
 /// Every page of `reference/head/golden.sh`, status and HTML, against
-/// PHP's, with HyScribe as the generator and without the tags an open question holds
+/// PHP's, with HyScribe as the generator and without the tags held
 /// back.
 #[tokio::test]
 async fn pages_match_php() {

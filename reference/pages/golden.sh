@@ -12,7 +12,7 @@
 # lists of a theme (which would be 9 MB of hex each), the SHA-256 of the
 # page without its RSD link, with the page itself in
 # target/pages/<list>.tsv for reading differences (reference/pages/ttd-body.py
-# says how a page with a gallery in random order is hashed, an open question).
+# says how a page with a gallery in random order is hashed).
 #   default: reference/default-install/php.sh up
 #   ttd, ttd-<theme>:     HYSCRIBE_PHP_DB=wordpress_saves HYSCRIBE_PHP_UPLOADS=$PWD/target/fixtures/theme-test-data/7.1.3/uploads reference/default-install/php.sh up
 #   over the Theme Test Data fixture loaded into wordpress_saves with

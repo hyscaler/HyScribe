@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The Theme Test Data page of post 1031 shows `[gallery ...
-//! orderby="rand"]`, which PHP orders by `RAND()`: no two runs repeat
-//!. [`unshuffle`] puts the items of that one gallery in a fixed
+//! orderby="rand"]`, which PHP orders by `RAND()`: no two runs repeat.
+//! [`unshuffle`] puts the items of that one gallery in a fixed
 //! order, as `reference/pages/ttd-body.py` does to PHP's page before it
 //! hashes it, so the two compare as the same items in any order. The
 //! `loading="lazy"` of an item, which WordPress gives by position, is

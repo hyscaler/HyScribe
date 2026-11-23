@@ -7,7 +7,7 @@ First-party theme ports, one folder per WordPress theme slug (docs/EXTENSIONS.md
 | `twentytwentyfive/` | Twenty Twenty-Five, as bundled with WordPress 7.1.3, exported by `reference/themes/export.sh` (patterns in en_US) | GPL-2.0-or-later (see its `style.css`); its fonts are SIL OFL 1.1 and its images CC0, as its `readme.txt` lists |
 | `twentytwentyfour/` | Twenty Twenty-Four, as bundled with WordPress 7.1.3, exported by `reference/themes/export.sh twentytwentyfour` | GPL-2.0-or-later (see its `style.css`); its fonts are SIL OFL 1.1 and its images CC0, as its `readme.txt` lists |
 | `twentytwentythree/` | Twenty Twenty-Three, as bundled with WordPress 7.1.3, exported by `reference/themes/export.sh twentytwentythree` | GPL-2.0-or-later (see its `style.css`); its fonts are SIL OFL 1.1, as its `readme.txt` lists |
-| `twentytwentytwo/` | Twenty Twenty-Two 2.2, pinned from wordpress.org (an open question, see below), exported by `reference/themes/export.sh twentytwentytwo` | GPL-2.0-or-later ("GNU General Public License v2 or later" in its `style.css`); its fonts are SIL OFL 1.1 and its images CC0, as its `readme.txt` lists |
+| `twentytwentytwo/` | Twenty Twenty-Two 2.2, pinned from wordpress.org (see below), exported by `reference/themes/export.sh twentytwentytwo` | GPL-2.0-or-later ("GNU General Public License v2 or later" in its `style.css`); its fonts are SIL OFL 1.1 and its images CC0, as its `readme.txt` lists |
 
 Never edit these files by hand; re-export them when the pinned WordPress version changes.
 

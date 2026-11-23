@@ -477,7 +477,13 @@ fn a_theme_renders_over_the_loop_and_its_tags() {
             "is_home is not served by the test host".into()
         ))
     );
-    host.state(|state| state.refused.clear());
+    host.state(|state| {
+        state.refused.clear();
+        state.fails.insert("template.conditional")
+    });
+    let failing = template::is("is_home", &[]);
+    assert_eq!(failing, Err(failed("template.conditional")));
+    host.state(|state| state.fails.clear());
     assert_eq!(template::get("get_the_ID", &[]), Ok(Value::Int(4)));
     host.state(|state| {
         let named = "get_the_ID[Int(2)]".to_string();

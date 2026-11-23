@@ -139,7 +139,7 @@ pub async fn update(
 
 /// Whether the registry signed the plugin's package: by name, or a local
 /// file with its signature.
-pub fn from_registry(plugin: &Installed) -> bool {
+fn from_registry(plugin: &Installed) -> bool {
     let read = origin::read(&plugin.folder).ok().flatten();
     let signer = read.and_then(|origin| origin.signer);
     signer.is_some_and(|(signer, _)| signer != Signer::Trusted)

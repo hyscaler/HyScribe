@@ -34,6 +34,13 @@ pub(crate) use footer::{head_scripts, mediaelement_scripts};
 
 /// The WordPress version the bundled assets come from.
 const WP_VERSION: &str = include_str!("../../../wordpress/VERSION");
+/// Where `COMMON_CSS` is served from.
+const COMMON_SRC: &str = "/wp-includes/css/dist/block-library/common.min.css";
+
+/// `wp-img-auto-sizes-contain`'s inline CSS.
+const AUTO_SIZES_CSS: &str =
+    "img:is([sizes=auto i],[sizes^=\"auto,\" i]){contain-intrinsic-size:3000px 1500px}";
+
 const COMMON_CSS: &str =
     include_str!("../../../wordpress/wp-includes/css/dist/block-library/common.min.css");
 const SKIP_LINK_CSS: &str =
@@ -322,10 +329,7 @@ impl Head<'_> {
     /// actions build it, after `wp_maybe_inline_styles()`.
     fn styles(&self, assets: &Assets) -> Vec<Style> {
         let siteurl = self.siteurl();
-        let mut queue = vec![Style::inline(
-            "wp-img-auto-sizes-contain",
-            "img:is([sizes=auto i],[sizes^=\"auto,\" i]){contain-intrinsic-size:3000px 1500px}",
-        )];
+        let mut queue = vec![Style::inline("wp-img-auto-sizes-contain", AUTO_SIZES_CSS)];
         for handle in &assets.styles {
             let own = self
                 .theme
@@ -350,12 +354,7 @@ impl Head<'_> {
             queue.iter().any(|style| style.handle == handle)
         };
         let global = self.theme.global.inline_css(&on_page);
-        let library = Style::file(
-            "wp-block-library",
-            "/wp-includes/css/dist/block-library/common.min.css",
-            COMMON_CSS,
-            None,
-        );
+        let library = Style::file("wp-block-library", COMMON_SRC, COMMON_CSS, None);
         let mut global = Style::inline("global-styles", &global);
         if !assets.global_presets.is_empty() {
             global.after.push(assets.global_presets.clone());

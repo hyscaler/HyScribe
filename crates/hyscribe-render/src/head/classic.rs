@@ -15,13 +15,13 @@ use hyscribe_model::hooks::{Core, do_action_printing};
 use hyscribe_theme_json::GlobalStyles;
 
 use super::footer::{footer_actions, footer_scripts, head_scripts, siteurl};
-use super::{Assets, COMMON_CSS, EMOJI_CSS, Head, Style, normalize_relative_css_links, style_text};
+use super::{
+    AUTO_SIZES_CSS, Assets, COMMON_CSS, COMMON_SRC, EMOJI_CSS, Head, Style,
+    normalize_relative_css_links, style_text,
+};
 use crate::site::{Request, Site};
 use crate::template::Renderer;
 use crate::theme::Theme;
-
-/// Where `common.css` of `wp-block-library` is inlined from.
-const COMMON_SRC: &str = "/wp-includes/css/dist/block-library/common.min.css";
 
 /// A stylesheet of an extension's package, enqueued for every medium.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -205,11 +205,9 @@ impl ClassicPage<'_> {
     /// `WP_Styles::do_item()` of `queued`, as the buffer leaves it.
     fn print_style(&self, queued: &Queued) -> Vec<u8> {
         match queued {
-            Queued::Core("wp-img-auto-sizes-contain") => Style::inline(
-                "wp-img-auto-sizes-contain",
-                "img:is([sizes=auto i],[sizes^=\"auto,\" i]){contain-intrinsic-size:3000px 1500px}",
-            )
-            .print(""),
+            Queued::Core("wp-img-auto-sizes-contain") => {
+                Style::inline("wp-img-auto-sizes-contain", AUTO_SIZES_CSS).print("")
+            }
             Queued::Core("wp-emoji-styles") => {
                 Style::inline("wp-emoji-styles", EMOJI_CSS).print("")
             }
@@ -281,7 +279,7 @@ fn block_library() -> Vec<u8> {
 /// in the head's `hole`, and the late styles before the first `</head>`.
 pub fn hoist(page: &[u8], enqueued: &Mutex<Enqueued>, hole: &str) -> Vec<u8> {
     let enqueued = held(enqueued);
-    let Some(at) = find(page, hole.as_bytes()) else {
+    let Some(at) = crate::formatting::find(page, 0, hole.as_bytes()) else {
         return page.to_vec();
     };
     let mut out = page.get(..at).unwrap_or_default().to_vec();
@@ -300,10 +298,6 @@ pub fn hoist(page: &[u8], enqueued: &Mutex<Enqueued>, hole: &str) -> Vec<u8> {
         None => out.extend_from_slice(rest),
     }
     out
-}
-
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// Where the first `</head>` closer starts, its name in any case.

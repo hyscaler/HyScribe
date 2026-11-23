@@ -434,7 +434,7 @@ async fn the_front_end_renders_the_classic_theme_s_template() {
     let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary).await;
     let site = site.with_writer(writer.unwrap());
     let site = Arc::new(site.with_extensions(&plugins, &themes));
-    let running = crate::extensions::request(&site).unwrap();
+    let running = crate::extensions::request(&site, false).unwrap();
     assert_eq!(format!("{running:?}"), "Running");
     let response = served(&site, "/").await;
     assert_eq!(response.status(), 200);
@@ -477,8 +477,8 @@ async fn the_front_end_renders_the_classic_theme_s_template() {
         // The style enqueued in the footer, moved into the head.
         let late = "late.css?ver=7.1.3' media='all' />\n\n</head>";
         assert!(page.contains(late), "{page}");
-        // The test theme supports neither the title tag nor feed links.
-        assert!(!page.contains("<title>") && !page.contains("application/rss+xml"));
+        // Not the title tag; feed links from its `after_setup_theme`.
+        assert!(!page.contains("<title>") && page.contains("application/rss+xml"));
         for printed in [
             style,
             "<meta name=\"theme\">\n",
@@ -509,8 +509,17 @@ const HELLO_THEME_JSON: &[u8] = include_bytes!("../../../tests/hello-elementor-t
 
 /// What Hello's port does in the head: its three stylesheets enqueued in
 /// `wp_enqueue_scripts`, and its description meta tag printed in `wp_head`
-/// for a post shown on its own that has an excerpt.
-struct HelloPort(Arc<Theme>, Request);
+/// through the host's tags, for a post shown on its own with an excerpt.
+struct HelloPort(Arc<Theme>);
+
+impl HelloPort {
+    fn singular(&self) -> bool {
+        told(
+            &self.0,
+            ThemeCall::Conditional("is_singular".into(), vec![]),
+        ) == b"true"
+    }
+}
 
 impl hyscribe_model::hooks::Dispatch for HelloPort {
     fn attached(&self, hook: &str) -> bool {
@@ -547,8 +556,12 @@ impl hyscribe_model::hooks::Dispatch for HelloPort {
                 self.0.register_asset("hello-elementor", &asset).unwrap();
                 self.0.enqueue(AssetKind::Style, handle).unwrap();
             }
-        } else if let Some(post) = self.1.posts.first().filter(|_| self.1.singular) {
-            let excerpt = hyscribe_kses::wp_strip_all_tags(&post.excerpt, false);
+        } else if self.singular() {
+            let get = ThemeCall::Get("get_queried_object_id".into(), Vec::new());
+            let field = vec![text("post_excerpt"), self.0.answer(&get).unwrap()];
+            let excerpt = told(&self.0, ThemeCall::Print("get_post_field".into(), field));
+            let strip = ThemeCall::Print("wp_strip_all_tags".into(), vec![Value::String(excerpt)]);
+            let excerpt = told(&self.0, strip);
             if !excerpt.is_empty() {
                 let content = hyscribe_kses::esc_attr(&excerpt);
                 printed.extend(
@@ -621,8 +634,7 @@ async fn hello_s_head_and_footer_print_as_php() {
                     .unwrap();
             }
             theme.begin((&site, &request), &hello_files(), (&title, Some(global)));
-            let port: Arc<dyn hyscribe_model::hooks::Dispatch> =
-                Arc::new(HelloPort(theme.clone(), request.clone()));
+            let port: Arc<dyn hyscribe_model::hooks::Dispatch> = Arc::new(HelloPort(theme.clone()));
             let page = hyscribe_model::hooks::scoped(&port, || {
                 let tag = |name: &str| told(&theme, ThemeCall::Print(name.into(), Vec::new()));
                 [
@@ -718,6 +730,68 @@ async fn styles_are_served_as_far_as_ported() {
         assert_eq!(theme.answer(&given), Err(UNSERVED.into()));
         assert!(theme.end(Ok(Vec::new())).is_ok());
         assert_eq!(theme.end(Ok(b"x".to_vec())).unwrap(), b"x");
+    })
+    .await
+    .unwrap();
+}
+
+/// Hello's setup calls are taken as PHP takes them: `register_nav_menus()`
+/// adds `menus` and `add_editor_style()` adds `editor-style`, once each;
+/// `is_admin()` answers outside a page, true for an admin request.
+#[test]
+fn setup_calls_are_taken_as_php_takes_them() {
+    let theme = Theme::default();
+    let calls = [
+        ThemeCall::NavMenus(vec![("menu-1".into(), "Header".into())]),
+        ThemeCall::NavMenus(vec![("menu-2".into(), "Footer".into())]),
+        ThemeCall::EditorStyle(vec!["assets/css/editor-styles.css".into()]),
+        ThemeCall::ContentWidth(800),
+    ];
+    for call in calls {
+        assert_eq!(theme.answer(&call), Ok(Value::Null));
+    }
+    assert_eq!(lock(&theme.0).supports, ["menus", "editor-style"]);
+    let admin = ThemeCall::Conditional("is_admin".into(), Vec::new());
+    assert_eq!(theme.answer(&admin), Ok(Value::Bool(false)));
+    assert_eq!(Theme::new(true).answer(&admin), Ok(Value::Bool(true)));
+    let given = ThemeCall::Conditional("is_admin".into(), vec![Value::Int(1)]);
+    assert_eq!(Theme::new(true).answer(&given), Err(NO_PAGE.into()));
+}
+
+/// The tags Hello's description meta tag reads: the queried post's ID and
+/// excerpt, the one field and post served, and `wp_strip_all_tags()`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_description_s_tags_answer() {
+    let (site, request) = hello_page("/?p=1").await;
+    let (home_site, home) = hello_page("/").await;
+    tokio::task::spawn_blocking(move || {
+        let theme = Theme::default();
+        theme.begin((&site, &request), &[], ("", None));
+        let get = |name: &str, args: Vec<Value>| theme.answer(&ThemeCall::Get(name.into(), args));
+        let print =
+            |name: &str, args: Vec<Value>| theme.answer(&ThemeCall::Print(name.into(), args));
+        assert_eq!(get("get_queried_object_id", Vec::new()), Ok(Value::Int(1)));
+        let unserved = Err(UNSERVED.to_string());
+        assert_eq!(get("get_queried_object_id", vec![Value::Int(1)]), unserved);
+        let excerpt = Ok(Value::String(request.posts[0].excerpt.clone()));
+        let field = |name: &str, id: i64| vec![text(name), Value::Int(id)];
+        assert_eq!(print("get_post_field", field("post_excerpt", 1)), excerpt);
+        assert_eq!(print("get_post_field", field("post_excerpt", 2)), unserved);
+        assert_eq!(print("get_post_field", field("post_title", 1)), unserved);
+        assert_eq!(
+            print("get_post_field", vec![text("post_excerpt")]),
+            unserved
+        );
+        let stripped = print("wp_strip_all_tags", vec![text(" <b>a</b>\n")]);
+        assert_eq!(stripped, Ok(text("a")));
+        assert_eq!(print("wp_strip_all_tags", Vec::new()), unserved);
+        // On a page that shows no post on its own, no post's field.
+        theme.begin((&home_site, &home), &[], ("", None));
+        let first = home.posts[0].id as i64;
+        assert_eq!(
+            print("get_post_field", field("post_excerpt", first)),
+            unserved
+        );
     })
     .await
     .unwrap();

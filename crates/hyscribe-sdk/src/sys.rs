@@ -813,9 +813,11 @@ pub mod template {
     }
 
     pub fn conditional(name: &str, _: &[Wire]) -> Result<bool, SdkError> {
-        live("template.conditional", |state| {
-            state.conditionals.contains(name)
-        })
+        let held = live("template.conditional", |state| {
+            let served = !state.refused.contains(name);
+            served.then(|| state.conditionals.contains(name))
+        })?;
+        held.ok_or_else(|| unserved(name))
     }
 
     /// A tag the test did not give an answer for.
@@ -823,13 +825,24 @@ pub mod template {
         SdkError::Invalid(format!("{name} is not served by the test host"))
     }
 
-    pub fn print(name: &str, _: &[Wire]) -> Result<Vec<u8>, SdkError> {
-        let printed = live("template.print", |state| state.printed.get(name).cloned())?;
+    /// The answer held for the tag `name` with `args`, as `name(args)`
+    /// with the arguments' debug form, or else for `name`.
+    fn held<T: Clone>(
+        answers: &alloc::collections::BTreeMap<String, T>,
+        name: &str,
+        args: &[Wire],
+    ) -> Option<T> {
+        let given = format!("{name}{:?}", super::values(args));
+        answers.get(&given).or_else(|| answers.get(name)).cloned()
+    }
+
+    pub fn print(name: &str, args: &[Wire]) -> Result<Vec<u8>, SdkError> {
+        let printed = live("template.print", |state| held(&state.printed, name, args))?;
         printed.ok_or_else(|| unserved(name))
     }
 
-    pub fn get(name: &str, _: &[Wire]) -> Result<Wire, SdkError> {
-        let value = live("template.get", |state| state.values.get(name).cloned())?;
+    pub fn get(name: &str, args: &[Wire]) -> Result<Wire, SdkError> {
+        let value = live("template.get", |state| held(&state.values, name, args))?;
         value
             .map(|value| value.__to_wit())
             .ok_or_else(|| unserved(name))

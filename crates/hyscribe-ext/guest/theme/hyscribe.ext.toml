@@ -13,4 +13,4 @@ license = "Apache-2.0 OR MIT"
 
 [hooks]
 filters = ["ext_theme", "ext_theme_head"]
-actions = ["wp_enqueue_scripts", "wp_head", "wp_footer"]
+actions = ["wp_enqueue_scripts", "wp_head", "wp_footer", "after_setup_theme"]

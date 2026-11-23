@@ -11,9 +11,14 @@ use crate::manifest::Kind as Of;
 fn theme_grants() -> Grants {
     Grants {
         filters: ["ext_theme", "ext_theme_head"].map(String::from).into(),
-        actions: ["wp_enqueue_scripts", "wp_head", "wp_footer"]
-            .map(String::from)
-            .into(),
+        actions: [
+            "wp_enqueue_scripts",
+            "wp_head",
+            "wp_footer",
+            "after_setup_theme",
+        ]
+        .map(String::from)
+        .into(),
         ..Grants::default()
     }
 }

@@ -356,7 +356,7 @@ async fn a_page_fails_with_its_first_database_error() {
     let broken = Arc::new(broken);
     let (printed, unserved, ended) = tokio::task::spawn_blocking(move || {
         let theme = Theme::default();
-        let global = hyscribe_render::theme::classic_global_styles(hello_theme_json(), None);
+        let global = hyscribe_render::theme::classic_global_styles(HELLO_THEME_JSON, None);
         theme.begin((&broken, &request), &[], ("", Some(Arc::new(global))));
         // The head reads `current_theme`, which the site has not loaded.
         let head = theme.answer(&ThemeCall::Print("wp_head".into(), Vec::new()));
@@ -458,7 +458,7 @@ async fn the_front_end_renders_the_classic_theme_s_template() {
     assert_eq!(response.status(), 500);
     let public = folder.join("public");
     std::fs::create_dir_all(&public).unwrap();
-    std::fs::write(public.join("theme.json"), hello_theme_json()).unwrap();
+    std::fs::write(public.join("theme.json"), HELLO_THEME_JSON).unwrap();
     let mods =
         "SELECT option_value FROM wp_options WHERE option_name = 'theme_mods_hyscribe-theme'";
     let named = "INSERT INTO wp_options (option_name, option_value, autoload) \
@@ -477,8 +477,8 @@ async fn the_front_end_renders_the_classic_theme_s_template() {
         // The style enqueued in the footer, moved into the head.
         let late = "late.css?ver=7.1.3' media='all' />\n\n</head>";
         assert!(page.contains(late), "{page}");
-        // The test theme supports neither the title tag nor feed links.
-        assert!(!page.contains("<title>") && !page.contains("application/rss+xml"));
+        // Not the title tag; feed links from its `after_setup_theme`.
+        assert!(!page.contains("<title>") && page.contains("application/rss+xml"));
         for printed in [
             style,
             "<meta name=\"theme\">\n",
@@ -505,51 +505,87 @@ async fn the_front_end_renders_the_classic_theme_s_template() {
 const GOLDEN_HEAD: &str = include_str!("../../../tests/golden/classic-head-hello-elementor.tsv");
 
 /// Hello Elementor 3.5.2's `theme.json`, as its package carries it.
-fn hello_theme_json() -> &'static [u8] {
-    hyscribe_assets::ported_file("hello-elementor", "theme.json").unwrap()
+const HELLO_THEME_JSON: &[u8] = include_bytes!("../../../tests/hello-elementor-theme.json");
+
+/// What Hello's port does in the head: its three stylesheets enqueued in
+/// `wp_enqueue_scripts`, and its description meta tag printed in `wp_head`
+/// through the host's tags, for a post shown on its own with an excerpt.
+struct HelloPort(Arc<Theme>);
+
+impl HelloPort {
+    fn singular(&self) -> bool {
+        told(
+            &self.0,
+            ThemeCall::Conditional("is_singular".into(), vec![]),
+        ) == b"true"
+    }
 }
 
-/// Hello's real component, built by `scripts/themes.sh` once per test
-/// binary, installed and approved in a themes folder of its own as the
-/// binary installs it, with an empty plugins folder beside it.
-fn hello_installed() -> tempfile::TempDir {
-    static WASM: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-    let wasm = WASM.get_or_init(|| {
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/themes.sh");
-        let built = std::process::Command::new("sh")
-            .arg(script)
-            .output()
-            .unwrap();
-        let stderr = String::from_utf8_lossy(&built.stderr);
-        assert!(built.status.success(), "scripts/themes.sh failed: {stderr}");
-        let dir = String::from_utf8(built.stdout).unwrap();
-        std::fs::read(format!("{}/hello-elementor.wasm", dir.trim())).unwrap()
-    });
-    let dir = tempfile::tempdir().unwrap();
-    let themes = dir.path().join("themes");
-    std::fs::create_dir_all(dir.path().join("plugins")).unwrap();
-    let port = &hyscribe_assets::PORTED[0];
-    let mut files = vec![
-        (
-            hyscribe_ext::manifest::FILE.to_string(),
-            port.manifest.to_vec(),
-        ),
-        (hyscribe_ext::hyx::COMPONENT.to_string(), wasm.clone()),
-    ];
-    let public = port.public.iter();
-    files.extend(public.map(|(path, bytes)| (format!("public/{path}"), bytes.to_vec())));
-    hyscribe_ext::installed::embed(&themes, files).unwrap();
-    let found = hyscribe_ext::installed::theme(&themes, "hello-elementor", "hello-elementor");
-    hyscribe_ext::installed::approve(&found.unwrap()).unwrap();
-    dir
+impl hyscribe_model::hooks::Dispatch for HelloPort {
+    fn attached(&self, hook: &str) -> bool {
+        ["wp_enqueue_scripts", "wp_head"].contains(&hook)
+    }
+
+    fn filter(&self, _: &str, value: Value, _: &[Value]) -> Value {
+        value
+    }
+
+    fn action(&self, _: &str, _: &[Value]) {}
+
+    fn printing(
+        &self,
+        hook: &str,
+        _: &[Value],
+        core: &mut dyn FnMut(Option<i32>) -> Vec<u8>,
+    ) -> Vec<u8> {
+        let mut printed = core(Some(10));
+        if hook == "wp_enqueue_scripts" {
+            for (handle, file) in [
+                ("hello-elementor", "reset"),
+                ("hello-elementor-theme-style", "theme"),
+                ("hello-elementor-header-footer", "header-footer"),
+            ] {
+                let asset = Asset {
+                    kind: AssetKind::Style,
+                    handle: handle.into(),
+                    src: format!("assets/css/{file}.css"),
+                    deps: Vec::new(),
+                    version: Some("3.5.2".into()),
+                    placement: "all".into(),
+                };
+                self.0.register_asset("hello-elementor", &asset).unwrap();
+                self.0.enqueue(AssetKind::Style, handle).unwrap();
+            }
+        } else if self.singular() {
+            let get = ThemeCall::Get("get_queried_object_id".into(), Vec::new());
+            let field = vec![text("post_excerpt"), self.0.answer(&get).unwrap()];
+            let excerpt = told(&self.0, ThemeCall::Print("get_post_field".into(), field));
+            let strip = ThemeCall::Print("wp_strip_all_tags".into(), vec![Value::String(excerpt)]);
+            let excerpt = told(&self.0, strip);
+            if !excerpt.is_empty() {
+                let content = hyscribe_kses::esc_attr(&excerpt);
+                printed.extend(
+                    format!("<meta name=\"description\" content=\"{content}\">\n").into_bytes(),
+                );
+            }
+        }
+        printed.extend(core(None));
+        printed
+    }
 }
 
-/// `site` running the extensions installed in `dir`.
-fn with_hello(site: Arc<Site>, dir: &tempfile::TempDir) -> Arc<Site> {
-    let site = Arc::try_unwrap(site).ok().unwrap();
-    let (plugins, themes) = (dir.path().join("plugins"), dir.path().join("themes"));
-    Arc::new(site.with_extensions(&plugins, &themes))
-}
+/// The features Hello adds in `after_setup_theme`.
+const HELLO_SUPPORTS: [&str; 9] = [
+    "post-thumbnails",
+    "automatic-feed-links",
+    "title-tag",
+    "html5",
+    "custom-logo",
+    "align-wide",
+    "responsive-embeds",
+    "editor-styles",
+    "woocommerce",
+];
 
 /// Hello's head and footer, over a template of the two only, print as PHP
 /// prints them on each page of `reference/pages/default.list` where its
@@ -562,10 +598,9 @@ async fn hello_s_head_and_footer_print_as_php() {
     ))
     .await;
     let global = Arc::new(hyscribe_render::theme::classic_global_styles(
-        hello_theme_json(),
+        HELLO_THEME_JSON,
         None,
     ));
-    let hello = hello_installed();
     let mut sites: HashMap<String, Arc<Site>> = HashMap::new();
     let (mut failures, mut pages) = (Vec::new(), 0);
     for line in GOLDEN_HEAD.lines() {
@@ -582,13 +617,7 @@ async fn hello_s_head_and_footer_print_as_php() {
                 } else {
                     hyscribe_testkit::fixture_database()
                 };
-                // A primary site, whose extensions read options through its writer.
-                let site = Arc::try_unwrap(site_on(&config, fields[0]).await)
-                    .ok()
-                    .unwrap();
-                let writer = hyscribe_db::Writer::open(&config, hyscribe_config::Mode::Primary);
-                let site = site.with_writer(writer.await.unwrap());
-                let site = with_hello(Arc::new(site), &hello);
+                let site = site_on(&config, fields[0]).await;
                 sites.insert(fields[0].into(), site.clone());
                 site
             }
@@ -598,12 +627,15 @@ async fn hello_s_head_and_footer_print_as_php() {
         };
         let global = global.clone();
         let ours = tokio::task::spawn_blocking(move || {
-            let running = crate::extensions::request(&site, false).unwrap();
-            let theme = running.theme.clone();
-            let port = crate::extensions::dispatch(&running);
+            let theme = Arc::new(Theme::default());
+            for feature in HELLO_SUPPORTS {
+                theme
+                    .answer(&ThemeCall::AddSupport(feature.into(), Vec::new()))
+                    .unwrap();
+            }
+            theme.begin((&site, &request), &hello_files(), (&title, Some(global)));
+            let port: Arc<dyn hyscribe_model::hooks::Dispatch> = Arc::new(HelloPort(theme.clone()));
             let page = hyscribe_model::hooks::scoped(&port, || {
-                hyscribe_model::hooks::do_action("after_setup_theme", &[]);
-                theme.begin((&site, &request), &hello_files(), (&title, Some(global)));
                 let tag = |name: &str| told(&theme, ThemeCall::Print(name.into(), Vec::new()));
                 [
                     &b"<head>\n"[..],
@@ -614,19 +646,15 @@ async fn hello_s_head_and_footer_print_as_php() {
                 ]
                 .concat()
             });
-            let mut faults = Vec::new();
-            crate::extensions::log(&running.request.reports(), &mut faults);
-            let page = String::from_utf8(theme.end(Ok(page)).unwrap()).unwrap();
-            (page, String::from_utf8(faults).unwrap())
+            String::from_utf8(theme.end(Ok(page)).unwrap()).unwrap()
         })
         .await
         .unwrap();
-        let (ours, faults) = ours;
         let php = String::from_utf8(hyscribe_testkit::unhex(fields[3])).unwrap();
         let php = crate::tests::as_hyscribe(php);
-        if php != ours || !faults.is_empty() {
+        if php != ours {
             failures.push(format!(
-                "{} {path}:\n{faults}{}",
+                "{} {path}:\n{}",
                 fields[0],
                 crate::tests::first_difference(&php, &ours)
             ));
@@ -677,7 +705,7 @@ async fn styles_are_served_as_far_as_ported() {
         theme.begin((&site, &request), &[], ("", None));
         // Without the theme's `theme.json`, its head is not served.
         assert_eq!(theme.answer(&head), Err(UNSERVED.into()));
-        let global = hyscribe_render::theme::classic_global_styles(hello_theme_json(), None);
+        let global = hyscribe_render::theme::classic_global_styles(HELLO_THEME_JSON, None);
         theme.begin((&site, &request), &[], ("", Some(Arc::new(global))));
         theme.enqueue(AssetKind::Style, "a").unwrap();
         theme.enqueue(AssetKind::Style, "unknown").unwrap();
@@ -767,91 +795,4 @@ async fn the_description_s_tags_answer() {
     })
     .await
     .unwrap();
-}
-
-/// The option's value and autoload the write oracle's `case` leaves.
-fn hello_version_golden(case: &str) -> (String, String) {
-    let path = format!(
-        "{}/../hyscribe-testkit/tests/golden/writes/hello-version-{case}.tsv",
-        env!("CARGO_MANIFEST_DIR")
-    );
-    let golden = std::fs::read_to_string(path).unwrap();
-    let cell = |column: &str| {
-        let line = golden
-            .lines()
-            .find(|line| line.contains(&format!("\t{column}\t")));
-        line.unwrap().rsplit('\t').next().unwrap().to_string()
-    };
-    let autoload = golden.contains("\tautoload\t").then(|| cell("autoload"));
-    (
-        cell("option_value"),
-        autoload.unwrap_or_else(|| "auto".into()),
-    )
-}
-
-/// Hello's `after_setup_theme` writes `hello_theme_version` in an admin
-/// request, a visitor's on the login redirect too, as PHP writes it (the
-/// write oracle's `hello-version-*`), when it is missing or older, and
-/// never on the front end.
-#[tokio::test(flavor = "multi_thread")]
-async fn hello_writes_its_version_as_php_does() {
-    let _saves = crate::admin::tests::SAVES.lock().await;
-    let db = content_db("SELECT 1").await;
-    let hello = hello_installed();
-    let site = site_on(&db, "template=hello-elementor&stylesheet=hello-elementor").await;
-    let site = Arc::try_unwrap(site).ok().unwrap();
-    let writer = hyscribe_db::Writer::open(&db, hyscribe_config::Mode::Primary).await;
-    let site = with_hello(Arc::new(site.with_writer(writer.unwrap())), &hello);
-    let options = sqlx::mysql::MySqlConnectOptions::new()
-        .host(&db.host)
-        .port(db.port)
-        .database(&db.name)
-        .username(&db.user)
-        .password(db.password.expose());
-    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
-    // A request reads the active theme from the database.
-    let active = "UPDATE wp_options SET option_value = 'hello-elementor' \
-        WHERE option_name IN ('template', 'stylesheet')";
-    conn.execute(active).await.unwrap();
-    let stored = "SELECT option_value, autoload FROM wp_options \
-        WHERE option_name = 'hello_theme_version'";
-    let set = |value: &str| {
-        format!(
-            "INSERT INTO wp_options (option_name, option_value, autoload) \
-             VALUES ('hello_theme_version', '{value}', 'auto')"
-        )
-    };
-    let gone = "DELETE FROM wp_options WHERE option_name = 'hello_theme_version'";
-    let cases = [
-        ("/", None, None),
-        ("/hs-admin/", None, Some(hello_version_golden("missing"))),
-        (
-            "/wp-admin/",
-            Some("3.0.0"),
-            Some(hello_version_golden("older")),
-        ),
-        (
-            "/hs-admin/",
-            Some("3.5.2"),
-            Some(("3.5.2".into(), "auto".into())),
-        ),
-        (
-            "/hs-admin/",
-            Some("3.10"),
-            Some(("3.10".into(), "auto".into())),
-        ),
-    ];
-    for (path, before, after) in cases {
-        conn.execute(gone).await.unwrap();
-        if let Some(before) = before {
-            let insert = sqlx::raw_sql(sqlx::AssertSqlSafe(set(before)));
-            conn.execute(insert).await.unwrap();
-        }
-        served(&site, path).await;
-        let row: Option<(String, String)> = sqlx::query_as(stored)
-            .fetch_optional(&mut conn)
-            .await
-            .unwrap();
-        assert_eq!(row, after, "{path} over {before:?}");
-    }
 }

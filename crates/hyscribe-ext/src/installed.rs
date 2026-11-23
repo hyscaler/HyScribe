@@ -206,7 +206,7 @@ pub fn install(
             Vouch::Signed(_, _, file) => replace(&signature, file),
             Vouch::Unsigned => gone(fs::remove_file(&signature)),
         })
-        .and_then(|()| unpack(plugins, &staging, &hyx, Some(&origin)));
+        .and_then(|()| unpack(plugins, &staging, &hyx, &origin));
     unpacked.map_err(|e| {
         let _ = fs::remove_dir_all(&staging);
         cannot(e)
@@ -214,39 +214,9 @@ pub fn install(
     Ok(hyx.manifest)
 }
 
-/// Puts a first-party theme the binary carries (ADR 0023) into
-/// `themes/<id>/` as an installed package, its approval and fault record
-/// kept; a folder already holding its files is left as it is.
-pub fn embed(themes: &Path, files: Vec<(String, Vec<u8>)>) -> Result<(), String> {
-    let text = files.iter().find(|(name, _)| name == manifest::FILE);
-    let manifest = Manifest::parse(text.map_or(&[][..], |(_, text)| text))?;
-    if manifest.kind != Kind::Theme {
-        return Err(format!("{} is not a theme", manifest.id));
-    }
-    let folder = themes.join(&manifest.id);
-    let held =
-        |(name, data): &(String, Vec<u8>)| fs::read(folder.join(name)).is_ok_and(|on| on == *data);
-    if files.iter().all(held) {
-        return Ok(());
-    }
-    let staging = themes.join(format!(".{}.new", manifest.id));
-    let hyx = Hyx { manifest, files };
-    let cannot = |e: std::io::Error| format!("cannot install into {}: {e}", themes.display());
-    let unpacked = fs::create_dir_all(themes).and_then(|()| unpack(themes, &staging, &hyx, None));
-    unpacked.map_err(|e| {
-        let _ = fs::remove_dir_all(&staging);
-        cannot(e)
-    })
-}
-
-/// Writes the package's files and `origin`, if any, into `staging`, then
-/// swaps it in for the extension's folder.
-fn unpack(
-    plugins: &Path,
-    staging: &Path,
-    hyx: &Hyx,
-    origin: Option<&Origin>,
-) -> std::io::Result<()> {
+/// Writes the package's files and `origin` into `staging`, then swaps it in
+/// for the plugin's folder.
+fn unpack(plugins: &Path, staging: &Path, hyx: &Hyx, origin: &Origin) -> std::io::Result<()> {
     let folder = plugins.join(&hyx.manifest.id);
     let old = plugins.join(format!(".{}.old", hyx.manifest.id));
     let write = |(name, data): &(String, Vec<u8>)| {
@@ -260,7 +230,7 @@ fn unpack(
         .and_then(|()| gone(fs::remove_dir_all(&old)))
         .and_then(|()| fs::create_dir_all(staging))
         .and_then(|()| hyx.files.iter().try_for_each(write))
-        .and_then(|()| origin.map_or(Ok(()), |origin| origin::write(staging, origin)))
+        .and_then(|()| origin::write(staging, origin))
         .and_then(|()| [faults::FILE, APPROVED].iter().try_for_each(keep))
         .and_then(|()| gone(fs::rename(&folder, &old)))
         .and_then(|()| fs::rename(staging, &folder))

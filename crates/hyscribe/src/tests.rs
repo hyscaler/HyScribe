@@ -1796,33 +1796,3 @@ fn registry_flags_are_read() {
     .allow(false);
     assert!(!(none.downgrade || none.new_grants || none.replace_local));
 }
-
-/// A ported theme the binary carries is put in the themes folder with its
-/// public files; one built without its component is not, and one that
-/// cannot be put there is logged.
-#[test]
-fn ported_themes_are_put_in_the_themes_folder() {
-    let manifest = include_bytes!("../../hyscribe-ext/guest/theme/hyscribe.ext.toml");
-    let port = |component: Option<&'static [u8]>| hyscribe_assets::Port {
-        slug: "hyscribe-theme",
-        manifest,
-        component,
-        public: &[("style.css", b"a {}")],
-    };
-    let dir = tempfile::tempdir().unwrap();
-    let themes = dir.path().join("themes");
-    let ports = [port(None), port(Some(b"wasm"))];
-    assert_eq!(ported_themes(&themes, &ports), Vec::<String>::new());
-    let folder = themes.join("hyscribe-theme");
-    assert_eq!(
-        std::fs::read(folder.join("extension.wasm")).unwrap(),
-        b"wasm"
-    );
-    let style = std::fs::read(folder.join("public/style.css")).unwrap();
-    assert_eq!(style, b"a {}");
-    let file = dir.path().join("file");
-    std::fs::write(&file, b"").unwrap();
-    let logged = ported_themes(&file, &ports);
-    assert_eq!(logged.len(), 1);
-    assert!(logged[0].starts_with("theme hyscribe-theme not installed: cannot install"));
-}

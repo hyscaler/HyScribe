@@ -29,8 +29,6 @@ chmod 600 .env
 # Saved first: grep -q stops reading early, which fails curl under pipefail.
 curl -fsS "http://127.0.0.1:$port/?p=1" > page.html
 grep -q 'Hello world!' page.html
-# The first-party theme components the binary carries are installed (ADR 0023).
-test -s themes/hello-elementor/extension.wasm && test -s themes/hello-elementor/public/style.css
 ./hyscribe service stop | grep -q '^stopped (pid '
 status=0
 ./hyscribe service status > status.txt || status=$?

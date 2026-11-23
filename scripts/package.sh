@@ -8,7 +8,6 @@
 # Needs the Rust target and clang: `ring` (rustls's crypto provider, ADR 0019)
 # compiles C and assembly, and clang builds it for either target without a
 # musl cross toolchain. CC_<target> and AR_<target> override the choice.
-# Also needs the wasm32-wasip2 target, for the theme components.
 set -euo pipefail
 
 target=${1:?target}
@@ -46,10 +45,6 @@ export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$root" log -1 --format=
 # Keep hosts paths out of the binary.
 export RUSTFLAGS="--remap-path-prefix=$root=/hyscribe --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
 
-# The first-party classic theme components (ADR 0023), built with the same
-# toolchain before the binary, which carries them.
-HYSCRIBE_THEME_COMPONENTS="$("$root/scripts/themes.sh")"
-export HYSCRIBE_THEME_COMPONENTS
 cargo build --manifest-path "$root/Cargo.toml" --release --locked -p hyscribe --target "$target"
 
 stage="$(mktemp -d)"

@@ -600,8 +600,6 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
             let (mut lines, cron) = cron::service(&config, site_paths.home());
             let (line, check) = updates::service(&config, site_paths.home(), outbound);
             lines.extend(line);
-            let themes = site_paths.home().join("themes");
-            lines.extend(ported_themes(&themes, hyscribe_assets::PORTED));
             for line in lines {
                 let _ = writeln!(out, "{line}");
             }
@@ -705,26 +703,6 @@ fn outbound_line(client: Option<&hyscribe_fetch::Client>) -> &'static str {
         Some(client) if client.has_roots() => "outbound fetches on",
         Some(_) => "outbound fetches on over HTTP only: no certificate store was found",
     }
-}
-
-/// Puts each ported theme whose component the binary carries into
-/// `themes/<slug>/` (ADR 0023), answering a start log line for each that
-/// could not be.
-fn ported_themes(themes: &std::path::Path, ports: &[hyscribe_assets::Port]) -> Vec<String> {
-    let carried = ports.iter().filter_map(|port| {
-        let component = port.component?;
-        let mut files = vec![
-            (hyscribe_ext::manifest::FILE.into(), port.manifest.to_vec()),
-            (hyscribe_ext::hyx::COMPONENT.into(), component.to_vec()),
-        ];
-        let public = port.public.iter();
-        files.extend(public.map(|(path, bytes)| (format!("public/{path}"), bytes.to_vec())));
-        let embedded = hyscribe_ext::installed::embed(themes, files);
-        embedded
-            .err()
-            .map(|err| format!("theme {} not installed: {err}", port.slug))
-    });
-    carried.collect()
 }
 
 fn failed(context: String) -> impl FnOnce(std::io::Error) -> String {

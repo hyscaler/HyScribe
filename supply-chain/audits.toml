@@ -103,12 +103,6 @@ criteria = "safe-to-deploy"
 version = "0.14.2"
 notes = "Pure Rust GIF decoder and encoder with #![forbid(unsafe_code)]. No build script or proc macros; the only extern block is an empty documentation include under the optional color_quant feature. No filesystem, network, process or environment access: it reads and writes only the Read, BufRead and Write values passed in. The decoder caps buffer growth with a MemoryLimit (50 MB by default) and fallible try_reserve. Depends on weezl, and on color_quant only with that feature."
 
-[[audits.glob]]
-who = "Devadatta Sahoo <webmaster@nettantra.com>"
-criteria = "safe-to-deploy"
-delta = "0.3.3 -> 0.3.4"
-notes = "Edition 2021, the filename cached for sorting in fill_todo from the DirEntry already read, a From<GlobError> for io::Error, tempfile in place of tempdir for tests, CI changes. No unsafe, build script, network or process access added; the directory reads are those 0.3.3 made. Runs at build time only here, inside askama_derive."
-
 [[audits.image-webp]]
 who = "Devadatta Sahoo <webmaster@nettantra.com>"
 criteria = "safe-to-deploy"

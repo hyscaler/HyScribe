@@ -1,4 +1,0 @@
-# The rows PHP WordPress writes for the action hello-version-older (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-23 08:40:19 to 2026-11-23 08:40:19 UTC.
-# %wp_options:1% is 131.
-wp_options	hello_theme_version	~	option_value	3.0.0	3.5.2

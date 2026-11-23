@@ -28,6 +28,7 @@ hyscribe_sdk::callbacks! {
         Styles => styles,
         Meta => meta,
         Late => late,
+        Setup => setup,
     }
 }
 
@@ -147,6 +148,16 @@ fn late(_: Vec<Value>) -> Answer {
     Ok(Value::Null)
 }
 
+/// `after_setup_theme`: feed links outside the admin, as a theme's setup
+/// adds its features.
+fn setup(_: Vec<Value>) -> Answer {
+    let why = |e: SdkError| format!("{e:?}");
+    if !template::is("is_admin", &[]).map_err(why)? {
+        theme::add_support("automatic-feed-links", &[]).map_err(why)?;
+    }
+    Ok(Value::Null)
+}
+
 /// `wp_head`, an action that prints what its callback answers.
 fn meta(_: Vec<Value>) -> Answer {
     Ok(Value::Text("<meta name=\"theme\">\n".into()))
@@ -171,6 +182,7 @@ impl Plugin for TestTheme {
         hooks::on_action("wp_enqueue_scripts", Cb::Styles, 10, 0).map_err(why)?;
         hooks::on_action("wp_head", Cb::Meta, 10, 0).map_err(why)?;
         hooks::on_action("wp_footer", Cb::Late, 10, 0).map_err(why)?;
+        hooks::on_action("after_setup_theme", Cb::Setup, 10, 0).map_err(why)?;
         theme::templates(&[
             file("index.php", None, &[]),
             file("single.php", None, &[]),

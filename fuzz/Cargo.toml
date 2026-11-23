@@ -31,7 +31,6 @@ hyscribe-kses = { path = "../crates/hyscribe-kses" }
 hyscribe-mail = { path = "../crates/hyscribe-mail" }
 hyscribe-theme-json = { path = "../crates/hyscribe-theme-json" }
 hyscribe-write = { path = "../crates/hyscribe-write" }
-hyscribe-theme-hello-elementor = { path = "../crates/hyscribe-theme-hello-elementor" }
 
 [[bin]]
 name = "phpser_decode"
@@ -465,13 +464,6 @@ bench = false
 [[bin]]
 name = "sdk_template_splice"
 path = "fuzz_targets/sdk_template_splice.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "theme_version_compare"
-path = "fuzz_targets/theme_version_compare.rs"
 test = false
 doc = false
 bench = false

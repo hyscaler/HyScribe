@@ -260,6 +260,25 @@ fn posts_match_php() {
     );
 }
 
+/// The links and dates of posts a user may read but a visitor may not,
+/// over `reference/rest/post-links.sql`: a private post keeps its pretty
+/// link for those who may read it, and a stored zero date reads as PHP's
+/// date handling makes it.
+#[test]
+fn private_post_links_and_zero_dates_match_php() {
+    static CONTENT: OnceLock<super::Content> = OnceLock::new();
+    let content = CONTENT.get_or_init(|| {
+        super::content::default_install_with(include_str!(
+            "../../../../reference/rest/post-links.sql"
+        ))
+    });
+    let golden = include_str!("../../tests/golden/post-links.tsv");
+    assert_eq!(rest_cases(golden).len(), 6 * 15);
+    let (failures, not_served) = super::mismatches(&[(content, golden, false)], true, &|_| false);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(not_served, 0);
+}
+
 /// `absint( ( $page - 1 ) * $per_page )` as PHP 8 computes it, for the
 /// products that fit an integer and for those that become floats and wrap.
 #[test]

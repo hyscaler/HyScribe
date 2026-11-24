@@ -7,7 +7,6 @@ use hyscribe_kses::strip_tags;
 use hyscribe_model::{Post, TermQuery};
 use hyscribe_phpser::{Key, Value, absint};
 use hyscribe_render::formatting::{CORE_SHORTCODE_TAGS, wptexturize};
-use hyscribe_render::permalinks::permalink;
 use hyscribe_render::post::{admin_title, sanitize_html_class};
 use hyscribe_render::wp_trim_words;
 
@@ -101,7 +100,7 @@ fn setup(context: &Context, post: &Post) -> Result<Item, RestError> {
             let found = context.site.post(id);
             item.invalid |= found.as_ref().is_none_or(|found| found.status == "trash");
             found.map(|found| {
-                item.url = permalink(context.site.reads(), &found);
+                item.url = crate::posts::link(context, &found);
                 the_title(&found.title)
             })
         }

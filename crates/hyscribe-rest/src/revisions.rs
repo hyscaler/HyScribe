@@ -9,7 +9,6 @@
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter};
 use hyscribe_phpser::{Key, Value, add_query_arg};
 use hyscribe_render::order_by;
-use hyscribe_render::permalinks::permalink;
 use hyscribe_render::post::admin_title;
 use hyscribe_render::rest::Rendering;
 
@@ -568,7 +567,7 @@ fn preview_link(context: &Context, kind: Kind, parent: &Post, autosave: bool) ->
     }
     let id = parent.id.to_string();
     let nonce = context.site.nonce(&format!("post_preview_{id}"));
-    let link = permalink(context.site.reads(), parent);
+    let link = crate::posts::link(context, parent);
     let mut args: Vec<(&[u8], Option<&[u8]>)> = vec![(b"preview", Some(b"true"))];
     if autosave {
         args.splice(

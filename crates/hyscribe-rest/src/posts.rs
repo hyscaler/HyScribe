@@ -371,6 +371,15 @@ pub(crate) fn link(context: &Context, post: &Post) -> Vec<u8> {
     if post.post_type == "attachment" {
         return crate::media::attachment_link(context, post, false);
     }
+    // `wp_force_plain_post_permalink()`: a private post keeps its pretty link
+    // for a user who may read it.
+    if post.status == "private" && context.can_for("read_post", post.id) {
+        let shown = Post {
+            status: "publish".into(),
+            ..post.clone()
+        };
+        return hyscribe_render::permalinks::permalink(context.site.reads(), &shown);
+    }
     hyscribe_render::permalinks::permalink(context.site.reads(), post)
 }
 

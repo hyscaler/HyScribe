@@ -718,7 +718,7 @@ fn in_init() -> String {
         &hooks::on_filter("user_has_cap", Cb::Echo, 10, 1),
         &hooks::on_action("the_content", Cb::Echo, 10, 1),
         &page("Bad Slug", "tools.php"),
-        &page("ext-x", "profile.php"),
+        &page("ext_x2", "profile.php"),
         &page("hyscribe-test", "tools.php"),
         &admin::add_menu_page("T", "T", "", "ext-x", Cb::TopPage, "", Some(5)),
         &admin::add_menu_page("T", "T", "read", "ext-x", Cb::TopPage, "x.svg", None),

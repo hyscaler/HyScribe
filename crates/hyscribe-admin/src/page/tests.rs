@@ -194,7 +194,7 @@ fn the_footer_text_goes_through_its_filter() {
     let (html, fired) =
         hyscribe_testkit::hooks::recorded(&answers, || render(&site(), &page(&[], "", "")));
     assert!(html.contains("\"alignleft\">\n\t\t<b>Thanks</b>\t</p>"));
-    let thanks = "<span id=\"footer-thankyou\">Thank you for creating with HyScribe.</span>";
+    let thanks = "<span id=\"footer-thankyou\">Thank you for creating with HyScribe. HyScribe is developed and supported by <a href=\"https://hyscaler.com\">HyScaler</a>.</span>";
     let thanks = Value::String(thanks.as_bytes().to_vec());
     let given = fired.iter().find(|(hook, ..)| hook == "admin_footer_text");
     assert_eq!(

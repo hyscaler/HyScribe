@@ -16,6 +16,7 @@ use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
 use crate::assets::{Assets, Urls, cookie_path, site_icon_tags};
+use crate::look::{bar_style, mark_icon};
 use crate::menu::{Look, Screen, admin_menu, clean_links, commands};
 
 /// `wp_removable_query_args()`: what the canonical admin URL leaves out.
@@ -451,6 +452,10 @@ pub fn admin_page_with(
         out.extend(RELOAD.as_bytes());
     }
     out.extend(assets.print_head_scripts(urls));
+    // The look's `admin_head` (ADR 0008), before core's.
+    if site.site_icon(512).is_none() {
+        out.extend(mark_icon(&|path| urls.admin_url(path)).into_bytes());
+    }
     let [base, focus, current] = scheme.icons;
     let icons = object(vec![(
         "icons",
@@ -533,6 +538,7 @@ fn enqueue(
         "after",
         list(vec![
             "@media print { #wpadminbar { display:none; } }".into(),
+            bar_style(&|path| Urls::admin_url(site, path)),
         ]),
     );
     assets.set_style_data("wp-emoji-styles", "after", list(vec![EMOJI_STYLES.into()]));

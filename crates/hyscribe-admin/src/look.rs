@@ -3,9 +3,10 @@
 //! hs-admin's wording of the WordPress strings that `__()` does not reach
 //! (ADR 0008): block descriptions translated with their context, and strings
 //! of WordPress's script bundles, given to `wp.i18n` as their translations
-//! so the bundles stay as released. `reference/admin-look/hyscribe-look.php`
-//! gives PHP the same.
+//! so the bundles stay as released; and the brand's marks on its own pages.
+//! `reference/admin-look/hyscribe-look.php` gives PHP the same.
 
+use hyscribe_kses::esc_url;
 use hyscribe_phpser::{Key, Value, json_encode};
 
 /// `_x( $text, 'block description' )`'s changed strings.
@@ -59,6 +60,39 @@ const SCRIPT_TEXT: [(&str, &[(&str, &str)]); 4] = [
         )],
     ),
 ];
+
+/// The brand's mark and small mark, as hs-admin serves them from `brand/`.
+const MARK: &str = "images/hyscribe-mark.svg";
+const SMALL_MARK: &str = "images/hyscribe-mark-small.svg";
+
+/// An escaped URL of one of the marks, by `admin_url( $path )`.
+fn mark_url(admin_url: &dyn Fn(&str) -> String, mark: &str) -> String {
+    String::from_utf8_lossy(&esc_url(admin_url(mark).as_bytes())).into_owned()
+}
+
+/// The small mark as the page's icon, printed where the site has no Site
+/// Icon.
+pub(crate) fn mark_icon(admin_url: &dyn Fn(&str) -> String) -> String {
+    let url = mark_url(admin_url, SMALL_MARK);
+    format!("<link rel=\"icon\" href=\"{url}\" type=\"image/svg+xml\" />\n")
+}
+
+/// `/hs-login`'s mark in place of the WordPress logo, at the size
+/// `login.css` gives the logo.
+pub(crate) fn login_style(admin_url: &dyn Fn(&str) -> String) -> String {
+    let url = mark_url(admin_url, MARK);
+    format!("<style>.login h1 a{{background-image:url({url});}}</style>\n")
+}
+
+/// The admin bar's HyScribe item: the small mark as its icon's `:before`, as
+/// the bar's stylesheet takes icons' own background images away, hidden on
+/// the narrowest screens as the WordPress logo it replaces is.
+pub(crate) fn bar_style(admin_url: &dyn Fn(&str) -> String) -> String {
+    let url = mark_url(admin_url, SMALL_MARK);
+    format!(
+        "#wpadminbar #wp-admin-bar-hyscribe>.ab-item{{padding:0 1px 0 7px}}#wpadminbar #wp-admin-bar-hyscribe .ab-icon:before{{content:\"\";display:block;width:20px;height:20px;background:url({url}) center/20px no-repeat}}@media screen and (max-width:782px){{#wpadminbar li#wp-admin-bar-hyscribe{{display:block}}#wpadminbar #wp-admin-bar-hyscribe>.ab-item{{padding:0 13px}}#wpadminbar #wp-admin-bar-hyscribe .ab-icon:before{{width:26px;height:26px;margin-top:10px;background-size:26px}}}}@media screen and (max-width:600px){{#wpadminbar li#wp-admin-bar-hyscribe{{display:none}}}}"
+    )
+}
 
 /// A block's description as hs-admin's editor shows it.
 pub(crate) fn block_description(text: &[u8]) -> Option<&'static str> {

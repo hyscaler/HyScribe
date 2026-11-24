@@ -7,6 +7,7 @@ use hyscribe_phpser::{Value, addslashes, is_empty_string, parse_str, urlencode};
 use hyscribe_render::formatting::sanitize_user;
 
 use crate::assets::{Assets, Urls, site_icon_tags};
+use crate::look::{login_style, mark_icon};
 
 pub mod actions;
 pub mod authenticate;
@@ -436,6 +437,8 @@ struct Frame<'a> {
     interim: bool,
     customize: bool,
     loggedout: bool,
+    /// Under `force_ssl_admin()`.
+    secure: bool,
     /// `login_header()`'s `$message`, as markup.
     message: &'a str,
     errors: &'a [Notice],
@@ -448,9 +451,6 @@ struct Frame<'a> {
     /// `login_footer( $input_id )`.
     input_id: &'a str,
 }
-
-/// The "HyScribe" text mark in place of the WordPress logo (ADR 0008).
-const MARK_STYLE: &str = "<style>.login h1 a{background-image:none;width:auto;height:auto;text-indent:0;font-size:32px;font-weight:600;color:#382e27;}</style>\n";
 
 impl Frame<'_> {
     fn render(&self, site: &dyn Site) -> Vec<u8> {
@@ -480,9 +480,22 @@ impl Frame<'_> {
         for script in self.scripts {
             assets.enqueue_script(script);
         }
+        // The look's icon and mark (ADR 0008) after `wp_site_icon()`.
+        let admin_url = |path: &str| {
+            let url = site.admin_url(path);
+            if self.secure {
+                set_url_scheme(&url, "https")
+            } else {
+                url
+            }
+        };
+        let mut icons = site_icon_tags(&|size| site.site_icon(size));
+        if icons.is_empty() {
+            icons = mark_icon(&admin_url);
+        }
         let mut out = format!(
-            "\t<meta name='referrer' content='strict-origin-when-cross-origin' />\n\t\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n\t{}{MARK_STYLE}\t",
-            site_icon_tags(&|size| site.site_icon(size))
+            "\t<meta name='referrer' content='strict-origin-when-cross-origin' />\n\t\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n\t{icons}{}\t",
+            login_style(&admin_url)
         );
         let mut classes = vec![
             format!("login-action-{}", self.action),
@@ -581,6 +594,7 @@ impl Screen<'_> {
             interim: self.interim,
             customize: self.customize,
             loggedout: self.loggedout,
+            secure: self.secure,
             message: "",
             errors: self.errors,
             head_scripts: &[],

@@ -1750,7 +1750,8 @@ fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<St
 /// Those redirects are 307: browsers do not cache them, so a site switched
 /// back to PHP WordPress gets its own admin back, and a POST stays a POST.
 /// `/hs-login.php` gets a permanent 308; `/hs-admin/<screen>.php` a 301 when
-/// `read` (GET or HEAD), else it is served [`in_place`].
+/// `read` (GET or HEAD), else it is served [`in_place`]. Bare `/hs-admin` gets
+/// Apache's directory slash, a 301 to `/hs-admin/` for any method.
 fn admin_redirect(
     site: &Site,
     path: &str,
@@ -1761,6 +1762,8 @@ fn admin_redirect(
         "/wp-login.php" => (StatusCode::TEMPORARY_REDIRECT, "/hs-login".to_string()),
         "/hs-login.php" => (StatusCode::PERMANENT_REDIRECT, "/hs-login".to_string()),
         "/wp-admin" => (StatusCode::TEMPORARY_REDIRECT, "/hs-admin/".to_string()),
+        // Apache's directory slash: a 301 with the query kept, for any method.
+        "/hs-admin" => (StatusCode::MOVED_PERMANENTLY, "/hs-admin/".to_string()),
         _ => {
             let (status, screen) = match (
                 path.strip_prefix("/wp-admin/"),

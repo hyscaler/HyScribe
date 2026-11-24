@@ -960,6 +960,8 @@ fn term_args(query: &str) -> Option<TermArgs> {
             "order" => order = Some(value),
             "message" => message = Some(value),
             "error" => error = true,
+            // The search form's own field: the only post type of these taxonomies.
+            "post_type" if value == "post" => {}
             _ => return None,
         }
     }
@@ -993,6 +995,20 @@ fn comment_args(query: &str) -> Option<CommentArgs> {
             "error" => args.error = value,
             // Sent back after unapproving, with no notice.
             "unapproved" => {}
+            "_wp_http_referer" => {
+                args.sent_back = value
+                    .as_deref()
+                    .is_some_and(|v| !is_empty_string(v.as_bytes()));
+            }
+            // The form's own fields: no action chosen, the list not read from them.
+            "action" | "action2" if value.as_deref() == Some("-1") => {}
+            "_wpnonce"
+            | "filter_action"
+            | "pagegen_timestamp"
+            | "_total"
+            | "_per_page"
+            | "_page"
+            | "_ajax_fetch_list_nonce" => {}
             name => {
                 let mut counts = MODERATED.iter().zip(&mut args.moderated);
                 *counts.find(|(m, _)| **m == name)?.1 = value;
@@ -1022,6 +1038,14 @@ fn user_args(query: &str) -> Option<UserArgs> {
             "delete_count" => args.delete_count = value,
             "reset_count" => args.reset_count = value,
             "id" => args.id = value,
+            "_wp_http_referer" => {
+                args.sent_back = value
+                    .as_deref()
+                    .is_some_and(|v| !is_empty_string(v.as_bytes()));
+            }
+            // The form's own fields: no action chosen, the list not read from them.
+            "action" | "action2" if value.as_deref() == Some("-1") => {}
+            "_wpnonce" | "new_role" | "new_role2" => {}
             _ => return None,
         }
     }
@@ -1312,10 +1336,17 @@ fn list_args(admin: &Admin, request_uri: &str) -> Option<ListArgs> {
                     None => {}
                 }
             }
+            // The form's own fields: no action chosen, the list not read from them.
+            (Key::String(key), Value::String(value))
+                if [&b"action"[..], b"action2"].contains(&key.as_slice()) && value == b"-1" => {}
+            (Key::String(key), Value::String(value)) if key == b"_wp_http_referer" => {
+                list.sent_back = !is_empty_string(value);
+            }
             // What a bulk action leaves of its request, which the list does not read.
             (Key::String(key), _)
                 if [
                     &b"_wpnonce"[..],
+                    b"filter_action",
                     b"doaction",
                     b"screen",
                     b"sticky",

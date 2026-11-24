@@ -16,7 +16,7 @@ use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
 use crate::assets::{Assets, Urls, cookie_path, site_icon_tags};
-use crate::look::{bar_style, mark_icon};
+use crate::look::{bar_style, editor_icon_style, mark_icon};
 use crate::menu::{Look, Screen, admin_menu, clean_links, commands};
 
 /// `wp_removable_query_args()`: what the canonical admin URL leaves out.
@@ -437,7 +437,13 @@ pub fn admin_page_with(
     let urls: &dyn Urls = site;
     let scheme = scheme(&site.admin_color().unwrap_or_default());
     let mut assets = Assets::new(true);
-    enqueue(&mut assets, site, page, (scheme, browser), look);
+    enqueue(
+        &mut assets,
+        site,
+        page,
+        (scheme, browser),
+        (look, extras.block_editor),
+    );
     for (handle, data) in page.script_data {
         assets.set_script_data(handle, "data", Value::String(data.as_bytes().to_vec()));
     }
@@ -501,7 +507,7 @@ fn enqueue(
     site: &dyn PageSite,
     page: &Page,
     (scheme, browser): (&Scheme, &Browser),
-    look: Look,
+    (look, block_editor): (Look, bool),
 ) {
     // `admin.php` enqueues the admin bar's, the screen its own, then
     // `admin-header.php` and its hooks the rest.
@@ -541,14 +547,15 @@ fn enqueue(
                 .collect(),
         )
     };
-    assets.set_style_data(
-        "admin-bar",
-        "after",
-        list(vec![
-            "@media print { #wpadminbar { display:none; } }".into(),
-            bar_style(&|path| Urls::admin_url(site, path)),
-        ]),
-    );
+    let mut bar = vec![
+        "@media print { #wpadminbar { display:none; } }".into(),
+        bar_style(&|path| Urls::admin_url(site, path)),
+    ];
+    // The look's `admin_enqueue_scripts` (ADR 0008), on the block editors.
+    if block_editor {
+        bar.push(editor_icon_style(&|path| Urls::admin_url(site, path)));
+    }
+    assets.set_style_data("admin-bar", "after", list(bar));
     assets.set_style_data("wp-emoji-styles", "after", list(vec![EMOJI_STYLES.into()]));
     if scheme.stylesheet {
         let url = BarSite::admin_url(site, &format!("css/colors/{}/colors.min.css", scheme.name));

@@ -96,6 +96,16 @@ pub(crate) fn bar_style(admin_url: &dyn Fn(&str) -> String) -> String {
     )
 }
 
+/// The post editor's publish panel shows the WordPress logo as an `svg`
+/// when the site has no Site Icon (an `img` of the icon otherwise): the
+/// mark is painted over it and the logo's path hidden, the bundle unchanged.
+pub(crate) fn editor_icon_style(admin_url: &dyn Fn(&str) -> String) -> String {
+    let url = mark_url(admin_url, MARK);
+    format!(
+        "svg.components-site-icon{{background:url({url}) center/36px no-repeat}}svg.components-site-icon path{{display:none}}"
+    )
+}
+
 /// A block's description as hs-admin's editor shows it.
 pub(crate) fn block_description(text: &[u8]) -> Option<&'static str> {
     let found = BLOCK_TEXT.iter().find(|(from, _)| from.as_bytes() == text);
@@ -129,6 +139,15 @@ mod tests {
             Some("Use the classic editor.")
         );
         assert_eq!(block_description(b"Add an image."), None);
+    }
+
+    #[test]
+    fn editor_icon_covers_only_the_fallback_svg() {
+        let style = editor_icon_style(&|path| format!("/hs-admin/{path}"));
+        assert_eq!(
+            style,
+            "svg.components-site-icon{background:url(/hs-admin/images/hyscribe-mark.svg) center/36px no-repeat}svg.components-site-icon path{display:none}"
+        );
     }
 
     /// The locale data is what PHP's `wp_json_encode()` gives the look

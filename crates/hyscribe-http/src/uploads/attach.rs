@@ -54,11 +54,11 @@ pub(crate) fn upload_time(site: &Site, parent: Option<Post>, now: i64) -> String
 type ImageMeta = Option<Vec<(Key, Value)>>;
 
 /// `wp_read_image_metadata( $file )` of an image upload, as the attachment
-/// reads it before it is inserted: `None` for what is not an image, 501
-/// for EXIF and XMP PHP would read in ways not ported, for a PDF, whose
-/// preview PHP makes with Ghostscript, and for audio and video getID3 reads
-/// in ways not ported. The audio and video ported have no tags, so the
-/// attachment's title and text are the name's.
+/// reads it before it is inserted: `None` for what is not an image (a PDF
+/// gets no preview, ADR 0020), 501 for EXIF and XMP PHP would read in ways
+/// not ported, and for audio and video getID3 reads in ways not ported. The
+/// audio and video ported have no tags, so the attachment's title and text
+/// are the name's.
 fn image_meta(site: &Site, handled: &Handled) -> Result<ImageMeta, Refused> {
     let kind = handled.mime.as_str();
     let media = if kind.starts_with("video/") {
@@ -68,7 +68,7 @@ fn image_meta(site: &Site, handled: &Handled) -> Result<ImageMeta, Refused> {
     } else {
         None
     };
-    if kind == "application/pdf" || media.is_some_and(|read| read.is_err()) {
+    if media.is_some_and(|read| read.is_err()) {
         return Err(Refused::Unported);
     }
     let size = getimagesize(&handled.bytes).filter(|_| handled.mime.starts_with("image/"));

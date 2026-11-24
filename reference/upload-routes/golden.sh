@@ -16,7 +16,8 @@
 # %uniqid%, times of the request's own %now% (dates), %nowms%
 # (milliseconds) and %today% (F j, Y), the uploads folder of the month
 # %ym%, and sizes in bytes %filesize%, which differ by encoder (ADR 0015).
-# Cron is off and no one may post unfiltered HTML, as in HyScribe.
+# Cron is off and no one may post unfiltered HTML, as in HyScribe; a PDF
+# gets no preview, as on a host without Imagick (no-pdf-preview.php).
 # Needs a fresh db.sh up and php.sh up; take both down after.
 set -euo pipefail
 DOCKER="${DOCKER:-docker}"
@@ -37,12 +38,13 @@ cleanup() {
   rm -rf "$TMP"
   echo "DELETE FROM wp_users WHERE ID BETWEEN 701 AND 704; DELETE FROM wp_usermeta WHERE user_id BETWEEN 701 AND 704;" | sql
   "$DOCKER" exec "$DB" rm -f /tmp/upload-routes.sql
-  "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-no-cron.php"
+  "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-no-cron.php" "$MU/hyscribe-no-pdf-preview.php"
   "$ROOT/reference/admin-look/look.sh" remove || true
 }
 trap cleanup EXIT
 "$ROOT/reference/admin-look/look.sh" add
 echo '<?php define( "DISABLE_WP_CRON", true ); define( "DISALLOW_UNFILTERED_HTML", true );' | "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-no-cron.php"
+"$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-no-pdf-preview.php" < "$ROOT/reference/uploads/no-pdf-preview.php"
 sql < "$ROOT/reference/rest/users.sql"
 sql < "$HERE/state.sql"
 

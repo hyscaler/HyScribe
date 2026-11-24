@@ -29,13 +29,10 @@ const WHO: [(&str, &str, u64); 6] = [
     ("subscriber", "subscriber", 704),
 ];
 
-/// The cases that answer 501 once the checks before them pass: a PDF, whose
-/// preview PHP makes with Ghostscript, audio and video, whose metadata is
-/// getID3's, a Word 97 file and bytes libmagic gives no type, and a Word
-/// file named as a ZIP, where libmagic may give either.
-const UNPORTED: [&str; 19] = [
-    "sample.pdf",
-    "sample.doc",
+/// The cases that answer 501 once the checks before them pass: audio and
+/// video, whose metadata is getID3's, bytes libmagic gives no type, and a
+/// Word file named as a ZIP, where libmagic may give either.
+const UNPORTED: [&str; 17] = [
     "random.bin:random.mp3",
     "sample.docx:sample.zip",
     "cbr.mp3",
@@ -452,7 +449,7 @@ async fn upload_routes_match_php() {
             site = uploading(sessions.path(), uploads.path()).await;
         }
     }
-    assert_eq!((matched, unported), (6 * 107 - 74, 74));
+    assert_eq!((matched, unported), (6 * 118 - 65, 65));
 }
 
 /// An upload's plan is written by `rest::uploads`, never by `act()`.
@@ -566,9 +563,9 @@ async fn uploads_stop_short() {
         format!("{rest}\traw,type=image/jpeg,md5\tsmall.jpg\t-"),
         format!("{rest}\trestfile,part=other\tsmall.jpg\t-"),
         format!("{rest}\trestfile,kind=image/x-unknown\tsmall.jpg\t-"),
-        format!("{rest}\traw,type=application/pdf\tsample.pdf\t-"),
-        format!("{async_upload}\tform,nonce\tsample.pdf\tshort=1"),
-        format!("{media_new}\tform,nonce\tsample.pdf\thtml-upload=Upload"),
+        format!("{rest}\traw,type=audio/mpeg\tcbr.mp3\t-"),
+        format!("{async_upload}\tform,nonce\tcbr.mp3\tshort=1"),
+        format!("{media_new}\tform,nonce\tcbr.mp3\thtml-upload=Upload"),
     ] {
         let (status, _) = sent_case(&site, &line, admin).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{line}");

@@ -886,7 +886,7 @@ async fn the_extension_s_admin_pages_are_php_s() {
     };
     let writer = open().await.unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let (site, cookies, _plugins) = served("wordpress_saves", open().await, dir.path()).await;
+    let (site, cookies, plugins) = served("wordpress_saves", open().await, dir.path()).await;
     let nonce = session_nonce(&site, &cookies, &format!("activate-plugin_{FILE}")).await;
     let uri = format!(
         "/hs-admin/plugins?action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=&_wpnonce={nonce}"
@@ -932,4 +932,27 @@ async fn the_extension_s_admin_pages_are_php_s() {
     // refused, as `user_can_access_admin_page()` refuses it.
     let refused = live(&site, "/hs-admin/tools?page=hyscribe-test", &cookies).await;
     assert_eq!(refused.status(), 403);
+    // A site in a folder serves the page below it, and still refuses it
+    // to the editor.
+    let folder = "http://127.0.0.1:8081/blog";
+    let (site, cookies) =
+        crate::admin::tests::logged_in_at("wordpress_saves", dir.path(), folder).await;
+    let site = std::sync::Arc::try_unwrap(site).ok().unwrap();
+    let site = site.with_extensions(plugins.path(), plugins.path());
+    let site = std::sync::Arc::new(site.with_writer(open().await));
+    let asked = "/blog/hs-admin/admin?page=hyscribe-test-admin";
+    let response = live(&site, asked, &cookies).await;
+    assert_eq!(response.status(), 200);
+    assert!(
+        page_of(response)
+            .await
+            .contains("<p id=\"ext-admin\">true</p>")
+    );
+    let outside = live(&site, "/hs-admin/admin?page=hyscribe-test-admin", &cookies).await;
+    assert!(!page_of(outside).await.contains("ext-admin"));
+    crate::admin::media::tests::as_role(&config, "editor").await;
+    assert_eq!(live(&site, asked, &cookies).await.status(), 403);
+    let asked = "/blog/hs-admin/upload?page=hyscribe-test-admin";
+    assert_eq!(live(&site, asked, &cookies).await.status(), 500);
+    crate::admin::media::tests::as_role(&config, "administrator").await;
 }

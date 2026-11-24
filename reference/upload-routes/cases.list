@@ -119,3 +119,14 @@ POST	/?rest_route=/wp/v2/media	raw,type=video/mp4	clip.mp4	-
 POST	/?rest_route=/wp/v2/media	restfile	clip.mov	post=2
 POST	/?rest_route=/wp/v2/media	raw,type=application/octet-stream	random.bin:random.mp3	-
 POST	/?rest_route=/wp/v2/media	raw,type=text/plain	sample.docx:sample.zip	-
+POST	/wp-admin/async-upload.php	form,nonce	sample.xls	action=upload-attachment&name=sample.xls
+POST	/wp-admin/async-upload.php	form,nonce	sample.ppt	action=upload-attachment&name=sample.ppt
+POST	/wp-admin/async-upload.php	form,nonce	sample.ppt:sample.pps	action=upload-attachment&name=sample.pps
+POST	/wp-admin/async-upload.php	form,nonce	sample.xls:sample.xlt	action=upload-attachment&name=sample.xlt
+POST	/wp-admin/async-upload.php	form,nonce	sample.doc:sample.ppt	action=upload-attachment&name=sample.ppt
+POST	/wp-admin/async-upload.php	form,nonce	sample.xls:sample.doc	action=upload-attachment&name=sample.doc
+POST	/wp-admin/async-upload.php	form,nonce	plain.txt:plain.doc	action=upload-attachment&name=plain.doc
+POST	/wp-admin/media-new.php	form,nonce	sample.doc	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	raw,type=application/msword	sample.doc	-
+POST	/?rest_route=/wp/v2/media	restfile	sample.ppt	title=A+deck&post=1
+POST	/?rest_route=/wp/v2/media	restfile	sample.xls	-

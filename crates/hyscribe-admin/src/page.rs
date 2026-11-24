@@ -862,7 +862,7 @@ fn screen_meta(page: &Page) -> String {
 /// HyScribe's version (ADR 0008).
 fn footer(site: &dyn PageSite, (page, extras): (&Page, &Extras), assets: &mut Assets) -> String {
     let urls: &dyn Urls = site;
-    let thanks = "<span id=\"footer-thankyou\">Thank you for creating with HyScribe.</span>";
+    let thanks = "<span id=\"footer-thankyou\">Thank you for creating with HyScribe. HyScribe is developed and supported by <a href=\"https://hyscaler.com\">HyScaler</a>.</span>";
     let mut out = format!(
         "\n<div class=\"clear\"></div></div><!-- wpbody-content -->\n<div class=\"clear\"></div></div><!-- wpbody -->\n<div class=\"clear\"></div></div><!-- wpcontent -->\n\n<div id=\"wpfooter\" role=\"contentinfo\">\n\t\t<p id=\"footer-left\" class=\"alignleft\">\n\t\t{}\t</p>\n\t<p id=\"footer-upgrade\" class=\"alignright\">\n\t\t{}\t</p>\n\t<div class=\"clear\"></div>\n</div>\n",
         apply_filters("admin_footer_text", thanks.to_string(), &[]),

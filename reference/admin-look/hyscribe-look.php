@@ -128,7 +128,7 @@ add_action( 'wp_enqueue_scripts', 'hyscribe_look_bar_style' );
 // Core's own strings (the default text domain) on admin and login screens
 // name HyScribe; content, themes and plugins never pass through here.
 const HYSCRIBE_LOOK_TEXT = array(
-	'Thank you for creating with <a href="%s">WordPress</a>.' => 'Thank you for creating with HyScribe.',
+	'Thank you for creating with <a href="%s">WordPress</a>.' => 'Thank you for creating with HyScribe. HyScribe is developed and supported by <a href="https://hyscaler.com">HyScaler</a>.',
 	'WordPress %1$s running %2$s theme.' => 'Running %2$s theme.',
 	'<strong>At a Glance</strong> &mdash; Displays a summary of the content on your site and identifies which theme and version of WordPress you are using.' => '<strong>At a Glance</strong> &mdash; Displays a summary of the content on your site and identifies which theme you are using.',
 	'WordPress Events and News' => 'Events and News',

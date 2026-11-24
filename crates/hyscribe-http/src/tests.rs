@@ -3160,6 +3160,9 @@ async fn assert_listed_pages(
             let options = named.split('&').filter_map(|o| o.split_once('='));
             for (name, value) in options.filter(|(name, _)| !name.starts_with('_')) {
                 let value = hyscribe_phpser::urldecode(value.as_bytes());
+                if name == "home" {
+                    site.home = String::from_utf8(value.clone()).unwrap();
+                }
                 site.options.insert(name.into(), value);
             }
             // The theme a `stylesheet` option names, as every request's reload picks it.
@@ -3581,6 +3584,157 @@ async fn edited_site_pages_match_php() {
     assert!(site.is_err());
 }
 
+/// A site not at the oracle's address: the 404 page's bundled theme image
+/// is under the site's own URL, not the exported one.
+#[tokio::test(flavor = "multi_thread")]
+async fn bundled_pattern_urls_follow_the_site() {
+    let own = "http://127.0.0.1:8180";
+    let site = site_at(Some(own), Some(own)).await;
+    let reply = request(&site, "GET", "/?p=999999").await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    let image = format!("{own}/wp-content/themes/twentytwentyfive/assets/images/404-image.webp");
+    assert!(reply.body.contains(&image), "{}", reply.body);
+    assert!(!reply.body.contains("127.0.0.1:8081"));
+}
+
+/// The pages of `reference/pages/folder.list` for a home URL in a folder,
+/// with plain and pretty permalinks: the canonical redirects keep the
+/// folder once, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_pages_match_php() {
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-folder.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, None, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 10);
+    // The canonical address itself is served, as PHP does (its body names
+    // the oracle's root content URL, so it is not in the golden).
+    let home = "http://127.0.0.1:8180/blog";
+    let site = site_at(Some(home), Some(home)).await;
+    assert_eq!(request(&site, "GET", "/blog/").await.status, StatusCode::OK);
+    let reply = request(&site, "GET", "/blog").await;
+    assert_eq!(reply.headers["location"], format!("{home}/"));
+    // A page on the front takes the slash too, none without a page chosen.
+    for (page, status) in [("2", StatusCode::MOVED_PERMANENTLY), ("0", StatusCode::OK)] {
+        let db = Db::connect(&fixture_config()).await.unwrap();
+        let mut site = Site::load(db, Some(home.into()), Some(home.into()))
+            .await
+            .unwrap();
+        site.options
+            .insert("show_on_front".into(), b"page".to_vec());
+        site.options.insert("page_on_front".into(), page.into());
+        assert_eq!(
+            request(&Arc::new(site), "GET", "/blog").await.status,
+            status
+        );
+    }
+}
+
+/// A home URL in a folder: login, admin, loaders and bundled files answer
+/// under the folder, and nothing outside it or beside it reaches them.
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_site_serves_its_own_files() {
+    let home = "http://127.0.0.1:8180/blog";
+    let site = site_at(Some(home), Some(home)).await;
+    let get = |uri: &'static str| request(&site, "GET", uri);
+    let login = get("/blog/hs-login").await;
+    assert_eq!(login.status, StatusCode::OK);
+    assert!(login.body.contains(&format!("{home}/hs-login")));
+    let script = "/blog/wp-includes/js/jquery/jquery.min.js";
+    let reply = get(script).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert!(
+        reply.headers["content-type"]
+            .to_str()
+            .unwrap()
+            .contains("javascript")
+    );
+    let styles = get("/blog/hs-admin/load-styles?c=0&load[]=dashicons").await;
+    assert_eq!(styles.status, StatusCode::OK);
+    assert!(
+        styles.headers["content-type"]
+            .to_str()
+            .unwrap()
+            .contains("css")
+    );
+    let admin = get("/blog/hs-admin/").await;
+    assert_eq!(admin.status, StatusCode::FOUND);
+    assert!(
+        admin.headers["location"]
+            .to_str()
+            .unwrap()
+            .starts_with(&format!("{home}/hs-login"))
+    );
+    let redirect = get("/blog/wp-login.php?x=1").await;
+    assert_eq!(redirect.status, StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(redirect.headers["location"], format!("{home}/hs-login?x=1"));
+    let rest = get("/blog/wp-json/").await;
+    assert_eq!(rest.status, StatusCode::OK);
+    // Outside the folder, beside it, doubled, climbing out and encoded:
+    // none of them is a login form, a script or an admin screen.
+    for uri in [
+        "/hs-login",
+        "/blogs/hs-login",
+        "/blog/blog/hs-login",
+        "/blog/../hs-login",
+        "/blog%2Fhs-login",
+        "/blog/hs-login/../x",
+        "/wp-includes/js/jquery/jquery.min.js",
+        "/blogs/wp-includes/js/jquery/jquery.min.js",
+        "/blog/blog/wp-includes/js/jquery/jquery.min.js",
+        "/blog/wp-includes/../wp-config.php",
+        "/blog/wp-includes/%2e%2e/%2e%2e/wp-config.php",
+        "/blog%2Fwp-includes/js/jquery/jquery.min.js",
+        "/hs-admin/load-styles?c=0&load[]=dashicons",
+        "/blogs/hs-admin/load-styles?c=0&load[]=dashicons",
+        "/hs-admin/",
+        "/blogs/hs-admin/",
+        "/blog/blog/hs-admin/",
+        "/hs-login.php",
+        "/wp-login.php",
+        "/wp-admin/",
+    ] {
+        let reply = get(uri).await;
+        // Plain permalinks answer any path with the home page, so a 200 is
+        // fine as long as it is not a file, a form or an admin redirect.
+        let kind = reply
+            .headers
+            .get("content-type")
+            .map_or("", |v| v.to_str().unwrap());
+        let sent = reply
+            .headers
+            .get("location")
+            .map_or("", |v| v.to_str().unwrap());
+        assert!(
+            !kind.contains("javascript")
+                && !kind.contains("css")
+                && !reply.body.contains("id=\"loginform\"")
+                && !sent.contains("hs-login?redirect_to"),
+            "{uri}"
+        );
+    }
+}
+
+/// The REST index of a site in a folder, as PHP answers it for the
+/// `home` option: `reference/pages/folder-rest.list`. Its other requests
+/// (login, bundled files) have no PHP counterpart: the oracle serves its
+/// files from its root only.
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_rest_matches_php() {
+    let golden = include_str!("../tests/golden/pages-folder-rest.tsv");
+    assert_eq!(assert_listed_pages("wordpress", golden, None, "").await, 0);
+    assert_eq!(golden.lines().count(), 6);
+}
+
 /// The pages of `reference/pages/comments.list` over the comments of
 /// `reference/pages/comments.sql`: paged comments, comment pages and their
 /// redirects, and the held comments, comment form and links the commenter
@@ -3614,6 +3768,41 @@ async fn commenter_pages_match_php() {
         0
     );
     assert_eq!(golden.lines().count(), 95);
+}
+
+/// The pages of `reference/pages/titles.list` over the posts and pages of
+/// `reference/pages/titles.sql`: the browser title of untitled posts and
+/// pages and of titles with quotes, dashes and entities, and of the posts
+/// page, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn title_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let titles = include_str!("../../../reference/pages/titles.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(titles))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-titles.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, None, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 13);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

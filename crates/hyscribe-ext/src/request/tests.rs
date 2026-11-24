@@ -33,7 +33,10 @@ fn a_call_gets_what_is_left_of_the_budget() -> Result<(), Fault> {
     // less than the call's own deadline.
     let extension = &request.0.extensions.list[0];
     let left = Shared::budget(extension, request.0.ledger(0));
-    assert_eq!(left, extension.limits.request() - Duration::from_millis(240));
+    assert_eq!(
+        left,
+        extension.limits.request() - Duration::from_millis(240)
+    );
     assert!(left < extension.limits.call());
     let started = Instant::now();
     assert_eq!(

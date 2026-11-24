@@ -81,7 +81,12 @@ pub(crate) fn installed_theme_file(
     let etag = format!("\"{:x}-{:x}\"", meta.len(), modified);
     let kind = TYPES.iter().find(|(known, _)| *known == extension);
     let kind = kind.map_or("", |(_, kind)| kind);
-    Some(conditional(headers, (kind, bytes), (Some(modified), etag), now))
+    Some(conditional(
+        headers,
+        (kind, bytes),
+        (Some(modified), etag),
+        now,
+    ))
 }
 
 /// The file at `path`, answering `headers`' preconditions at Unix time

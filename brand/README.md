@@ -1,6 +1,6 @@
 # The HyScribe name and logo
 
-The files in this folder are the HyScribe logo: the primary logo for light and dark backgrounds, the mark alone, and the small mark for favicons and anything under 48 px. hs-admin and `/hs-login` will use them where WordPress shows its own logo; they do not yet.
+The files in this folder are the HyScribe logo: the primary logo for light and dark backgrounds, the mark alone, and the small mark for favicons and anything under 48 px. hs-admin and `/hs-login` use them where WordPress shows its own logo.
 
 ## Not covered by the AGPL
 

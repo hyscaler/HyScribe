@@ -125,6 +125,22 @@ function hyscribe_look_bar_style() {
 add_action( 'admin_enqueue_scripts', 'hyscribe_look_bar_style' );
 add_action( 'wp_enqueue_scripts', 'hyscribe_look_bar_style' );
 
+// The block editors' publish panel draws the WordPress logo as an svg of class
+// components-site-icon when the site has no Site Icon (an img of the icon
+// otherwise): the mark is painted over it and the logo's path hidden, so the
+// bundle stays as released. Printed after the bar's style, as the admin bar's.
+add_action(
+	'admin_enqueue_scripts',
+	function () {
+		if ( get_current_screen()->is_block_editor() ) {
+			wp_add_inline_style(
+				'admin-bar',
+				sprintf( 'svg.components-site-icon{background:url(%s) center/36px no-repeat}svg.components-site-icon path{display:none}', esc_url( admin_url( 'images/hyscribe-mark.svg' ) ) )
+			);
+		}
+	}
+);
+
 // Core's own strings (the default text domain) on admin and login screens
 // name HyScribe; content, themes and plugins never pass through here.
 const HYSCRIBE_LOOK_TEXT = array(

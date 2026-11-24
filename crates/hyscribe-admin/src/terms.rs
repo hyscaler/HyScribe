@@ -897,6 +897,7 @@ pub fn edit_tags(site: &dyn TermsSite, args: &TermArgs, request: &Request) -> An
             taxonomy: taxonomy.name,
             parent_file: Some("edit.php"),
             submenu_file: Some(&submenu),
+            plugin_page: None,
         },
         id: &screen_id,
         title: taxonomy.plural,

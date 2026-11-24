@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The SDK's host functions (`hyscribe:sdk@0.3.0`, ADR 0022 and 0023). Each checks
+//! The SDK's host functions (`hyscribe:sdk@0.4.0`, ADR 0022 and 0023). Each checks
 //! its grant in the store's state before it touches anything, and answers
 //! `sdk-error.denied` otherwise; registrations are taken in `init` only,
 //! and everything else in a request only.
@@ -8,19 +8,22 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use hyscribe_phpser::{Value, json_decode, lookup};
+use hyscribe_kses::esc_attr;
+use hyscribe_phpser::{Key, Value, json_decode, json_encode, lookup};
 use wasmtime::component::types::ComponentFunc;
 use wasmtime::component::{ComponentType, Lift, Linker, Lower, Val};
 use wasmtime::{AsContextMut, StoreContextMut};
 
-use crate::extension::{Block, Hook, MetaKey, Registrations, Route, Taxonomy, TemplateFile};
+use crate::extension::{
+    Block, Field, Hook, MetaKey, Registrations, Route, Section, Taxonomy, TemplateFile,
+};
 use crate::grants::relative;
 use crate::host::{Chain, Phase, State};
 use crate::request::{Fired, Shared};
 use crate::value::{Lifted, lift, lift_all, lower};
 use crate::{
-    Asset, AssetKind, Caps, CustomizeKind, Found, Incoming, Message, ObjectKind, Outgoing, Part,
-    Post, Site, ThemeCall,
+    AdminPage, Asset, AssetKind, Caps, CustomizeKind, Found, Incoming, Message, ObjectKind,
+    Outgoing, Part, Post, Setting, Site, ThemeCall,
 };
 
 /// Why the host refused or failed a call (`types.sdk-error`).
@@ -55,6 +58,17 @@ enum Link {
     Mine(u32),
     #[component(name = "others")]
     Others(u32),
+}
+
+/// `admin.piece`: the host's markup, or a callback of the extension's own
+/// with its argument as JSON.
+#[derive(ComponentType, Lower, Debug, PartialEq, Eq)]
+#[component(variant)]
+pub(crate) enum Piece {
+    #[component(name = "markup")]
+    Markup(Vec<u8>),
+    #[component(name = "call")]
+    Call((u32, String)),
 }
 
 /// `rest.route`.
@@ -902,6 +916,263 @@ fn customize(
     theme_call(state, call).map(drop)
 }
 
+/// The core menus a page may go under: `add_options_page()` and its kin.
+const PARENTS: [&str; 11] = [
+    "index.php",
+    "edit.php",
+    "upload.php",
+    "link-manager.php",
+    "edit.php?post_type=page",
+    "edit-comments.php",
+    "themes.php",
+    "plugins.php",
+    "users.php",
+    "tools.php",
+    "options-general.php",
+];
+
+/// The core Settings screens' groups and pages, which print and save
+/// only core's settings here.
+const CORE_SETTINGS: [&str; 9] = [
+    "general",
+    "writing",
+    "reading",
+    "discussion",
+    "media",
+    "permalink",
+    "privacy",
+    "misc",
+    "options",
+];
+
+/// `admin.page`, field by field.
+fn admin_page(params: &[Val]) -> AdminPage {
+    let fields = fields(params.first());
+    let optional = |n| match field(fields, n) {
+        Some(Val::Option(Some(value))) => Some(value.as_ref()),
+        _ => None,
+    };
+    let position = match optional(7) {
+        Some(Val::S32(position)) => Some(*position),
+        _ => None,
+    };
+    AdminPage {
+        parent: optional(0).map(|parent| text(Some(parent))),
+        page_title: text(field(fields, 1)),
+        menu_title: text(field(fields, 2)),
+        capability: text(field(fields, 3)),
+        slug: text(field(fields, 4)),
+        callback: number(field(fields, 5)),
+        icon: text(field(fields, 6)),
+        position,
+    }
+}
+
+fn add_page(state: &mut State, page: AdminPage) -> Result<(), SdkError> {
+    let slug = |slug: &str| {
+        let allowed =
+            |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-';
+        !slug.is_empty() && slug.bytes().all(allowed)
+    };
+    if !slug(&page.slug) {
+        return Err(SdkError::Invalid(format!(
+            "{} is not a page slug",
+            page.slug
+        )));
+    }
+    if page.capability.is_empty() {
+        return Err(SdkError::Invalid("a page has a capability".into()));
+    }
+    if !(page.icon.is_empty() || page.icon.starts_with("dashicons-")) {
+        return Err(SdkError::Invalid(
+            "an icon is a dashicons class, or none".into(),
+        ));
+    }
+    let registered = state.registering()?;
+    let own = |parent: &str| {
+        let pages = registered.pages.iter();
+        pages
+            .into_iter()
+            .any(|added| added.parent.is_none() && added.slug == parent)
+    };
+    if let Some(parent) = page
+        .parent
+        .as_deref()
+        .filter(|parent| !PARENTS.contains(parent) && !own(parent))
+    {
+        return Err(SdkError::Invalid(format!("{parent} is not a menu")));
+    }
+    if registered.pages.iter().any(|added| added.slug == page.slug) {
+        return Err(SdkError::Invalid(format!("page {} is added", page.slug)));
+    }
+    registered.pages.push(page);
+    Ok(())
+}
+
+/// A name of the extension's own settings: not empty, and none of core's.
+fn own_settings(name: &str, what: &str) -> Result<(), SdkError> {
+    if name.is_empty() || CORE_SETTINGS.contains(&name) {
+        Err(SdkError::Invalid(format!(
+            "{name} is not a {what} of its own"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn register_setting(
+    state: &mut State,
+    (group, option, args, sanitize): (String, String, String, Option<u32>),
+) -> Result<(), SdkError> {
+    state.grants.option(&option).map_err(denied)?;
+    own_settings(&group, "settings group")?;
+    let args = json(&args)?;
+    let known = |(key, _): &(Key, Value)| matches!(key, Key::String(key) if [&b"type"[..], b"label", b"description"].contains(&key.as_slice()));
+    if !args.as_array().is_some_and(|args| args.iter().all(known)) {
+        return Err(SdkError::Invalid(
+            "a setting's arguments are its type, label and description".into(),
+        ));
+    }
+    let registered = state.registering()?;
+    let hook = format!("sanitize_option_{option}");
+    registered.hooks.extend(sanitize.map(|callback| Hook {
+        hook,
+        action: false,
+        callback,
+        priority: 10,
+        accepted_args: 1,
+    }));
+    registered.settings.push(Setting { group, option });
+    Ok(())
+}
+
+fn add_section(
+    state: &mut State,
+    (id, title, callback, page): (String, String, Option<u32>, String),
+) -> Result<(), SdkError> {
+    own_settings(&page, "settings page")?;
+    let section = Section {
+        id,
+        title,
+        callback,
+        page,
+    };
+    let sections = &mut state.registering()?.sections;
+    // Added again, it takes its first place, as PHP's array key does.
+    match sections
+        .iter_mut()
+        .find(|added| added.page == section.page && added.id == section.id)
+    {
+        Some(added) => *added = section,
+        None => sections.push(section),
+    }
+    Ok(())
+}
+
+fn add_field(
+    state: &mut State,
+    (id, title, callback, page, section, args): (String, String, u32, String, String, String),
+) -> Result<(), SdkError> {
+    own_settings(&page, "settings page")?;
+    let decoded = json(&args)?;
+    let entries = decoded.as_array().ok_or(SdkError::Invalid(
+        "a field's arguments are an object".into(),
+    ))?;
+    // `! empty( $field['args'][ $key ] )`.
+    let given = |key| {
+        lookup(entries, key)
+            .filter(|value| !value.is_empty())
+            .map(Value::to_php_string)
+    };
+    let field = Field {
+        label_for: given("label_for"),
+        class: given("class"),
+        id,
+        title,
+        callback,
+        page,
+        section,
+        args,
+    };
+    let fields = &mut state.registering()?.fields;
+    match fields.iter_mut().find(|added| {
+        (&added.page, &added.section, &added.id) == (&field.page, &field.section, &field.id)
+    }) {
+        Some(added) => *added = field,
+        None => fields.push(field),
+    }
+    Ok(())
+}
+
+/// `do_settings_sections( $page )` of the extension's own sections: the
+/// markup PHP prints, and its callbacks to run where PHP calls them.
+fn sections(state: &State, page: &str) -> Vec<Piece> {
+    let live = state.live().ok();
+    let found = live.as_ref().and_then(|(_, shared, me)| {
+        let extension = shared.extensions.list.get(*me);
+        extension.map(|extension| (shared, &extension.registered))
+    });
+    let Some((shared, registered)) = found else {
+        return Vec::new();
+    };
+    let mut pieces = Vec::new();
+    for section in registered
+        .sections
+        .iter()
+        .filter(|section| section.page == page)
+    {
+        // `if ( $section['title'] )`.
+        if !Value::String(section.title.clone().into_bytes()).is_empty() {
+            let unique = shared.unique_id(&format!("wp-settings-section-{}-", section.id));
+            let markup = format!(
+                "<h2 id=\"{}\">{}</h2>\n",
+                esc_attr(unique.as_bytes()),
+                section.title
+            );
+            pieces.push(Piece::Markup(markup.into_bytes()));
+        }
+        if let Some(callback) = section.callback {
+            let entries = [("id", &section.id), ("title", &section.title)];
+            let entries = entries.map(|(key, value)| {
+                let key = Key::String(key.as_bytes().to_vec());
+                (key, Value::String(value.as_bytes().to_vec()))
+            });
+            let json = json_encode(&Value::Array(entries.to_vec())).unwrap_or_default();
+            pieces.push(Piece::Call((
+                callback,
+                String::from_utf8_lossy(&json).into_owned(),
+            )));
+        }
+        let fields = registered.fields.iter();
+        let mut table = fields
+            .filter(|field| field.page == page && field.section == section.id)
+            .peekable();
+        if table.peek().is_none() {
+            continue;
+        }
+        pieces.push(Piece::Markup(
+            b"<table class=\"form-table\" role=\"presentation\">".to_vec(),
+        ));
+        for field in table {
+            let class = field.class.as_deref().map_or_else(String::new, |class| {
+                format!(" class=\"{}\"", esc_attr(class))
+            });
+            let title = match &field.label_for {
+                Some(label) => {
+                    format!("<label for=\"{}\">{}</label>", esc_attr(label), field.title)
+                }
+                None => field.title.clone(),
+            };
+            let row = format!("<tr{class}><th scope=\"row\">{title}</th><td>");
+            pieces.push(Piece::Markup(row.into_bytes()));
+            pieces.push(Piece::Call((field.callback, field.args.clone())));
+            pieces.push(Piece::Markup(b"</td></tr>".to_vec()));
+        }
+        pieces.push(Piece::Markup(b"</table>".to_vec()));
+    }
+    pieces
+}
+
 /// A host function timed as the host's: `dynamic` times its own.
 macro_rules! timed {
     (func_wrap, $body:expr) => {
@@ -914,7 +1185,7 @@ macro_rules! timed {
 
 /// The SDK versions linked: each minor version only adds interfaces, so
 /// an interface of 0.1 is linked under both names (ADR 0022).
-const VERSIONS: [&str; 3] = ["0.1.0", "0.2.0", "0.3.0"];
+const VERSIONS: [&str; 4] = ["0.1.0", "0.2.0", "0.3.0", "0.4.0"];
 
 /// Defines one interface's functions under each version from `since` on,
 /// each a closure of the store and its arguments, without an error path
@@ -1039,6 +1310,19 @@ pub(crate) fn link(linker: &mut Linker<State>) -> wasmtime::Result<()> {
             },
             func_wrap "remove-cap" => |cx: Cx<'_>, (role, cap): (String, String)| {
                 answer(role_cap(cx.data(), &role, &cap, None))
+            },
+        }),
+        interface!(linker, "admin", 3, {
+            func_new "add-page" => dynamic(|state, params| {
+                result_val(add_page(state, admin_page(params)).map(|()| None))
+            }),
+            func_wrap "register-setting" => |mut cx: Cx<'_>, args| answer(register_setting(cx.data_mut(), args)),
+            func_wrap "add-section" => |mut cx: Cx<'_>, args| answer(add_section(cx.data_mut(), args)),
+            func_wrap "add-field" => |mut cx: Cx<'_>, args| answer(add_field(cx.data_mut(), args)),
+            func_wrap "sections" => |cx: Cx<'_>, (page,): (String,)| Ok((sections(cx.data(), &page),)),
+            func_wrap "settings-fields" => |cx: Cx<'_>, (group,): (String,)| {
+                let site = cx.data().site();
+                answer(site.and_then(|site| site.settings_fields(&group).map_err(failed)))
             },
         }),
         interface!(linker, "template", 2, {

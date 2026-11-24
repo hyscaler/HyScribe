@@ -567,14 +567,9 @@ async fn activation_and_deactivation_answer_as_php() {
         let stored = reloaded.options.get("active_plugins").cloned();
         assert_eq!(format!("{} on", text(&stored.unwrap_or_default())), active);
         if action == "activate" {
-            let response = send(
-                &reloaded,
-                "GET",
-                to.trim_start_matches(SITE),
-                &cookies,
-                None,
-            )
-            .await;
+            // Through the router, which runs the active extension: its pages
+            // are in the menu.
+            let response = live(&reloaded, to.trim_start_matches(SITE), &cookies).await;
             let page = page_of(response).await;
             let php = screen("x13active", "?activate=true&plugin_status=all&paged=1&s=");
             assert!(!page.contains("hyscribe-grants"));
@@ -868,4 +863,68 @@ async fn the_screen_shows_what_the_kept_registry_says() {
     std::fs::remove_dir_all(&registry).unwrap();
     let none = page().await;
     assert!(!none.contains("out of date") && !none.contains("hyscribe-test-update"));
+}
+
+/// The test extension's admin pages, activated, as PHP serves the plugin's
+/// to the administrator: in the menu, under their URLs, their callbacks'
+/// output inside hs-admin's frame.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_extension_s_admin_pages_are_php_s() {
+    use crate::admin::tests::{SAVES, page_of, session_nonce};
+    let _saves = SAVES.lock().await;
+    let config = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&config)
+        .await
+        .unwrap();
+    let open = async || {
+        Writer::open(&config, hyscribe_config::Mode::Primary)
+            .await
+            .unwrap()
+    };
+    let writer = open().await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies, _plugins) = served("wordpress_saves", open().await, dir.path()).await;
+    let nonce = session_nonce(&site, &cookies, &format!("activate-plugin_{FILE}")).await;
+    let uri = format!(
+        "/hs-admin/plugins?action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=&_wpnonce={nonce}"
+    );
+    assert_eq!(live(&site, &uri, &cookies).await.status(), 302);
+    let mut write = writer.begin().await.unwrap();
+    let title = Value::String(b"Hello World".to_vec());
+    update_option(&mut write, "ext_title", &title, None)
+        .await
+        .unwrap();
+    write.commit().await.unwrap();
+    let golden = include_str!("../../../../tests/golden/extension-admin.tsv");
+    let mut seen = 0;
+    for line in golden.lines() {
+        let [_, path, role, _, page] = line.split('\t').collect::<Vec<_>>()[..] else {
+            panic!("{line}");
+        };
+        if role != "administrator" {
+            continue;
+        }
+        seen += 1;
+        let php = String::from_utf8(hyscribe_testkit::unhex(page)).unwrap();
+        let php = hyscribe_testkit::hs_admin_page(&php);
+        let asked = format!("/hs-admin/{}", path.replacen(".php", "", 1));
+        let response = live(&site, &asked, &cookies).await;
+        assert_eq!(response.status(), 200, "{path}");
+        same(&compared(&php), &compared(&page_of(response).await), path);
+    }
+    assert_eq!(seen, 3);
+    // A page no active extension has, and one asked with more, are not served.
+    for asked in [
+        "/hs-admin/admin?page=nope",
+        "/hs-admin/admin?page=hyscribe-test-top&x=1",
+    ] {
+        assert_eq!(live(&site, asked, &cookies).await.status(), 501, "{asked}");
+    }
+    // Under another menu, its parent is that menu's, whose page it is not:
+    // refused, as `user_can_access_admin_page()` refuses it.
+    let refused = live(&site, "/hs-admin/tools?page=hyscribe-test", &cookies).await;
+    assert_eq!(refused.status(), 403);
 }

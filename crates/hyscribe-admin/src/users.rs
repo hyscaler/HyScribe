@@ -823,6 +823,7 @@ fn users_page(site: &dyn UsersSite, content: &str, request: &Request) -> Answer 
             taxonomy: "",
             parent_file: Some("users.php"),
             submenu_file: None,
+            plugin_page: None,
         },
         id: "users",
         title: "Users",

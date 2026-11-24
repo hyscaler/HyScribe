@@ -241,7 +241,7 @@ impl Server {
         let sha256 = hyscribe_ext::signature::sha256(&package);
         let key = hyscribe_testkit::minisign::Key(7);
         let claim = format!(
-            "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.3 sha256={sha256} signed=1800000000"
+            "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.4 sha256={sha256} signed=1800000000"
         );
         std::fs::write(
             self.home.join("hyscribe-test.hyx.minisig"),

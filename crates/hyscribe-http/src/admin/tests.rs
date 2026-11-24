@@ -365,6 +365,8 @@ async fn logged_in_users_are_let_in() {
     for path in [
         "/hs-admin/plugins?s=x",
         "/hs-admin/nav-menus",
+        // An extension's page, with no extension active.
+        "/hs-admin/admin?page=hyscribe-test",
         "/hs-admin/site-health?tab=status",
         "/hs-admin/site-editor",
         "/hs-admin/site-editor?p=%2Fpage",

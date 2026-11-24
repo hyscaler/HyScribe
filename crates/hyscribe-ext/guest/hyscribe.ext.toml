@@ -6,7 +6,7 @@
 kind = "plugin"
 id = "hyscribe-test"
 version = "0.1.0"
-sdk = "0.3"
+sdk = "0.4"
 replaces = "hyscribe-test/hyscribe-test.php"
 replaces_versions = ">=0.1"
 compatibility = "full"
@@ -18,7 +18,7 @@ author_uri = "https://hyscribe.com/"
 plugin_uri = "https://hyscribe.com/plugins/hyscribe-test/"
 
 [capabilities]
-options = ["ext", "ext_fail", "ext_bytes", "ext_active", "ext_hooks"]
+options = ["ext", "ext_fail", "ext_bytes", "ext_active", "ext_hooks", "ext_title"]
 post_types = ["ext_item", "ext_item_named_too_long"]
 mail = true
 filesystem = ["uploads/ext"]

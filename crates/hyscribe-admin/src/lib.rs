@@ -10,6 +10,7 @@ pub mod comments;
 pub mod dashboard;
 pub mod die;
 pub mod editor;
+pub mod extension_page;
 pub mod list_table;
 pub mod login;
 mod look;

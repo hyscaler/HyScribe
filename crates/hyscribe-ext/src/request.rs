@@ -19,7 +19,7 @@ use crate::extension::{Answered, Args, Done, Rendered};
 use crate::faults::{Counted, Kind};
 use crate::host::{Phase, State, begin, classify};
 use crate::value::{Crossing, Lowered, lift, lower_all};
-use crate::{Extension, Extensions, Fault, Hook, Host, Site, TemplateFile};
+use crate::{AdminPage, Extension, Extensions, Fault, Hook, Host, Setting, Site, TemplateFile};
 
 /// A fault in a request, for the log and the Plugins screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,6 +94,8 @@ pub(crate) struct Shared {
     current: Mutex<Vec<String>>,
     did: Mutex<BTreeMap<String, u32>>,
     reports: Mutex<Vec<Report>>,
+    /// `wp_unique_id()`'s count.
+    unique: Mutex<u64>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -118,6 +120,7 @@ impl Request {
             current: Mutex::default(),
             did: Mutex::default(),
             reports: Mutex::default(),
+            unique: Mutex::default(),
         }))
     }
 
@@ -250,6 +253,47 @@ impl Request {
         self.0.lifecycle(ext, false)
     }
 
+    /// The active extensions' admin pages (SDK 0.4): each with its
+    /// extension's place, in load order, then in the order added.
+    pub fn pages(&self) -> Vec<(usize, AdminPage)> {
+        let list = self.0.extensions.list.iter().enumerate();
+        let pages = list.flat_map(|(ext, extension)| {
+            extension
+                .pages()
+                .iter()
+                .map(move |page| (ext, page.clone()))
+        });
+        pages.collect()
+    }
+
+    /// What the admin page `slug` of extension `ext` prints where PHP runs
+    /// `do_action( $page_hook )`: its callback's answer, as an action that
+    /// prints prints it; nothing on a fault.
+    pub fn page(&self, ext: usize, slug: &str) -> Vec<u8> {
+        let extension = self.0.extensions.list.get(ext);
+        let page =
+            extension.and_then(|extension| extension.pages().iter().find(|page| page.slug == slug));
+        let Some(page) = page else {
+            return Vec::new();
+        };
+        let args = [Value::String(Vec::new())];
+        match self
+            .0
+            .call(ext, page.callback, slug, &args, Registered::Other)
+        {
+            Some(Value::String(printed)) => printed,
+            _ => Vec::new(),
+        }
+    }
+
+    /// The active extensions' settings (`register_setting()`), in load
+    /// order, then in the order registered.
+    pub fn settings(&self) -> Vec<Setting> {
+        let list = self.0.extensions.list.iter();
+        let settings = list.flat_map(|extension| extension.settings().iter());
+        settings.cloned().collect()
+    }
+
     /// The faults of the request so far.
     pub fn reports(&self) -> Vec<Report> {
         lock(&self.0.reports).clone()
@@ -335,6 +379,13 @@ impl Shared {
     /// The hook the request is running, innermost first.
     pub(crate) fn current(&self) -> Option<String> {
         lock(&self.current).last().cloned()
+    }
+
+    /// `wp_unique_id( $prefix )`: the prefix and the request's next number.
+    pub(crate) fn unique_id(&self, prefix: &str) -> String {
+        let mut count = lock(&self.unique);
+        *count += 1;
+        format!("{prefix}{count}")
     }
 
     /// `did_action( $hook )`.

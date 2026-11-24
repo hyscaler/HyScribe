@@ -682,6 +682,7 @@ fn form(
             taxonomy: "",
             parent_file: Some(users(edit_users)),
             submenu_file: Some(users(edit_users && !profile)),
+            plugin_page: None,
         },
         id: if shown.profile_page {
             "profile"

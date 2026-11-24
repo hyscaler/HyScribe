@@ -296,6 +296,7 @@ pub fn site_editor_page(
             taxonomy: "",
             parent_file: Some("themes.php"),
             submenu_file: None,
+            plugin_page: None,
         },
         id: "site-editor",
         title: "Editor",

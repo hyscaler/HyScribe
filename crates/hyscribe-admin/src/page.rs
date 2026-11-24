@@ -606,7 +606,8 @@ fn enqueue(
             json(&preferences)
         )]),
     );
-    let menu_commands = commands(site, look)
+    let admin_url = |path: &str| BarSite::admin_url(site, path);
+    let menu_commands = commands(site, look, &admin_url)
         .into_iter()
         .enumerate()
         .map(|(i, (label, url, name))| {
@@ -681,9 +682,17 @@ fn head(site: &dyn PageSite, page: &Page) -> Vec<u8> {
         esc_js(ajaxurl),
         esc_js(page.id),
         esc_js(page.screen.typenow),
-        esc_js(&admin_page_class(page.screen.pagenow)),
+        esc_js(&admin_page_class(hook_suffix(page))),
     )
     .into_bytes()
+}
+
+/// `$hook_suffix`: an extension's page's hook, else the screen's file.
+fn hook_suffix<'a>(page: &Page<'a>) -> &'a str {
+    match page.screen.plugin_page {
+        Some(_) => page.id,
+        None => page.screen.pagenow,
+    }
 }
 
 /// `$hook_suffix` as a class: what is not a letter, digit, `_` or `-`
@@ -737,7 +746,7 @@ fn body(
     let mut classes = format!(
         "{} {}",
         extras.body_class,
-        admin_page_class(page.screen.pagenow)
+        admin_page_class(hook_suffix(page))
     );
     classes = classes.trim_start().to_string();
     // `WP_Site_Health::admin_body_class()` comes first, as a filter's class.

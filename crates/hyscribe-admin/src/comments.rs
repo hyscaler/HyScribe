@@ -1313,6 +1313,7 @@ pub fn edit_comments(
             taxonomy: "",
             parent_file: None,
             submenu_file: None,
+            plugin_page: None,
         },
         id: "edit-comments",
         title: &title,

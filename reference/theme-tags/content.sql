@@ -39,3 +39,26 @@ INSERT INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, 
 INSERT INTO wp_term_relationships (object_id, term_taxonomy_id, term_order) VALUES (962, 961, 0), (963, 961, 0);
 INSERT INTO wp_options (option_id, option_name, option_value, autoload) VALUES
   (961, 'theme_mods_hello-elementor', 'a:2:{s:11:"custom_logo";i:961;s:18:"nav_menu_locations";a:2:{s:6:"menu-1";i:961;s:6:"menu-2";i:962;}}', 'auto');
+-- The first post gets the logo as its featured image and a tag, which the
+-- loop's tags show.
+INSERT INTO wp_postmeta (meta_id, post_id, meta_key, meta_value) VALUES (979, 1, '_thumbnail_id', '961');
+INSERT INTO wp_terms (term_id, name, slug, term_group) VALUES (963, 'Kept & "quoted"', 'kept', 0);
+INSERT INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (963, 963, 'post_tag', '', 0, 1);
+INSERT INTO wp_term_relationships (object_id, term_taxonomy_id, term_order) VALUES (1, 963, 0);
+-- A post without a title, in pages and with a more tag, which comments
+-- are closed on; and on the first post a reply to its comment and a
+-- second comment, so its comments nest and page.
+INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status,
+  comment_status, ping_status, post_password, post_name, to_ping, pinged, post_modified, post_modified_gmt,
+  post_content_filtered, post_parent, guid, menu_order, post_type, post_mime_type, comment_count) VALUES
+  (964, 1, '2026-10-20 10:00:00', '2026-10-20 10:00:00', '<p>One</p><!--more--><p>Two</p><!--nextpage--><p>Three</p>', '',
+    '', 'publish', 'closed', 'closed', '', '964', '', '', '2026-10-20 10:00:00', '2026-10-20 10:00:00', '', 0,
+    'http://127.0.0.1:8081/?p=964', 0, 'post', '', 0);
+INSERT INTO wp_term_relationships (object_id, term_taxonomy_id, term_order) VALUES (964, 1, 0);
+INSERT INTO wp_comments (comment_ID, comment_post_ID, comment_author, comment_author_email, comment_author_url,
+  comment_author_IP, comment_date, comment_date_gmt, comment_content, comment_karma, comment_approved, comment_agent,
+  comment_type, comment_parent, user_id) VALUES
+  (961, 1, 'Replier', 'replier@example.test', '', '127.0.0.1', '2026-10-28 09:00:00', '2026-10-28 09:00:00',
+    'A reply.', 0, '1', '', 'comment', 1, 0),
+  (962, 1, 'Second', 'second@example.test', 'https://second.test/', '127.0.0.1', '2026-10-29 09:00:00',
+    '2026-10-29 09:00:00', 'Another comment.', 0, '1', '', 'comment', 0, 0);

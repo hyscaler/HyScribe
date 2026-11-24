@@ -208,12 +208,12 @@ pub(crate) fn arrow_span(block: &str, arrow: Option<&Value>, direction: &str) ->
 }
 
 /// `is_single()`: a post, not a page, is the main query's.
-fn is_single(request: &Request) -> bool {
+pub(crate) fn is_single(request: &Request) -> bool {
     request.singular && request.posts.first().is_some_and(|p| p.post_type != "page")
 }
 
 /// The previous or next posts link, `href` already escaped.
-fn link(href: &[u8], wrapper: &[u8], label: &[u8]) -> Vec<u8> {
+pub(crate) fn link(href: &[u8], wrapper: &[u8], label: &[u8]) -> Vec<u8> {
     [
         b"<a href=\"".as_slice(),
         href,
@@ -262,7 +262,7 @@ pub(crate) fn pagenum_link(request: &Request, home: &[u8], page: u64) -> Vec<u8>
 }
 
 /// The path of the home URL, `parse_url( home_url() )['path'] ?? ''`.
-fn home_path(home: &[u8]) -> Vec<u8> {
+pub(crate) fn home_path(home: &[u8]) -> Vec<u8> {
     // `scheme:`, the empty part before the host, the host, then the path.
     home.splitn(4, |&b| b == b'/')
         .nth(3)

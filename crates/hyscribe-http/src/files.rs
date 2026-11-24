@@ -2,7 +2,8 @@
 
 //! The embedded themes' and `wp-includes` files, with the
 //! `Last-Modified` they have in the pinned release, an `ETag` from their
-//! SHA-256, and conditional requests answered as Apache answers them.
+//! SHA-256, and conditional requests answered as Apache answers them; and
+//! the files of an installed theme's package, from its `public/`.
 //! HyScribe's own files under `/hs-admin/` (ADR 0008) have an `ETag` only.
 
 use std::time::{Duration, UNIX_EPOCH};
@@ -10,10 +11,78 @@ use std::time::{Duration, UNIX_EPOCH};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use hyscribe_assets::{hyscribe_file, release_file, wp_admin, wp_includes};
+use hyscribe_phpser::urldecode;
 use hyscribe_render::date::days_from_civil;
 use hyscribe_render::theme::theme_file;
 
+use crate::Site;
+use crate::uploads::stays;
+
 const THEMES: &str = "wp-content/themes/";
+
+/// The types the web server sends files with, by extension, as for the
+/// embedded themes' files; a file of another kind gets none.
+const TYPES: [(&str, &str); 16] = [
+    ("css", "text/css"),
+    ("eot", "application/vnd.ms-fontobject"),
+    ("gif", "image/gif"),
+    ("html", "text/html"),
+    ("jpg", "image/jpeg"),
+    ("js", "text/javascript"),
+    ("json", "application/json"),
+    ("md", "text/markdown"),
+    ("mp4", "video/mp4"),
+    ("png", "image/png"),
+    ("svg", "image/svg+xml"),
+    ("ttf", "font/ttf"),
+    ("txt", "text/plain"),
+    ("webp", "image/webp"),
+    ("woff", "font/woff"),
+    ("woff2", "font/woff2"),
+];
+
+/// `/wp-content/themes/<slug>/<file>` of a theme installed as a package,
+/// from its `public/`, as the web server serves a theme's static files,
+/// with `Last-Modified` and an `ETag` from its size and time: a path that
+/// is not a plain file inside `public/` (`..`, a hidden name, a link
+/// leading out) and PHP source are not found.
+pub(crate) fn installed_theme_file(
+    site: &Site,
+    path: &str,
+    headers: &HeaderMap,
+    now: u64,
+) -> Option<Response> {
+    let themes = site.extensions.as_ref()?.themes();
+    let path = path
+        .strip_prefix('/')
+        .unwrap_or(path)
+        .strip_prefix(THEMES)?;
+    let (slug, file) = path.split_once('/')?;
+    // Apache decodes the path, a `+` staying a `+`.
+    let decoded = String::from_utf8(urldecode(file.replace('+', "%2B").as_bytes())).ok()?;
+    let name = decoded.rsplit('/').next().unwrap_or_default();
+    let extension = name
+        .rsplit_once('.')
+        .map_or("", |(_, e)| e)
+        .to_ascii_lowercase();
+    let php = extension.starts_with("php") || extension == "phtml" || extension == "phar";
+    if php || !stays(slug) || !decoded.split('/').all(stays) {
+        return None;
+    }
+    let public = themes.join(slug).join("public").canonicalize().ok()?;
+    let file = public.join(&decoded).canonicalize().ok()?;
+    let meta = std::fs::metadata(&file)
+        .ok()
+        .filter(|_| file.starts_with(&public))?;
+    let bytes = std::fs::read(&file).ok().filter(|_| meta.is_file())?;
+    let since = meta.modified().ok();
+    let since = since.and_then(|at| at.duration_since(UNIX_EPOCH).ok());
+    let modified = since.unwrap_or_default().as_secs();
+    let etag = format!("\"{:x}-{:x}\"", meta.len(), modified);
+    let kind = TYPES.iter().find(|(known, _)| *known == extension);
+    let kind = kind.map_or("", |(_, kind)| kind);
+    Some(conditional(headers, (kind, bytes), (Some(modified), etag), now))
+}
 
 /// The file at `path`, answering `headers`' preconditions at Unix time
 /// `now`.

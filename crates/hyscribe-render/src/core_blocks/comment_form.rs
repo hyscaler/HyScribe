@@ -12,6 +12,29 @@ use crate::template::replace;
 
 const REQUIRED: &str = " <span class=\"required\">*</span>";
 
+/// How a comment form looks: the reply title's wrapper and the submit
+/// field's classes, which a block theme's filters change.
+pub(crate) struct Look<'a> {
+    pub(crate) title_before: &'a str,
+    pub(crate) title_after: &'a str,
+    pub(crate) submit_field: &'a str,
+    pub(crate) submit_class: &'a str,
+}
+
+/// `comment_form()`'s default reply title wrapper.
+pub(crate) const TITLE: (&str, &str) = (
+    "<h3 id=\"reply-title\" class=\"comment-reply-title\">",
+    "</h3>",
+);
+
+/// The block's form.
+const BLOCK: Look<'static> = Look {
+    title_before: TITLE.0,
+    title_after: TITLE.1,
+    submit_field: "form-submit wp-block-button",
+    submit_class: "wp-block-button__link wp-element-button",
+};
+
 /// `render_block_core_post_comments_form()`.
 pub(super) fn post_comments_form(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     let Some(post_id) = context.post_id else {
@@ -28,7 +51,7 @@ pub(super) fn post_comments_form(context: &Context<'_>, block: &Block<'_>) -> Ve
         return Vec::new();
     };
     replace(
-        &comment_form(context, &post, ""),
+        &comment_form(context, &post, &BLOCK),
         b"class=\"comment-respond\"",
         wrapper.as_bytes(),
     )
@@ -37,17 +60,24 @@ pub(super) fn post_comments_form(context: &Context<'_>, block: &Block<'_>) -> Ve
 /// `comment_form()` of the legacy comments template: the form of a post
 /// that takes comments, whose submit button also has the class `submit`.
 pub(super) fn legacy_comment_form(context: &Context<'_>, post: &Post) -> Vec<u8> {
+    let look = Look {
+        submit_class: "submit wp-block-button__link wp-element-button",
+        ..BLOCK
+    };
+    open_comment_form(context, post, &look)
+}
+
+/// `comment_form()` of a post that takes comments, nothing otherwise.
+pub(crate) fn open_comment_form(context: &Context<'_>, post: &Post, look: &Look<'_>) -> Vec<u8> {
     if comments_open(context, post) {
-        comment_form(context, post, "submit ")
+        comment_form(context, post, look)
     } else {
         Vec::new()
     }
 }
 
-/// `comment_form( array(), $post )` with the block's submit button, in
-/// HTML5 as block themes have it; `submit` is the class before the
-/// button's own.
-fn comment_form(context: &Context<'_>, post: &Post, submit: &str) -> Vec<u8> {
+/// `comment_form( $args, $post )` in HTML5, as `look` has it.
+fn comment_form(context: &Context<'_>, post: &Post, look: &Look<'_>) -> Vec<u8> {
     let truthy = |name| {
         context
             .site
@@ -56,7 +86,7 @@ fn comment_form(context: &Context<'_>, post: &Post, submit: &str) -> Vec<u8> {
     };
     let reply = reply_to(context, post);
     let mut form = String::from("\t<div id=\"respond\" class=\"comment-respond\">\n\t\t");
-    form.push_str("<h3 id=\"reply-title\" class=\"comment-reply-title\">");
+    form.push_str(look.title_before);
     // comment_form_title()
     match &reply {
         Some(comment) => form.push_str(&format!(
@@ -84,7 +114,7 @@ fn comment_form(context: &Context<'_>, post: &Post, submit: &str) -> Vec<u8> {
             String::from_utf8_lossy(&esc_url(&link))
         ));
     }
-    form.push_str("</h3>");
+    form.push_str(look.title_after);
     if truthy("comment_registration") {
         let login = wp_login_url(context, &context.permalink(post));
         form.push_str(&format!(
@@ -98,7 +128,7 @@ fn comment_form(context: &Context<'_>, post: &Post, submit: &str) -> Vec<u8> {
             reply.as_ref(),
             truthy("require_name_email"),
             truthy("show_comments_cookies_opt_in"),
-            submit,
+            look,
         ));
     }
     form.push_str("\t</div><!-- #respond -->\n\t");
@@ -112,7 +142,7 @@ fn fields(
     reply: Option<&Comment>,
     required: bool,
     cookies: bool,
-    submit: &str,
+    look: &Look<'_>,
 ) -> String {
     let (indicator, attribute) = if required {
         (REQUIRED, " required")
@@ -148,7 +178,9 @@ fn fields(
     }
     // The submit field, with get_comment_id_fields().
     form.push_str(&format!(
-        "<p class=\"form-submit wp-block-button\"><input name=\"submit\" type=\"submit\" id=\"submit\" class=\"{submit}wp-block-button__link wp-element-button\" value=\"Post Comment\" /> <input type='hidden' name='comment_post_ID' value='{}' id='comment_post_ID' />\n<input type='hidden' name='comment_parent' id='comment_parent' value='{}' />\n</p></form>",
+        "<p class=\"{}\"><input name=\"submit\" type=\"submit\" id=\"submit\" class=\"{}\" value=\"Post Comment\" /> <input type='hidden' name='comment_post_ID' value='{}' id='comment_post_ID' />\n<input type='hidden' name='comment_parent' id='comment_parent' value='{}' />\n</p></form>",
+        look.submit_field,
+        look.submit_class,
         post.id,
         reply.map_or(0, |comment| comment.id)
     ));

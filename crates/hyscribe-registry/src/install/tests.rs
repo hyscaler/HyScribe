@@ -70,7 +70,7 @@ const NEWER: Release = Release {
     ..release("0.3.0")
 };
 
-const ASKS: &str = "Options: ext, ext_active, ext_bytes, ext_fail, ext_hooks";
+const ASKS: &str = "Options: ext, ext_active, ext_bytes, ext_fail, ext_hooks, ext_title";
 
 #[tokio::test]
 async fn installs_the_newest_version_that_fits() {
@@ -183,7 +183,7 @@ async fn says_why_no_version_fits() {
 
 #[tokio::test]
 async fn refuses_a_package_its_document_does_not_describe() {
-    // Listed as SDK 0.2, its manifest says 0.3.
+    // Listed as SDK 0.2, its manifest says 0.4.
     let wrong = Release {
         sdk: "0.2",
         ..release("0.1.0")
@@ -226,7 +226,7 @@ async fn refuses_a_package_its_document_does_not_describe() {
     );
     // Signed by key 10, which signs the index only.
     let comment = format!(
-        "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.3 sha256={} signed={NOW}",
+        "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.4 sha256={} signed={NOW}",
         signature::sha256(&bytes)
     );
     let index_key = hyscribe_testkit::minisign::Key(10);
@@ -341,7 +341,7 @@ async fn updates_check_and_install_the_newest() {
     let check = test.update(Update::Check, allow).await.unwrap();
     assert_eq!(
         check,
-        "hyscribe-test 0.1.0 is installed; 0.2.0 is available (SDK 0.3): `hyscribe plugin update hyscribe-test`\n"
+        "hyscribe-test 0.1.0 is installed; 0.2.0 is available (SDK 0.4): `hyscribe plugin update hyscribe-test`\n"
     );
     let ids = ["hyscribe-test".to_string(), "other".to_string()];
     let updated = test.update(Update::Ids(&ids), allow).await.unwrap_err();
@@ -373,7 +373,7 @@ async fn offers_go_to_the_registry_s_plugins_only() {
     let index = index.unwrap().unwrap();
     let plugins = installed::list(&test.folder.path().join("plugins"));
     let offered = offer(&plugins[0], &index);
-    assert_eq!(offered, Some(&("0.3".to_string(), "0.2.0".to_string())));
+    assert_eq!(offered, Some(&("0.4".to_string(), "0.2.0".to_string())));
     let mut origin = test.origin();
     origin.signer = origin.signer.map(|(_, key)| (Signer::Trusted, key));
     origin::write(&plugins[0].folder, &origin).unwrap();

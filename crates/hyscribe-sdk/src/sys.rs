@@ -1038,3 +1038,104 @@ pub mod customize {
         .unwrap_or_default()
     }
 }
+
+pub mod admin {
+    //! `admin`.
+
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    use super::types::SdkError;
+    use super::{live, registering};
+    use crate::test::{Field, Section, Setting, with};
+
+    /// `page`.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[allow(missing_docs)]
+    pub struct Page {
+        pub parent: Option<String>,
+        pub page_title: String,
+        pub menu_title: String,
+        pub capability: String,
+        pub slug: String,
+        pub callback: u32,
+        pub icon: String,
+        pub position: Option<i32>,
+    }
+
+    /// `piece`.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum Piece {
+        /// `markup`.
+        Markup(Vec<u8>),
+        /// `call`.
+        Call((u32, String)),
+    }
+
+    pub fn add_page(page: &Page) -> Result<(), SdkError> {
+        registering("admin.add-page", |state| state.pages.push(page.clone()))
+    }
+
+    pub fn register_setting(
+        group: &str,
+        option: &str,
+        args: &str,
+        sanitize: Option<u32>,
+    ) -> Result<(), SdkError> {
+        registering("admin.register-setting", |state| {
+            state.settings.push(Setting {
+                group: group.into(),
+                option: option.into(),
+                args: args.into(),
+                sanitize,
+            });
+        })
+    }
+
+    pub fn add_section(
+        id: &str,
+        title: &str,
+        callback: Option<u32>,
+        page: &str,
+    ) -> Result<(), SdkError> {
+        registering("admin.add-section", |state| {
+            state.sections.push(Section {
+                id: id.into(),
+                title: title.into(),
+                callback,
+                page: page.into(),
+            });
+        })
+    }
+
+    pub fn add_field(
+        id: &str,
+        title: &str,
+        callback: u32,
+        page: &str,
+        section: &str,
+        args: &str,
+    ) -> Result<(), SdkError> {
+        registering("admin.add-field", |state| {
+            state.fields.push(Field {
+                id: id.into(),
+                title: title.into(),
+                callback,
+                page: page.into(),
+                section: section.into(),
+                args: args.into(),
+            });
+        })
+    }
+
+    pub fn sections(page: &str) -> Vec<Piece> {
+        with(|state| state.pieces.get(page).cloned().unwrap_or_default())
+    }
+
+    pub fn settings_fields(group: &str) -> Result<Vec<u8>, SdkError> {
+        live("admin.settings-fields", |state| {
+            let named = alloc::format!("settings_fields[{group}]");
+            state.printed.get(&named).cloned().unwrap_or_default()
+        })
+    }
+}

@@ -410,6 +410,79 @@ impl MenuUser for Admin<'_> {
     fn transient(&self, name: &str) -> Option<Vec<u8>> {
         self.reads.reads.option(&format!("_transient_{name}"))
     }
+    fn plugin_pages(&self) -> Vec<hyscribe_admin::menu::PluginPage> {
+        let running = self.site.running.as_ref();
+        let pages = running
+            .map(|running| running.request.pages())
+            .unwrap_or_default();
+        pages
+            .into_iter()
+            .map(|(_, page)| plugin_page(page))
+            .collect()
+    }
+}
+
+/// An active extension's admin page asked with `page` alone under
+/// `screen` (`admin`, or a core menu's file), as `admin.php` serves it:
+/// the access check first, then its callback if it is on the page's hook
+/// for the user; `None` for a page no active extension has.
+fn extension_screen(
+    admin: &Admin,
+    screen: &str,
+    query: &str,
+    request: &Request,
+) -> Option<Response> {
+    use hyscribe_admin::extension_page::{extension_page, settings_fields};
+    use hyscribe_admin::menu::{Look, Screen, admin_menu, plugin_page_hook};
+    let slug = only_argument(query, "page")??;
+    let running = admin.site.running.as_ref()?;
+    let pages = running.request.pages();
+    let (ext, page) = pages.into_iter().find(|(_, page)| page.slug == slug)?;
+    let pagenow = format!("{screen}.php");
+    let asked = Screen {
+        pagenow: &pagenow,
+        typenow: "",
+        taxonomy: "",
+        parent_file: None,
+        submenu_file: None,
+        plugin_page: Some(&slug),
+    };
+    if admin_menu(admin, &asked, Look::Block).is_none() {
+        return Some(served(admin, Answer::from_page(None)));
+    }
+    // A top level page asked under a menu the user may reach, without its
+    // capability: no callback is on its hook.
+    let Some(hook) = plugin_page_hook(admin, &pagenow, &slug) else {
+        let message = format!("Cannot load {slug}.");
+        return Some(died(admin, StatusCode::INTERNAL_SERVER_ERROR, &message));
+    };
+    let groups = running
+        .request
+        .settings()
+        .into_iter()
+        .map(|setting| setting.group);
+    let fields = groups.map(|group| {
+        let fields = settings_fields(admin, &group, request.uri);
+        (group, fields.into_bytes())
+    });
+    running.fields.set(fields.collect());
+    let printed = running.request.page(ext, &slug);
+    let titles = (page.page_title.as_str(), printed.as_slice());
+    let page = extension_page(admin, (&pagenow, &slug, &hook), titles, request);
+    Some(served(admin, Answer::from_page(page)))
+}
+
+/// An extension's admin page as the menu adds it.
+fn plugin_page(page: hyscribe_ext::AdminPage) -> hyscribe_admin::menu::PluginPage {
+    hyscribe_admin::menu::PluginPage {
+        parent: page.parent,
+        page_title: page.page_title,
+        menu_title: page.menu_title,
+        capability: page.capability,
+        slug: page.slug,
+        icon: page.icon,
+        position: page.position,
+    }
 }
 
 impl BarSite for Admin<'_> {
@@ -1482,6 +1555,9 @@ fn screen(
     };
     let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
     let query = raw.split_once('?').map_or("", |(_, query)| query);
+    if let Some(response) = extension_screen(admin, screen, query, &request) {
+        return Some(response);
+    }
     // The Settings screens are sent back with `settings-updated` or `updated` alone.
     let settings = || {
         let back = only_argument(query, "settings-updated").or(only_argument(query, "updated"));

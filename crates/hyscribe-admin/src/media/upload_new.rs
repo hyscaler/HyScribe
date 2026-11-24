@@ -153,6 +153,7 @@ pub fn media_new(site: &dyn MediaSite, args: &NewArgs, request: &Request) -> Ans
             taxonomy: "",
             parent_file: Some("upload.php"),
             submenu_file: None,
+            plugin_page: None,
         },
         id: "media",
         title: "Upload Media",

@@ -15,6 +15,11 @@
 #   (the Location's nonces masked as the body's)
 #   the options as the action left them: value and autoload, or - for none,
 #   recently_activated's times as %time%.
+# - the extension's admin pages (SDK 0.4) in the x14page variant, the
+#   plugin active and ext_title set (a top level page asked under Media
+#   by one without its capability: "Cannot load"), as
+#   crates/hyscribe-http/tests/golden/extension-admin.tsv:
+#   variant<TAB>path<TAB>role<TAB>status<TAB>hex(page)
 # - the body tag of front end pages as a visitor with the plugin active and
 #   its page hooks on (x13hooks) or set to trap (x13fail), as
 #   crates/hyscribe-http/tests/golden/extension-pages.tsv:
@@ -33,6 +38,7 @@ HERE="$ROOT/reference/plugins"
 SCREENS="$ROOT/crates/hyscribe-admin/tests/golden/plugins.tsv"
 ACTIONS="$ROOT/crates/hyscribe-http/tests/golden/plugin-actions.tsv"
 PAGES="$ROOT/crates/hyscribe-http/tests/golden/extension-pages.tsv"
+ADMIN="$ROOT/crates/hyscribe-http/tests/golden/extension-admin.tsv"
 MU=/var/www/html/wp-content/mu-plugins
 PLUGIN=/var/www/html/wp-content/plugins/hyscribe-test
 TMP=$(mktemp)
@@ -53,7 +59,7 @@ trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-as-role.php" < "$ROOT/reference/admin-menu/as-role.php"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-variants.php" < "$HERE/variants.php"
 file=hyscribe-test/hyscribe-test.php
-actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts updates bulk-plugins screen-options-nonce activate-plugin_$file deactivate-plugin_$file activate-plugin_missing/missing.php activate-plugin_../x.php plugin-activation-error_$file"
+actions="log-out heartbeat-nonce wp_rest update_can_compress_scripts updates bulk-plugins screen-options-nonce activate-plugin_$file deactivate-plugin_$file activate-plugin_missing/missing.php activate-plugin_../x.php plugin-activation-error_$file hyscribe_test-options"
 # shellcheck disable=SC2086
 "$DOCKER" exec "$NAME" php -r 'require "/var/www/html/wp-load.php"; wp_set_current_user( 1 ); foreach ( array_slice( $argv, 1 ) as $action ) { echo wp_create_nonce( $action ), "\t", $action, "\n"; }' \
   $actions > "$NONCES"
@@ -71,9 +77,10 @@ mask() {
 # The state of a variant, in SQL: active_plugins, recently_activated and the
 # plugin's ext_hooks.
 state() {
-  local active='a:0:{}' recent='' hooks=''
+  local active='a:0:{}' recent='' hooks='' title=''
   case "$1" in
     x13active | x24active) active="a:1:{i:0;s:31:\"$file\";}" ;;
+    x14page) active="a:1:{i:0;s:31:\"$file\";}" title="Hello World" ;;
     x13hooks) active="a:1:{i:0;s:31:\"$file\";}" hooks=on ;;
     x13fail) hooks=trap ;;
     x13missing) active="a:2:{i:0;s:31:\"$file\";i:1;s:19:\"missing/missing.php\";}" ;;
@@ -84,6 +91,9 @@ state() {
   printf "UPDATE wp_options SET option_value = '%s' WHERE option_name = 'active_plugins';\n" "$active" | sql
   if [ -n "$recent" ]; then
     printf "INSERT INTO wp_options (option_name, option_value, autoload) VALUES ('recently_activated', '%s', 'off');\n" "$recent" | sql
+  fi
+  if [ -n "$title" ]; then
+    printf "INSERT INTO wp_options (option_name, option_value, autoload) VALUES ('ext_title', '%s', 'auto');\n" "$title" | sql
   fi
   if [ -n "$hooks" ]; then
     printf "INSERT INTO wp_options (option_name, option_value, autoload) VALUES ('ext_hooks', '%s', 'auto');\n" "$hooks" | sql
@@ -144,6 +154,20 @@ done < <(grep -v '^#' "$HERE/actions.list")
 masked="$failed"
 while IFS=$'\t' read -r value name; do masked=${masked//$value/%nonce:$name%}; done < "$NONCES"
 screen x13inactive "$masked" administrator "$failed"
+# The extension's admin pages, each as a role.
+: > "$ADMIN"
+for asked in administrator:options-general.php?page=hyscribe-test administrator:admin.php?page=hyscribe-test-top \
+  administrator:admin.php?page=hyscribe-test-sub editor:admin.php?page=hyscribe-test-top \
+  editor:admin.php?page=hyscribe-test-sub editor:options-general.php?page=hyscribe-test \
+  administrator:admin.php?page=hyscribe-test-admin editor:admin.php?page=hyscribe-test-admin \
+  editor:tools.php?page=hyscribe-test-admin editor:upload.php?page=hyscribe-test-admin; do
+  role=${asked%%:*} path=${asked#*:}
+  state x14page
+  : > "$TMP"
+  status=$(curl -s -o "$TMP" -w '%{http_code}' -b "hyscribe_role=$role; hyscribe_variant=x14page" "$BASE/wp-admin/$path")
+  printf '%s\t%s\t%s\t%s\t%s\n' x14page "$path" "$role" "$status" "$(mask "$TMP")" >> "$ADMIN"
+  sql < "$OPTIONS"
+done
 # The front end as a visitor: user 1 no longer logged in.
 "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-as-role.php"
 : > "$PAGES"
@@ -157,4 +181,4 @@ for variant in x13hooks x13fail; do
     sql < "$OPTIONS"
   done
 done
-wc -l "$SCREENS" "$ACTIONS" "$PAGES"
+wc -l "$SCREENS" "$ACTIONS" "$PAGES" "$ADMIN"

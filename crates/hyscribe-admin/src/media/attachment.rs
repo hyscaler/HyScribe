@@ -1212,6 +1212,7 @@ fn page(
             taxonomy: "",
             parent_file: Some("upload.php"),
             submenu_file: Some("upload.php"),
+            plugin_page: None,
         },
         id: "attachment",
         title: &title,

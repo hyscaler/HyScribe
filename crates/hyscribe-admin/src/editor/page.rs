@@ -322,6 +322,7 @@ pub fn editor_page(
             taxonomy: "",
             parent_file: Some(parent),
             submenu_file: Some(if new { add } else { parent }),
+            plugin_page: None,
         },
         id: &post.post_type,
         title: &title,

@@ -76,10 +76,22 @@ impl Drop for Done {
 /// runtime that runs them.
 struct Outbound(Option<Arc<Client>>, String, Handle);
 
+/// `settings_fields()` of each settings group, made for the admin page
+/// the request serves (SDK 0.4).
+#[derive(Default)]
+pub(crate) struct Fields(std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>);
+
+impl Fields {
+    /// The groups' fields of the page about to be printed.
+    pub(crate) fn set(&self, fields: std::collections::BTreeMap<String, Vec<u8>>) {
+        *lock(&self.0) = fields;
+    }
+}
+
 /// The site an extension's host calls reach, once their grants are
-/// checked: where their database calls run, how they fetch, and what the
-/// active theme's calls answer from.
-struct Live(Through, Option<Outbound>, Arc<Theme>);
+/// checked: where their database calls run, how they fetch, what the
+/// active theme's calls answer from and the admin page's settings fields.
+struct Live(Through, Option<Outbound>, Arc<Theme>, Arc<Fields>);
 
 fn failed(err: impl std::fmt::Debug) -> String {
     format!("{err:?}")
@@ -440,6 +452,11 @@ impl hyscribe_ext::Site for Live {
     fn theme(&self, _: &str, call: &hyscribe_ext::ThemeCall) -> Result<Value, String> {
         self.2.answer(call)
     }
+
+    fn settings_fields(&self, group: &str) -> Result<Vec<u8>, String> {
+        let fields = lock(&self.3.0).get(group).cloned();
+        fields.ok_or(format!("settings group {group} is not on this page"))
+    }
 }
 
 /// The plugin files of `active_plugins` as PHP walks it.
@@ -474,6 +491,8 @@ fn line(report: &Report) -> String {
 pub(crate) struct Running {
     pub(crate) request: Arc<Request>,
     pub(crate) theme: Arc<Theme>,
+    /// The settings fields of the admin page it serves.
+    pub(crate) fields: Arc<Fields>,
     /// The themes folder, where the active theme's files are.
     pub(crate) themes: std::path::PathBuf,
 }
@@ -491,10 +510,12 @@ pub(crate) fn request(site: &Site, admin: bool) -> Option<Running> {
     runtime.and_then(|runtime| {
         let outbound = Outbound(site.fetch.clone(), site.home.clone(), Handle::current());
         let theme = Arc::new(Theme::new(admin));
+        let fields = Arc::new(Fields::default());
         let live = Live(
             Through::Own(site.writer.clone(), Handle::current()),
             Some(outbound),
             theme.clone(),
+            fields.clone(),
         );
         let stored = site.options.get("active_plugins").map(Vec::as_slice);
         let listed = hyscribe_admin::plugins::option_array(stored).unwrap_or_default();
@@ -508,6 +529,7 @@ pub(crate) fn request(site: &Site, admin: bool) -> Option<Running> {
         request.map(|request| Running {
             request: Arc::new(request),
             theme,
+            fields,
             themes: runtime.themes().to_path_buf(),
         })
     })
@@ -552,7 +574,12 @@ impl Acted {
         make: impl FnOnce(Arc<dyn hyscribe_ext::Site>) -> Result<Request, E>,
     ) -> Result<Acted, E> {
         let (sender, jobs) = mpsc::channel(1);
-        let live = Live(Through::Action(sender.clone()), None, Arc::default());
+        let live = Live(
+            Through::Action(sender.clone()),
+            None,
+            Arc::default(),
+            Arc::default(),
+        );
         let request = make(Arc::new(live))?;
         Ok(Acted {
             request: Arc::new(request),

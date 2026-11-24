@@ -365,6 +365,8 @@ async fn logged_in_users_are_let_in() {
     for path in [
         "/hs-admin/plugins?s=x",
         "/hs-admin/nav-menus",
+        // An extension's page, with no extension active.
+        "/hs-admin/admin?page=hyscribe-test",
         "/hs-admin/site-health?tab=status",
         "/hs-admin/site-editor",
         "/hs-admin/site-editor?p=%2Fpage",
@@ -599,18 +601,31 @@ pub(crate) fn oracle_install() -> Install {
 /// `database` seen from the oracle's address, with a login for `admin`:
 /// the site and its cookies.
 pub(crate) async fn logged_in(database: &str, dir: &std::path::Path) -> (Arc<Site>, String) {
+    logged_in_at(database, dir, "http://127.0.0.1:8081").await
+}
+
+/// [`logged_in`] with `url` as the home and site URLs, a folder's included.
+pub(crate) async fn logged_in_at(
+    database: &str,
+    dir: &std::path::Path,
+    url: &str,
+) -> (Arc<Site>, String) {
     let config = hyscribe_config::Database {
         name: database.into(),
         ..hyscribe_testkit::fixture_database()
     };
     let db = hyscribe_db::Db::connect(&config).await.unwrap();
-    let url = Some("http://127.0.0.1:8081".to_string());
+    let path = format!(
+        "{}/hs-login",
+        url.split_once("8081").map_or("", |(_, path)| path)
+    );
+    let url = Some(url.to_string());
     let site = Site::load(db, url.clone(), url).await.unwrap();
     let site = site.with_install(oracle_install());
     let site = Arc::new(salted(site).with_sessions(hyscribe_auth::sessions::Sessions::new(dir)));
     let login = axum::http::Request::builder()
         .method("POST")
-        .uri("/hs-login")
+        .uri(path)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
         .body(Body::from("log=admin&pwd=reference-only-password"))
         .unwrap();

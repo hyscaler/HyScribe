@@ -318,7 +318,7 @@ fn signed(bytes: &[u8], seed: u8, comment: &str) -> Vec<u8> {
     Key(seed).sign(bytes, &comment).into_bytes()
 }
 
-const CLAIM: &str = "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.3 sha256=%sha% signed=1";
+const CLAIM: &str = "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.4 sha256=%sha% signed=1";
 
 #[test]
 fn installs_a_signed_package_with_its_origin() {
@@ -376,15 +376,15 @@ fn refuses_a_package_its_signature_does_not_vouch_for() {
     let version = signed(&bytes, 7, &CLAIM.replace("0.1.0", "0.1.1"));
     assert_eq!(
         refused(&version),
-        "its signature is for hyscribe-test 0.1.1 of SDK 0.3"
+        "its signature is for hyscribe-test 0.1.1 of SDK 0.4"
     );
-    let sdk = signed(&bytes, 7, &CLAIM.replace("sdk=0.3", "sdk=0.2"));
+    let sdk = signed(&bytes, 7, &CLAIM.replace("sdk=0.4", "sdk=0.2"));
     assert_eq!(
         refused(&sdk),
         "its signature is for hyscribe-test 0.1.0 of SDK 0.2"
     );
     let id = signed(&bytes, 7, &CLAIM.replace("id=hyscribe-test", "id=other"));
-    assert_eq!(refused(&id), "its signature is for other 0.1.0 of SDK 0.3");
+    assert_eq!(refused(&id), "its signature is for other 0.1.0 of SDK 0.4");
     assert!(!plugins.exists() && !packages.exists());
 }
 

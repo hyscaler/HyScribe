@@ -28,6 +28,9 @@ impl MenuUser for Fake {
     fn transient(&self, _: &str) -> Option<Vec<u8>> {
         None
     }
+    fn plugin_pages(&self) -> Vec<crate::menu::PluginPage> {
+        Vec::new()
+    }
 }
 
 impl BarSite for Fake {
@@ -120,6 +123,7 @@ fn page<'a>(help: &'a [HelpTab<'a>], sidebar: &'a str, typenow: &'a str) -> Page
             taxonomy: "",
             parent_file: None,
             submenu_file: None,
+            plugin_page: None,
         },
         id: "x'y",
         title: "Tools",

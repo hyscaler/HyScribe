@@ -2354,6 +2354,7 @@ pub fn edit(
             taxonomy: "",
             parent_file: Some(&file),
             submenu_file: Some(&file),
+            plugin_page: None,
         },
         id: &id,
         title: kind.plural,

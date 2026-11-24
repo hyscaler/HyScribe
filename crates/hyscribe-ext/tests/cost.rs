@@ -27,7 +27,7 @@ fn the_content_10000_times() -> Result<(), Fault> {
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let extension = host.load(Package {
         kind: hyscribe_ext::manifest::Kind::Plugin,
-        sdk: "0.3",
+        sdk: "0.4",
         slug: "ext",
         wasm: guest::component(),
         grants: guest::grants(),

@@ -986,6 +986,7 @@ pub fn dashboard(site: &dyn DashboardSite, request: &Request) -> Option<String> 
             taxonomy: "",
             parent_file: Some("index.php"),
             submenu_file: None,
+            plugin_page: None,
         },
         id: "dashboard",
         title: "Dashboard",

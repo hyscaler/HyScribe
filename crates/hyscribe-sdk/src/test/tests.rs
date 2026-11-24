@@ -8,6 +8,7 @@ use alloc::string::ToString;
 use alloc::vec;
 
 use super::*;
+use crate::admin::{self, Page, Piece};
 use crate::assets::{self, Asset, AssetKind};
 use crate::customize::{self, CustomizeKind};
 use crate::mail::{self, Message};
@@ -713,4 +714,111 @@ fn the_lifecycle_and_the_wire() {
     for value in values {
         assert_eq!(Value::__from_wit(value.__to_wit()), value);
     }
+}
+
+/// Admin pages and the settings API (SDK 0.4): taken while registering,
+/// each kin under its menu, and the sections printed from the host's
+/// pieces with the plugin's own callbacks run here.
+#[test]
+fn admin_pages_and_settings() {
+    let host = host();
+    let denied = Err(SdkError::Denied("registered in init only".into()));
+    assert_eq!(
+        admin::add_options_page("T", "T", "read", "t", Cb::Append),
+        denied
+    );
+    host.state(|state| state.registering = true);
+    let added = [
+        admin::add_menu_page(
+            "Top",
+            "Top",
+            "read",
+            "top",
+            Cb::Append,
+            "dashicons-x",
+            Some(3),
+        ),
+        admin::add_submenu_page("top", "Sub", "Sub", "read", "sub", Cb::Append, Some(0)),
+        admin::add_dashboard_page("T", "T", "read", "a", Cb::Append),
+        admin::add_posts_page("T", "T", "read", "b", Cb::Append),
+        admin::add_media_page("T", "T", "read", "c", Cb::Append),
+        admin::add_links_page("T", "T", "read", "d", Cb::Append),
+        admin::add_pages_page("T", "T", "read", "e", Cb::Append),
+        admin::add_comments_page("T", "T", "read", "f", Cb::Append),
+        admin::add_theme_page("T", "T", "read", "g", Cb::Append),
+        admin::add_plugins_page("T", "T", "read", "h", Cb::Append),
+        admin::add_management_page("T", "T", "read", "i", Cb::Append),
+        admin::add_options_page("T", "T", "read", "j", Cb::Append),
+        admin::register_setting("demo", "demo_x", "{}", Some(Cb::Count as u32)),
+        admin::add_settings_section("main", "Main", Some(Cb::Count as u32), "demo"),
+        admin::add_settings_field("x", "X", Cb::Append, "demo", "main", "{}"),
+    ];
+    assert!(added.iter().all(Result::is_ok));
+    host.state(|state| {
+        let parents: Vec<_> = state.pages.iter().map(|page| page.parent.clone()).collect();
+        let files = [
+            "top",
+            "index.php",
+            "edit.php",
+            "upload.php",
+            "link-manager.php",
+            "edit.php?post_type=page",
+            "edit-comments.php",
+            "themes.php",
+            "plugins.php",
+            "tools.php",
+            "options-general.php",
+        ];
+        let mut expected = vec![None];
+        expected.extend(files.map(|file| Some(file.to_string())));
+        assert_eq!(parents, expected);
+        assert_eq!(
+            state.pages.first(),
+            Some(&Page {
+                parent: None,
+                page_title: "Top".into(),
+                menu_title: "Top".into(),
+                capability: "read".into(),
+                slug: "top".into(),
+                callback: Cb::Append as u32,
+                icon: "dashicons-x".into(),
+                position: Some(3),
+            })
+        );
+        assert_eq!(
+            state
+                .settings
+                .first()
+                .map(|s| (s.group.as_str(), s.sanitize)),
+            Some(("demo", Some(1)))
+        );
+        assert_eq!(state.sections.first().map(|s| s.callback), Some(Some(1)));
+        assert_eq!(
+            state.fields.first().map(|f| f.section.as_str()),
+            Some("main")
+        );
+        state.registering = false;
+        state.pieces.insert(
+            "demo".into(),
+            vec![
+                Piece::Markup(b"<h2>".to_vec()),
+                Piece::Call((Cb::Append as u32, "{}".into())),
+                Piece::Call((Cb::Count as u32, "{}".into())),
+            ],
+        );
+        state
+            .printed
+            .insert("settings_fields[demo]".into(), b"<input>".to_vec());
+    });
+    assert_eq!(
+        admin::do_settings_sections::<Demo>("demo"),
+        b"<h2>+demo".to_vec()
+    );
+    assert_eq!(
+        admin::do_settings_sections::<Demo>("other"),
+        Vec::<u8>::new()
+    );
+    assert_eq!(admin::settings_fields("demo"), Ok(b"<input>".to_vec()));
+    assert_eq!(admin::settings_fields("other"), Ok(Vec::new()));
+    assert!(admin::SUBMIT_BUTTON.contains("value=\"Save Changes\"  />"));
 }

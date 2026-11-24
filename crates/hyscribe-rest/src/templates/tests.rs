@@ -195,3 +195,18 @@ fn an_unregistered_pattern_is_left_as_it_is() {
     }
     assert!(resolve(b"<!-- wp:pattern {\"slug\":\"core/x\"} /-->").is_err());
 }
+
+/// A theme pattern's bundled image is under the site's own content URL, not
+/// the exported site's: what a template read answers on a site elsewhere.
+#[test]
+fn a_pattern_resolves_its_theme_urls_under_the_site() {
+    let theme = hyscribe_render::theme::load("twentytwentyfive", None);
+    let content = b"<!-- wp:pattern {\"slug\":\"twentytwentyfive/hidden-404\"} /-->";
+    let own = b"http://127.0.0.1:8180";
+    let resolved = super::content::resolve_patterns(&theme, content, own).unwrap();
+    let resolved = String::from_utf8(resolved).unwrap();
+    let image =
+        "http://127.0.0.1:8180/wp-content/themes/twentytwentyfive/assets/images/404-image.webp";
+    assert!(resolved.contains(image), "{resolved}");
+    assert!(!resolved.contains("127.0.0.1:8081"));
+}

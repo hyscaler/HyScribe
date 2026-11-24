@@ -8,7 +8,7 @@ use crate::tests::corpus;
 const GOLDEN: &str = include_str!("../../tests/golden/uploads.tsv");
 
 /// The type checks of the golden this does not read (see the test).
-const UNPORTED: usize = 26;
+const UNPORTED: usize = 19;
 
 fn lines(kind: &str) -> Vec<Vec<&'static str>> {
     GOLDEN
@@ -48,7 +48,7 @@ fn names_uploads_as_wordpress_does() {
 fn checks_types_as_wordpress_does() {
     let php = |v: &str| v.trim_matches('\'').to_string();
     let checks = lines("check");
-    assert_eq!(checks.len(), 222);
+    assert_eq!(checks.len(), 242);
     let mut unported = Vec::new();
     for fields in checks {
         let [_, corpus_name, upload, ext, kind, proper] = fields[..] else {

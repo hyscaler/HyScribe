@@ -31,11 +31,10 @@ const WHO: [(&str, &str, u64); 6] = [
 
 /// The cases that answer 501 once the checks before them pass: a PDF, whose
 /// preview PHP makes with Ghostscript, audio and video, whose metadata is
-/// getID3's, a Word 97 file and bytes libmagic gives no type, and a Word
-/// file named as a ZIP, where libmagic may give either.
-const UNPORTED: [&str; 19] = [
+/// getID3's, bytes libmagic gives no type, and a Word file named as a ZIP,
+/// where libmagic may give either.
+const UNPORTED: [&str; 18] = [
     "sample.pdf",
-    "sample.doc",
     "random.bin:random.mp3",
     "sample.docx:sample.zip",
     "cbr.mp3",
@@ -452,7 +451,7 @@ async fn upload_routes_match_php() {
             site = uploading(sessions.path(), uploads.path()).await;
         }
     }
-    assert_eq!((matched, unported), (6 * 107 - 74, 74));
+    assert_eq!((matched, unported), (6 * 118 - 71, 71));
 }
 
 /// An upload's plan is written by `rest::uploads`, never by `act()`.

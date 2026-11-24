@@ -247,6 +247,48 @@ async fn uploads_write_php_s_rows() {
             How::Media(0),
         ),
         (
+            "upload-async-doc",
+            ("sample.doc", "sample.doc"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-xls",
+            ("sample.xls", "My Sheet.xls"),
+            How::Media(1),
+        ),
+        (
+            "upload-async-ppt",
+            ("sample.ppt", "sample.ppt"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-ppt-pps",
+            ("sample.ppt", "slides.pps"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-xls-xlt",
+            ("sample.xls", "sheet.xlt"),
+            How::Media(0),
+        ),
+        (
+            "upload-rest-raw-doc",
+            ("sample.doc", "sample.doc"),
+            How::Rest(
+                false,
+                Upload {
+                    title: Some(b"A Word file".to_vec()),
+                    post: 1,
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
+            "upload-rest-form-xls",
+            ("sample.xls", "sample.xls"),
+            How::Rest(true, Upload::default()),
+        ),
+        (
             "upload-rest-raw-text",
             ("plain.txt", "plain.txt"),
             How::Rest(false, text),

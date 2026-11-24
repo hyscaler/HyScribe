@@ -167,7 +167,7 @@ async fn answers_match_php() {
     let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 69, 2 * 4));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/content.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 89 + 6, 0));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 91 + 6, 0));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/templates.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 85, 0));
     let golden = fixture_users(include_str!(
@@ -175,7 +175,7 @@ async fn answers_match_php() {
     ));
     assert_eq!(replay(&sites, &golden, false).await, (64, 0));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/search.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 49, 2));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 51, 2));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/namespaces.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 33, 2));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/widgets-default.tsv");
@@ -280,7 +280,7 @@ async fn people_match_php() {
     let golden = fixture_users(include_str!(
         "../../../hyscribe-rest/tests/golden/people.tsv"
     ));
-    assert_eq!(replay(&sites, &golden, false).await, (230, 0));
+    assert_eq!(replay(&sites, &golden, false).await, (232, 0));
     let sites = (
         ttd_site(false, dir.path()).await,
         ttd_site(true, dir.path()).await,

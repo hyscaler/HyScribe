@@ -255,9 +255,33 @@ fn posts_match_php() {
     replay(
         include_str!("../../tests/golden/posts.tsv"),
         (false, false),
-        6 * 103,
+        6 * 105,
         &[],
     );
+}
+
+/// `absint( ( $page - 1 ) * $per_page )` as PHP 8 computes it, for the
+/// products that fit an integer and for those that become floats and wrap.
+#[test]
+fn page_offsets_follow_php_integer_overflow() {
+    let cases = [
+        (1, 100, 0),
+        (3, 10, 20),
+        (92_233_720_368_547_758, 100, 9_223_372_036_854_775_700),
+        (92_233_720_368_547_759, 100, 9_223_372_036_854_775_800),
+        (9_223_372_036_854_775_807, 1, 9_223_372_036_854_775_806),
+        (9_223_372_036_854_775_807, 100, 0),
+        (9_223_372_036_854_775_807, 2, 0),
+        (4_294_967_297, 4_294_967_296, 0),
+        (3_037_000_501, 3_037_000_500, 9_223_372_036_709_302_272),
+    ];
+    for (page, per_page, offset) in cases {
+        assert_eq!(
+            crate::request::page_offset(page, per_page),
+            offset,
+            "{page} {per_page}"
+        );
+    }
 }
 
 /// The post routes over the Theme Test Data fixture:

@@ -35,6 +35,8 @@ GET	/?rest_route=/wp/v2/pages&status=private	default
 GET	/?rest_route=/wp/v2/pages&status=bogus	default
 GET	/?rest_route=/wp/v2/pages&status[]=publish&status[]=Draft	default
 GET	/?rest_route=/wp/v2/posts&per_page=1&page=1	default
+GET	/?rest_route=/wp/v2/posts&page=9223372036854775807&per_page=100	default
+GET	/?rest_route=/wp/v2/pages&page=9223372036854775807&per_page=100&status=any	default
 GET	/?rest_route=/wp/v2/pages&per_page=1&page=2&status=any	default
 GET	/?rest_route=/wp/v2/posts&page=3	default
 GET	/?rest_route=/wp/v2/posts&page=0	default

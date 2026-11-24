@@ -127,7 +127,7 @@ enum Found {
 fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
     let int_param = |name| params.get(name).map_or(1, Value::to_int).unsigned_abs();
     let (page, per_page) = (int_param("page"), int_param("per_page"));
-    let offset = page.saturating_sub(1).saturating_mul(per_page);
+    let offset = crate::request::page_offset(page, per_page);
     let search = params.text("search");
     let search = Some(search).filter(|search| !Value::String(search.clone()).is_empty());
     let (found, total) = match params.text("type").as_slice() {

@@ -382,7 +382,7 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
     let per_page = int("per_page").unsigned_abs().max(1);
     let offset = match params.get("offset") {
         Some(offset) if !offset.is_empty() => offset.to_int().unsigned_abs(),
-        _ => int("page").unsigned_abs().saturating_sub(1) * per_page,
+        _ => crate::request::page_offset(int("page").unsigned_abs(), per_page),
     };
     let query = prepared(context, params);
     let hidden = query.published.is_some() && authors_hidden(context);

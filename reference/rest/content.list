@@ -26,6 +26,7 @@ GET	/?rest_route=/wp/v2/categories&context=edit
 GET	/?rest_route=/wp/v2/categories&context=embed
 GET	/?rest_route=/wp/v2/categories&per_page=2&page=2
 GET	/?rest_route=/wp/v2/categories&per_page=3&page=50
+GET	/?rest_route=/wp/v2/categories&page=9223372036854775807&per_page=100	default
 GET	/?rest_route=/wp/v2/categories&per_page=0
 GET	/?rest_route=/wp/v2/categories&per_page=101
 GET	/?rest_route=/wp/v2/categories&page=0
@@ -81,6 +82,7 @@ GET	/?rest_route=/wp/v2/tags
 GET	/?rest_route=/wp/v2/tags&context=edit
 GET	/?rest_route=/wp/v2/tags&offset=2&per_page=2
 GET	/?rest_route=/wp/v2/tags&offset=3&per_page=2&page=9
+GET	/?rest_route=/wp/v2/tags&page=9223372036854775807&per_page=100	default
 GET	/?rest_route=/wp/v2/tags&orderby=slug&order=desc&per_page=5
 GET	/?rest_route=/wp/v2/tags&hide_empty=1&search=a
 GET	/?rest_route=/wp/v2/tags&parent=1

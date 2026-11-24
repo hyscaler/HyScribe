@@ -350,7 +350,7 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
     // Only a flat taxonomy's collection registers `offset`.
     let offset = match int("offset") {
         offset if offset > 0 && !hierarchical => offset,
-        _ => int("page").saturating_sub(1) * per_page,
+        _ => crate::request::page_offset(int("page"), per_page),
     };
     let tree = hierarchical && (query.nonempty || query.parent.is_some_and(|parent| parent > 0));
     // `_get_term_hierarchy()` writes the hierarchy when it is not stored.

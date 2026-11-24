@@ -606,7 +606,7 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
     let page = int("page").unsigned_abs();
     let offset = match params.get("offset") {
         Some(offset) if !offset.is_empty() => offset.to_int().unsigned_abs(),
-        _ => per_page * page.saturating_sub(1),
+        _ => crate::request::page_offset(page, per_page),
     };
     let query = prepared(context, params);
     let total = context.site.count_comments(&query);

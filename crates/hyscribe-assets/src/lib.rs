@@ -41,8 +41,8 @@ pub fn wp_admin(path: &str) -> Option<(&'static str, &'static [u8])> {
 /// HyScribe's own files under `wp-admin/` (ADR 0008), with their SHA-256.
 const OWN: &[(&str, &str, &[u8], &str)] = include!(concat!(env!("OUT_DIR"), "/own.rs"));
 
-/// One of HyScribe's own files under `wp-admin/`, the brand's marks: its
-/// content type, bytes and SHA-256 in hex.
+/// One of HyScribe's own files under `wp-admin/`, the brand's marks and the
+/// HyScribe colour scheme: its content type, bytes and SHA-256 in hex.
 pub fn hyscribe_file(path: &str) -> Option<(&'static str, &'static [u8], &'static str)> {
     OWN.iter()
         .find(|(name, _, _, _)| *name == path)
@@ -71,7 +71,8 @@ mod tests {
     use super::{hyscribe_file, release_file, wp_admin, wp_includes, wp_includes_read};
     use sha2::{Digest, Sha256};
 
-    /// The brand's marks as kept in `brand/`, neither in the release.
+    /// The brand's marks as kept in `brand/`, and the scheme's files core
+    /// would serve of its own, none of them in the release.
     #[test]
     fn hyscribe_files() {
         let mark = include_bytes!("../../../brand/hyscribe-mark.svg");
@@ -83,11 +84,18 @@ mod tests {
             .map(|b| format!("{b:02x}"))
             .collect();
         assert_eq!(sha, digest);
-        let small = "images/hyscribe-mark-small.svg";
-        assert_eq!(hyscribe_file(small).map(|f| f.0), Some("image/svg+xml"));
-        assert!(wp_admin(small).is_none());
+        let types = [
+            ("images/hyscribe-mark-small.svg", "image/svg+xml"),
+            ("css/colors/hyscribe/colors.min.css", "text/css"),
+            ("css/colors/hyscribe/colors-rtl.min.css", "text/css"),
+            ("css/colors/hyscribe/colors.scss", ""),
+        ];
+        for (path, expected) in types {
+            assert_eq!(hyscribe_file(path).map(|f| f.0), Some(expected), "{path}");
+            assert!(wp_admin(path).is_none(), "{path}");
+        }
         for missing in [
-            "css/colors/coffee/colors.min.css",
+            "css/colors/hyscribe/colors.css",
             "images/wordpress-logo.svg",
             "",
         ] {

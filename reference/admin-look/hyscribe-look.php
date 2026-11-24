@@ -5,14 +5,36 @@
 // wp-login.php, through WordPress's own filters only, so the goldens of
 // admin and login screens stay differential. look.sh adds and removes it.
 
+// HyScribe's scheme (reference/admin-colors), registered as core registers
+// its own; look.sh puts its files and the brand's marks in wp-admin.
+add_action(
+	'admin_init',
+	function () {
+		$suffix  = is_rtl() ? '-rtl' : '';
+		$suffix .= SCRIPT_DEBUG ? '' : '.min';
+		wp_admin_css_color(
+			'hyscribe',
+			'HyScribe',
+			admin_url( "css/colors/hyscribe/colors$suffix.css" ),
+			array( '#131b26', '#003364', '#1a5fd0', '#c99a3a' ),
+			array(
+				'base'    => '#f1f2f3',
+				'focus'   => '#fff',
+				'current' => '#fff',
+			)
+		);
+	},
+	1
+);
+
 // The schemes hs-admin offers: `modern`, the near-black "Default", is left
-// out, and a user without one of them is shown Coffee. Nothing is written.
-const HYSCRIBE_LOOK_SCHEMES = array( 'blue', 'coffee', 'ectoplasm', 'fresh', 'light', 'midnight', 'ocean', 'sunrise' );
+// out, and a user without one of them is shown HyScribe. Nothing is written.
+const HYSCRIBE_LOOK_SCHEMES = array( 'blue', 'coffee', 'ectoplasm', 'fresh', 'hyscribe', 'light', 'midnight', 'ocean', 'sunrise' );
 
 add_filter(
 	'get_user_option_admin_color',
 	function ( $color ) {
-		return in_array( $color, HYSCRIBE_LOOK_SCHEMES, true ) ? $color : 'coffee';
+		return in_array( $color, HYSCRIBE_LOOK_SCHEMES, true ) ? $color : 'hyscribe';
 	}
 );
 
@@ -32,7 +54,7 @@ add_filter(
 	function ( $classes ) {
 		return array_map(
 			function ( $class ) {
-				return 'admin-color-modern' === $class ? 'admin-color-coffee' : $class;
+				return 'admin-color-modern' === $class ? 'admin-color-hyscribe' : $class;
 			},
 			$classes
 		);
@@ -40,7 +62,7 @@ add_filter(
 );
 
 // The mark in place of the WordPress logo, linked to the site with its name
-// as the link's text.
+// as the link's text; and the scheme's theme colour, which login has not.
 add_filter(
 	'login_headertext',
 	function () {
@@ -57,7 +79,7 @@ add_action(
 	'login_head',
 	function () {
 		printf(
-			"<style>.login h1 a{background-image:url(%s);}</style>\n",
+			"<style>.login h1 a{background-image:url(%s);}body.admin-color-hyscribe{--wp-admin-theme-color:#1a5fd0;--wp-admin-theme-color--rgb:26,95,208;--wp-admin-theme-color-darker-10:#1755b9;--wp-admin-theme-color-darker-10--rgb:23,85,185;--wp-admin-theme-color-darker-20:#144aa3;--wp-admin-theme-color-darker-20--rgb:20,74,163;}</style>\n",
 			esc_url( admin_url( 'images/hyscribe-mark.svg' ) )
 		);
 	},

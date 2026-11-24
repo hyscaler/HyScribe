@@ -116,6 +116,7 @@ profile-email	POST	profile.php	action=update&user_id=1&email=new%40example.test&
 profile-email-taken	POST	profile.php	action=update&user_id=1&email=other%40example.test&nickname=admin&display_name=admin&pass1=&pass2=	update-user_1	_wpnonce
 profile-password	POST	profile.php	action=update&user_id=1&email=admin%40default-install.test&nickname=admin&display_name=admin&pass1=New+pass&pass2=New+pass	update-user_1	_wpnonce
 color-scheme	POST	admin-ajax.php	action=save-user-color-scheme&color_scheme=ocean	save-color-scheme	nonce
+color-scheme-hyscribe	POST	admin-ajax.php	action=save-user-color-scheme&color_scheme=hyscribe	save-color-scheme	nonce
 destroy-sessions-self	POST	admin-ajax.php	action=destroy-sessions&user_id=1	update-user_1	nonce
 destroy-sessions-other	POST	admin-ajax.php	action=destroy-sessions&user_id=801	update-user_801	nonce
 destroy-sessions-missing	POST	admin-ajax.php	action=destroy-sessions&user_id=999	update-user_999	nonce

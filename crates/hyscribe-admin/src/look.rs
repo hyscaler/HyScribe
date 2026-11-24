@@ -77,11 +77,13 @@ pub(crate) fn mark_icon(admin_url: &dyn Fn(&str) -> String) -> String {
     format!("<link rel=\"icon\" href=\"{url}\" type=\"image/svg+xml\" />\n")
 }
 
-/// `/hs-login`'s mark in place of the WordPress logo, at the size
-/// `login.css` gives the logo.
+/// `/hs-login`'s mark in place of the WordPress logo, and the HyScribe
+/// scheme's theme colour, as the login page loads no scheme.
 pub(crate) fn login_style(admin_url: &dyn Fn(&str) -> String) -> String {
     let url = mark_url(admin_url, MARK);
-    format!("<style>.login h1 a{{background-image:url({url});}}</style>\n")
+    format!(
+        "<style>.login h1 a{{background-image:url({url});}}body.admin-color-hyscribe{{--wp-admin-theme-color:#1a5fd0;--wp-admin-theme-color--rgb:26,95,208;--wp-admin-theme-color-darker-10:#1755b9;--wp-admin-theme-color-darker-10--rgb:23,85,185;--wp-admin-theme-color-darker-20:#144aa3;--wp-admin-theme-color-darker-20--rgb:20,74,163;}}</style>\n"
+    )
 }
 
 /// The admin bar's HyScribe item: the small mark as its icon's `:before`, as

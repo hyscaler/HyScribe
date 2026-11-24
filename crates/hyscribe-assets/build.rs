@@ -10,8 +10,8 @@
 //! (`HYSCRIBE_THEME_ZIPS` is a folder of them for offline builds). Each file served
 //! from the release, the embedded themes' too, keeps its modification time
 //! and SHA-256 for `Last-Modified` and `ETag`. HyScribe's own files under
-//! `wp-admin` (ADR 0008), the brand's marks, are embedded from `brand/`
-//! with their SHA-256 for the `ETag`.
+//! `wp-admin` (ADR 0008), the brand's marks and the HyScribe colour scheme,
+//! are embedded from `brand/` and `colors/` with their SHA-256 for the `ETag`.
 
 use sha2::{Digest, Sha256};
 use std::io;
@@ -25,8 +25,20 @@ const TARBALL_ENV: &str = "HYSCRIBE_WORDPRESS_TARBALL";
 const THEME_ZIPS_ENV: &str = "HYSCRIBE_THEME_ZIPS";
 const THEMES: &str = "wp-content/themes";
 /// HyScribe's own files by their path under `wp-admin`, from where they are
-/// kept: the brand's marks.
-const OWN: [(&str, &str); 2] = [
+/// kept: the scheme's files core serves of its own (`served`), and the marks.
+const OWN: [(&str, &str); 5] = [
+    (
+        "css/colors/hyscribe/colors-rtl.min.css",
+        "colors/hyscribe/colors-rtl.min.css",
+    ),
+    (
+        "css/colors/hyscribe/colors.min.css",
+        "colors/hyscribe/colors.min.css",
+    ),
+    (
+        "css/colors/hyscribe/colors.scss",
+        "colors/hyscribe/colors.scss",
+    ),
     (
         "images/hyscribe-mark-small.svg",
         "../../brand/hyscribe-mark-small.svg",

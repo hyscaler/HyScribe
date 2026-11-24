@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// HyScribe's admin colour scheme (ADR 0008): WordPress's own colour Sass
+// with the brand's colours, compiled by reference/admin-colors/build.sh.
+@use "sass:color";
+
+$ink: #131b26;
+$navy: #003364;
+$blue: #1a5fd0;
+$gold: #c99a3a;
+$sky: #7db2ff;
+$paper: #f6f8fb;
+
+@use "../_admin.scss" with (
+	$scheme-name: "hyscribe",
+	$base-color: $ink,
+	$highlight-color: $blue,
+	$notification-color: $gold,
+	$body-background: $paper,
+	$link: $blue,
+	$link-focus: color.adjust($blue, $lightness: -10%),
+	$form-checked: $blue,
+	$menu-highlight-text: #fff,
+	$menu-highlight-icon: #fff,
+	$menu-bubble-text: $ink,
+	$menu-submenu-background: $navy,
+	$menu-submenu-focus-text: $sky,
+);
+
+// The theme colour wp-base-styles gives core's schemes (admin-schemes.css).
+@function channels($color) {
+	@return color.channel($color, "red", $space: rgb), color.channel($color, "green", $space: rgb), color.channel($color, "blue", $space: rgb);
+}
+
+body.admin-color-hyscribe {
+	--wp-admin-theme-color: #{$blue};
+	--wp-admin-theme-color--rgb: #{channels($blue)};
+	--wp-admin-theme-color-darker-10: #{color.adjust($blue, $lightness: -5%)};
+	--wp-admin-theme-color-darker-10--rgb: #{channels(color.adjust($blue, $lightness: -5%))};
+	--wp-admin-theme-color-darker-20: #{color.adjust($blue, $lightness: -10%)};
+	--wp-admin-theme-color-darker-20--rgb: #{channels(color.adjust($blue, $lightness: -10%))};
+	--wp-admin-border-width-focus: 2px;
+}
+
+@media (min-resolution: 192dpi) {
+	body.admin-color-hyscribe {
+		--wp-admin-border-width-focus: 1.5px;
+	}
+}

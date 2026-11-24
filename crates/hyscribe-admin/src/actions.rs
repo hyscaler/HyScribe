@@ -1178,8 +1178,9 @@ const AJAX_POST: [&str; 87] = [
     "press-this-add-category",
 ];
 
-/// The color schemes `register_admin_color_schemes()` registers.
-const COLOR_SCHEMES: [&str; 9] = [
+/// The color schemes `register_admin_color_schemes()` registers, and
+/// HyScribe's (ADR 0008).
+const COLOR_SCHEMES: [&str; 10] = [
     "fresh",
     "light",
     "modern",
@@ -1189,6 +1190,7 @@ const COLOR_SCHEMES: [&str; 9] = [
     "ectoplasm",
     "ocean",
     "coffee",
+    "hyscribe",
 ];
 
 /// `admin-ajax.php`: the action's checks for the logged in user, if any.

@@ -3613,6 +3613,41 @@ async fn commenter_pages_match_php() {
     assert_eq!(golden.lines().count(), 95);
 }
 
+/// The pages of `reference/pages/titles.list` over the posts and pages of
+/// `reference/pages/titles.sql`: the browser title of untitled posts and
+/// pages and of titles with quotes, dashes and entities, and of the posts
+/// page, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn title_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let titles = include_str!("../../../reference/pages/titles.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(titles))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-titles.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, None, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 13);
+}
+
 /// Every case of `reference/term-template/golden.sh` over the Theme Test
 /// Data fixture's database: `WP_Term_Query`'s terms and whole terms query
 /// blocks, by hash, as the fixture's content is not ours to commit.

@@ -1,0 +1,13 @@
+	/?p=701
+	/?p=702
+	/?page_id=703
+	/?page_id=704
+show_on_front=page&page_for_posts=704	/
+show_on_front=page&page_for_posts=704	/?paged=2
+show_on_front=page&page_for_posts=704	/?page_id=704
+show_on_front=page&page_on_front=703	/
+show_on_front=page&page_on_front=704	/
+	/?p=701&page=2
+show_on_front=page&page_on_front=703&page_for_posts=704	/?page_id=704
+show_on_front=page&page_on_front=703&page_for_posts=704	/?page_id=704&paged=2
+show_on_front=page&page_on_front=703&page_for_posts=704	/

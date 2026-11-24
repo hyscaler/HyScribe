@@ -8,7 +8,7 @@
 
 use hyscribe_kses::{esc_attr, esc_url, url_host, url_scheme};
 use hyscribe_model::Post;
-use hyscribe_phpser::{Maybe, Value, is_empty_string, maybe_unserialize, php_trim};
+use hyscribe_phpser::{Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, php_trim};
 
 use crate::attachment::prepend::prepend_attachment;
 use crate::autop::wpautop;
@@ -255,7 +255,7 @@ fn shows_more(request: &Request, post: &Post) -> bool {
 
 /// `wp_link_pages()` for `post`: a link to each of its pages, the one shown
 /// marked current unless only its teaser shows.
-fn wp_link_pages(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
+pub(crate) fn wp_link_pages(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
     let count = split_pages(&post.content).len();
     if count < 2 {
         return Vec::new();
@@ -274,6 +274,12 @@ fn wp_link_pages(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
                 permalink.clone()
             } else {
                 crate::permalinks::post_page(renderer.context.site, post, &permalink, i)
+            };
+            // get_preview_post_link() on a preview.
+            let url = if request.preview {
+                add_query_arg(&[(b"preview", Some(b"true"))], &url)
+            } else {
+                url
             };
             out.extend_from_slice(
                 &[

@@ -961,7 +961,8 @@ async fn page(
     if !post && page_method {
         let now = now() as u64;
         let file = uploads::serve::serve(&site, uri.path(), &headers, now)
-            .or_else(|| files::static_file(uri.path(), &headers, now));
+            .or_else(|| files::static_file(uri.path(), &headers, now))
+            .or_else(|| files::installed_theme_file(&site, uri.path(), &headers, now));
         if let Some(response) = file {
             return response;
         }

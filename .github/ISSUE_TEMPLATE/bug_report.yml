@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report this. Please search [existing issues](https://github.com/hyscaler/HyScribe/issues) first, and check [what is not supported yet](https://github.com/hyscaler/HyScribe/blob/main/docs/operators/not-supported.md). Security problems are reported privately, as [SECURITY.md](https://github.com/hyscaler/HyScribe/blob/main/SECURITY.md) says, not here.
+        Thanks for taking the time to report this. HyScribe is not yet production ready, and reports from real sites are how it gets there. Please search [existing issues](https://github.com/hyscaler/HyScribe/issues) first, and check [what is not supported yet](https://github.com/hyscaler/HyScribe/blob/main/docs/operators/not-supported.md). Security problems are reported privately, as [SECURITY.md](https://github.com/hyscaler/HyScribe/blob/main/SECURITY.md) says, not here.
   - type: textarea
     id: what-happened
     attributes:

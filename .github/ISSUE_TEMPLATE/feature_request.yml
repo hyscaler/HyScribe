@@ -1,0 +1,51 @@
+name: Feature request
+description: Something of WordPress that HyScribe should serve, or something HyScribe should do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [PROGRESS.md](https://github.com/hyscaler/HyScribe/blob/main/PROGRESS.md) and the [roadmap](https://github.com/hyscaler/HyScribe/blob/main/docs/ROADMAP.md) first: it may be done, under way or planned. For a plugin or theme you need ported, name it and its version.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what is missing or answers 501 today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you would like to see. For WordPress behaviour, name the screen, route, function or hook.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Front end pages
+        - Themes
+        - Blocks and formatting
+        - hs-admin
+        - Block editor or site editor
+        - Media and uploads
+        - REST API
+        - Login and users
+        - Plugins and extensions
+        - A plugin or theme port
+        - Setup wizard or install
+        - Deployment and operations
+        - Other
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to work on this myself.

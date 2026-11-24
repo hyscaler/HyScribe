@@ -51,45 +51,54 @@ pub(super) fn legacy_comments(context: &Context<'_>, block: &Block<'_>, post: &P
     [format!("<div {wrapper}>").as_bytes(), &output, b"</div>"].concat()
 }
 
-/// `comments_template()`: the comments of the post as the compat template
-/// lays them out, then the form.
-fn comments_template(context: &Context<'_>, post: &Post) -> Vec<u8> {
-    // The compat template stops at a password protected post.
-    if !post.password.is_empty() {
-        return b"\t\t<p class=\"nocomments\">This post is password protected. Enter the password to view comments.</p>\n\t".to_vec();
-    }
-    let site = context.site;
-    let (all, held) = post_comments(site, context.request, post.id);
-    let option = |name| site.option(name).unwrap_or_default();
-    let mut top = listed(site, &all);
-    let paging = paging(site, context.request, top.len());
-    if let Some(paging) = &paging {
-        // Pages below the first list the first.
-        let offset = paging.paged.map_or(0, |p| (p.max(1) - 1) * paging.number);
-        top = top
-            .into_iter()
-            .skip(usize::try_from(offset).unwrap_or(usize::MAX))
-            .take(usize::try_from(paging.number).unwrap_or(usize::MAX))
+/// What `comments_template()` sets up for a post: its comments, the
+/// top-level ones the page shows, in order, and the comment page.
+#[derive(Clone)]
+pub(crate) struct Thread {
+    all: Vec<Comment>,
+    /// The ids of those held for the commenter.
+    held: HashSet<u64>,
+    /// The top-level comments shown, as places in `all`.
+    top: Vec<usize>,
+    page: Cpage,
+    max_pages: i64,
+    /// The page `get_comment_link()` names, 0 for none.
+    link_page: i64,
+}
+
+/// How `wp_list_comments()` lists: the avatars' size, and whether replies
+/// nest in an `ol` rather than a `ul`.
+pub(crate) struct Style {
+    pub(crate) avatar: i64,
+    pub(crate) ol: bool,
+}
+
+impl Thread {
+    /// `comments_template()`'s query of `post`'s comments.
+    pub(crate) fn of(context: &Context<'_>, post: &Post) -> Thread {
+        let site = context.site;
+        let (all, held) = post_comments(site, context.request, post.id);
+        let option = |name| site.option(name).unwrap_or_default();
+        let listed = listed(site, &all);
+        let paging = paging(site, context.request, listed.len());
+        let mut top: Vec<usize> = listed
+            .iter()
+            .filter_map(|shown| all.iter().position(|c| c.id == shown.id))
             .collect();
-    }
-    let max_pages = paging.as_ref().map_or(0, |paging| paging.max_pages);
-    let page = cpage_var(context, max_pages);
-    let mut out = String::from("\n<!-- You can start editing here. -->\n\n");
-    if top.is_empty() {
-        out.push_str(if comments_open(context, post) {
-            "\n\t\t\t<!-- If comments are open, but there are no comments. -->\n\n\t\n"
-        } else {
-            "\n\t\t\t<!-- If comments are closed. -->\n\t\t<p class=\"nocomments\">Comments are closed.</p>\n\n\t\n"
-        });
-    } else {
+        if let Some(paging) = &paging {
+            // Pages below the first list the first.
+            let offset = paging.paged.map_or(0, |p| (p.max(1) - 1) * paging.number);
+            top = top
+                .into_iter()
+                .skip(usize::try_from(offset).unwrap_or(usize::MAX))
+                .take(usize::try_from(paging.number).unwrap_or(usize::MAX))
+                .collect();
+        }
         if option("comment_order") == b"desc" {
             top.reverse();
         }
-        let nav = navigation(context, &page, max_pages);
-        out.push_str(&format!(
-            "\t<h3 id=\"comments\">\n\t\t{}\t</h3>\n\n{nav}\n\n\t<ol class=\"commentlist\">\n\t",
-            title(post)
-        ));
+        let max_pages = paging.as_ref().map_or(0, |paging| paging.max_pages);
+        let page = cpage_var(context, max_pages);
         // get_comment_link() names the page shown, the first of the oldest
         // comments having none.
         let oldest = option("default_comments_page") == b"oldest";
@@ -98,13 +107,94 @@ fn comments_template(context: &Context<'_>, post: &Post) -> Vec<u8> {
         } else {
             page.page
         };
+        Thread {
+            all,
+            held,
+            top,
+            page,
+            max_pages,
+            link_page,
+        }
+    }
+
+    /// `have_comments()`.
+    pub(crate) fn have_comments(&self) -> bool {
+        !self.top.is_empty()
+    }
+
+    /// The comment pages, `get_comment_pages_count()`: 1 unpaged.
+    pub(crate) fn pages(&self) -> i64 {
+        self.max_pages.max(1)
+    }
+
+    /// `wp_list_comments()` of the comments shown.
+    pub(crate) fn list(&self, context: &Context<'_>, style: &Style) -> String {
+        let top: Vec<&Comment> = self.top.iter().filter_map(|&at| self.all.get(at)).collect();
         let list = List {
             context,
-            all: &all,
-            held: &held,
-            link_page,
+            all: &self.all,
+            held: &self.held,
+            link_page: self.link_page,
+            style,
         };
-        out.push_str(&list.walk(&top));
+        list.walk(&top)
+    }
+
+    /// `get_previous_comments_link( $label )`.
+    pub(crate) fn older(&self, context: &Context<'_>, label: &str) -> Option<String> {
+        let page = self.page.page;
+        (context.request.singular && page > 1).then(|| comments_link(context, page - 1, 0, label))
+    }
+
+    /// `get_next_comments_link( $label )`: a page count the comment query
+    /// did not make is 1, of a post with comments.
+    pub(crate) fn newer(&self, context: &Context<'_>, label: &str) -> Option<String> {
+        let next = if self.page.truthy { self.page.page } else { 1 } + 1;
+        let max = self.pages();
+        (context.request.singular && next <= max).then(|| comments_link(context, next, max, label))
+    }
+}
+
+/// A comments page link, `max_page` 0 for the previous one.
+fn comments_link(context: &Context<'_>, page: i64, max_page: i64, label: &str) -> String {
+    format!(
+        "<a href=\"{}\" >{label}</a>",
+        String::from_utf8_lossy(&esc_url(&comments_pagenum_link(context, page, max_page)))
+    )
+}
+
+/// `comments_template()`: the comments of the post as the compat template
+/// lays them out, then the form.
+fn comments_template(context: &Context<'_>, post: &Post) -> Vec<u8> {
+    // The compat template stops at a password protected post.
+    if !post.password.is_empty() {
+        return b"\t\t<p class=\"nocomments\">This post is password protected. Enter the password to view comments.</p>\n\t".to_vec();
+    }
+    let thread = Thread::of(context, post);
+    let mut out = String::from("\n<!-- You can start editing here. -->\n\n");
+    if !thread.have_comments() {
+        out.push_str(if comments_open(context, post) {
+            "\n\t\t\t<!-- If comments are open, but there are no comments. -->\n\n\t\n"
+        } else {
+            "\n\t\t\t<!-- If comments are closed. -->\n\t\t<p class=\"nocomments\">Comments are closed.</p>\n\n\t\n"
+        });
+    } else {
+        let previous = thread.older(context, "&laquo; Older Comments");
+        let next = thread.newer(context, "Newer Comments &raquo;");
+        let nav = format!(
+            "\t<div class=\"navigation\">\n\t\t<div class=\"alignleft\">{}</div>\n\t\t<div class=\"alignright\">{}</div>\n\t</div>",
+            previous.unwrap_or_default(),
+            next.unwrap_or_default()
+        );
+        out.push_str(&format!(
+            "\t<h3 id=\"comments\">\n\t\t{}\t</h3>\n\n{nav}\n\n\t<ol class=\"commentlist\">\n\t",
+            title(post)
+        ));
+        let style = Style {
+            avatar: 32,
+            ol: false,
+        };
+        out.push_str(&thread.list(context, &style));
         out.push_str(&format!("\t</ol>\n\n{nav}\n\n"));
     }
     let mut out = out.into_bytes();
@@ -127,6 +217,7 @@ fn title(post: &Post) -> String {
 
 /// The `cpage` query var after `comments_template()`: what the request
 /// names or else, with several pages, the page it sets.
+#[derive(Clone)]
 struct Cpage {
     page: i64,
     /// Whether PHP takes it for true, as `abc` is.
@@ -178,34 +269,6 @@ pub(crate) fn legacy_cpage(context: &Context<'_>, post: &Post) -> Option<i64> {
     (page.set && context.request.singular).then_some(page.page)
 }
 
-/// The navigation `<div>` of the older and newer comments links.
-fn navigation(context: &Context<'_>, page: &Cpage, max_pages: i64) -> String {
-    let link = |page, max_page, label: &str| {
-        format!(
-            "<a href=\"{}\" >{label}</a>",
-            String::from_utf8_lossy(&esc_url(&comments_pagenum_link(context, page, max_page)))
-        )
-    };
-    let singular = context.request.singular;
-    let previous = if singular && page.page > 1 {
-        link(page.page - 1, 0, "&laquo; Older Comments")
-    } else {
-        String::new()
-    };
-    // A page count the comment query did not make is 1, of a post with
-    // comments.
-    let next_page = if page.truthy { page.page } else { 1 } + 1;
-    let max_page = max_pages.max(1);
-    let next = if singular && next_page <= max_page {
-        link(next_page, max_page, "Newer Comments &raquo;")
-    } else {
-        String::new()
-    };
-    format!(
-        "\t<div class=\"navigation\">\n\t\t<div class=\"alignleft\">{previous}</div>\n\t\t<div class=\"alignright\">{next}</div>\n\t</div>"
-    )
-}
-
 /// What `wp_list_comments()` lists.
 struct List<'a, 'c> {
     context: &'a Context<'c>,
@@ -215,6 +278,7 @@ struct List<'a, 'c> {
     held: &'a HashSet<u64>,
     /// The page `get_comment_link()` names, 0 for none.
     link_page: i64,
+    style: &'a Style,
 }
 
 /// A step of the walk.
@@ -260,7 +324,11 @@ impl List<'_, '_> {
                     let nested = max_depth == 0 || max_depth > depth_i + 1;
                     match replies {
                         Some(replies) if nested => {
-                            out.push_str("<ul class=\"children\">\n");
+                            out.push_str(if self.style.ol {
+                                "<ol class=\"children\">\n"
+                            } else {
+                                "<ul class=\"children\">\n"
+                            });
                             steps.push(Step::CloseItem);
                             steps.push(Step::CloseLevel);
                             steps.extend(replies.iter().rev().map(|c| Step::Show(c, depth + 1)));
@@ -273,7 +341,11 @@ impl List<'_, '_> {
                         None => out.push_str(CLOSE_ITEM),
                     }
                 }
-                Step::CloseLevel => out.push_str("</ul><!-- .children -->\n"),
+                Step::CloseLevel => out.push_str(if self.style.ol {
+                    "</ol><!-- .children -->\n"
+                } else {
+                    "</ul><!-- .children -->\n"
+                }),
                 Step::CloseItem => out.push_str(CLOSE_ITEM),
             }
         }
@@ -293,7 +365,14 @@ impl List<'_, '_> {
         } else {
             "Your comment is awaiting moderation."
         };
-        let avatar = get_avatar(context, &Subject::Comment(comment), 32, b"", "", "");
+        let avatar = get_avatar(
+            context,
+            &Subject::Comment(comment),
+            self.style.avatar,
+            b"",
+            "",
+            "",
+        );
         let author = if held && !show_pending {
             comment_author(context, comment)
         } else {

@@ -273,7 +273,7 @@ pub(crate) fn form(
 
 /// A file name that stays in its folder: not empty, no separator or NUL,
 /// and no leading dot, so never `.`, `..` or a temporary file.
-fn stays(name: &str) -> bool {
+pub(crate) fn stays(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && !name.contains(['/', '\\', '\0'])
 }
 

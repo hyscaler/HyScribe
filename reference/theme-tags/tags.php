@@ -62,6 +62,62 @@ add_filter(
 			the_custom_logo();
 			$put( "the_custom_logo:$part", ob_get_clean() );
 		}
+		// The other tags a classic theme's templates call, after the
+		// above, so their answers stay as they were.
+		$print = function ( $name, $callback ) use ( $put ) {
+			ob_start();
+			$callback();
+			$put( $name, ob_get_clean() );
+		};
+		$shows = array( 'name', 'description', 'charset', 'url', 'wpurl', 'html_type', 'language', 'rss2_url', 'atom_url', 'comments_rss2_url', 'pingback_url', 'nope' );
+		foreach ( $shows as $show ) {
+			$put( "get_bloginfo:$show", get_bloginfo( $show ) );
+			$put( "get_bloginfo:$show:display", get_bloginfo( $show, 'display' ) );
+		}
+		$print( 'bloginfo:charset', fn() => bloginfo( 'charset' ) );
+		$print( 'bloginfo:name', fn() => bloginfo( 'name' ) );
+		$put( 'home_url', home_url() );
+		$put( 'home_url:/', home_url( '/' ) );
+		$samples = array( '#content', 'http://127.0.0.1:8081/?p=1&a=b', 'example.test/a b', 'javascript:alert(1)', "a\"b<c>&amp;'d", '<p onclick="x">Hi <script>x</script><a href="https://w.test/">w</a></p>' );
+		foreach ( $samples as $at => $sample ) {
+			$put( "esc_url:$at", esc_url( $sample ) );
+			$put( "esc_attr:$at", esc_attr( $sample ) );
+			$put( "esc_html:$at", esc_html( $sample ) );
+			$put( "wp_kses_post:$at", wp_kses_post( $sample ) );
+		}
+		$print( 'the_archive_title', fn() => the_archive_title( '<h1 class="entry-title">', '</h1>' ) );
+		$print( 'the_archive_description', fn() => the_archive_description( '<p class="archive-description">', '</p>' ) );
+		$put( 'get_search_query', get_search_query() );
+		$put( 'get_search_query:raw', get_search_query( false ) );
+		global $wp_query;
+		$put( 'max_num_pages', $wp_query->max_num_pages );
+		$print( 'previous_posts_link', fn() => previous_posts_link( '<span class="meta-nav">&larr;</span> Previous' ) );
+		$print( 'next_posts_link', fn() => next_posts_link( 'Next <span class="meta-nav">&rarr;</span>' ) );
+		while ( have_posts() ) {
+			the_post();
+			$at = 'post:' . get_the_ID() . ':';
+			$print( $at . 'the_title', fn() => the_title( '<h1 class="entry-title">', '</h1>' ) );
+			$put( $at . 'get_the_title', get_the_title() );
+			$put( $at . 'get_permalink', get_permalink() );
+			$print( $at . 'the_permalink', fn() => the_permalink() );
+			$print( $at . 'post_class', fn() => post_class( 'site-main' ) );
+			$put( $at . 'get_post_type', get_post_type() );
+			$put( $at . 'post_type_supports:comments', $bool( post_type_supports( get_post_type(), 'comments' ) ) );
+			$put( $at . 'has_post_thumbnail', $bool( has_post_thumbnail() ) );
+			$put( $at . 'get_the_post_thumbnail', get_the_post_thumbnail( null, 'large' ) );
+			$print( $at . 'the_excerpt', fn() => the_excerpt() );
+			$print( $at . 'the_content', fn() => the_content() );
+			$print( $at . 'wp_link_pages', fn() => wp_link_pages() );
+			$put( $at . 'has_tag', $bool( has_tag() ) );
+			$print( $at . 'the_tags', fn() => the_tags( '<span class="tag-links">Tagged ', ', ', '</span>' ) );
+			$put( $at . 'comments_open', $bool( comments_open() ) );
+			$print( $at . 'comments_template', fn() => comments_template() );
+			$put( $at . 'have_comments', $bool( have_comments() ) );
+			$put( $at . 'get_comments_number', get_comments_number() );
+			$print( $at . 'the_comments_navigation', fn() => the_comments_navigation() );
+			$print( $at . 'wp_list_comments', fn() => wp_list_comments( array( 'style' => 'ol', 'short_ping' => true, 'avatar_size' => 42 ) ) );
+			$print( $at . 'comment_form', fn() => comment_form( array( 'title_reply_before' => '<h2 id="reply-title" class="comment-reply-title">', 'title_reply_after' => '</h2>' ) ) );
+		}
 		echo implode( "\n", $out ), "\n";
 		exit;
 	},

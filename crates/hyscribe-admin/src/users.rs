@@ -16,7 +16,8 @@ use crate::admin_bar::BarSite;
 use crate::dashboard::DashboardSite;
 use crate::list_table::{
     Column, Order, Sort, View, bulk_actions, column_headers, fill, pagenum, pagination,
-    row_actions, screen_options, search_box, table_description, views, wp_nonce_field,
+    row_actions, screen_options, search_box, table_description, views, without_referer,
+    wp_nonce_field,
 };
 use crate::menu::{Screen, link};
 use crate::page::{HelpTab, Page, Request, admin_notice, admin_page, wp_admin_notice};
@@ -79,6 +80,9 @@ pub struct UserArgs {
     pub reset_count: Option<String>,
     /// `id`, the user added, if given.
     pub id: Option<String>,
+    /// `_wp_http_referer` is not empty: the list's own form sent back,
+    /// which `users.php` redirects to the list without it.
+    pub sent_back: bool,
 }
 
 /// `users.php`'s notices of `args`, as printed without `wp_kses_post()`;
@@ -553,6 +557,9 @@ pub fn users(site: &dyn UsersSite, args: &UserArgs, request: &Request) -> Answer
         return Answer::Denied(
             "<h1>You need a higher level of permission.</h1><p>Sorry, you are not allowed to list users.</p>",
         );
+    }
+    if args.sent_back {
+        return Answer::Redirect(without_referer(request_uri));
     }
     let per_page = per_page(site, "users_per_page", 20);
     let page = pagenum(args.paged.as_deref());

@@ -8,14 +8,10 @@
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value};
 
-use crate::autop::wpautop;
 use crate::blocks::Block;
-use crate::content::replace_insecure_home_url;
-use crate::content_tags::wp_filter_content_tags;
-use crate::excerpt::EXCERPT_MORE;
-use crate::formatting::{CORE_SHORTCODE_TAGS, contains, convert_chars, wptexturize};
+use crate::formatting::contains;
 use crate::site::{Request, Site};
-use crate::template::{Renderer, site_smilies};
+use crate::template::Renderer;
 use crate::theme::Theme;
 
 /// The rendering of one REST request.
@@ -73,12 +69,7 @@ impl<'a> Rendering<'a> {
         let renderer = &mut self.renderer;
         renderer.context.post_id = Some(post.id);
         renderer.attachment = attachment(post);
-        let excerpt = renderer.excerpt(post, length, EXCERPT_MORE);
-        let site = renderer.context.site;
-        let excerpt = wptexturize(&excerpt, &CORE_SHORTCODE_TAGS);
-        let excerpt = convert_chars(&site_smilies(site, &excerpt));
-        let excerpt = replace_insecure_home_url(site, &wpautop(&excerpt, true));
-        wp_filter_content_tags(site, &renderer.context.loading, &excerpt)
+        renderer.the_excerpt_filtered(post, length)
     }
 }
 

@@ -8,7 +8,9 @@
 #   page<TAB>options<TAB>hex(path)<TAB>status
 #   tag<TAB>name<TAB>hex(value)            the lines of reference/theme-tags/tags.php
 # once over the default install, then with reference/theme-tags/content.sql
-# (a custom logo and two menus), which it adds and deletes after; those
+# (a custom logo, two menus, a featured image, a tag and two more comments
+# on the first post, and an untitled post in pages), which it adds and
+# deletes after; those
 # requests carry the option _tags=content, which is no option.
 #   reference/theme-tags/golden.sh [slug]   (default hello-elementor)
 # The theme is active through the options of each request
@@ -29,9 +31,9 @@ HEADERS=$(mktemp)
 BODY=$(mktemp)
 sql() { "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress; }
 remove() {
-  echo "DELETE FROM wp_posts WHERE ID BETWEEN 961 AND 963; DELETE FROM wp_postmeta WHERE meta_id BETWEEN 961 AND 978;
-    DELETE FROM wp_terms WHERE term_id IN (961, 962); DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id IN (961, 962);
-    DELETE FROM wp_term_relationships WHERE term_taxonomy_id IN (961, 962); DELETE FROM wp_options WHERE option_id = 961;" | sql
+  echo "DELETE FROM wp_posts WHERE ID BETWEEN 961 AND 964; DELETE FROM wp_comments WHERE comment_ID IN (961, 962); DELETE FROM wp_postmeta WHERE meta_id BETWEEN 961 AND 979;
+    DELETE FROM wp_terms WHERE term_id IN (961, 962, 963); DELETE FROM wp_term_taxonomy WHERE term_taxonomy_id IN (961, 962, 963);
+    DELETE FROM wp_term_relationships WHERE term_taxonomy_id IN (961, 962, 963) OR object_id = 964; DELETE FROM wp_options WHERE option_id = 961;" | sql
 }
 cleanup() {
   rm -f "$HEADERS" "$BODY"

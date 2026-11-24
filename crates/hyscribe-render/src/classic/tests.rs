@@ -185,12 +185,17 @@ fn language_attributes_follow_the_document_type() {
             site.options.insert("html_type", html_type);
         }
         let args: Vec<Value> = doctype.map(text).into_iter().collect();
-        let printed = classic().print(
-            &site,
-            &Request::default(),
-            ("language_attributes", &args),
-            &|_| false,
+        let (theme, request) = (
+            crate::theme::load("twentytwentyfive", None),
+            Request::default(),
         );
+        let scope = Scope {
+            theme: &theme,
+            site: &site,
+            request: &request,
+            supports: &|_| false,
+        };
+        let printed = classic().print(&scope, ("language_attributes", &args));
         String::from_utf8(printed.unwrap()).unwrap()
     };
     let xhtml: &[u8] = b"application/xhtml+xml";
@@ -215,17 +220,32 @@ fn language_attributes_follow_the_document_type() {
 fn unported_arguments_are_unserved() {
     let site = Fixture::default();
     let request = Request::default();
-    let mut page = classic();
-    let print = |page: &mut Classic, name: &str, args: &[Value]| {
-        page.print(&site, &request, (name, args), &|feature| {
-            feature == "responsive-embeds"
-        })
+    let theme = crate::theme::load("twentytwentyfive", None);
+    let scope = Scope {
+        theme: &theme,
+        site: &site,
+        request: &request,
+        supports: &|feature| feature == "responsive-embeds",
     };
+    let mut page = classic();
+    let print = |page: &mut Classic, name: &str, args: &[Value]| page.print(&scope, (name, args));
     assert_eq!(print(&mut page, "body_class", &[text("x")]), Err(Unserved));
     assert_eq!(print(&mut page, "the_title", &[]), Err(Unserved));
     let classes = print(&mut page, "body_class", &[text("")]).unwrap();
     assert_eq!(classes, b"class=\"wp-embed-responsive wp-theme-t\"");
-    assert_eq!(page.get(&site, &request, "the_title", &[]), Err(Unserved));
+    assert_eq!(page.get(&scope, "the_title", &[]), Err(Unserved));
     // No menu falls back to `wp_page_menu()`, which is not ported.
-    assert_eq!(page.get(&site, &request, "wp_nav_menu", &[]), Err(Unserved));
+    assert_eq!(page.get(&scope, "wp_nav_menu", &[]), Err(Unserved));
+}
+
+/// `get_pagenum_link()` drops `page/<n>/?` at the end of the request, and
+/// only with digits: `page/` with no number after it stays.
+#[test]
+fn page_numbers_are_dropped_only_with_digits() {
+    let without = tags::without_page;
+    assert_eq!(without(b"x/page/3/"), b"x/");
+    assert_eq!(without(b"x/page/12"), b"x/");
+    assert_eq!(without(b"x/page//"), b"x/page//");
+    assert_eq!(without(b"x/page/"), b"x/page/");
+    assert_eq!(without(b"x/3/"), b"x/3/");
 }

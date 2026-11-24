@@ -19,7 +19,7 @@ use crate::admin_bar::BarSite;
 use crate::assets::cookie_path;
 use crate::list_table::{
     Column, Order, Sort, bulk_actions, column_headers, fill, months_dropdown, pagenum, pagination,
-    row_actions, screen_options, table_description,
+    row_actions, screen_options, table_description, without_referer,
 };
 use crate::menu::{Screen, esc_link, link};
 use crate::page::{HelpTab, Page, Request, admin_page, json, query_strings, text};
@@ -107,7 +107,7 @@ const HIDDEN_TYPES: [&str; 9] = [
 ];
 
 /// The arguments the list takes; any other is not ported.
-const LIST_ARGS: [&str; 26] = [
+const LIST_ARGS: [&str; 29] = [
     "mode",
     "attachment-filter",
     "post_mime_type",
@@ -134,6 +134,10 @@ const LIST_ARGS: [&str; 26] = [
     "untrashed",
     "message",
     "ids",
+    // The hidden fields of the Add Media to post dialog the form holds.
+    "affected",
+    "_ajax_nonce",
+    "ps",
 ];
 
 /// `upload.php`'s query: `$_GET`'s strings in order, unslashed.
@@ -1224,10 +1228,7 @@ pub fn upload(site: &dyn MediaSite, args: &LibraryArgs, request: &Request) -> Op
         return None;
     }
     if args.given("_wp_http_referer") {
-        let uri = remove_query_arg(&[b"_wp_http_referer", b"_wpnonce"], request.uri.as_bytes());
-        return Some(Answer::Redirect(crate::text(
-            &hyscribe_phpser::stripslashes(&uri),
-        )));
+        return Some(Answer::Redirect(without_referer(request.uri)));
     }
     list(site, args, request, &notice, &removed)
 }

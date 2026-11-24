@@ -19,7 +19,8 @@ use crate::admin_bar::{BarSite, html_excerpt};
 use crate::dashboard::{CommentCounts, DashboardSite, RecentComment, approved_of};
 use crate::list_table::{Column, Order, Sort, View, bulk_actions, column_headers, pagination};
 use crate::list_table::{
-    nonce_url, pagenum, screen_options, search_box, table_description, views, wp_nonce_field,
+    nonce_url, pagenum, screen_options, search_box, table_description, views, without_referer,
+    wp_nonce_field,
 };
 use crate::media::image::response_thumbnail;
 use crate::menu::{Screen, esc_link, link};
@@ -194,6 +195,9 @@ pub struct CommentArgs {
     pub ids: Option<String>,
     /// `error`, the moderation's failure, if given.
     pub error: Option<String>,
+    /// `_wp_http_referer` is not empty: the list's own form sent back,
+    /// which `edit-comments.php` redirects to the list without it.
+    pub sent_back: bool,
 }
 
 /// `WP_Comment_Query`'s `ORDER BY` for `orderby` and `order`; `None` for
@@ -1000,6 +1004,14 @@ pub fn edit_comments(
         uri: request_uri,
         browser,
     } = request;
+    if args.sent_back {
+        // The menu turns away who may not edit posts before the screen runs.
+        return Some(if site.can("edit_posts") {
+            Answer::Redirect(without_referer(request_uri))
+        } else {
+            Answer::from_page(None)
+        });
+    }
     let (view, approved) = VIEWS
         .into_iter()
         .find(|(view, _)| args.status.as_deref() == Some(*view))

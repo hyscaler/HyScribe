@@ -360,3 +360,27 @@ fn the_edit_screen_deletes_without_the_trash() {
     assert!(delete.contains(&expected), "{delete}");
     assert!(comment_edit(&Role("administrator"), 2, &request).is_none());
 }
+
+/// The list's own form sent back goes to the list without its nonce and
+/// referer, for who may edit posts.
+#[test]
+fn a_form_sent_back_is_redirected() {
+    let args = CommentArgs {
+        sent_back: true,
+        ..CommentArgs::default()
+    };
+    let uri = "/hs-admin/edit-comments?s=a&_wpnonce=n&_wp_http_referer=%2Fhs-admin%2Fedit-comments";
+    let sent = |role| {
+        edit_comments(
+            &Role(role),
+            &args,
+            None,
+            &crate::tests::request(&format!("{SITE}{uri}"), uri, &crate::tests::BROWSER),
+        )
+    };
+    assert_eq!(
+        sent("contributor"),
+        Some(Answer::Redirect("/hs-admin/edit-comments?s=a".into()))
+    );
+    assert!(matches!(sent("subscriber"), Some(Answer::Denied(_))));
+}

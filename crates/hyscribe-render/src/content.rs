@@ -128,18 +128,20 @@ impl Renderer<'_> {
         };
         let content = autop_at(false, content);
         let content = shortcode_unautop(&content, &CORE_SHORTCODE_TAGS);
-        let content = match &self.attachment {
-            Some(post) => [
-                prepend_attachment(
-                    site,
-                    &self.context.loading,
-                    post,
-                    &self.audio_instances,
-                    &mut self.assets,
-                ),
-                content,
-            ]
-            .concat(),
+        let content = match self.attachment.clone() {
+            Some(post) => {
+                let prepended = match self.video_attachment(&post) {
+                    Some(player) => [player, b"\n".to_vec()].concat(),
+                    None => prepend_attachment(
+                        site,
+                        &self.context.loading,
+                        &post,
+                        &self.audio_instances,
+                        &mut self.assets,
+                    ),
+                };
+                [prepended, content].concat()
+            }
             None => content,
         };
         let content = replace_insecure_home_url(site, &content);

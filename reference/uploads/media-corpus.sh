@@ -88,4 +88,19 @@ printf 'MThd\x00\x00\x00\x06\x00\x00\x00\x01\x00\x60MTrk\x00\x00\x00\x04\x00\xff
 "${F[@]}" "${PICTURE[@]}" -c:v wmv2 "$OUT/clip.wmv"
 "${F[@]}" "${PICTURE[@]}" -c:v flv1 "$OUT/clip.flv"
 "${F[@]}" -f lavfi -i testsrc=duration=0.5:size=320x240:rate=25 -c:v mpeg1video -f mpeg "$OUT/clip.mpg"
+# MP4 and QuickTime in the shapes WordPress reads: the movie first, sound in
+# QuickTime and 3GPP, M4V, PCM, a rotated picture, tags, a cover picture,
+# Apple Lossless and MPEG-4 Part 2.
+BOTH=("${PICTURE[@]}" "${SINE[@]}" -ac 1 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest)
+"${F[@]}" "${BOTH[@]}" -movflags +faststart "$OUT/faststart.mp4"
+"${F[@]}" "${BOTH[@]}" "$OUT/clip-audio.mov"
+"${F[@]}" "${BOTH[@]}" "$OUT/clip-audio.3gp"
+"${F[@]}" "${BOTH[@]}" "$OUT/clip.m4v"
+"${F[@]}" "${BOTH[@]}" -metadata title="A Title" -metadata comment="Notes" "$OUT/tagged.mp4"
+"${F[@]}" "${PICTURE[@]}" "${SINE[@]}" -ac 1 -c:v libx264 -pix_fmt yuv420p -c:a pcm_s16be -shortest "$OUT/pcm.mov"
+"${F[@]}" -display_rotation 90 "${PICTURE[@]}" -c:v libx264 -pix_fmt yuv420p "$OUT/rotated.mp4"
+"${F[@]}" "${SINE[@]}" -f lavfi -i testsrc=size=64x48:rate=1 -map 0:a -map 1:v -frames:v 1 -ac 1 -c:a aac \
+  -c:v png -disposition:v attached_pic -metadata title="A Cover" -metadata artist="An Artist" "$OUT/covered.m4a"
+"${F[@]}" "${SINE[@]}" -ac 1 -c:a alac "$OUT/alac.m4a"
+"${F[@]}" "${PICTURE[@]}" -c:v mpeg4 "$OUT/mpeg4.mp4"
 ls -l "$OUT"

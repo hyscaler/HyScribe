@@ -9,9 +9,10 @@ use crate::upload::wp_check_filetype;
 
 const GOLDEN: &str = include_str!("../../tests/golden/getid3.tsv");
 
-/// An MP3 sample of `reference/getid3/mp3-samples.py`.
-fn mp3_sample(name: &str) -> Vec<u8> {
-    let path = format!("{}/tests/mp3/{name}", env!("CARGO_MANIFEST_DIR"));
+/// A sample of `reference/getid3/mp3-samples.py` or `mp4-samples.py`,
+/// in the folder `kind`.
+pub(super) fn sample(kind: &str, name: &str) -> Vec<u8> {
+    let path = format!("{}/tests/{kind}/{name}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read(path).unwrap()
 }
 
@@ -23,7 +24,7 @@ fn files() -> Vec<(String, Vec<u8>, Vec<u8>)> {
             let f: Vec<&str> = line.split('\t').collect();
             match f[0] {
                 "corpus" => (f[1].to_string(), corpus(f[1]), unhex(f[2])),
-                "mp3" => (f[1].to_string(), mp3_sample(f[1]), unhex(f[2])),
+                "mp3" | "mp4" => (f[1].to_string(), sample(f[0], f[1]), unhex(f[2])),
                 _ => (f[1].to_string(), unhex(f[2]), unhex(f[3])),
             }
         })
@@ -65,7 +66,7 @@ fn matches_getid3() {
 }
 
 /// How many golden files are read.
-const READ: usize = 433;
+const READ: usize = 659;
 
 /// A WAVE file of `size` bytes of 8 bit mono samples.
 fn wave(size: usize) -> Vec<u8> {

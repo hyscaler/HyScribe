@@ -1,0 +1,36 @@
+# The rows PHP WordPress writes for the action upload-async-mp4 (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-24 22:57:10 to 2026-11-24 22:57:10 UTC.
+# %wp_posts:1% is 5.
+# %wp_postmeta:1% is 3.
+# %wp_postmeta:2% is 4.
+wp_postmeta	%wp_postmeta:1%	+	meta_id	%wp_postmeta:1%
+wp_postmeta	%wp_postmeta:1%	+	meta_key	_wp_attached_file
+wp_postmeta	%wp_postmeta:1%	+	meta_value	%ym%/faststart.mp4
+wp_postmeta	%wp_postmeta:1%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:2%	+	meta_id	%wp_postmeta:2%
+wp_postmeta	%wp_postmeta:2%	+	meta_key	_wp_attachment_metadata
+wp_postmeta	%wp_postmeta:2%	+	meta_value	a:12:{s:7:"bitrate";i:57278;s:8:"filesize";i:%filesize%;s:9:"mime_type";s:9:"video/mp4";s:6:"length";i:1;s:16:"length_formatted";s:4:"0:01";s:5:"width";i:160;s:6:"height";i:120;s:10:"fileformat";s:3:"mp4";s:10:"dataformat";s:9:"quicktime";s:5:"codec";s:16:"H.264/MPEG-4 AVC";s:5:"audio";a:9:{s:10:"dataformat";s:3:"mp4";s:7:"bitrate";i:59746;s:5:"codec";s:19:"ISO/IEC 14496-3 AAC";s:11:"sample_rate";d:22050;s:8:"channels";i:1;s:15:"bits_per_sample";i:16;s:8:"lossless";b:0;s:11:"channelmode";s:4:"mono";s:17:"compression_ratio";d:0.1693480725623583;}s:17:"created_timestamp";i:-2082844800;}
+wp_postmeta	%wp_postmeta:2%	+	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	+	ID	%wp_posts:1%
+wp_posts	%wp_posts:1%	+	comment_count	0
+wp_posts	%wp_posts:1%	+	comment_status	open
+wp_posts	%wp_posts:1%	+	guid	http://127.0.0.1:8081/wp-content/uploads/%ym%/faststart.mp4
+wp_posts	%wp_posts:1%	+	menu_order	0
+wp_posts	%wp_posts:1%	+	ping_status	closed
+wp_posts	%wp_posts:1%	+	pinged	
+wp_posts	%wp_posts:1%	+	post_author	1
+wp_posts	%wp_posts:1%	+	post_content	
+wp_posts	%wp_posts:1%	+	post_content_filtered	
+wp_posts	%wp_posts:1%	+	post_date	%now%
+wp_posts	%wp_posts:1%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_excerpt	
+wp_posts	%wp_posts:1%	+	post_mime_type	video/mp4
+wp_posts	%wp_posts:1%	+	post_modified	%now%
+wp_posts	%wp_posts:1%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_name	faststart
+wp_posts	%wp_posts:1%	+	post_parent	0
+wp_posts	%wp_posts:1%	+	post_password	
+wp_posts	%wp_posts:1%	+	post_status	inherit
+wp_posts	%wp_posts:1%	+	post_title	faststart
+wp_posts	%wp_posts:1%	+	post_type	attachment
+wp_posts	%wp_posts:1%	+	to_ping	

@@ -199,4 +199,11 @@ return array(
 	'upload-async-mp3-cover-again' => $uploads_case( $uploads_handle( 'covered.mp3', 'covered.mp3' ), $uploads_handle( 'covered.mp3', 'covered.mp3' ) ),
 	'upload-rest-raw-mp3'   => $uploads_case( $uploads_rest( 'cbr.mp3', 'cbr.mp3', array( 'title' => 'A song' ), false ) ),
 	'upload-rest-form-mp3-cover' => $uploads_case( $uploads_rest( 'covered.mp3', 'covered.mp3', array(), true ) ),
+	// MP4 and QuickTime files: video with sound, an M4A file's audio and its
+	// cover picture, found again by its hash the second time.
+	'upload-async-mp4'      => $uploads_case( $uploads_handle( 'faststart.mp4', 'faststart.mp4' ) ),
+	'upload-async-m4a-cover' => $uploads_case( $uploads_handle( 'covered.m4a', 'covered.m4a', 1 ) ),
+	'upload-async-m4a-cover-again' => $uploads_case( $uploads_handle( 'covered.m4a', 'covered.m4a' ), $uploads_handle( 'covered.m4a', 'covered.m4a' ) ),
+	'upload-rest-raw-mov'   => $uploads_case( $uploads_rest( 'clip-audio.mov', 'clip-audio.mov', array( 'title' => 'A movie', 'post' => 1 ), false ) ),
+	'upload-rest-form-m4v'  => $uploads_case( $uploads_rest( 'clip.m4v', 'clip.m4v', array(), true ) ),
 );

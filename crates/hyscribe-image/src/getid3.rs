@@ -13,6 +13,7 @@ use crate::meta::Unported;
 mod encoder;
 mod id3;
 mod mp3;
+mod quicktime;
 mod tables;
 mod wav;
 
@@ -152,6 +153,9 @@ pub fn wp_read_audio_metadata(bytes: &[u8], host: &[u8]) -> Result<Vec<Entry>, U
     if bytes.starts_with(b"RIFF") && !untrusted(bytes) {
         return wav::wav(bytes);
     }
+    if quicktime::quicktime(bytes) && !untrusted(bytes) {
+        return quicktime::audio(bytes);
+    }
     match without_module(bytes) {
         Some(mime) if mime.starts_with("audio/") => Ok(named_only(bytes, mime)),
         _ => Err(Unported),
@@ -161,6 +165,9 @@ pub fn wp_read_audio_metadata(bytes: &[u8], host: &[u8]) -> Result<Vec<Entry>, U
 /// `wp_read_video_metadata( $file )` of a video file's `bytes`, the array
 /// it stores; [`Unported`] for a file getID3 reads in ways not ported here.
 pub fn wp_read_video_metadata(bytes: &[u8]) -> Result<Vec<Entry>, Unported> {
+    if quicktime::quicktime(bytes) && !untrusted(bytes) {
+        return quicktime::video(bytes);
+    }
     match without_module(bytes) {
         Some(mime) if mime.starts_with("video/") => Ok(named_only(bytes, mime)),
         _ => Err(Unported),

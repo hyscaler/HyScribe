@@ -361,6 +361,33 @@ async fn uploads_write_php_s_rows() {
             ("covered.mp3", "covered.mp3"),
             How::Rest(true, Upload::default()),
         ),
+        (
+            "upload-async-mp4",
+            ("faststart.mp4", "faststart.mp4"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-m4a-cover",
+            ("covered.m4a", "covered.m4a"),
+            How::Media(1),
+        ),
+        (
+            "upload-rest-raw-mov",
+            ("clip-audio.mov", "clip-audio.mov"),
+            How::Rest(
+                false,
+                Upload {
+                    title: Some(b"A movie".to_vec()),
+                    post: 1,
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
+            "upload-rest-form-m4v",
+            ("clip.m4v", "clip.m4v"),
+            How::Rest(true, Upload::default()),
+        ),
     ];
     for (golden, file, how) in cases {
         let dir = tempfile::tempdir().unwrap();
@@ -394,19 +421,23 @@ async fn uploads_write_php_s_rows() {
     let report = check_writes(&fixture_database(), "upload-async-again", setup, again).await;
     report.unwrap();
     // The same cover picture again is the attachment made the first time.
-    let dir = tempfile::tempdir().unwrap();
-    let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
-    let covered = ("covered.mp3", "covered.mp3");
-    let setup = async |conn: &mut Connection| {
-        uploaded((&site, &uploads), conn, covered, How::Media(0)).await
-    };
-    let again = async |conn: &mut Connection, ()| {
-        uploaded((&site, &uploads), conn, covered, How::Media(0)).await
-    };
-    let golden = "upload-async-mp3-cover-again";
-    check_writes(&fixture_database(), golden, setup, again)
-        .await
-        .unwrap();
+    for (golden, name) in [
+        ("upload-async-mp3-cover-again", "covered.mp3"),
+        ("upload-async-m4a-cover-again", "covered.m4a"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+        let covered = (name, name);
+        let setup = async |conn: &mut Connection| {
+            uploaded((&site, &uploads), conn, covered, How::Media(0)).await
+        };
+        let again = async |conn: &mut Connection, ()| {
+            uploaded((&site, &uploads), conn, covered, How::Media(0)).await
+        };
+        check_writes(&fixture_database(), golden, setup, again)
+            .await
+            .unwrap();
+    }
     // A text file's number: its copies are not looked for.
     let dir = tempfile::tempdir().unwrap();
     let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
@@ -600,7 +631,7 @@ async fn uploads_are_titled_and_hooked_as_php_s() {
 async fn unported_types_leave_no_file() {
     let site = crate::tests::oracle_site().await;
     let time = (upload_time(&site, None, now()), WHO);
-    for name in ["tone.flac", "clip.mp4"] {
+    for name in ["tone.flac", "clip.webm"] {
         let dir = tempfile::tempdir().unwrap();
         let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
         let sent = sent(name, name);

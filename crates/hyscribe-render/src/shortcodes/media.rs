@@ -98,6 +98,38 @@ impl Renderer<'_> {
         self.media_shortcode(Kind::Video, attr, content.unwrap_or_default(), instance)
     }
 
+    /// `prepend_attachment()`'s `wp_video_shortcode()` of a video
+    /// attachment `post`: its size from its metadata, its thumbnail as the
+    /// poster; `None` for another attachment.
+    pub(crate) fn video_attachment(&mut self, post: &Post) -> Option<Vec<u8>> {
+        let site = self.context.site;
+        let file = site
+            .post_meta(post.id, "_wp_attached_file")
+            .unwrap_or_default();
+        if !crate::attachment::prepend::is_video(&file, &post.mime_type) {
+            return None;
+        }
+        let url = attachment_url(site, post.id).unwrap_or_default();
+        let mut attr = vec![(Key::String(b"src".to_vec()), Value::String(url))];
+        let meta = crate::attachment::metadata(site, post.id).unwrap_or(Value::Null);
+        let side = |name: &str| {
+            let found = meta
+                .as_array()
+                .and_then(|meta| hyscribe_phpser::lookup(meta, name));
+            found.filter(|value| !value.is_empty()).map(Value::to_int)
+        };
+        if let (Some(width), Some(height)) = (side("width"), side("height")) {
+            attr.push((Key::String(b"width".to_vec()), Value::Int(width)));
+            attr.push((Key::String(b"height".to_vec()), Value::Int(height)));
+        }
+        let thumbnail = crate::attachment::post_thumbnail_id(site, Some(post.id));
+        if thumbnail != 0 {
+            let poster = attachment_url(site, thumbnail).unwrap_or_default();
+            attr.push((Key::String(b"poster".to_vec()), Value::String(poster)));
+        }
+        Some(self.wp_video_shortcode(&attr, None))
+    }
+
     /// The first attachment of `kind` attached to post `post_id`, as
     /// `get_attached_media()` lists them.
     fn attached_media(&self, kind: Kind, post_id: u64) -> Option<Post> {

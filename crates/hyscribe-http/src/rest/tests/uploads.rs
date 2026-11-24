@@ -32,20 +32,15 @@ const WHO: [(&str, &str, u64); 6] = [
 /// The cases that answer 501 once the checks before them pass: audio and
 /// video getID3 reads in ways not ported, bytes libmagic gives no type, and
 /// a Word file named as a ZIP, where libmagic may give either.
-const UNPORTED: [&str; 14] = [
+const UNPORTED: [&str; 9] = [
     "random.bin:random.mp3",
     "sample.docx:sample.zip",
     "tone.flac",
     "tone.ogg",
-    "tone.m4a",
     "tone.wma",
     "tune.mid",
-    "clip.mp4",
-    "clip-audio.mp4",
-    "clip.mov",
     "clip.avi",
     "clip.webm",
-    "clip.3gp",
     "clip.flv",
 ];
 
@@ -446,7 +441,7 @@ async fn upload_routes_match_php() {
             site = uploading(sessions.path(), uploads.path()).await;
         }
     }
-    assert_eq!((matched, unported), (6 * 121 - 50, 50));
+    assert_eq!((matched, unported), (6 * 130 - 30, 30));
 }
 
 /// An upload's plan is written by `rest::uploads`, never by `act()`.

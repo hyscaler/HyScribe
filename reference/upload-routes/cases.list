@@ -133,3 +133,12 @@ POST	/?rest_route=/wp/v2/media	restfile	sample.xls	-
 POST	/wp-admin/async-upload.php	form,nonce	covered.mp3	action=upload-attachment&name=covered.mp3
 POST	/wp-admin/media-new.php	form,nonce	covered.mp3	html-upload=Upload&post_id=1
 POST	/?rest_route=/wp/v2/media	raw,type=audio/mpeg	covered.mp3	-
+POST	/wp-admin/async-upload.php	form,nonce	covered.m4a	action=upload-attachment&name=covered.m4a
+POST	/wp-admin/media-new.php	form,nonce	covered.m4a	html-upload=Upload&post_id=1
+POST	/?rest_route=/wp/v2/media	restfile	covered.m4a	-
+POST	/wp-admin/async-upload.php	form,nonce	faststart.mp4	action=upload-attachment&name=faststart.mp4
+POST	/wp-admin/async-upload.php	form,nonce	clip.m4v	action=upload-attachment&name=clip.m4v
+POST	/wp-admin/async-upload.php	form,nonce	clip-audio.3gp	action=upload-attachment&name=clip-audio.3gp
+POST	/wp-admin/async-upload.php	form,nonce	alac.m4a	action=upload-attachment&name=alac.m4a
+POST	/?rest_route=/wp/v2/media	raw,type=video/quicktime	clip-audio.mov	title=A+movie&post=1
+POST	/?rest_route=/wp/v2/media	restfile	rotated.mp4	-

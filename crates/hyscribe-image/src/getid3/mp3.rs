@@ -32,12 +32,28 @@ impl Num {
     }
 
     /// PHP's `$a * $b`.
-    fn mul(self, other: Self) -> Self {
+    pub(super) fn mul(self, other: Self) -> Self {
         match (self, other) {
             // The counts multiplied stay far below 2^63: a 32 bit byte
             // count by a sample rate and a channel count.
             (Self::Int(a), Self::Int(b)) => Self::Int(a * b),
             _ => Self::Float(self.float() * other.float()),
+        }
+    }
+
+    /// PHP's `$a + $b` of counts far below 2^63.
+    pub(super) fn add(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Int(a), Self::Int(b)) => Self::Int(a + b),
+            _ => Self::Float(self.float() + other.float()),
+        }
+    }
+
+    /// PHP's `$a - $b` of counts far below 2^63.
+    pub(super) fn sub(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Int(a), Self::Int(b)) => Self::Int(a - b),
+            _ => Self::Float(self.float() - other.float()),
         }
     }
 
@@ -61,10 +77,10 @@ impl Num {
 /// The audio array of getID3's `$info`: keys in the order they were first
 /// set.
 #[derive(Default)]
-struct Audio(Vec<Entry>);
+pub(super) struct Audio(pub(super) Vec<Entry>);
 
 impl Audio {
-    fn set(&mut self, name: &str, value: Value) {
+    pub(super) fn set(&mut self, name: &str, value: Value) {
         match self.0.iter_mut().find(|(have, _)| *have == key(name)) {
             Some(entry) => entry.1 = value,
             None => self.0.push((key(name), value)),

@@ -32,6 +32,8 @@ pub(crate) struct Theme(Mutex<State>);
 
 #[derive(Default)]
 struct State {
+    /// Whether the request is the admin's, where `is_admin()` is true.
+    admin: bool,
     /// `add_theme_support()`'s features, in the order added.
     supports: Vec<String>,
     /// The styles registered, and by which extension.
@@ -81,15 +83,35 @@ impl std::fmt::Display for Failed {
 }
 
 impl Theme {
-    /// The active theme's `call`, answered from the request's state.
+    /// The state of a request, to the admin when `admin`.
+    pub(crate) fn new(admin: bool) -> Theme {
+        Theme(Mutex::new(State {
+            admin,
+            ..State::default()
+        }))
+    }
+
+    /// `add_theme_support( $feature )`, once.
+    fn support(&self, feature: &str) -> Result<Value, String> {
+        let supports = &mut lock(&self.0).supports;
+        if !supports.iter().any(|known| known == feature) {
+            supports.push(feature.into());
+        }
+        Ok(Value::Null)
+    }
+
+    /// The active theme's `call`, answered from the request's state. The
+    /// menu locations, editor styles and content width are taken as PHP
+    /// takes them, adding the features PHP adds; what reads them (the
+    /// Menus screen, the block editor, embeds) follows with its port.
     pub(crate) fn answer(&self, call: &ThemeCall) -> Result<Value, String> {
         match call {
-            ThemeCall::AddSupport(feature, _) => {
-                let supports = &mut lock(&self.0).supports;
-                if !supports.contains(feature) {
-                    supports.push(feature.clone());
-                }
-                Ok(Value::Null)
+            ThemeCall::AddSupport(feature, _) => self.support(feature),
+            ThemeCall::NavMenus(_) => self.support("menus"),
+            ThemeCall::EditorStyle(_) => self.support("editor-style"),
+            ThemeCall::ContentWidth(_) => Ok(Value::Null),
+            ThemeCall::Conditional(name, args) if name == "is_admin" && args.is_empty() => {
+                Ok(Value::Bool(lock(&self.0).admin))
             }
             ThemeCall::HavePosts => self.on_page(&|classic, _, shared| {
                 Ok(Value::Bool(classic.have_posts(&shared.request)))

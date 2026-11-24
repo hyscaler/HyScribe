@@ -158,15 +158,15 @@ fn a_scheme_without_a_stylesheet() {
     assert!(html.contains(" admin-color-fresh "));
 }
 
-/// No scheme, WordPress's `modern` or an unknown one shows Coffee (ADR 0008).
+/// No scheme, WordPress's `modern` or an unknown one shows HyScribe's own (ADR 0008).
 #[test]
-fn coffee_is_the_default() {
+fn hyscribe_is_the_default() {
     for color in [None, Some(&b"modern"[..]), Some(b"teal")] {
         let site = Fake { color, ..site() };
         let html = render(&site, &page(&[], "", ""));
-        assert!(html.contains("/wp/hs-admin/css/colors/coffee/colors.min.css?ver="));
-        assert!(html.contains("\"base\":\"#f3f2f1\""));
-        assert!(html.contains(" admin-color-coffee "), "{color:?}");
+        assert!(html.contains("/wp/hs-admin/css/colors/hyscribe/colors.min.css?ver="));
+        assert!(html.contains("\"base\":\"#f1f2f3\""));
+        assert!(html.contains(" admin-color-hyscribe "), "{color:?}");
     }
 }
 

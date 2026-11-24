@@ -711,13 +711,19 @@ async fn current(
         Ok(now) => {
             let now = admin::saves::themes::checked(now).await;
             // The extensions answer the hooks of the request's work (ADR 0022).
-            let running = extensions::request(&now);
+            let running = extensions::request(&now, extensions::admin_request(uri.path()));
             let now = Site {
                 running: running.clone(),
                 ..now
             };
             let site = State(Arc::new(now));
-            let served = page(site, method, uri, headers, query, peer, body);
+            let setup = running.is_some();
+            let served = async move {
+                if setup {
+                    extensions::after_setup_theme();
+                }
+                page(site, method, uri, headers, query, peer, body).await
+            };
             let response =
                 hyscribe_model::hooks::within(running.as_ref().map(extensions::dispatch), served)
                     .await;

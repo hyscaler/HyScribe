@@ -85,6 +85,7 @@ fn frame(
         interim: request.request("interim-login").is_some(),
         customize: false,
         loggedout: false,
+        secure: false,
         message,
         errors,
         head_scripts: &[],
@@ -353,6 +354,7 @@ fn reset_password(
         interim: request.request("interim-login").is_some(),
         customize: false,
         loggedout: false,
+        secure: false,
         message: &info(
             " reset-pass",
             "Enter your new password below or generate one.",

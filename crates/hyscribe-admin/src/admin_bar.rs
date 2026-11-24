@@ -314,7 +314,10 @@ pub fn admin_bar(site: &dyn BarSite, browser: &Browser, view: Option<(&str, &str
     // wp_admin_bar_sidebar_toggle().
     let toggle = format!("{icon}<span class=\"screen-reader-text\">Menu</span>");
     bar.add("menu-toggle", "", toggle, "#".into(), Meta::default());
-    // wp_admin_bar_wp_menu() is left out: no WordPress logo menu (ADR 0008).
+    // In place of wp_admin_bar_wp_menu()'s WordPress logo menu, a HyScribe
+    // item linked to the Dashboard (ADR 0008).
+    let mark = format!("{icon}<span class=\"screen-reader-text\">HyScribe Dashboard</span>");
+    bar.add("hyscribe", "", mark, site.admin_url(""), Meta::default());
     // wp_admin_bar_site_menu(), without a site icon.
     let mut blogname = site.blogname();
     if hyscribe_phpser::is_empty_string(blogname.as_bytes()) {

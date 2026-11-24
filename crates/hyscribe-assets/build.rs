@@ -9,7 +9,9 @@
 //! (`themes/pinned.tsv`), checked the same way before it is unpacked
 //! (`HYSCRIBE_THEME_ZIPS` is a folder of them for offline builds). Each file served
 //! from the release, the embedded themes' too, keeps its modification time
-//! and SHA-256 for `Last-Modified` and `ETag`.
+//! and SHA-256 for `Last-Modified` and `ETag`. HyScribe's own files under
+//! `wp-admin` (ADR 0008), the brand's marks and the HyScribe colour scheme,
+//! are embedded from `brand/` and `colors/` with their SHA-256 for the `ETag`.
 
 use sha2::{Digest, Sha256};
 use std::io;
@@ -22,6 +24,27 @@ const SHA256: &str = "d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e2
 const TARBALL_ENV: &str = "HYSCRIBE_WORDPRESS_TARBALL";
 const THEME_ZIPS_ENV: &str = "HYSCRIBE_THEME_ZIPS";
 const THEMES: &str = "wp-content/themes";
+/// HyScribe's own files by their path under `wp-admin`, from where they are
+/// kept: the scheme's files core serves of its own (`served`), and the marks.
+const OWN: [(&str, &str); 5] = [
+    (
+        "css/colors/hyscribe/colors-rtl.min.css",
+        "colors/hyscribe/colors-rtl.min.css",
+    ),
+    (
+        "css/colors/hyscribe/colors.min.css",
+        "colors/hyscribe/colors.min.css",
+    ),
+    (
+        "css/colors/hyscribe/colors.scss",
+        "colors/hyscribe/colors.scss",
+    ),
+    (
+        "images/hyscribe-mark-small.svg",
+        "../../brand/hyscribe-mark-small.svg",
+    ),
+    ("images/hyscribe-mark.svg", "../../brand/hyscribe-mark.svg"),
+];
 /// Files with a `.min` twin, so not served, that PHP reads as they are.
 const READ: [&str; 1] = ["css/dist/block-editor/default-editor-styles.css"];
 /// As the web server sends them; a file with no extension gets no type.
@@ -168,7 +191,22 @@ fn main() -> io::Result<()> {
         let digest = hex(&Sha256::digest(std::fs::read(&file)?));
         dates.push_str(&format!("    ({path:?}, {modified}, {digest:?}),\n"));
     }
-    std::fs::write(out.join("release.rs"), format!("&[\n{dates}]\n"))
+    std::fs::write(out.join("release.rs"), format!("&[\n{dates}]\n"))?;
+    let mut own = String::new();
+    for (path, source) in OWN {
+        println!("cargo::rerun-if-changed={source}");
+        let source = std::fs::canonicalize(source)?;
+        let digest = hex(&Sha256::digest(std::fs::read(&source)?));
+        let extension = path.rsplit_once('.').map_or("", |(_, e)| e);
+        let content_type = CONTENT_TYPES
+            .iter()
+            .find(|(known, _)| *known == extension)
+            .map_or("", |(_, content_type)| content_type);
+        own.push_str(&format!(
+            "    ({path:?}, {content_type:?}, include_bytes!({source:?}), {digest:?}),\n"
+        ));
+    }
+    std::fs::write(out.join("own.rs"), format!("&[\n{own}]\n"))
 }
 
 fn hex(bytes: &[u8]) -> String {

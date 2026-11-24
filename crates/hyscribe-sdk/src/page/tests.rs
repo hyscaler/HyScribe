@@ -192,8 +192,10 @@ fn template_tags_print_markup() {
             .insert("wp_head".to_string(), b"<meta>\xff".to_vec());
     });
     let head = print("wp_head", &[]).unwrap_or_else(|_| raw(b"none"));
+    assert!(!head.0.is_empty());
     assert_eq!(render(&Head { head }), Ok(b"<meta>\xff".to_vec()));
     assert!(print("wp_footer", &[]).is_err());
+    assert!(raw(b"").0.is_empty());
 }
 
 /// A folder of its own under the system's temporary folder, with `files`.

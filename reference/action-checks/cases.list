@@ -72,6 +72,7 @@ ajax-hidden-columns	POST	admin-ajax.php	action=hidden-columns&page=edit-post&hid
 ajax-meta-box-order	POST	admin-ajax.php	action=meta-box-order&page=dashboard&order[normal]=dashboard_activity	meta-box-order	_ajax_nonce
 ajax-welcome-panel	POST	admin-ajax.php	action=update-welcome-panel&visible=0	welcome-panel-nonce	welcomepanelnonce
 ajax-color-scheme	POST	admin-ajax.php	action=save-user-color-scheme&color_scheme=ocean	save-color-scheme	nonce
+ajax-color-scheme-hyscribe	POST	admin-ajax.php	action=save-user-color-scheme&color_scheme=hyscribe	save-color-scheme	nonce
 ajax-color-scheme-unknown	POST	admin-ajax.php	action=save-user-color-scheme&color_scheme=nope	save-color-scheme	nonce
 ajax-send-password-reset	POST	admin-ajax.php	action=send-password-reset&user_id=801	reset-password-for-801	nonce
 ajax-destroy-sessions	POST	admin-ajax.php	action=destroy-sessions&user_id=801	update-user_801	nonce

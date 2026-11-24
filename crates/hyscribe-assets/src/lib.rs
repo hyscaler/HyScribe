@@ -38,6 +38,17 @@ pub fn wp_admin(path: &str) -> Option<(&'static str, &'static [u8])> {
     lookup(ADMIN_FILES, path)
 }
 
+/// HyScribe's own files under `wp-admin/` (ADR 0008), with their SHA-256.
+const OWN: &[(&str, &str, &[u8], &str)] = include!(concat!(env!("OUT_DIR"), "/own.rs"));
+
+/// One of HyScribe's own files under `wp-admin/`, the brand's marks and the
+/// HyScribe colour scheme: its content type, bytes and SHA-256 in hex.
+pub fn hyscribe_file(path: &str) -> Option<(&'static str, &'static [u8], &'static str)> {
+    OWN.iter()
+        .find(|(name, _, _, _)| *name == path)
+        .map(|(_, content_type, bytes, sha)| (*content_type, *bytes, *sha))
+}
+
 /// One of the files under `wp-includes/`, as the web server sends it: its
 /// content type (empty for none) and bytes.
 pub fn wp_includes(path: &str) -> Option<(&'static str, &'static [u8])> {
@@ -57,7 +68,40 @@ fn lookup(
 
 #[cfg(test)]
 mod tests {
-    use super::{release_file, wp_includes, wp_includes_read};
+    use super::{hyscribe_file, release_file, wp_admin, wp_includes, wp_includes_read};
+    use sha2::{Digest, Sha256};
+
+    /// The brand's marks as kept in `brand/`, and the scheme's files core
+    /// would serve of its own, none of them in the release.
+    #[test]
+    fn hyscribe_files() {
+        let mark = include_bytes!("../../../brand/hyscribe-mark.svg");
+        let (content_type, bytes, sha) =
+            hyscribe_file("images/hyscribe-mark.svg").unwrap_or_default();
+        assert_eq!((content_type, bytes), ("image/svg+xml", &mark[..]));
+        let digest: String = Sha256::digest(mark)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(sha, digest);
+        let types = [
+            ("images/hyscribe-mark-small.svg", "image/svg+xml"),
+            ("css/colors/hyscribe/colors.min.css", "text/css"),
+            ("css/colors/hyscribe/colors-rtl.min.css", "text/css"),
+            ("css/colors/hyscribe/colors.scss", ""),
+        ];
+        for (path, expected) in types {
+            assert_eq!(hyscribe_file(path).map(|f| f.0), Some(expected), "{path}");
+            assert!(wp_admin(path).is_none(), "{path}");
+        }
+        for missing in [
+            "css/colors/hyscribe/colors.css",
+            "images/wordpress-logo.svg",
+            "",
+        ] {
+            assert!(hyscribe_file(missing).is_none(), "{missing}");
+        }
+    }
 
     #[test]
     fn release_dates_and_digests() {

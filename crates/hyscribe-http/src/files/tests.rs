@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-use super::http_date;
+use super::{http_date, static_file};
 
 /// The forms and checks of APR's `apr_date_parse_http()`.
 #[test]
@@ -35,4 +35,40 @@ fn reads_dates_as_apache_does() {
     ] {
         assert_eq!(http_date(text), unix, "{text}");
     }
+}
+
+/// HyScribe's own files under `/hs-admin/` (ADR 0008): an `ETag` from their
+/// SHA-256 and no `Last-Modified`, so only the tag answers a revalidation.
+#[test]
+fn serves_hyscribe_files() {
+    use axum::http::{HeaderMap, StatusCode, header};
+
+    let now = 1_800_000_000;
+    let get = |pairs: &[(header::HeaderName, &str)]| {
+        let mut headers = HeaderMap::new();
+        for (name, value) in pairs {
+            headers.insert(name, value.parse().unwrap());
+        }
+        static_file("/hs-admin/images/hyscribe-mark.svg", &headers, now).unwrap()
+    };
+    let (_, _, sha) = hyscribe_assets::hyscribe_file("images/hyscribe-mark.svg").unwrap();
+    let etag = format!("\"{sha}\"");
+    let plain = get(&[]);
+    assert_eq!(plain.status(), StatusCode::OK);
+    assert_eq!(plain.headers()[header::CONTENT_TYPE], "image/svg+xml");
+    assert_eq!(plain.headers()[header::ETAG], etag.as_str());
+    assert!(plain.headers().get(header::LAST_MODIFIED).is_none());
+    let tagged = get(&[(header::IF_NONE_MATCH, &etag)]);
+    assert_eq!(tagged.status(), StatusCode::NOT_MODIFIED);
+    let date = "Sat, 01 Jan 2028 00:00:00 GMT";
+    for name in [header::IF_MODIFIED_SINCE, header::IF_UNMODIFIED_SINCE] {
+        assert_eq!(get(&[(name, date)]).status(), StatusCode::OK);
+    }
+    // A release file keeps its date.
+    let core = static_file(
+        "hs-admin/css/colors/coffee/colors.min.css",
+        &HeaderMap::new(),
+        now,
+    );
+    assert!(core.unwrap().headers().get(header::LAST_MODIFIED).is_some());
 }

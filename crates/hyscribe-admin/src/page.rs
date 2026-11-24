@@ -16,6 +16,7 @@ use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
 use crate::assets::{Assets, Urls, cookie_path, site_icon_tags};
+use crate::look::{bar_style, mark_icon};
 use crate::menu::{Look, Screen, admin_menu, clean_links, commands};
 
 /// `wp_removable_query_args()`: what the canonical admin URL leaves out.
@@ -240,8 +241,9 @@ pub(crate) struct Scheme {
 }
 
 /// The schemes hs-admin offers, by name: `modern`, WordPress's near-black
-/// "Default", is left out for [`COFFEE`] (ADR 0008).
-pub(crate) const SCHEMES: [Scheme; 8] = [
+/// "Default", is left out for [`HYSCRIBE`], built in the brand's colours
+/// (ADR 0008, `reference/admin-colors`).
+pub(crate) const SCHEMES: [Scheme; 9] = [
     Scheme {
         name: "blue",
         label: "Blue",
@@ -269,6 +271,13 @@ pub(crate) const SCHEMES: [Scheme; 8] = [
         stylesheet: false,
         icons: ["#a7aaad", "#72aee6", "#fff"],
         palette: &["#1d2327", "#2c3338", "#2271b1", "#72aee6"],
+    },
+    Scheme {
+        name: "hyscribe",
+        label: "HyScribe",
+        stylesheet: true,
+        icons: ["#f1f2f3", "#fff", "#fff"],
+        palette: &["#131b26", "#003364", "#1a5fd0", "#c99a3a"],
     },
     Scheme {
         name: "light",
@@ -301,14 +310,14 @@ pub(crate) const SCHEMES: [Scheme; 8] = [
 ];
 
 /// The scheme of a user whose stored one is missing, `modern` or unknown.
-const COFFEE: usize = 1;
+const HYSCRIBE: usize = 4;
 
 /// The scheme hs-admin shows for the stored `admin_color`.
 pub(crate) fn scheme(color: &[u8]) -> &'static Scheme {
     SCHEMES
         .iter()
         .find(|scheme| scheme.name.as_bytes() == color)
-        .unwrap_or(&SCHEMES[COFFEE])
+        .unwrap_or(&SCHEMES[HYSCRIBE])
 }
 
 /// `esc_js()`: special characters as entities, backslashes stripped, then
@@ -451,6 +460,10 @@ pub fn admin_page_with(
         out.extend(RELOAD.as_bytes());
     }
     out.extend(assets.print_head_scripts(urls));
+    // The look's `admin_head` (ADR 0008), before core's.
+    if site.site_icon(512).is_none() {
+        out.extend(mark_icon(&|path| urls.admin_url(path)).into_bytes());
+    }
     let [base, focus, current] = scheme.icons;
     let icons = object(vec![(
         "icons",
@@ -533,6 +546,7 @@ fn enqueue(
         "after",
         list(vec![
             "@media print { #wpadminbar { display:none; } }".into(),
+            bar_style(&|path| Urls::admin_url(site, path)),
         ]),
     );
     assets.set_style_data("wp-emoji-styles", "after", list(vec![EMOJI_STYLES.into()]));

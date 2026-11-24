@@ -3620,6 +3620,20 @@ async fn folder_pages_match_php() {
     assert_eq!(request(&site, "GET", "/blog/").await.status, StatusCode::OK);
     let reply = request(&site, "GET", "/blog").await;
     assert_eq!(reply.headers["location"], format!("{home}/"));
+    // A page on the front takes the slash too, none without a page chosen.
+    for (page, status) in [("2", StatusCode::MOVED_PERMANENTLY), ("0", StatusCode::OK)] {
+        let db = Db::connect(&fixture_config()).await.unwrap();
+        let mut site = Site::load(db, Some(home.into()), Some(home.into()))
+            .await
+            .unwrap();
+        site.options
+            .insert("show_on_front".into(), b"page".to_vec());
+        site.options.insert("page_on_front".into(), page.into());
+        assert_eq!(
+            request(&Arc::new(site), "GET", "/blog").await.status,
+            status
+        );
+    }
 }
 
 /// The pages of `reference/pages/comments.list` over the comments of

@@ -73,11 +73,6 @@ async fn visitors_are_sent_to_log_in() {
             "other.test:9",
             "http%3A%2F%2Fother.test%3A9%2Fhs-admin%2F",
         ),
-        (
-            "/hs-admin",
-            "127.0.0.1:8081",
-            "http%3A%2F%2F127.0.0.1%3A8081%2Fhs-admin",
-        ),
     ] {
         let response = get(&site, uri, host, "").await;
         assert_eq!(response.status(), StatusCode::FOUND, "{uri}");

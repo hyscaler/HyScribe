@@ -888,6 +888,9 @@ async fn admin_and_login_urls_are_clean() {
             "/hs-admin/css/forms.css",
         ),
         ("GET", "/hs-login.php", permanent, "/hs-login"),
+        ("GET", "/hs-admin", moved, "/hs-admin/"),
+        ("GET", "/hs-admin?x=1&y=2", moved, "/hs-admin/?x=1&y=2"),
+        ("POST", "/hs-admin", moved, "/hs-admin/"),
         (
             "GET",
             "/hs-admin/edit.php?post_type=page",
@@ -921,7 +924,7 @@ async fn admin_and_login_urls_are_clean() {
         request(&site, "GET", "/hs-login").await.status,
         StatusCode::OK
     );
-    for uri in ["/hs-admin", "/hs-admin/", "/hs-admin/edit"] {
+    for uri in ["/hs-admin/", "/hs-admin/edit"] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::FOUND, "{uri}");
         let location = reply.headers["location"].to_str().unwrap();

@@ -1,0 +1,6 @@
+home=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&siteurl=http%3A%2F%2F127.0.0.1%3A8081%2Fblog	/blog/?rest_route=/wp/v2/posts/1
+home=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&siteurl=http%3A%2F%2F127.0.0.1%3A8081%2Fblog	/blog/?rest_route=/wp/v2/pages/2
+home=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&siteurl=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&permalink_structure=%2F%25postname%25%2F	/blog/wp-json/wp/v2/posts/1
+home=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&siteurl=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&permalink_structure=%2F%25postname%25%2F	/blog/wp-json/wp/v2/pages/2
+home=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&siteurl=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&permalink_structure=%2F%25postname%25%2F	/blog/?rest_route=/wp/v2/posts/1
+home=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&siteurl=http%3A%2F%2F127.0.0.1%3A8081%2Fblog&permalink_structure=%2F%25postname%25%2F	/blog/wp-json/wp/v2/posts/999

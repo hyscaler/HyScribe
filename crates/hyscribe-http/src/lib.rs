@@ -711,7 +711,12 @@ async fn current(
         Ok(now) => {
             let now = admin::saves::themes::checked(now).await;
             // The extensions answer the hooks of the request's work (ADR 0022).
-            let running = extensions::request(&now, extensions::admin_request(uri.path()));
+            let running = extensions::request(
+                &now,
+                extensions::admin_request(
+                    under_folder(home_path(&now.option("siteurl")), uri.path()).unwrap_or("/"),
+                ),
+            );
             let now = Site {
                 running: running.clone(),
                 ..now
@@ -952,24 +957,29 @@ async fn page(
 ) -> Response {
     // Before the method check, so a login form's POST is redirected too.
     let read = method == Method::GET || method == Method::HEAD;
-    if let Some((status, location)) = admin_redirect(&site, uri.path(), uri.query(), read) {
+    let siteurl = site.option("siteurl");
+    // The site's own files, login and admin are answered by the path below
+    // the home folder; a request outside it gets `/`, which none answers.
+    let inner = below_folder(home_path(&siteurl), &uri);
+    if let Some((status, location)) = admin_redirect(&site, inner.path(), inner.query(), read) {
         return (status, [(header::LOCATION, location)]).into_response();
     }
+    let inner = in_place(inner);
     let uri = in_place(uri);
     let (head, post) = (method == Method::HEAD, method == Method::POST);
     let page_method = method == Method::GET || head || post;
     if !post && page_method {
         let now = now() as u64;
-        let file = uploads::serve::serve(&site, uri.path(), &headers, now)
-            .or_else(|| files::static_file(uri.path(), &headers, now))
-            .or_else(|| files::installed_theme_file(&site, uri.path(), &headers, now));
+        let file = uploads::serve::serve(&site, inner.path(), &headers, now)
+            .or_else(|| files::static_file(inner.path(), &headers, now))
+            .or_else(|| files::installed_theme_file(&site, inner.path(), &headers, now));
         if let Some(response) = file {
             return response;
         }
     }
     let peer = peer.map(|axum::Extension(Peer(ip))| ip);
     // `_show_post_preview()` runs on `init`, before the entry point's work.
-    if uri.path() == login::PATH && page_method {
+    if inner.path() == login::PATH && page_method {
         if let Some(refused) =
             preview_nonce::refuse(&site, &headers, uri.query(), post, Entry::Page).await
         {
@@ -989,8 +999,7 @@ async fn page(
         };
         return login::respond(&site, asked).await;
     }
-    let siteurl = site.option("siteurl");
-    if uri.path().strip_prefix(home_path(&siteurl)) == Some(comment_post::PATH) {
+    if under_folder(home_path(&siteurl), uri.path()) == Some(comment_post::PATH) {
         // Only a POST gets as far as loading WordPress.
         if post
             && let Some(refused) =
@@ -1007,11 +1016,11 @@ async fn page(
         return comment_post::respond(&site, asked).await;
     }
     // The loaders read only the query, whatever the method, as PHP's do.
-    if let Some(loader) = loaders::Loader::at(uri.path()).filter(|_| page_method) {
+    if let Some(loader) = loaders::Loader::at(inner.path()).filter(|_| page_method) {
         return loaders::load(loader, uri.query(), &headers, now() as u64);
     }
-    if admin::is_admin(uri.path()) && page_method {
-        let entry = if uri.path() == "/hs-admin/admin-ajax" {
+    if admin::is_admin(inner.path()) && page_method {
+        let entry = if inner.path() == "/hs-admin/admin-ajax" {
             Entry::Ajax
         } else {
             Entry::Page
@@ -1022,7 +1031,7 @@ async fn page(
             return refused;
         }
         let max = site.upload_max();
-        let multipart = uploads::takes_upload(&uri)
+        let multipart = uploads::takes_upload(&inner)
             .then(|| uploads::form(&headers, &body, max))
             .flatten();
         let (form, files) = match multipart {
@@ -1039,7 +1048,7 @@ async fn page(
                 (read.then_some(form), Vec::new())
             }
         };
-        return admin::respond(&site, uri, headers, (post, peer), (form, files)).await;
+        return admin::respond(&site, inner, headers, (post, peer), (form, files)).await;
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();
@@ -1049,7 +1058,7 @@ async fn page(
         query.insert("s".into(), String::new());
     }
     // Before the REST API or a query.
-    let rpc = uri.path().strip_prefix(home_path(&siteurl)) == Some("/xmlrpc.php");
+    let rpc = under_folder(home_path(&siteurl), uri.path()) == Some("/xmlrpc.php");
     let entry = if rpc { Entry::XmlRpc } else { Entry::Page };
     if let Some(refused) = preview_nonce::refuse(&site, &headers, uri.query(), post, entry).await {
         return refused;
@@ -1786,6 +1795,24 @@ fn admin_redirect(
     };
     let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
     Some((status, format!("{}{target}{query}", site.home)))
+}
+
+/// `path` below the site's `folder`, `None` outside it or at it: a folder is
+/// a whole path segment, so `/blogs` is not in `/blog`.
+fn under_folder<'a>(folder: &str, path: &'a str) -> Option<&'a str> {
+    let rest = path.strip_prefix(folder.trim_end_matches('/'))?;
+    rest.starts_with('/').then_some(rest)
+}
+
+/// `uri` below the site's `folder`, with its query; `/` outside it or at it.
+fn below_folder(folder: &str, uri: &Uri) -> Uri {
+    let Some(path) = under_folder(folder, uri.path()) else {
+        return Uri::from_static("/");
+    };
+    let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+    format!("{path}{query}")
+        .parse()
+        .unwrap_or(Uri::from_static("/"))
 }
 
 /// `uri` with `/hs-admin/<screen>.php` as `/hs-admin/<screen>`: a request

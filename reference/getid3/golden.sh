@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# Records what getID3 makes of the audio and video of the upload corpus and
-# of samples.py's synthetic files, as wp_read_audio_metadata() and
+# Records what getID3 makes of the audio and video of the upload corpus, of
+# samples.py's synthetic files and of mp3-samples.py's MP3 files (which it
+# writes to crates/hyscribe-image/tests/mp3/), as wp_read_audio_metadata() and
 # wp_read_video_metadata() keep it, into
 # crates/hyscribe-image/tests/golden/getid3.tsv:
 #   corpus<TAB>name<TAB>hex(serialize(metadata))
 #   sample<TAB>name<TAB>hex(bytes)<TAB>hex(serialize(metadata))
+#   mp3<TAB>name<TAB>hex(serialize(metadata))
 # The metadata is `b:0;` for a file PHP cannot read. Needs php.sh up over a
 # fresh db.sh up (WordPress loads); writes nothing to the database.
 set -euo pipefail
@@ -19,6 +21,9 @@ DIR=/tmp/hyscribe-getid3
 cleanup() { rm -rf "$TMP"; "$DOCKER" exec "$NAME" rm -rf "$DIR"; }
 trap cleanup EXIT
 python3 -I "$ROOT/reference/getid3/samples.py" "$ROOT/crates/hyscribe-image/tests/corpus" "$TMP/files"
+rm -rf "$ROOT/crates/hyscribe-image/tests/mp3"
+python3 -I "$ROOT/reference/getid3/mp3-samples.py" "$ROOT/crates/hyscribe-image/tests/mp3"
+cp "$ROOT"/crates/hyscribe-image/tests/mp3/* "$TMP/files/"
 "$DOCKER" exec "$NAME" mkdir -p "$DIR"
 "$DOCKER" cp "$TMP/files" "$NAME:$DIR/files"
 "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/golden.php" < "$ROOT/reference/getid3/golden.php"
@@ -27,6 +32,7 @@ python3 -I "$ROOT/reference/getid3/samples.py" "$ROOT/crates/hyscribe-image/test
 : > "$OUT"
 while IFS=$'\t' read -r name serialized; do
   case "$name" in
+    mp3-*) printf 'mp3\t%s\t%s\n' "$name" "$serialized" >> "$OUT" ;;
     corpus-*) printf 'corpus\t%s\t%s\n' "${name#corpus-}" "$serialized" >> "$OUT" ;;
     *) printf 'sample\t%s\t%s\t%s\n' "$name" "$(xxd -p "$TMP/files/$name" | tr -d '\n')" "$serialized" >> "$OUT" ;;
   esac

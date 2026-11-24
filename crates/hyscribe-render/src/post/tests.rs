@@ -370,3 +370,39 @@ fn admin_titles_have_no_prefix() {
         "Protected:  &#8220;Quoted&#8221;".as_bytes()
     );
 }
+
+/// An attachment with a thumbnail, as an audio file with its cover, has
+/// `has-post-thumbnail` but on its own attachment page (`is_attachment(
+/// $post )`).
+#[test]
+fn attachments_have_thumbnails_but_on_their_page() {
+    let site = Fixture {
+        terms: HashMap::new(),
+        thumbnail: b"10".to_vec(),
+        sticky: Vec::new(),
+    };
+    let post = Post {
+        id: 9,
+        status: "inherit".into(),
+        post_type: "attachment".into(),
+        ..Post::default()
+    };
+    let has = |request: Request| {
+        let class = post_class(&site, Some(&request), "", &post);
+        String::from_utf8(class)
+            .unwrap()
+            .contains("has-post-thumbnail")
+    };
+    let page = |queried_object_id| Request {
+        attachment: true,
+        queried_object_id,
+        ..Request::default()
+    };
+    assert!(has(Request::default()));
+    assert!(has(page(8)));
+    assert!(!has(page(9)));
+    assert!(has(Request {
+        queried_object_id: 9,
+        ..Request::default()
+    }));
+}

@@ -371,6 +371,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "upload_getid3"
+path = "fuzz_targets/upload_getid3.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "auth_cookie"
 path = "fuzz_targets/auth_cookie.rs"
 test = false

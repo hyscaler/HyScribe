@@ -126,7 +126,9 @@ pub fn post_class(site: &dyn Site, request: Option<&Request>, class: &str, post:
     let thumbnail = site
         .post_meta(id, "_thumbnail_id")
         .is_some_and(|meta| Value::String(meta).to_int() != 0);
-    if thumbnail && post.post_type != "attachment" && !password_required {
+    // is_attachment( $post ): the attachment page of this post.
+    let its_page = request.is_some_and(|r| r.attachment && r.queried_object_id == id);
+    if thumbnail && !its_page && !password_required {
         classes.push(b"has-post-thumbnail".to_vec());
     }
     let sticky = site

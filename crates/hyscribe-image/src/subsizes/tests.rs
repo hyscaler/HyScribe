@@ -353,7 +353,7 @@ fn reads_audio_and_video_as_getid3_does() {
     let size_only = |name: &str| (Key::String(b"filesize".to_vec()), filesize(name));
     let limits = Limits::default();
     let wav = with("tone.wav", "audio/wav", &limits, &NoHooks);
-    let read = crate::getid3::wp_read_audio_metadata(&corpus("tone.wav")).unwrap();
+    let read = crate::getid3::wp_read_audio_metadata(&corpus("tone.wav"), b"").unwrap();
     assert_eq!((wav.meta, wav.files.len()), (Value::Array(read), 0));
     // A format with no module: its size and type.
     let mpeg = with("clip.mpg", "video/mpeg", &limits, &NoHooks);
@@ -377,10 +377,51 @@ fn reads_audio_and_video_as_getid3_does() {
             ("video".to_string(), None)
         ]
     );
-    // What getID3 reads in ways not ported is not made.
-    let bytes = corpus("cbr.mp3");
+    // An MP3 is read, with its tags.
+    let tagged = with("tagged.mp3", "audio/mpeg", &limits, &NoHooks);
+    let Value::Array(tags) = &tagged.meta else {
+        panic!("{:?}", tagged.meta)
+    };
+    assert_eq!(
+        lookup(tags, "title"),
+        Some(&Value::String(b"A Title".to_vec()))
+    );
+    // A cover picture is taken out of the metadata, which keeps its type
+    // and size.
+    let path = format!(
+        "{}/tests/mp3/mp3-v23-apic-png.mp3",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let bytes = std::fs::read(path).unwrap();
     let upload = Upload {
         bytes: &bytes,
+        file: "x.mp3",
+        attachment: 1,
+    };
+    let covered =
+        wp_generate_attachment_metadata(upload, "audio/mpeg", sizes(), &limits, &NoHooks, b"");
+    let covered = covered.unwrap();
+    let cover = covered.cover.unwrap();
+    assert_eq!(cover.mime, b"image/png");
+    assert!(cover.data.starts_with(b"\x89PNG"));
+    let Value::Array(meta) = &covered.meta else {
+        panic!("{:?}", covered.meta)
+    };
+    let Some(Value::Array(image)) = lookup(meta, "image") else {
+        panic!("{meta:?}")
+    };
+    let kept: Vec<&Key> = image.iter().map(|(key, _)| key).collect();
+    assert_eq!(
+        kept,
+        ["mime", "width", "height"]
+            .map(|k| Key::String(k.into()))
+            .iter()
+            .collect::<Vec<_>>()
+    );
+    // What getID3 reads in ways not ported is not made.
+    let noise = [0x55; 600];
+    let upload = Upload {
+        bytes: &noise,
         file: "x.mp3",
         attachment: 1,
     };
@@ -571,4 +612,45 @@ fn keeps_what_no_editor_opens_without_sizes() {
         .unwrap();
     assert_eq!((sizes.len(), made.files.len()), (1, 2));
     assert_eq!(sizes[0].1.get_str("width"), Some(&Value::Int(50)));
+}
+
+/// An audio filter that gives the metadata `image` alone.
+struct Image(Value);
+
+impl Hooks for Image {
+    fn wp_read_audio_metadata(&self, _meta: Value, _format: Option<&str>) -> Value {
+        Value::Array(vec![(Key::String(b"image".to_vec()), self.0.clone())])
+    }
+}
+
+/// The cover PHP makes an attachment of is `image`'s `data` where not
+/// empty; its `data` never stays in the metadata.
+#[test]
+fn takes_the_cover_as_php_does() {
+    let text = |value: &str| Value::String(value.into());
+    let entry = |name: &str, value: &str| (Key::String(name.into()), text(value));
+    let cases = [
+        (text("not an array"), None, text("not an array")),
+        (
+            Value::Array(vec![entry("data", "0"), entry("mime", "image/png")]),
+            None,
+            Value::Array(vec![entry("mime", "image/png")]),
+        ),
+        (
+            Value::Array(vec![entry("data", "bytes")]),
+            Some(Cover {
+                data: b"bytes".to_vec(),
+                mime: Vec::new(),
+            }),
+            Value::Array(Vec::new()),
+        ),
+    ];
+    for (image, cover, kept) in cases {
+        let generated = with("tone.wav", "audio/wav", &Limits::default(), &Image(image));
+        assert_eq!(generated.cover, cover);
+        let Value::Array(meta) = &generated.meta else {
+            panic!("{:?}", generated.meta)
+        };
+        assert_eq!(lookup(meta, "image"), Some(&kept));
+    }
 }

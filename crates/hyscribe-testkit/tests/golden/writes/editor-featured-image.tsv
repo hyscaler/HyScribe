@@ -1,5 +1,5 @@
 # The rows PHP WordPress writes for the action editor-featured-image (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-17 04:49:17 to 2026-11-17 04:49:17 UTC.
+# %now% and %unix% stand for times from 2026-11-24 12:09:10 to 2026-11-24 12:09:10 UTC.
 # %wp_posts:1% is 9601.
 # %wp_posts:2% is 9602.
 # %wp_posts:3% is 9603.
@@ -9,16 +9,16 @@
 # %wp_posts:7% is 9607.
 # %wp_posts:8% is 9608.
 # %wp_posts:9% is 9609.
-# %wp_posts:10% is 9616.
+# %wp_posts:10% is 9610.
 # %wp_postmeta:1% is 9601.
 # %wp_postmeta:2% is 9602.
 # %wp_postmeta:3% is 9603.
 # %wp_postmeta:4% is 9604.
 # %wp_postmeta:5% is 9605.
 # %wp_postmeta:6% is 9606.
-# %wp_postmeta:7% is 9612.
-# %wp_postmeta:8% is 9613.
-# %wp_postmeta:9% is 9614.
+# %wp_postmeta:7% is 9607.
+# %wp_postmeta:8% is 9608.
+# %wp_postmeta:9% is 9609.
 # %wp_terms:1% is 9601.
 # %wp_terms:2% is 9602.
 # %wp_terms:3% is 9603.
@@ -37,7 +37,7 @@ wp_postmeta	%wp_postmeta:8%	+	meta_value	1
 wp_postmeta	%wp_postmeta:8%	+	post_id	1
 wp_postmeta	%wp_postmeta:9%	+	meta_id	%wp_postmeta:9%
 wp_postmeta	%wp_postmeta:9%	+	meta_key	_thumbnail_id
-wp_postmeta	%wp_postmeta:9%	+	meta_value	9605
+wp_postmeta	%wp_postmeta:9%	+	meta_value	%wp_posts:5%
 wp_postmeta	%wp_postmeta:9%	+	post_id	1
 wp_posts	%wp_posts:10%	+	ID	%wp_posts:10%
 wp_posts	%wp_posts:10%	+	comment_count	0

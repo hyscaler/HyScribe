@@ -1,5 +1,5 @@
 # The rows PHP WordPress writes for the action media-edit-song (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-18 15:49:33 to 2026-11-18 15:49:33 UTC.
+# %now% and %unix% stand for times from 2026-11-24 12:09:11 to 2026-11-24 12:09:11 UTC.
 # %wp_posts:1% is 801.
 # %wp_posts:2% is 802.
 # %wp_posts:3% is 803.
@@ -85,8 +85,8 @@
 # %wp_postmeta:52% is 852.
 # %wp_postmeta:53% is 853.
 # %wp_postmeta:54% is 854.
-# %wp_postmeta:55% is 874.
-# %wp_postmeta:56% is 875.
+# %wp_postmeta:55% is 9610.
+# %wp_postmeta:56% is 9611.
 # %wp_comments:1% is 801.
 # %wp_users:1% is 2.
 # %wp_users:2% is 3.
@@ -99,7 +99,7 @@
 wp_postmeta	%wp_postmeta:26%	~	meta_value	a:12:{s:8:"filesize";i:%filesize%;s:9:"mime_type";s:10:"audio/mpeg";s:6:"length";i:215;s:16:"length_formatted";s:4:"3:35";s:7:"bitrate";d:128456.5;s:12:"bitrate_mode";s:3:"cbr";s:6:"artist";s:19:"The "Band" &amp; Co";s:5:"album";s:5:"First";s:4:"year";s:4:"2026";s:5:"genre";s:4:"Rock";s:10:"dataformat";s:3:"mp3";s:5:"audio";a:3:{s:10:"dataformat";s:3:"mp3";s:5:"codec";s:4:"LAME";s:11:"sample_rate";i:44100;}}	a:12:{s:8:"filesize";i:%filesize%;s:9:"mime_type";s:10:"audio/mpeg";s:6:"length";i:215;s:16:"length_formatted";s:4:"3:35";s:7:"bitrate";d:128456.5;s:12:"bitrate_mode";s:3:"cbr";s:6:"artist";s:10:"New artist";s:5:"album";s:6:"Second";s:4:"year";s:4:"2026";s:5:"genre";s:4:"Rock";s:10:"dataformat";s:3:"mp3";s:5:"audio";a:3:{s:10:"dataformat";s:3:"mp3";s:5:"codec";s:4:"LAME";s:11:"sample_rate";i:44100;}}
 wp_postmeta	%wp_postmeta:27%	-	meta_id	%wp_postmeta:27%
 wp_postmeta	%wp_postmeta:27%	-	meta_key	_thumbnail_id
-wp_postmeta	%wp_postmeta:27%	-	meta_value	801
+wp_postmeta	%wp_postmeta:27%	-	meta_value	%wp_posts:1%
 wp_postmeta	%wp_postmeta:27%	-	post_id	%wp_posts:17%
 wp_postmeta	%wp_postmeta:55%	+	meta_id	%wp_postmeta:55%
 wp_postmeta	%wp_postmeta:55%	+	meta_key	_edit_last

@@ -579,3 +579,33 @@ fn ids_are_masked_as_whole_numbers() {
     assert_eq!(mask(&guid("1")), guid("%wp_posts:2%").into_bytes());
     assert_eq!(mask("1.127 127. .1"), b"1.127 %wp_posts:1%. .%wp_posts:2%");
 }
+
+/// A post's `_thumbnail_id` naming a post of the action is masked, as a
+/// cover picture's; a user's `_new_email` key is; no other meta is.
+#[test]
+fn masks_thumbnails_of_new_posts_and_new_email_keys() {
+    let new = NewIds::from([(("wp_posts", b"12".to_vec()), b"%wp_posts:1%".to_vec())]);
+    let masks = Masks {
+        start: (0, Vec::new()),
+        end: (0, Vec::new()),
+        new,
+    };
+    let value = |table: &Table, key: &str, value: &str| {
+        let row: Row = vec![
+            ("meta_key".to_string(), key.as_bytes().to_vec()),
+            ("meta_value".to_string(), value.as_bytes().to_vec()),
+        ];
+        let rows = masked(&masks, table, &BTreeMap::from([(b"k".to_vec(), row)]));
+        String::from_utf8(rows.into_values().next().unwrap()[1].1.clone()).unwrap()
+    };
+    let (posts, comments, users) = (&TABLES[1], &TABLES[3], &TABLES[10]);
+    assert_eq!(value(posts, "_thumbnail_id", "12"), "%wp_posts:1%");
+    assert_eq!(value(posts, "_thumbnail_id", "3"), "3");
+    assert_eq!(value(posts, "_other", "12"), "12");
+    assert_eq!(value(comments, "_thumbnail_id", "12"), "12");
+    let key = "a:1:{s:4:\"hash\";s:32:\"0123456789abcdef0123456789abcdef\";}";
+    let hashed = "a:1:{s:4:\"hash\";s:32:\"%hash%\";}";
+    assert_eq!(value(users, "_new_email", key), hashed);
+    assert_eq!(value(users, "_other", key), key);
+    assert_eq!(value(posts, "_new_email", key), key);
+}

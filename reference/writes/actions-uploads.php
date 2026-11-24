@@ -192,4 +192,11 @@ return array(
 	'upload-async-aac'      => $uploads_case( $uploads_handle( 'tone.aac', 'tone.aac', 1 ) ),
 	'upload-rest-raw-wav'   => $uploads_case( $uploads_rest( 'tone.wav', 'tone.wav', array( 'title' => 'A tone', 'post' => 1 ), false ) ),
 	'upload-rest-form-aac'  => $uploads_case( $uploads_rest( 'tone.aac', 'tone.aac', array(), true ) ),
+	// MP3 files: the title and text of their tags, and a cover picture made
+	// an attachment of its own, or found again by its hash.
+	'upload-async-mp3'      => $uploads_case( $uploads_handle( 'tagged.mp3', 'tagged.mp3' ) ),
+	'upload-async-mp3-cover' => $uploads_case( $uploads_handle( 'covered.mp3', 'covered.mp3', 1 ) ),
+	'upload-async-mp3-cover-again' => $uploads_case( $uploads_handle( 'covered.mp3', 'covered.mp3' ), $uploads_handle( 'covered.mp3', 'covered.mp3' ) ),
+	'upload-rest-raw-mp3'   => $uploads_case( $uploads_rest( 'cbr.mp3', 'cbr.mp3', array( 'title' => 'A song' ), false ) ),
+	'upload-rest-form-mp3-cover' => $uploads_case( $uploads_rest( 'covered.mp3', 'covered.mp3', array(), true ) ),
 );

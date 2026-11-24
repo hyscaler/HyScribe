@@ -10,6 +10,10 @@ use hyscribe_phpser::{Float, Key, Value};
 
 use crate::meta::Unported;
 
+mod encoder;
+mod id3;
+mod mp3;
+mod tables;
 mod wav;
 
 /// An entry of the metadata array.
@@ -97,10 +101,54 @@ fn named_only(bytes: &[u8], mime: &str) -> Vec<Entry> {
     ]
 }
 
+/// The metadata of an MP3 file as `wp_read_audio_metadata()` keeps it:
+/// getID3's audio array, the file's own entries, then the ID3 tag's
+/// comments (`wp_add_id3_tag_data()`, where `host` is the uploads host for
+/// `wp_kses_post()`) and the first picture.
+fn mp3_metadata(bytes: &[u8], host: &[u8]) -> Result<Vec<Entry>, Unported> {
+    let found = mp3::analyze(bytes)?;
+    let mut entries = found.audio;
+    entries.push((key("fileformat"), text(found.format)));
+    entries.push((key("filesize"), Value::Int(bytes.len() as i64)));
+    entries.push((key("mime_type"), text("audio/mpeg")));
+    // The length is never 0: the audio after the header frame has bytes.
+    let seconds = found.seconds.float();
+    entries.push((key("length"), Value::Int(seconds.round() as i64)));
+    entries.push((key("length_formatted"), text(&playtime_string(seconds))));
+    let tags = [found.v2.as_ref().map(|v2| &v2.tag), found.v1.as_ref()];
+    let chosen = tags
+        .into_iter()
+        .flatten()
+        .find(|tag| !tag.comments.is_empty());
+    for (name, list) in chosen.iter().flat_map(|tag| &tag.comments) {
+        let Some(first) = list.first().filter(|_| name != b"length") else {
+            continue;
+        };
+        let value = Value::String(hyscribe_render::kses::wp_kses_post(first, host));
+        // No tag's key is one of the audio's.
+        entries.push((Key::String(name.clone()), value));
+    }
+    if let Some(picture) = found.v2.and_then(|v2| v2.tag.picture) {
+        entries.push((
+            key("image"),
+            Value::Array(vec![
+                (key("data"), Value::String(picture.data)),
+                (key("mime"), text(picture.mime)),
+                (key("width"), Value::Int(i64::from(picture.width))),
+                (key("height"), Value::Int(i64::from(picture.height))),
+            ]),
+        ));
+    }
+    Ok(entries)
+}
+
 /// `wp_read_audio_metadata( $file )` of an audio file's `bytes`, the
 /// array it stores; [`Unported`] for a file getID3 reads in ways not
-/// ported here.
-pub fn wp_read_audio_metadata(bytes: &[u8]) -> Result<Vec<Entry>, Unported> {
+/// ported here. `host` is the uploads URL's host, for `wp_kses_post()`.
+pub fn wp_read_audio_metadata(bytes: &[u8], host: &[u8]) -> Result<Vec<Entry>, Unported> {
+    if let Ok(entries) = mp3_metadata(bytes, host) {
+        return Ok(entries);
+    }
     if bytes.starts_with(b"RIFF") && !untrusted(bytes) {
         return wav::wav(bytes);
     }

@@ -64,6 +64,23 @@ pub trait UploadHooks: Hooks + Send + Sync {
         upload
     }
 
+    /// `wp_upload_bits`: the name and bytes of a file `wp_upload_bits()`
+    /// writes; an error message stops it.
+    fn wp_upload_bits(&self, _name: &str, _bits: &[u8]) -> Option<String> {
+        None
+    }
+
+    /// `attachment_thumbnail_args`: the arguments of the attachment made of
+    /// an audio or video file's cover picture, and the picture's file;
+    /// the file's metadata is not given.
+    fn attachment_thumbnail_args(
+        &self,
+        args: hyscribe_write::posts::PostArgs,
+        _uploaded: &Handled,
+    ) -> hyscribe_write::posts::PostArgs {
+        args
+    }
+
     /// `add_attachment`: an attachment was inserted.
     fn add_attachment(&self, id: u64) {
         hyscribe_model::hooks::do_action("add_attachment", &[&id]);
@@ -230,6 +247,14 @@ impl From<hyscribe_write::Error> for Refused {
     }
 }
 
+/// Why a file was not written, with the folder as PHP shows it.
+enum Unwritten {
+    /// The folder could not be made.
+    Folder(String),
+    /// The file could not be written.
+    File(String),
+}
+
 /// Who uploads: what the type check allows them.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Who {
@@ -358,34 +383,21 @@ impl Uploads {
         if !default || !is_empty_string(option("upload_url_path")) {
             return Err(Refused::Unported);
         }
-        let subdir = match is_empty_string(option("uploads_use_yearmonth_folders")) {
-            true => String::new(),
-            false => {
-                let part = |range| time.get(range).unwrap_or_default();
-                format!("/{}/{}", part(0..4), part(5..7))
+        let (file, url) = match self.write_file(site, time, &name, &sent.bytes, who) {
+            Ok(written) => written,
+            Err(Unwritten::Folder(shown)) => {
+                return Err(Refused::Message(format!(
+                    "Unable to create directory {shown}. Is its parent directory writable by the server?"
+                )));
+            }
+            Err(Unwritten::File(shown)) => {
+                return Err(Refused::Message(format!(
+                    "The uploaded file could not be moved to {shown}."
+                )));
             }
         };
-        let shown = format!("wp-content/uploads{subdir}");
-        let Some(folder) = folder(&self.dir, &subdir) else {
-            return Err(Refused::Message(format!(
-                "Unable to create directory {shown}. Is its parent directory writable by the server?"
-            )));
-        };
-        let moved = names(&folder).and_then(|files| {
-            let unique = wp_unique_filename(&name, &files, who.unfiltered_html);
-            place(&folder, &unique, &sent.bytes, false).map(|()| unique)
-        });
-        let Ok(unique) = moved else {
-            return Err(Refused::Message(format!(
-                "The uploaded file could not be moved to {shown}."
-            )));
-        };
-        let base =
-            hyscribe_render::attachment::upload_baseurl(&|name| site.raw_option(name).to_vec());
-        let file = format!("{}/{unique}", subdir.trim_start_matches('/'));
-        let file = file.trim_start_matches('/').to_string();
         let handled = Handled {
-            url: [&base[..], b"/", file.as_bytes()].concat(),
+            url,
             file: file.clone(),
             mime: mime.into(),
             name,
@@ -394,6 +406,67 @@ impl Uploads {
         let context = if sideload { "sideload" } else { "upload" };
         let filtered = self.hooks.wp_handle_upload(handled, context);
         Ok(Handled { file, ..filtered })
+    }
+
+    /// `bytes` written as `name`, numbered past the files of the uploads
+    /// folder of the month `time` (`wp_upload_dir( $time )`), made if
+    /// missing: the file's path within the uploads folder and its URL.
+    fn write_file(
+        &self,
+        site: &Site,
+        time: &str,
+        name: &[u8],
+        bytes: &[u8],
+        who: Who,
+    ) -> Result<(String, Vec<u8>), Unwritten> {
+        let subdir = match is_empty_string(site.raw_option("uploads_use_yearmonth_folders")) {
+            true => String::new(),
+            false => {
+                let part = |range| time.get(range).unwrap_or_default();
+                format!("/{}/{}", part(0..4), part(5..7))
+            }
+        };
+        let shown = format!("wp-content/uploads{subdir}");
+        let folder = folder(&self.dir, &subdir).ok_or_else(|| Unwritten::Folder(shown.clone()))?;
+        let unique = names(&folder)
+            .and_then(|files| {
+                let unique = wp_unique_filename(name, &files, who.unfiltered_html);
+                place(&folder, &unique, bytes, false).map(|()| unique)
+            })
+            .map_err(|_| Unwritten::File(shown))?;
+        let base =
+            hyscribe_render::attachment::upload_baseurl(&|name| site.raw_option(name).to_vec());
+        let file = format!("{}/{unique}", subdir.trim_start_matches('/'));
+        let file = file.trim_start_matches('/').to_string();
+        Ok((file.clone(), [&base[..], b"/", file.as_bytes()].concat()))
+    }
+
+    /// `wp_upload_bits( $name, null, $bits )` of a picture of `mime`, at
+    /// `time`: the file written, `None` where PHP gives an error.
+    pub(crate) fn upload_bits(
+        &self,
+        site: &Site,
+        (name, mime): (&str, &[u8]),
+        bits: &Bytes,
+        time: &str,
+    ) -> Option<Handled> {
+        if self.hooks.wp_upload_bits(name, bits).is_some() {
+            return None;
+        }
+        let nobody = Who {
+            unfiltered_html: false,
+            unfiltered_upload: false,
+        };
+        let (file, url) = self
+            .write_file(site, time, name.as_bytes(), bits, nobody)
+            .ok()?;
+        Some(Handled {
+            file,
+            url,
+            mime: String::from_utf8_lossy(mime).into_owned(),
+            name: name.as_bytes().to_vec(),
+            bytes: bits.clone(),
+        })
     }
 
     /// Deletes an upload `handle()` wrote, when what follows stops it.

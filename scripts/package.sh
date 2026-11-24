@@ -51,7 +51,7 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 mkdir -m 0755 "$stage/hyscribe"
 install -m 0755 "$root/target/$target/release/hyscribe" "$stage/hyscribe/hyscribe"
-install -m 0644 "$root/LICENSE" "$root/packaging/README.txt" "$root/.env.example" "$stage/hyscribe/"
+install -m 0644 "$root/LICENSE" "$root/NOTICE" "$root/packaging/README.txt" "$root/.env.example" "$stage/hyscribe/"
 # The notices of what the binary embeds: WordPress, its themes and the crates.
 "$root/scripts/third-party-notices.sh" "$stage/hyscribe/THIRD-PARTY-NOTICES"
 chmod 0644 "$stage/hyscribe/THIRD-PARTY-NOTICES"

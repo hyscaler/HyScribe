@@ -1,14 +1,14 @@
 # The rows PHP WordPress writes for the action rest-media-delete-trashed (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-18 20:31:37 to 2026-11-18 20:31:37 UTC.
+# %now% and %unix% stand for times from 2026-11-24 12:09:13 to 2026-11-24 12:09:13 UTC.
 # %wp_posts:1% is 9301.
-# %wp_postmeta:1% is 40.
-# %wp_postmeta:2% is 41.
-# %wp_postmeta:3% is 42.
-# %wp_postmeta:4% is 43.
-# %wp_postmeta:5% is 44.
-# %wp_postmeta:6% is 45.
-# %wp_postmeta:7% is 46.
-# %wp_comments:1% is 3.
+# %wp_postmeta:1% is 9619.
+# %wp_postmeta:2% is 9620.
+# %wp_postmeta:3% is 9621.
+# %wp_postmeta:4% is 9622.
+# %wp_postmeta:5% is 9623.
+# %wp_postmeta:6% is 9624.
+# %wp_postmeta:7% is 9625.
+# %wp_comments:1% is 803.
 wp_comments	%wp_comments:1%	-	comment_ID	%wp_comments:1%
 wp_comments	%wp_comments:1%	-	comment_agent	
 wp_comments	%wp_comments:1%	-	comment_approved	1
@@ -42,7 +42,7 @@ wp_postmeta	%wp_postmeta:4%	-	meta_value	a:1:{s:9:"full-orig";a:3:{s:5:"width";i
 wp_postmeta	%wp_postmeta:4%	-	post_id	%wp_posts:1%
 wp_postmeta	%wp_postmeta:5%	-	meta_id	%wp_postmeta:5%
 wp_postmeta	%wp_postmeta:5%	-	meta_key	_thumbnail_id
-wp_postmeta	%wp_postmeta:5%	-	meta_value	9301
+wp_postmeta	%wp_postmeta:5%	-	meta_value	%wp_posts:1%
 wp_postmeta	%wp_postmeta:5%	-	post_id	1
 wp_postmeta	%wp_postmeta:6%	-	meta_id	%wp_postmeta:6%
 wp_postmeta	%wp_postmeta:6%	-	meta_key	_wp_trash_meta_status

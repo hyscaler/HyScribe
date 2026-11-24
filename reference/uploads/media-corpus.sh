@@ -66,6 +66,12 @@ gzip -n -c hello.txt > "$OUT/sample.gz"
 "${F[@]}" "${SINE[@]}" -ac 1 -c:a aac "$OUT/tone.m4a"
 "${F[@]}" "${SINE[@]}" -ac 1 -c:a aac -f adts "$OUT/tone.aac"
 "${F[@]}" "${SINE[@]}" -ac 1 -c:a wmav2 "$OUT/tone.wma"
+# An MP3 with all the tags media_handle_upload() writes into the text, and
+# a PNG cover picture WordPress makes an attachment of.
+"${F[@]}" "${SINE[@]}" -f lavfi -i testsrc=size=64x48:rate=1 -map 0:a -map 1:v -frames:v 1 -ac 1 \
+  -c:a libmp3lame -b:a 64k -c:v png -disposition:v attached_pic -id3v2_version 3 \
+  -metadata title="A Cover" -metadata artist="An Artist" -metadata album="An Album" \
+  -metadata date=2024 -metadata track=3/12 -metadata genre=Ambient "$OUT/covered.mp3"
 printf 'MThd\x00\x00\x00\x06\x00\x00\x00\x01\x00\x60MTrk\x00\x00\x00\x04\x00\xff\x2f\x00' > "$OUT/tune.mid"
 
 # Video.

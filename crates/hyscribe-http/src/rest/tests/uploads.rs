@@ -33,14 +33,11 @@ const WHO: [(&str, &str, u64); 6] = [
 /// preview PHP makes with Ghostscript, audio and video, whose metadata is
 /// getID3's, a Word 97 file and bytes libmagic gives no type, and a Word
 /// file named as a ZIP, where libmagic may give either.
-const UNPORTED: [&str; 19] = [
+const UNPORTED: [&str; 16] = [
     "sample.pdf",
     "sample.doc",
     "random.bin:random.mp3",
     "sample.docx:sample.zip",
-    "cbr.mp3",
-    "noxing.mp3",
-    "tagged.mp3",
     "tone.flac",
     "tone.ogg",
     "tone.m4a",
@@ -452,7 +449,7 @@ async fn upload_routes_match_php() {
             site = uploading(sessions.path(), uploads.path()).await;
         }
     }
-    assert_eq!((matched, unported), (6 * 107 - 74, 74));
+    assert_eq!((matched, unported), (6 * 110 - 59, 59));
 }
 
 /// An upload's plan is written by `rest::uploads`, never by `act()`.

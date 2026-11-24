@@ -1,12 +1,12 @@
 # The rows PHP WordPress writes for the action rest-media-delete (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-18 20:31:36 to 2026-11-18 20:31:36 UTC.
+# %now% and %unix% stand for times from 2026-11-24 12:09:12 to 2026-11-24 12:09:12 UTC.
 # %wp_posts:1% is 9301.
-# %wp_postmeta:1% is 35.
-# %wp_postmeta:2% is 36.
-# %wp_postmeta:3% is 37.
-# %wp_postmeta:4% is 38.
-# %wp_postmeta:5% is 39.
-# %wp_comments:1% is 2.
+# %wp_postmeta:1% is 9614.
+# %wp_postmeta:2% is 9615.
+# %wp_postmeta:3% is 9616.
+# %wp_postmeta:4% is 9617.
+# %wp_postmeta:5% is 9618.
+# %wp_comments:1% is 802.
 wp_comments	%wp_comments:1%	-	comment_ID	%wp_comments:1%
 wp_comments	%wp_comments:1%	-	comment_agent	
 wp_comments	%wp_comments:1%	-	comment_approved	1
@@ -40,7 +40,7 @@ wp_postmeta	%wp_postmeta:4%	-	meta_value	a:1:{s:9:"full-orig";a:3:{s:5:"width";i
 wp_postmeta	%wp_postmeta:4%	-	post_id	%wp_posts:1%
 wp_postmeta	%wp_postmeta:5%	-	meta_id	%wp_postmeta:5%
 wp_postmeta	%wp_postmeta:5%	-	meta_key	_thumbnail_id
-wp_postmeta	%wp_postmeta:5%	-	meta_value	9301
+wp_postmeta	%wp_postmeta:5%	-	meta_value	%wp_posts:1%
 wp_postmeta	%wp_postmeta:5%	-	post_id	1
 wp_posts	%wp_posts:1%	-	ID	%wp_posts:1%
 wp_posts	%wp_posts:1%	-	comment_count	0

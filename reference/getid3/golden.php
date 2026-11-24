@@ -16,6 +16,11 @@ $names = array_diff( scandir( $argv[1] ), array( '.', '..' ) );
 foreach ( $names as $name ) {
 	$file = $argv[1] . '/' . $name;
 	$type = wp_check_filetype( preg_replace( '/^(corpus|sample)-/', '', $name ) )['type'];
-	$meta = str_starts_with( (string) $type, 'video/' ) ? wp_read_video_metadata( $file ) : wp_read_audio_metadata( $file );
+	// A fatal error of getID3 on a corrupt file is recorded as false.
+	try {
+		$meta = str_starts_with( (string) $type, 'video/' ) ? wp_read_video_metadata( $file ) : wp_read_audio_metadata( $file );
+	} catch ( Throwable $e ) {
+		$meta = false;
+	}
 	echo $name, "\t", bin2hex( serialize( $meta ) ), "\n";
 }

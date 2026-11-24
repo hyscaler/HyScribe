@@ -119,3 +119,6 @@ POST	/?rest_route=/wp/v2/media	raw,type=video/mp4	clip.mp4	-
 POST	/?rest_route=/wp/v2/media	restfile	clip.mov	post=2
 POST	/?rest_route=/wp/v2/media	raw,type=application/octet-stream	random.bin:random.mp3	-
 POST	/?rest_route=/wp/v2/media	raw,type=text/plain	sample.docx:sample.zip	-
+POST	/wp-admin/async-upload.php	form,nonce	covered.mp3	action=upload-attachment&name=covered.mp3
+POST	/wp-admin/media-new.php	form,nonce	covered.mp3	html-upload=Upload&post_id=1
+POST	/?rest_route=/wp/v2/media	raw,type=audio/mpeg	covered.mp3	-

@@ -528,7 +528,16 @@ fn masked(masks: &Masks, table: &Table, rows: &BTreeMap<Vec<u8>, Row>) -> BTreeM
         .map(|row| {
             let timeout = is_timeout(table, row);
             let option = (table.name == "wp_options").then(|| value(row, "option_name"));
-            let new_email = table.name == "wp_usermeta" && value(row, "meta_key") == b"_new_email";
+            let meta_key = value(row, "meta_key");
+            let new_email = table.name == "wp_usermeta" && meta_key == b"_new_email";
+            let thumbnail = table.name == "wp_postmeta" && meta_key == b"_thumbnail_id";
+            let post = |id: Vec<u8>| {
+                masks
+                    .new
+                    .get(&("wp_posts", id.clone()))
+                    .cloned()
+                    .unwrap_or(id)
+            };
             let row: Row = row
                 .iter()
                 .map(|(column, value)| {
@@ -539,11 +548,10 @@ fn masked(masks: &Masks, table: &Table, rows: &BTreeMap<Vec<u8>, Row>) -> BTreeM
                         ("option_value", Some(b"cron")) => masks.rescheduled(&masked),
                         // `send_confirmation_on_profile_email()`'s random key.
                         ("meta_value", _) if new_email => hash_masked(&masked),
-                        // A new privacy policy page's ID.
-                        ("option_value", Some(b"wp_page_for_privacy_policy")) => {
-                            let id = masks.new.get(&("wp_posts", masked.clone()));
-                            id.cloned().unwrap_or(masked)
-                        }
+                        // A new privacy policy page's ID, and a post's thumbnail
+                        // among the posts of the action.
+                        ("option_value", Some(b"wp_page_for_privacy_policy")) => post(masked),
+                        ("meta_value", _) if thumbnail => post(masked),
                         _ => masked,
                     };
                     (column.clone(), masked)

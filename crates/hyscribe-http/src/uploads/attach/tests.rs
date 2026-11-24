@@ -289,6 +289,22 @@ async fn uploads_write_php_s_rows() {
             How::Rest(true, Upload::default()),
         ),
         (
+            "upload-async-pdf",
+            ("sample.pdf", "sample.pdf"),
+            How::Media(0),
+        ),
+        (
+            "upload-rest-raw-pdf",
+            ("sample.pdf", "sample.pdf"),
+            How::Rest(
+                false,
+                Upload {
+                    post: 1,
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
             "upload-rest-raw-text",
             ("plain.txt", "plain.txt"),
             How::Rest(false, text),
@@ -538,13 +554,13 @@ async fn uploads_are_titled_and_hooked_as_php_s() {
     }
 }
 
-/// A PDF, whose preview is Ghostscript's, and audio and video, whose
-/// metadata is getID3's, answer 501 and leave no file behind.
+/// Audio and video whose metadata is getID3's answer 501 and leave no file
+/// behind.
 #[tokio::test(flavor = "multi_thread")]
 async fn unported_types_leave_no_file() {
     let site = crate::tests::oracle_site().await;
     let time = (upload_time(&site, None, now()), WHO);
-    for name in ["sample.pdf", "cbr.mp3", "clip.mp4", "tagged.mp3"] {
+    for name in ["cbr.mp3", "clip.mp4", "tagged.mp3"] {
         let dir = tempfile::tempdir().unwrap();
         let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
         let sent = sent(name, name);

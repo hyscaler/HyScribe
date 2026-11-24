@@ -202,9 +202,10 @@ pub(crate) fn parts(kind: Kind, name: &[u8]) -> &'static Properties {
     }
 }
 
-/// `mysql_to_rfc3339()` of a date WordPress has set.
+/// `mysql_to_rfc3339()` of a stored date, as PHP's date handling
+/// normalizes it: the zero date reads `-0001-11-30T00:00:00`.
 pub(crate) fn rfc3339(date: &str) -> Value {
-    text(date.replacen(' ', "T", 1))
+    text(crate::users::rfc3339(date))
 }
 
 pub(crate) const UNSET: &str = "0000-00-00 00:00:00";

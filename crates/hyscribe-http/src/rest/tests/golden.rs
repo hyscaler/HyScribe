@@ -299,7 +299,7 @@ async fn index_matches_php() {
 #[tokio::test]
 async fn posts_match_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/posts.tsv");
-    replay("wordpress", golden, false, 6 * 103, &[]).await;
+    replay("wordpress", golden, false, 6 * 105, &[]).await;
     unported(
         "wordpress",
         &[

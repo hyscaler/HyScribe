@@ -19,6 +19,7 @@ GET	/?rest_route=/wp/v2/comments&per_page=100
 GET	/?rest_route=/wp/v2/comments&per_page=100&context=edit
 GET	/?rest_route=/wp/v2/comments&per_page=2&page=2
 GET	/?rest_route=/wp/v2/comments&per_page=5&page=50
+GET	/?rest_route=/wp/v2/comments&page=9223372036854775807&per_page=100	default
 GET	/?rest_route=/wp/v2/comments&per_page=0
 GET	/?rest_route=/wp/v2/comments&offset=3&per_page=3
 GET	/?rest_route=/wp/v2/comments&offset=x
@@ -158,6 +159,7 @@ GET	/?rest_route=/wp/v2/users&orderby=url
 GET	/?rest_route=/wp/v2/users&orderby=bogus
 GET	/?rest_route=/wp/v2/users&per_page=2&page=2
 GET	/?rest_route=/wp/v2/users&per_page=2&page=9
+GET	/?rest_route=/wp/v2/users&page=9223372036854775807&per_page=100	default
 GET	/?rest_route=/wp/v2/users&offset=1&per_page=2
 GET	/?rest_route=/wp/v2/users&_fields=id,name,avatar_urls,_links
 GET	/?rest_route=/wp/v2/users	pretty

@@ -355,6 +355,21 @@ pub(crate) fn force_arg() -> Arg {
     typed("force", r#"{"type":"boolean","default":false}"#)
 }
 
+/// `absint( ( $page - 1 ) * $per_page )`: the product of PHP's integers,
+/// which becomes a float past the largest integer and wraps when cast back.
+pub(crate) fn page_offset(page: u64, per_page: u64) -> u64 {
+    let before = page.saturating_sub(1);
+    match before
+        .checked_mul(per_page)
+        .filter(|n| i64::try_from(*n).is_ok())
+    {
+        Some(offset) => offset,
+        None => absint(&Value::Float(hyscribe_phpser::Float::from_f64(
+            before as f64 * per_page as f64,
+        ))),
+    }
+}
+
 /// `get_collection_params()`: the context, the page, its size and the
 /// search.
 pub(crate) fn collection_args() -> Vec<Arg> {

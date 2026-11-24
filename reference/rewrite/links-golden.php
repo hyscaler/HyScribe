@@ -58,6 +58,7 @@ out( 'post_comments_feed_link unattached 13 atom', get_post_comments_feed_link( 
 $category = get_term( 1, 'category' );
 out( 'term_link category 1', get_term_link( $category ) );
 out( 'term_link tag', get_term_link( new WP_Term( (object) array( 'term_id' => 5, 'slug' => 'a-tag', 'taxonomy' => 'post_tag', 'parent' => 0 ) ) ) );
+out( 'term_link tag child', get_term_link( new WP_Term( (object) array( 'term_id' => 7, 'slug' => 'a-child-tag', 'taxonomy' => 'post_tag', 'parent' => 5 ) ) ) );
 out( 'term_link format', get_term_link( new WP_Term( (object) array( 'term_id' => 6, 'slug' => 'post-format-aside', 'taxonomy' => 'post_format', 'parent' => 0 ) ) ) );
 out( 'term_feed_link category 1', get_term_feed_link( 1, 'category' ) );
 out( 'term_feed_link category 1 atom', get_term_feed_link( 1, 'category', 'atom' ) );

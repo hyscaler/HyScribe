@@ -3157,6 +3157,9 @@ async fn assert_listed_pages(
             let options = named.split('&').filter_map(|o| o.split_once('='));
             for (name, value) in options.filter(|(name, _)| !name.starts_with('_')) {
                 let value = hyscribe_phpser::urldecode(value.as_bytes());
+                if name == "home" {
+                    site.home = String::from_utf8(value.clone()).unwrap();
+                }
                 site.options.insert(name.into(), value);
             }
             // The theme a `stylesheet` option names, as every request's reload picks it.
@@ -3576,6 +3579,27 @@ async fn edited_site_pages_match_php() {
     let drop = "DROP TABLE broken_options";
     sqlx::raw_sql(drop).execute(&mut conn).await.unwrap();
     assert!(site.is_err());
+}
+
+/// The pages of `reference/pages/folder.list` for a home URL in a folder,
+/// with plain and pretty permalinks: the canonical redirects keep the
+/// folder once, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_pages_match_php() {
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-folder.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, None, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 10);
 }
 
 /// The pages of `reference/pages/comments.list` over the comments of

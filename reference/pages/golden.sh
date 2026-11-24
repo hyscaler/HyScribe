@@ -25,7 +25,8 @@
 #   of reference/pages/titles.sql (untitled, quoted and dashed titles), which
 #   it adds
 #   folder: reference/default-install/php.sh up; a site whose home URL has
-#   the folder /blog, by the options home and siteurl, plain and pretty
+#   the folder /blog, by the options home and siteurl, plain and pretty: its
+#   redirects only, as the oracle's content URL constants stay at its root
 #   comments: reference/default-install/php.sh up, over the comments of
 #   reference/pages/comments.sql, which it adds, with the commenter cookies
 #   an option named _cookie sends (urlencoded, `name=value; name=value`)

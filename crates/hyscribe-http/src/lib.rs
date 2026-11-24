@@ -1726,19 +1726,23 @@ fn now() -> i64 {
 /// on the front page. `None` when `path` is canonical.
 fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<String> {
     let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
+    // A requested path already starts with the home URL's folder.
+    let origin = site
+        .home
+        .strip_suffix(home_path(&site.home))
+        .unwrap_or(&site.home);
     if path.contains("/index.php/") {
         return Some(format!(
-            "{}{}{query}",
-            site.home,
+            "{origin}{}{query}",
             path.replace("/index.php/", "/")
         ));
     }
     if let Some(folder) = path.strip_suffix("index.php").filter(|f| f.ends_with('/')) {
-        return Some(format!("{}{folder}{query}", site.home));
+        return Some(format!("{origin}{folder}{query}"));
     }
     // The home page these paths show takes it only as `is_front_page()`.
     let front = site.posts_on_front() || site.front_page().is_some_and(|id| id != 0);
-    (front && !path.ends_with('/')).then(|| format!("{}{path}/{query}", site.home))
+    (front && !path.ends_with('/')).then(|| format!("{origin}{path}/{query}"))
 }
 
 /// HyScribe's admin and login URLs have no `.php` (ADR 0008):

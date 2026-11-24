@@ -542,8 +542,7 @@ async fn other_actions_show_their_forms_and_links() {
             .find(|line| line.starts_with(&format!("{query}\t0\t")))
             .unwrap();
         let page = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
-        page.replace("/wp-login.php", "/hs-login")
-            .replace("/wp-admin/load-styles.php", "/hs-admin/load-styles")
+        hs_login(&page)
     };
     for (query, status) in [
         ("action=lostpassword", StatusCode::OK),
@@ -982,9 +981,7 @@ async fn logging_out_asks_without_a_nonce_and_ends_the_session_with_one() {
         .find(|l| l.starts_with("GET\taction=logout&redirect_to=%2Fx%22\t"))
         .unwrap();
     let php = String::from_utf8(unhex(line.rsplit('\t').next().unwrap())).unwrap();
-    let expected = php
-        .replace("/wp-login.php", "/hs-login")
-        .replace("%nonce:log-out%", &logout_nonce(&asked.body));
+    let expected = hs_login(&php).replace("%nonce:log-out%", &logout_nonce(&asked.body));
     assert_eq!(asked.body, expected);
     // A visitor with their own nonce logs out, which ends no session.
     let nonce = logout_nonce(&asked.body);

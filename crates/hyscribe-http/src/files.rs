@@ -3,12 +3,13 @@
 //! The embedded themes' and `wp-includes` files, with the
 //! `Last-Modified` they have in the pinned release, an `ETag` from their
 //! SHA-256, and conditional requests answered as Apache answers them.
+//! HyScribe's own files under `/hs-admin/` (ADR 0008) have an `ETag` only.
 
 use std::time::{Duration, UNIX_EPOCH};
 
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use hyscribe_assets::{release_file, wp_admin, wp_includes};
+use hyscribe_assets::{hyscribe_file, release_file, wp_admin, wp_includes};
 use hyscribe_render::date::days_from_civil;
 use hyscribe_render::theme::theme_file;
 
@@ -18,6 +19,16 @@ const THEMES: &str = "wp-content/themes/";
 /// `now`.
 pub(crate) fn static_file(path: &str, headers: &HeaderMap, now: u64) -> Option<Response> {
     let path = path.strip_prefix('/').unwrap_or(path);
+    if let Some((content_type, bytes, sha)) = path.strip_prefix("hs-admin/").and_then(hyscribe_file)
+    {
+        let etag = format!("\"{sha}\"");
+        return Some(conditional(
+            headers,
+            (content_type, bytes),
+            (None, etag),
+            now,
+        ));
+    }
     let (content_type, bytes) = path
         .strip_prefix(THEMES)
         .and_then(|theme| theme.split_once('/'))
@@ -35,18 +46,18 @@ pub(crate) fn static_file(path: &str, headers: &HeaderMap, now: u64) -> Option<R
     Some(conditional(
         headers,
         (content_type, bytes),
-        (modified, etag),
+        (Some(modified), etag),
         now,
     ))
 }
 
 /// A file of `content_type` (none if empty) last modified at Unix time
-/// `modified` with the entity tag `etag`, answering `headers`'
+/// `modified`, if known, with the entity tag `etag`, answering `headers`'
 /// preconditions at `now`.
 pub(crate) fn conditional(
     headers: &HeaderMap,
     (content_type, bytes): (&str, impl IntoResponse),
-    (modified, etag): (u64, String),
+    (modified, etag): (Option<u64>, String),
     now: u64,
 ) -> Response {
     let status = precondition(headers, &etag, modified, now);
@@ -60,12 +71,17 @@ pub(crate) fn conditional(
         Some(kind) => set.insert(header::CONTENT_TYPE, kind),
         None => set.remove(header::CONTENT_TYPE),
     };
-    let last_modified = httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(modified));
-    let values = [(header::LAST_MODIFIED, last_modified), (header::ETAG, etag)];
-    for (name, value) in values
-        .into_iter()
-        .flat_map(|(name, value)| HeaderValue::try_from(value).map(|value| (name, value)))
-    {
+    let last_modified = modified
+        .map(|modified| httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(modified)));
+    let values = [
+        (header::LAST_MODIFIED, last_modified),
+        (header::ETAG, Some(etag)),
+    ];
+    for (name, value) in values.into_iter().flat_map(|(name, value)| {
+        value
+            .and_then(|value| HeaderValue::try_from(value).ok())
+            .map(|value| (name, value))
+    }) {
         set.insert(name, value);
     }
     response
@@ -74,16 +90,18 @@ pub(crate) fn conditional(
 /// Apache's `ap_meets_conditions()` for a GET or HEAD: 412 when `If-Match`
 /// or `If-Unmodified-Since` fails, 304 when `If-None-Match` or
 /// `If-Modified-Since` (a past date) matches and neither fails, else 200.
-fn precondition(headers: &HeaderMap, etag: &str, modified: u64, now: u64) -> StatusCode {
+/// Without a modification time, the dates are not compared.
+fn precondition(headers: &HeaderMap, etag: &str, modified: Option<u64>, now: u64) -> StatusCode {
     let value = |name| headers.get(name).and_then(|v| v.to_str().ok());
-    let modified = modified as i64;
+    let date = |name| value(name).filter(|_| modified.is_some());
+    let modified = modified.unwrap_or_default() as i64;
     let listed = |list: &str, weak: bool| {
         list.split(',')
             .map(str::trim)
             .any(|tag| tag == "*" || tag == etag || weak && tag.strip_prefix("W/") == Some(etag))
     };
     let failed = value(header::IF_MATCH).is_some_and(|list| !listed(list, false))
-        || value(header::IF_UNMODIFIED_SINCE)
+        || date(header::IF_UNMODIFIED_SINCE)
             .and_then(http_date)
             .is_some_and(|since| since < modified);
     if failed {
@@ -92,7 +110,7 @@ fn precondition(headers: &HeaderMap, etag: &str, modified: u64, now: u64) -> Sta
     let answers = [
         value(header::IF_NONE_MATCH).map(|list| listed(list, true)),
         // A date Apache cannot read counts as one before the file's.
-        value(header::IF_MODIFIED_SINCE).map(|since| {
+        date(header::IF_MODIFIED_SINCE).map(|since| {
             http_date(since).is_some_and(|since| since >= modified && since <= now as i64)
         }),
     ];

@@ -57,7 +57,7 @@ pub(crate) fn serve(site: &Site, path: &str, headers: &HeaderMap, now: u64) -> O
     let name = decoded.rsplit('/').next().unwrap_or_default();
     let kind = shown(name);
     let response = (kind.unwrap_or("application/octet-stream"), bytes);
-    let mut response = crate::files::conditional(headers, response, (modified, etag), now);
+    let mut response = crate::files::conditional(headers, response, (Some(modified), etag), now);
     if kind.is_none() {
         let download = HeaderValue::from_static("attachment");
         response

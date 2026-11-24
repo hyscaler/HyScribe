@@ -39,7 +39,8 @@ add_filter(
 	}
 );
 
-// A text mark in place of the WordPress logo, linked to the site.
+// The mark in place of the WordPress logo, linked to the site with its name
+// as the link's text.
 add_filter(
 	'login_headertext',
 	function () {
@@ -55,19 +56,52 @@ add_filter(
 add_action(
 	'login_head',
 	function () {
-		echo "<style>.login h1 a{background-image:none;width:auto;height:auto;text-indent:0;font-size:32px;font-weight:600;color:#382e27;}</style>\n";
+		printf(
+			"<style>.login h1 a{background-image:url(%s);}</style>\n",
+			esc_url( admin_url( 'images/hyscribe-mark.svg' ) )
+		);
 	},
 	100
 );
 
-// No WordPress logo menu in the toolbar.
+// The small mark as the icon of admin and login pages when the site has no
+// Site Icon, after where wp_site_icon() prints one.
+function hyscribe_look_icon() {
+	if ( ! has_site_icon() ) {
+		printf( "<link rel=\"icon\" href=\"%s\" type=\"image/svg+xml\" />\n", esc_url( admin_url( 'images/hyscribe-mark-small.svg' ) ) );
+	}
+}
+add_action( 'admin_head', 'hyscribe_look_icon' );
+add_action( 'login_head', 'hyscribe_look_icon', 99 );
+
+// A HyScribe item with the small mark in place of the WordPress logo menu: a
+// link to the Dashboard. The mark is the icon's :before, as the admin bar's
+// stylesheet takes every icon's own background image away.
 add_action(
 	'admin_bar_menu',
 	function ( $bar ) {
 		$bar->remove_node( 'wp-logo' );
+		$bar->add_node(
+			array(
+				'id'    => 'hyscribe',
+				'title' => '<span class="ab-icon" aria-hidden="true"></span><span class="screen-reader-text">HyScribe Dashboard</span>',
+				'href'  => admin_url(),
+			)
+		);
 	},
 	11
 );
+function hyscribe_look_bar_style() {
+	wp_add_inline_style(
+		'admin-bar',
+		sprintf(
+			'#wpadminbar #wp-admin-bar-hyscribe>.ab-item{padding:0 1px 0 7px}#wpadminbar #wp-admin-bar-hyscribe .ab-icon:before{content:"";display:block;width:20px;height:20px;background:url(%s) center/20px no-repeat}@media screen and (max-width:782px){#wpadminbar li#wp-admin-bar-hyscribe{display:block}#wpadminbar #wp-admin-bar-hyscribe>.ab-item{padding:0 13px}#wpadminbar #wp-admin-bar-hyscribe .ab-icon:before{width:26px;height:26px;margin-top:10px;background-size:26px}}@media screen and (max-width:600px){#wpadminbar li#wp-admin-bar-hyscribe{display:none}}',
+			esc_url( admin_url( 'images/hyscribe-mark-small.svg' ) )
+		)
+	);
+}
+add_action( 'admin_enqueue_scripts', 'hyscribe_look_bar_style' );
+add_action( 'wp_enqueue_scripts', 'hyscribe_look_bar_style' );
 
 // Core's own strings (the default text domain) on admin and login screens
 // name HyScribe; content, themes and plugins never pass through here.

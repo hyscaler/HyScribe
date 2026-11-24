@@ -3,7 +3,7 @@
 //! `WP_List_Table`: the parts every admin list shares.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
-use hyscribe_phpser::{Value, add_query_arg, is_empty_string, remove_query_arg};
+use hyscribe_phpser::{Value, add_query_arg, is_empty_string, remove_query_arg, stripslashes};
 use hyscribe_render::date::MONTHS;
 use hyscribe_render::number_format;
 
@@ -102,6 +102,13 @@ pub fn bulk_actions(which: &str, actions: &[(&str, &str)]) -> String {
         "</select>\n<input type=\"submit\" name=\"bulk_action\" id=\"doaction{two}\" class=\"button action button-compact\" value=\"Apply\"  />\n"
     ));
     out
+}
+
+/// Where a list's own form, sent back with its nonce and referer and no
+/// action chosen, goes: the slashed `request_uri` without them.
+pub fn without_referer(request_uri: &str) -> String {
+    let uri = stripslashes(request_uri.as_bytes());
+    text(&remove_query_arg(&[b"_wp_http_referer", b"_wpnonce"], &uri))
 }
 
 /// `get_pagenum()`: `absint()` of `paged`, the first page for none.

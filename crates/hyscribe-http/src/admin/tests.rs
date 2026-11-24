@@ -1593,11 +1593,47 @@ fn the_terms_list_reads_its_taxonomy() {
         "/hs-admin/edit-tags",
         "/hs-admin/edit-tags?taxonomy=nav_menu",
         "/hs-admin/edit-tags?taxonomy=category&x=1",
+        "/hs-admin/edit-tags?taxonomy=category&post_type=page",
         "/hs-admin/edit-tags?taxonomy=category&s[]=x",
         "/hs-admin/edit-tags?taxonomy[]=category",
         "/hs-admin/edit-tags?taxonomy=category&paged=%FF",
     ] {
         assert!(taxonomy(refused).is_none(), "{refused}");
+    }
+}
+
+/// The comments and users lists read the idle fields of their own forms and
+/// the referer that sends them back; a chosen action is not theirs to read.
+#[test]
+fn the_lists_read_their_forms_idle_fields() {
+    let sent = |query| comment_args(query).map(|args| args.sent_back);
+    assert_eq!(
+        sent(
+            "s=a&action=-1&action2=-1&_wpnonce=n&filter_action=Filter&_total=1&_per_page=20&_page=1&pagegen_timestamp=t&_ajax_fetch_list_nonce=n"
+        ),
+        Some(false)
+    );
+    assert_eq!(
+        sent("_wp_http_referer=%2Fhs-admin%2Fedit-comments"),
+        Some(true)
+    );
+    assert_eq!(sent("_wp_http_referer=0"), Some(false));
+    let sent = |query| user_args(query).map(|args| args.sent_back);
+    assert_eq!(
+        sent("s=a&action=-1&action2=-1&_wpnonce=n&new_role&new_role2="),
+        Some(false)
+    );
+    assert_eq!(sent("_wp_http_referer=%2Fhs-admin%2Fusers"), Some(true));
+    assert_eq!(sent("_wp_http_referer="), Some(false));
+    for refused in [
+        "action=trash",
+        "action2=trash",
+        "action[]=-1",
+        "changeit=Change",
+        "_wp_http_referer[]=x",
+    ] {
+        assert!(comment_args(refused).is_none(), "{refused}");
+        assert!(user_args(refused).is_none(), "{refused}");
     }
 }
 
@@ -1914,6 +1950,9 @@ async fn the_posts_list_reads_its_arguments() {
             "/hs-admin/edit?order=%FF",
             "/hs-admin/edit?author=%FF",
             "/hs-admin/edit?trashed=%FF",
+            "/hs-admin/edit?action=trash",
+            "/hs-admin/edit?action2=trash",
+            "/hs-admin/edit?_wp_http_referer[]=x",
         ] {
             assert_eq!(args(refused), None, "{refused}");
         }
@@ -2973,5 +3012,6 @@ async fn the_site_health_info_tab() {
 
 mod clean_urls;
 mod comment_saves;
+mod list_search;
 mod passwords;
 mod revisions;

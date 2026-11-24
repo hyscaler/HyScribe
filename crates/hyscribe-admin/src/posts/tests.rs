@@ -724,3 +724,44 @@ fn previews_take_the_admin_s_scheme() {
     let link = preview_link(&site, &site.permalink(&draft), &[]);
     assert_eq!(link, b"https://127.0.0.1:8081/?p=301&preview=true");
 }
+
+/// A list's own form sent back goes to the list without its nonce and
+/// referer, and an author is refused the pages list as the screen refuses.
+#[test]
+fn a_form_sent_back_is_redirected() {
+    let browser = crate::admin_bar::Browser {
+        user_agent: b"Mozilla/5.0 (X11; Linux x86_64)",
+        mobile_hint: None,
+    };
+    let uri = "/hs-admin/edit?s=a\\'b&_wpnonce=n&_wp_http_referer=%2Fhs-admin%2Fedit&action=-1";
+    let args = ListArgs {
+        sent_back: true,
+        ..ListArgs::default()
+    };
+    let to = redirect(edit(
+        &Role("editor"),
+        &args,
+        &format!("{}{uri}", crate::tests::SITE),
+        crate::tests::SITE,
+        uri,
+        &browser,
+    ));
+    assert_eq!(to, "/hs-admin/edit?s=a%27b&action=-1");
+    let pages = ListArgs {
+        post_type: PostType::named(b"page").unwrap(),
+        sent_back: true,
+        ..ListArgs::default()
+    };
+    let answer = edit(
+        &Role("author"),
+        &pages,
+        &format!("{}{uri}", crate::tests::SITE),
+        crate::tests::SITE,
+        uri,
+        &browser,
+    );
+    let Some(Answer::Denied(message)) = answer else {
+        panic!("{answer:?}");
+    };
+    assert!(message.contains("not allowed to edit posts in this post type"));
+}

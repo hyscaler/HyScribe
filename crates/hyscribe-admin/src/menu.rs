@@ -320,8 +320,9 @@ fn add_submenu_page(menu: &mut Menu, user: &dyn MenuUser, parent: &str, page: Pl
     let position = page
         .position
         .map(|position| position.max(0).unsigned_abs() as usize);
+    // A position past the last entry adds it last, as PHP appends it.
     menu.submenu
-        .put(parent, position.filter(|at| *at < count), new);
+        .put(parent, position.map(|at| at.min(count)), new);
     let hookname = menu.hookname(&page.slug, parent);
     menu.actions.push(hookname.clone());
     menu.registered.push(hookname);

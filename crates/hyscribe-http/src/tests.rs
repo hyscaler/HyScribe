@@ -3581,6 +3581,19 @@ async fn edited_site_pages_match_php() {
     assert!(site.is_err());
 }
 
+/// A site not at the oracle's address: the 404 page's bundled theme image
+/// is under the site's own URL, not the exported one.
+#[tokio::test(flavor = "multi_thread")]
+async fn bundled_pattern_urls_follow_the_site() {
+    let own = "http://127.0.0.1:8180";
+    let site = site_at(Some(own), Some(own)).await;
+    let reply = request(&site, "GET", "/?p=999999").await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    let image = format!("{own}/wp-content/themes/twentytwentyfive/assets/images/404-image.webp");
+    assert!(reply.body.contains(&image), "{}", reply.body);
+    assert!(!reply.body.contains("127.0.0.1:8081"));
+}
+
 /// The pages of `reference/pages/folder.list` for a home URL in a folder,
 /// with plain and pretty permalinks: the canonical redirects keep the
 /// folder once, in `wordpress_saves`.
@@ -3600,6 +3613,13 @@ async fn folder_pages_match_php() {
         0
     );
     assert_eq!(golden.lines().count(), 10);
+    // The canonical address itself is served, as PHP does (its body names
+    // the oracle's root content URL, so it is not in the golden).
+    let home = "http://127.0.0.1:8180/blog";
+    let site = site_at(Some(home), Some(home)).await;
+    assert_eq!(request(&site, "GET", "/blog/").await.status, StatusCode::OK);
+    let reply = request(&site, "GET", "/blog").await;
+    assert_eq!(reply.headers["location"], format!("{home}/"));
 }
 
 /// The pages of `reference/pages/comments.list` over the comments of

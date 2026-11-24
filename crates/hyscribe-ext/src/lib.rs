@@ -35,7 +35,8 @@ mod site;
 mod value;
 
 pub use extension::{
-    Block, Extension, Extensions, Hook, MetaKey, Package, Route, Taxonomy, TemplateFile,
+    AdminPage, Block, Extension, Extensions, Hook, MetaKey, Package, Route, Setting, Taxonomy,
+    TemplateFile,
 };
 pub use grants::Grants;
 pub use hierarchy::locate;

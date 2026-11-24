@@ -125,10 +125,26 @@ function hyscribe_look_bar_style() {
 add_action( 'admin_enqueue_scripts', 'hyscribe_look_bar_style' );
 add_action( 'wp_enqueue_scripts', 'hyscribe_look_bar_style' );
 
+// The block editors' publish panel draws the WordPress logo as an svg of class
+// components-site-icon when the site has no Site Icon (an img of the icon
+// otherwise): the mark is painted over it and the logo's path hidden, so the
+// bundle stays as released. Printed after the bar's style, as the admin bar's.
+add_action(
+	'admin_enqueue_scripts',
+	function () {
+		if ( get_current_screen()->is_block_editor() ) {
+			wp_add_inline_style(
+				'admin-bar',
+				sprintf( 'svg.components-site-icon{background:url(%s) center/36px no-repeat}svg.components-site-icon path{display:none}', esc_url( admin_url( 'images/hyscribe-mark.svg' ) ) )
+			);
+		}
+	}
+);
+
 // Core's own strings (the default text domain) on admin and login screens
 // name HyScribe; content, themes and plugins never pass through here.
 const HYSCRIBE_LOOK_TEXT = array(
-	'Thank you for creating with <a href="%s">WordPress</a>.' => 'Thank you for creating with HyScribe.',
+	'Thank you for creating with <a href="%s">WordPress</a>.' => 'Thank you for creating with HyScribe. HyScribe is developed and supported by <a href="https://hyscaler.com">HyScaler</a>.',
 	'WordPress %1$s running %2$s theme.' => 'Running %2$s theme.',
 	'<strong>At a Glance</strong> &mdash; Displays a summary of the content on your site and identifies which theme and version of WordPress you are using.' => '<strong>At a Glance</strong> &mdash; Displays a summary of the content on your site and identifies which theme you are using.',
 	'WordPress Events and News' => 'Events and News',

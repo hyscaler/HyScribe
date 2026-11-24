@@ -80,6 +80,7 @@ pub(crate) fn tool_page(site: &dyn PageSite, tool: &Tool, request: &Request) -> 
             taxonomy: "",
             parent_file: None,
             submenu_file: None,
+            plugin_page: None,
         },
         id: tool.file.trim_end_matches(".php"),
         title: tool.title,

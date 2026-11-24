@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The admin menu: `wp-admin/menu.php`, `wp-admin/includes/menu.php` and
-//! `_wp_menu_output()`, for a single site with a block theme and no plugins.
-//! Links drop `.php`, as hs-admin's screens do (ADR 0008).
+//! `_wp_menu_output()`, for a single site with a block theme and the
+//! extensions' admin pages (SDK 0.4). Links drop `.php`, as hs-admin's
+//! screens do (ADR 0008).
 
-use hyscribe_kses::esc_attr;
-use hyscribe_phpser::Value;
-use hyscribe_render::formatting::wptexturize;
+use hyscribe_kses::{esc_attr, esc_url};
+use hyscribe_phpser::{Value, add_query_arg, md5};
+use hyscribe_render::formatting::{sanitize_title, wptexturize};
 use hyscribe_render::number_format;
 
 /// What the menu asks of the user and the site.
@@ -17,6 +18,28 @@ pub trait MenuUser {
     fn moderated_comments(&self) -> u64;
     /// `get_transient( $name )`, as stored.
     fn transient(&self, name: &str) -> Option<Vec<u8>>;
+    /// The active extensions' admin pages, in the order added.
+    fn plugin_pages(&self) -> Vec<PluginPage>;
+}
+
+/// An extension's admin page (SDK 0.4), as `add_menu_page()` or
+/// `add_submenu_page()` added it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PluginPage {
+    /// The parent's file or slug; none for a top level page.
+    pub parent: Option<String>,
+    /// `$page_title`, markup.
+    pub page_title: String,
+    /// `$menu_title`, markup.
+    pub menu_title: String,
+    /// `$capability`.
+    pub capability: String,
+    /// `$menu_slug`.
+    pub slug: String,
+    /// A top level page's icon: a `dashicons-*` class, or empty.
+    pub icon: String,
+    /// `$position`.
+    pub position: Option<i32>,
 }
 
 /// The Site Health count: the critical issues of the last cached check,
@@ -55,6 +78,8 @@ pub struct Screen<'a> {
     pub parent_file: Option<&'a str>,
     /// `$submenu_file`, if the screen sets one.
     pub submenu_file: Option<&'a str>,
+    /// `$plugin_page`: the `page` an extension's admin page is asked by.
+    pub plugin_page: Option<&'a str>,
 }
 
 /// A `$menu` entry: title, capability, slug, classes, ID and icon.
@@ -63,8 +88,8 @@ struct Item {
     cap: String,
     slug: String,
     classes: String,
-    id: &'static str,
-    icon: &'static str,
+    id: String,
+    icon: String,
 }
 
 /// A `$submenu` entry: title, capability, slug and classes.
@@ -75,21 +100,14 @@ struct Sub {
     class: &'static str,
 }
 
-fn item(
-    title: &str,
-    cap: &str,
-    slug: &str,
-    classes: &str,
-    id: &'static str,
-    icon: &'static str,
-) -> Item {
+fn item(title: &str, cap: &str, slug: &str, classes: &str, id: &str, icon: &str) -> Item {
     Item {
         title: title.into(),
         cap: cap.into(),
         slug: slug.into(),
         classes: classes.into(),
-        id,
-        icon,
+        id: id.into(),
+        icon: icon.into(),
     }
 }
 
@@ -112,8 +130,13 @@ struct Submenu(Vec<(String, Vec<Sub>)>);
 
 impl Submenu {
     fn add(&mut self, parent: &str, entry: Sub) {
+        self.put(parent, None, entry);
+    }
+
+    /// Adds `entry` under `parent`, at `at` among its entries or last.
+    fn put(&mut self, parent: &str, at: Option<usize>, entry: Sub) {
         match self.0.iter_mut().find(|(p, _)| p == parent) {
-            Some((_, entries)) => entries.push(entry),
+            Some((_, entries)) => entries.insert(at.unwrap_or(entries.len()), entry),
             None => self.0.push((parent.into(), vec![entry])),
         }
     }
@@ -134,13 +157,24 @@ impl Submenu {
     }
 }
 
-/// What the menu is built into, with what the user was denied. The real
-/// parents PHP also keeps only matter to plugin pages.
+/// What the menu is built into, with what the user was denied, the hook
+/// names of the menus (`$admin_page_hooks`), the parents that moved
+/// (`$_wp_real_parent_file`) and the extensions' pages: those registered
+/// (`$_registered_pages`) and those with a callback for the user.
+#[derive(Default)]
 struct Menu {
-    items: Vec<(i64, Item)>,
+    items: Vec<(f64, Item)>,
     submenu: Submenu,
     menu_nopriv: Vec<String>,
     submenu_nopriv: Vec<(String, String)>,
+    page_hooks: Vec<(String, String)>,
+    real_parents: Vec<(String, String)>,
+    registered: Vec<String>,
+    actions: Vec<String>,
+    /// The screen's parent, which a page asked under `admin.php` takes.
+    parent: String,
+    /// `$_parent_pages`: each page added and its parent, none at the top.
+    parent_pages: Vec<(String, Option<String>)>,
 }
 
 impl Menu {
@@ -149,6 +183,151 @@ impl Menu {
             .iter()
             .any(|(p, s)| p == parent && s == page)
     }
+
+    fn page_hook(&self, slug: &str) -> Option<&str> {
+        let found = self.page_hooks.iter().find(|(menu, _)| menu == slug);
+        found.map(|(_, hook)| hook.as_str())
+    }
+
+    /// `$_wp_real_parent_file[ $parent ] ?? $parent`.
+    fn real_parent<'a>(&'a self, parent: &'a str) -> &'a str {
+        let found = self.real_parents.iter().find(|(old, _)| old == parent);
+        found.map_or(parent, |(_, new)| new.as_str())
+    }
+
+    /// `get_plugin_page_hookname( $plugin_page, $parent_page )`: under no
+    /// parent or `admin.php`, the screen's parent's type.
+    fn hookname(&self, plugin_page: &str, parent_page: &str) -> String {
+        let parent = match parent_page {
+            "" | "admin.php" => &self.parent,
+            parent => self.real_parent(parent),
+        };
+        let page_type = match self.page_hook(plugin_page) {
+            Some(_) => "toplevel",
+            None => self.page_hook(parent).unwrap_or("admin"),
+        };
+        format!("{page_type}_page_{}", plugin_page.replace(".php", ""))
+    }
+
+    /// `get_plugin_page_hook()`: the hook name, when a page's callback is on it.
+    fn plugin_hook(&self, plugin_page: &str, parent_page: &str) -> Option<String> {
+        let hook = self.hookname(plugin_page, parent_page);
+        self.actions.contains(&hook).then_some(hook)
+    }
+}
+
+/// `$admin_page_hooks` of the core menus: a menu's file, or the post type
+/// it lists, as `sanitize_title()` makes it, under its older names.
+fn core_page_hooks(items: &[(f64, Item)]) -> Vec<(String, String)> {
+    let compat = [
+        ("index", "dashboard"),
+        ("edit", "posts"),
+        ("post", "posts"),
+        ("upload", "media"),
+        ("link-manager", "links"),
+        ("edit-pages", "pages"),
+        ("page", "pages"),
+        ("edit-comments", "comments"),
+        ("options-general", "settings"),
+        ("themes", "appearance"),
+    ];
+    let mut hooks = Vec::new();
+    for (_, item) in items {
+        let (file, query) = item.slug.split_once('?').unwrap_or((&item.slug, ""));
+        let name = query.strip_prefix("post_type=").unwrap_or(file);
+        let name = name.strip_suffix(".php").unwrap_or(name);
+        let name = String::from_utf8_lossy(&sanitize_title(name.as_bytes())).into_owned();
+        let found = compat.iter().find(|(old, _)| *old == name);
+        hooks.push((
+            item.slug.clone(),
+            found.map_or(name, |(_, new)| new.to_string()),
+        ));
+    }
+    hooks
+}
+
+/// `add_menu_page()` and `add_submenu_page()` of the extensions' pages, run
+/// where `admin_menu` fires.
+fn add_plugin_pages(menu: &mut Menu, user: &dyn MenuUser) {
+    for page in user.plugin_pages() {
+        match page.parent.as_deref() {
+            None => add_menu_page(menu, user, page),
+            Some(parent) => {
+                let parent = menu.real_parent(parent).to_string();
+                add_submenu_page(menu, user, &parent, page);
+            }
+        }
+    }
+}
+
+fn add_menu_page(menu: &mut Menu, user: &dyn MenuUser, page: PluginPage) {
+    let title = sanitize_title(page.menu_title.as_bytes());
+    let title = String::from_utf8_lossy(&title).into_owned();
+    menu.page_hooks.push((page.slug.clone(), title));
+    let hookname = menu.hookname(&page.slug, "");
+    if user.can(&page.capability) {
+        menu.actions.push(hookname.clone());
+    }
+    let (icon, icon_class) = match page.icon.as_str() {
+        "" => ("dashicons-admin-generic", "menu-icon-generic "),
+        icon => (icon, ""),
+    };
+    let classes = format!("menu-top {icon_class}{hookname}");
+    let new = item(
+        &page.menu_title,
+        &page.capability,
+        &page.slug,
+        &classes,
+        &hookname,
+        icon,
+    );
+    let integers = menu
+        .items
+        .iter()
+        .map(|(key, _)| *key)
+        .filter(|key| key.fract() == 0.0);
+    // `$menu[] = ...`: past the largest integer key.
+    let next = integers.max_by(f64::total_cmp).map_or(0.0, |max| max + 1.0);
+    let key = match page.position.map(f64::from) {
+        None => next,
+        Some(position) if menu.items.iter().any(|(key, _)| *key == position) => {
+            // `base_convert( substr( md5( $menu_slug . $menu_title ), -4 ), 16, 10 ) * 0.00001`.
+            let hash = md5(format!("{}{}", page.slug, page.menu_title).as_bytes());
+            let tail = hash.get(hash.len().saturating_sub(4)..).unwrap_or_default();
+            let tail = u16::from_str_radix(tail, 16).unwrap_or_default();
+            position + f64::from(tail) * 0.00001
+        }
+        Some(position) => position,
+    };
+    menu.items.push((key, new));
+    menu.registered.push(hookname);
+    menu.parent_pages.push((page.slug, None));
+}
+
+fn add_submenu_page(menu: &mut Menu, user: &dyn MenuUser, parent: &str, page: PluginPage) {
+    if !user.can(&page.capability) {
+        menu.submenu_nopriv.push((parent.into(), page.slug));
+        return;
+    }
+    if menu.submenu.get(parent).is_empty() && page.slug != parent {
+        let found = menu.items.iter().find(|(_, item)| item.slug == parent);
+        if let Some((_, top)) = found.filter(|(_, top)| user.can(&top.cap)) {
+            let first = sub(&top.title, &top.cap, &top.slug);
+            menu.submenu.add(parent, first);
+        }
+    }
+    let new = sub(&page.menu_title, &page.capability, &page.slug);
+    let count = menu.submenu.get(parent).len();
+    let position = page
+        .position
+        .map(|position| position.max(0).unsigned_abs() as usize);
+    // A position past the last entry adds it last, as PHP appends it.
+    menu.submenu
+        .put(parent, position.map(|at| at.min(count)), new);
+    let hookname = menu.hookname(&page.slug, parent);
+    menu.actions.push(hookname.clone());
+    menu.registered.push(hookname);
+    menu.parent_pages.push((page.slug, Some(parent.into())));
 }
 
 /// The active theme as the Appearance menu shows it.
@@ -468,11 +647,21 @@ fn build(user: &dyn MenuUser, look: Look) -> Menu {
         sub("Privacy", "manage_privacy_options", "options-privacy.php"),
     );
     items.push((99, separator("separator-last")));
+    let items: Vec<(f64, Item)> = items
+        .into_iter()
+        .map(|(key, item)| (key as f64, item))
+        .collect();
     Menu {
+        page_hooks: core_page_hooks(&items),
         items,
         submenu,
         menu_nopriv: Vec::new(),
         submenu_nopriv: Vec::new(),
+        real_parents: Vec::new(),
+        registered: Vec::new(),
+        actions: Vec::new(),
+        parent: String::new(),
+        parent_pages: Vec::new(),
     }
 }
 
@@ -502,7 +691,9 @@ fn prune(menu: &mut Menu, user: &dyn MenuUser) {
         for entry in menu.submenu.take(&old) {
             menu.submenu.add(&first, entry);
         }
+        menu.real_parents.push((old, first));
     }
+    add_plugin_pages(menu, user);
     // The `admin_menu` hooks add the file editors, which nobody here may use.
     for slug in ["theme-editor.php", "plugin-editor.php"] {
         menu.submenu_nopriv.push(("tools.php".into(), slug.into()));
@@ -521,9 +712,9 @@ fn prune(menu: &mut Menu, user: &dyn MenuUser) {
         }
         kept.push((key, entry));
     }
-    kept.sort_by_key(|(key, _)| *key);
+    kept.sort_by(|(a, _), (b, _)| a.total_cmp(b));
     // No separator after another, and none last.
-    let mut tidy: Vec<(i64, Item)> = Vec::new();
+    let mut tidy: Vec<(f64, Item)> = Vec::new();
     for (key, entry) in kept {
         let separator = entry.classes.contains("wp-menu-separator");
         let after_separator = tidy
@@ -537,9 +728,22 @@ fn prune(menu: &mut Menu, user: &dyn MenuUser) {
     menu.items = tidy;
 }
 
-/// `get_admin_page_parent()` without plugin pages: the parent file of the
-/// screen, which it also sets as `$parent_file`.
+/// `get_admin_page_parent()`: the parent file of the screen, which it also
+/// sets as `$parent_file`.
 fn admin_page_parent(menu: &Menu, screen: &Screen, parent_file: &mut String) -> String {
+    if let Some(plugin_page) = screen.plugin_page {
+        let top = menu.items.iter().any(|(_, item)| item.slug == plugin_page);
+        if screen.pagenow == "admin.php"
+            && (top || menu.menu_nopriv.iter().any(|m| m == plugin_page))
+        {
+            *parent_file = plugin_page.to_string();
+            return menu.real_parent(plugin_page).to_string();
+        }
+        if menu.submenu_denied(screen.pagenow, plugin_page) {
+            *parent_file = screen.pagenow.to_string();
+            return menu.real_parent(screen.pagenow).to_string();
+        }
+    }
     for (parent, entries) in &menu.submenu.0 {
         for entry in entries {
             let typed = !screen.typenow.is_empty()
@@ -547,7 +751,8 @@ fn admin_page_parent(menu: &Menu, screen: &Screen, parent_file: &mut String) -> 
             let plain = screen.typenow.is_empty()
                 && screen.pagenow == entry.slug
                 && (parent_file.is_empty() || !parent_file.contains('?'));
-            if typed || plain {
+            let plugin = screen.plugin_page == Some(entry.slug.as_str());
+            if typed || plain || plugin {
                 *parent_file = parent.to_string();
                 return parent.to_string();
             }
@@ -556,19 +761,36 @@ fn admin_page_parent(menu: &Menu, screen: &Screen, parent_file: &mut String) -> 
     String::new()
 }
 
-/// `user_can_access_admin_page()` without plugin pages.
+/// `user_can_access_admin_page()`.
 fn can_access(menu: &Menu, user: &dyn MenuUser, screen: &Screen, parent_file: &mut String) -> bool {
     let parent = admin_page_parent(menu, screen, parent_file);
     let page = screen.pagenow;
-    if menu.submenu_denied(&parent, page) {
+    let asked = screen.plugin_page.unwrap_or(page);
+    if menu.submenu_denied(&parent, asked) {
+        return false;
+    }
+    let registered = |plugin_page| {
+        menu.registered
+            .contains(&menu.hookname(plugin_page, &parent))
+    };
+    if screen
+        .plugin_page
+        .is_some_and(|plugin_page| !registered(plugin_page))
+    {
         return false;
     }
     if parent.is_empty() {
-        let denied = menu.menu_nopriv.iter().any(|m| m == page)
-            || menu.submenu_nopriv.iter().any(|(_, s)| s == page);
-        return !denied;
+        let denied = |name: &str| {
+            menu.menu_nopriv.iter().any(|m| m == name)
+                || menu.submenu_nopriv.iter().any(|(_, s)| s == name)
+        };
+        return !(denied(page) || screen.plugin_page.is_some_and(denied));
     }
-    if let Some(entry) = menu.submenu.get(&parent).iter().find(|e| e.slug == page) {
+    if screen.plugin_page == Some(parent.as_str()) && menu.menu_nopriv.contains(&parent) {
+        return false;
+    }
+    let reached = |e: &&Sub| screen.plugin_page == Some(e.slug.as_str()) || e.slug == page;
+    if let Some(entry) = menu.submenu.get(&parent).iter().find(reached) {
         return user.can(&entry.cap);
     }
     menu.items
@@ -578,7 +800,7 @@ fn can_access(menu: &Menu, user: &dyn MenuUser, screen: &Screen, parent_file: &m
 }
 
 /// `add_menu_classes()`: the first and last of each group.
-fn menu_classes(items: &mut [(i64, Item)]) {
+fn menu_classes(items: &mut [(f64, Item)]) {
     let count = items.len();
     let mut added = Vec::new();
     let (mut first_item, mut last) = (false, None);
@@ -664,22 +886,44 @@ pub fn clean_links(html: &str) -> String {
 }
 
 /// `wp_enqueue_command_palette_assets()`'s menu commands: label, hs-admin
-/// URL and name of each menu item the user may reach and its submenu.
-pub fn commands(user: &dyn MenuUser, look: Look) -> Vec<(String, String, String)> {
+/// URL and name of each menu item the user may reach and its submenu; an
+/// extension's page by `menu_page_url()`, `admin_url` making its URL.
+pub fn commands(
+    user: &dyn MenuUser,
+    look: Look,
+    admin_url: &dyn Fn(&str) -> String,
+) -> Vec<(String, String, String)> {
     let mut menu = build(user, look);
     prune(&mut menu, user);
+    // Every slug the menu holds without `.php` is an extension's page.
+    let url = |slug: &str| {
+        if slug.contains(".php") {
+            return link(slug);
+        }
+        let found = menu.parent_pages.iter().find(|(page, _)| page == slug);
+        let top = |parent: &str| menu.parent_pages.iter().any(|(page, _)| page == parent);
+        let parent = found.and_then(|(_, parent)| parent.as_deref().filter(|parent| !top(parent)));
+        let path = match parent {
+            Some(parent) => {
+                let page = [(&b"page"[..], Some(slug.as_bytes()))];
+                String::from_utf8_lossy(&add_query_arg(&page, parent.as_bytes())).into_owned()
+            }
+            None => format!("admin.php?page={slug}"),
+        };
+        admin_url(&link(&path))
+    };
     let mut out = Vec::new();
     for (_, item) in &menu.items {
         if item.title.is_empty() || !user.can(&item.cap) {
             continue;
         }
         let label = root_text(&item.title);
-        out.push((label.clone(), link(&item.slug), item.slug.clone()));
+        out.push((label.clone(), url(&item.slug), item.slug.clone()));
         // Pruning left only titled entries the user may reach.
         for entry in menu.submenu.get(&item.slug) {
             out.push((
                 format!("{label} > {}", root_text(&entry.title)),
-                link(&entry.slug),
+                url(&entry.slug),
                 format!("{}-{}", item.slug, entry.slug),
             ));
         }
@@ -727,6 +971,8 @@ pub fn admin_menu(user: &dyn MenuUser, screen: &Screen, look: Look) -> Option<St
     // `user_can_access_admin_page()` runs from `admin.php`, before the
     // screen sets its parent file; one it leaves unset keeps what was found.
     let mut found = String::new();
+    menu.parent = admin_page_parent(&menu, screen, &mut found);
+    found.clear();
     if !can_access(&menu, user, screen, &mut found) {
         return None;
     }
@@ -740,6 +986,30 @@ pub fn admin_menu(user: &dyn MenuUser, screen: &Screen, look: Look) -> Option<St
     output(&menu, user, screen, &parent_file, &mut out);
     out.push_str("</ul>\n</div>\n</div>\n");
     Some(out)
+}
+
+/// `admin.php`'s `$page_hook` for the extension's page `plugin_page` asked
+/// under `pagenow`: `get_plugin_page_hook()` under it, then under the page
+/// itself; none when no callback is on either for `user`.
+pub fn plugin_page_hook(user: &dyn MenuUser, pagenow: &str, plugin_page: &str) -> Option<String> {
+    let mut menu = build(user, Look::Block);
+    prune(&mut menu, user);
+    let screen = Screen {
+        pagenow,
+        typenow: "",
+        taxonomy: "",
+        parent_file: None,
+        submenu_file: None,
+        plugin_page: Some(plugin_page),
+    };
+    menu.parent = admin_page_parent(&menu, &screen, &mut String::new());
+    let hook = menu.plugin_hook(plugin_page, pagenow);
+    hook.or_else(|| menu.plugin_hook(plugin_page, plugin_page))
+}
+
+/// `file_exists( $menu_file )` in `wp-admin`: a core screen's file.
+fn core_file(file: &str) -> bool {
+    file.ends_with(".php")
 }
 
 /// `_wp_menu_output()`.
@@ -806,7 +1076,17 @@ fn output(menu: &Menu, user: &dyn MenuUser, screen: &Screen, parent_file: &str, 
         if separator {
             out.push_str("<div class=\"separator\"></div>");
         } else if let Some(first_sub) = subs.first() {
-            out.push_str(&anchor(&first_sub.slug, &title));
+            if menu.plugin_hook(&first_sub.slug, &item.slug).is_some() {
+                let href = format!("admin.php?page={}", first_sub.slug);
+                out.push_str(anchor(&href, &title).trim_start_matches("\n\t"));
+            } else {
+                out.push_str(&anchor(&first_sub.slug, &title));
+            }
+        } else if menu.plugin_hook(&item.slug, "admin.php").is_some() {
+            out.push_str(&anchor(
+                &format!("admin.php?page={}", item.slug),
+                &item.title,
+            ));
         } else {
             // Pruning left only items without a submenu that the user may reach.
             out.push_str(&anchor(&item.slug, &item.title));
@@ -821,9 +1101,15 @@ fn output(menu: &Menu, user: &dyn MenuUser, screen: &Screen, parent_file: &str, 
                     class.push("wp-first-item");
                     first_sub = false;
                 }
-                let current = match screen.submenu_file {
-                    Some(file) => file == entry.slug,
-                    None => self_file == entry.slug,
+                let (menu_file, _) = item.slug.split_once('?').unwrap_or((&item.slug, ""));
+                let current = match (screen.submenu_file, screen.plugin_page) {
+                    (Some(file), _) => file == entry.slug,
+                    (None, None) => self_file == entry.slug,
+                    // `$self_type` is never a parent here: no typed screen has a page.
+                    (None, Some(plugin_page)) => {
+                        plugin_page == entry.slug
+                            && (item.slug == self_file || !core_file(menu_file))
+                    }
                 };
                 if current {
                     class.push("current");
@@ -839,9 +1125,22 @@ fn output(menu: &Menu, user: &dyn MenuUser, screen: &Screen, parent_file: &str, 
                 };
                 let title =
                     String::from_utf8_lossy(&wptexturize(entry.title.as_bytes(), &[])).into_owned();
+                let href = match menu.plugin_hook(&entry.slug, &item.slug) {
+                    Some(_) => {
+                        let file = if core_file(menu_file) {
+                            item.slug.as_str()
+                        } else {
+                            "admin.php"
+                        };
+                        let page = [(&b"page"[..], Some(entry.slug.as_bytes()))];
+                        let url = add_query_arg(&page, file.as_bytes());
+                        String::from_utf8_lossy(&esc_url(&url)).into_owned()
+                    }
+                    None => entry.slug.clone(),
+                };
                 out.push_str(&format!(
                     "<li{class}><a href='{}'{class}{aria}>{title}</a></li>",
-                    link(&entry.slug)
+                    link(&href)
                 ));
             }
             out.push_str("</ul>");

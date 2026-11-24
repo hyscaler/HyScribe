@@ -215,3 +215,20 @@ fn roles_are_asked_for_once() {
     };
     assert!(page.contains("id='user-601'") && !page.contains("id='user-602'"));
 }
+
+/// The list's own form sent back goes to the list without its nonce and
+/// referer.
+#[test]
+fn a_form_sent_back_is_redirected() {
+    let args = UserArgs {
+        sent_back: true,
+        ..UserArgs::default()
+    };
+    let uri = "/hs-admin/users?s=a&_wpnonce=n&_wp_http_referer=%2Fhs-admin%2Fusers";
+    let canonical = format!("{SITE}{uri}");
+    let request = crate::tests::request(&canonical, uri, &crate::tests::BROWSER);
+    assert_eq!(
+        users(&Role("administrator"), &args, &request),
+        Answer::Redirect("/hs-admin/users?s=a".into())
+    );
+}

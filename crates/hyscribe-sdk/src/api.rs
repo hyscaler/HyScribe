@@ -769,3 +769,185 @@ pub mod customize {
         wit::remove(kind, id)
     }
 }
+
+/// Admin pages and the settings API (SDK 0.4), registered in `init`: the
+/// host puts each page in hs-admin's menu where PHP puts it, checks its
+/// capability and prints what its callback answers. The page's own
+/// output is the extension's to escape; the markup the host answers
+/// (`settings_fields()`, `do_settings_sections()`'s) prints as it is.
+pub mod admin {
+    use alloc::string::String;
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use super::SdkError;
+    use crate::sys::admin as wit;
+    use crate::{Plugin, Value};
+
+    pub use crate::sys::admin::{Page, Piece};
+
+    /// `submit_button()`: its button with its defaults.
+    pub const SUBMIT_BUTTON: &str = "<p class=\"submit\"><input type=\"submit\" name=\"submit\" id=\"submit\" class=\"button button-primary\" value=\"Save Changes\"  /></p>";
+
+    /// `add_menu_page( $page_title, $menu_title, $capability, $menu_slug,
+    /// $callback, $icon_url, $position )`, `icon` a `dashicons-*` class or
+    /// empty.
+    pub fn add_menu_page(
+        page_title: &str,
+        menu_title: &str,
+        capability: &str,
+        menu_slug: &str,
+        callback: impl Into<u32>,
+        icon: &str,
+        position: Option<i32>,
+    ) -> Result<(), SdkError> {
+        let titles = (page_title, menu_title);
+        add(
+            None,
+            titles,
+            capability,
+            menu_slug,
+            callback.into(),
+            icon,
+            position,
+        )
+    }
+
+    /// `add_submenu_page( $parent_slug, $page_title, $menu_title,
+    /// $capability, $menu_slug, $callback, $position )`.
+    pub fn add_submenu_page(
+        parent_slug: &str,
+        page_title: &str,
+        menu_title: &str,
+        capability: &str,
+        menu_slug: &str,
+        callback: impl Into<u32>,
+        position: Option<i32>,
+    ) -> Result<(), SdkError> {
+        let titles = (page_title, menu_title);
+        let parent = Some(parent_slug);
+        add(
+            parent,
+            titles,
+            capability,
+            menu_slug,
+            callback.into(),
+            "",
+            position,
+        )
+    }
+
+    fn add(
+        parent: Option<&str>,
+        (page_title, menu_title): (&str, &str),
+        capability: &str,
+        slug: &str,
+        callback: u32,
+        icon: &str,
+        position: Option<i32>,
+    ) -> Result<(), SdkError> {
+        wit::add_page(&Page {
+            parent: parent.map(String::from),
+            page_title: page_title.into(),
+            menu_title: menu_title.into(),
+            capability: capability.into(),
+            slug: slug.into(),
+            callback,
+            icon: icon.into(),
+            position,
+        })
+    }
+
+    /// WordPress's pages under a core menu, each `add_submenu_page()` of
+    /// that menu's file.
+    macro_rules! under {
+        ($($name:ident => $parent:literal),* $(,)?) => {
+            $(
+                #[doc = concat!("`", stringify!($name), "()`: a page under `", $parent, "`.")]
+                pub fn $name(
+                    page_title: &str,
+                    menu_title: &str,
+                    capability: &str,
+                    menu_slug: &str,
+                    callback: impl Into<u32>,
+                ) -> Result<(), SdkError> {
+                    let titles = (page_title, menu_title);
+                    add(Some($parent), titles, capability, menu_slug, callback.into(), "", None)
+                }
+            )*
+        };
+    }
+
+    under! {
+        add_dashboard_page => "index.php",
+        add_posts_page => "edit.php",
+        add_media_page => "upload.php",
+        add_links_page => "link-manager.php",
+        add_pages_page => "edit.php?post_type=page",
+        add_comments_page => "edit-comments.php",
+        add_theme_page => "themes.php",
+        add_plugins_page => "plugins.php",
+        add_management_page => "tools.php",
+        add_options_page => "options-general.php",
+    }
+
+    /// `register_setting( $option_group, $option_name, $args )` for an
+    /// option the manifest grants: `args` as JSON (`type`, `label`,
+    /// `description`), `sanitize` its `sanitize_callback`, a filter on
+    /// `sanitize_option_{$option_name}` with one argument.
+    pub fn register_setting(
+        option_group: &str,
+        option_name: &str,
+        args: &str,
+        sanitize: Option<u32>,
+    ) -> Result<(), SdkError> {
+        wit::register_setting(option_group, option_name, args, sanitize)
+    }
+
+    /// `add_settings_section( $id, $title, $callback, $page )`: the
+    /// callback gets the section's `id` and `title` as JSON.
+    pub fn add_settings_section(
+        id: &str,
+        title: &str,
+        callback: Option<u32>,
+        page: &str,
+    ) -> Result<(), SdkError> {
+        wit::add_section(id, title, callback, page)
+    }
+
+    /// `add_settings_field( $id, $title, $callback, $page, $section, $args )`:
+    /// `args` as JSON, which the callback gets.
+    pub fn add_settings_field(
+        id: &str,
+        title: &str,
+        callback: impl Into<u32>,
+        page: &str,
+        section: &str,
+        args: &str,
+    ) -> Result<(), SdkError> {
+        wit::add_field(id, title, callback.into(), page, section, args)
+    }
+
+    /// `settings_fields( $option_group )`: the hidden fields its form sends.
+    pub fn settings_fields(option_group: &str) -> Result<Vec<u8>, SdkError> {
+        wit::settings_fields(option_group)
+    }
+
+    /// `do_settings_sections( $page )`: the host's markup, the plugin's
+    /// own section and field callbacks run here and what they answer
+    /// printed where PHP calls them.
+    pub fn do_settings_sections<P: Plugin>(page: &str) -> Vec<u8> {
+        let mut printed = Vec::new();
+        for piece in wit::sections(page) {
+            match piece {
+                Piece::Markup(markup) => printed.extend(markup),
+                Piece::Call((callback, arg)) => {
+                    if let Ok(Value::Text(text)) = P::invoke(callback, vec![Value::Json(arg)]) {
+                        printed.extend(text.into_bytes());
+                    }
+                }
+            }
+        }
+        printed
+    }
+}

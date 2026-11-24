@@ -24,6 +24,7 @@ fn screen(user: &Role, file: &str) -> (Screen<'static>, Vec<&'static str>) {
         taxonomy: "",
         parent_file: Some(parent_file).filter(|p: &&str| !p.is_empty()),
         submenu_file,
+        plugin_page: None,
     };
     match file {
         "" | "index.php" => (screen("index.php", "", "index.php", None), vec![]),
@@ -220,6 +221,9 @@ impl MenuUser for Caps {
         assert_eq!(name, "health-check-site-status-result");
         self.2.map(|json| json.as_bytes().to_vec())
     }
+    fn plugin_pages(&self) -> Vec<crate::menu::PluginPage> {
+        Vec::new()
+    }
 }
 
 fn dashboard() -> Screen<'static> {
@@ -229,6 +233,7 @@ fn dashboard() -> Screen<'static> {
         taxonomy: "",
         parent_file: Some("index.php"),
         submenu_file: None,
+        plugin_page: None,
     }
 }
 
@@ -310,6 +315,7 @@ fn a_denied_page_under_its_parent() {
         taxonomy: "",
         parent_file: Some("tools.php"),
         submenu_file: None,
+        plugin_page: None,
     };
     let user = Caps(&["read", "edit_posts"], 0, None);
     assert!(!can_access(&menu, &user, &screen, &mut String::new()));
@@ -326,6 +332,7 @@ fn screen_of(
         taxonomy: "",
         parent_file: Some(parent_file).filter(|p| !p.is_empty()),
         submenu_file: None,
+        plugin_page: None,
     }
 }
 
@@ -406,15 +413,14 @@ fn a_typed_screen_needs_its_menu_item() {
     let user = Caps(&["read"], 0, None);
     let menu = Menu {
         items: vec![
-            (1, item("Read", "read", "index.php", "x", "", "")),
-            (2, item("Things", "nope", "x.php", "x", "", "")),
+            (1.0, item("Read", "read", "index.php", "x", "", "")),
+            (2.0, item("Things", "nope", "x.php", "x", "", "")),
         ],
         submenu: Submenu(vec![(
             "x.php".into(),
             vec![sub("All", "read", "x.php?post_type=thing")],
         )]),
-        menu_nopriv: Vec::new(),
-        submenu_nopriv: Vec::new(),
+        ..Menu::default()
     };
     assert!(!can_access(
         &menu,
@@ -492,4 +498,133 @@ fn links_name_screens_without_php() {
     ] {
         assert_eq!(clean_links(html), clean, "{html}");
     }
+}
+
+/// A user with these capabilities and the active extensions' pages.
+struct Paged(&'static [&'static str], Vec<crate::menu::PluginPage>);
+
+impl MenuUser for Paged {
+    fn can(&self, cap: &str) -> bool {
+        self.0.contains(&cap)
+    }
+    fn moderated_comments(&self) -> u64 {
+        0
+    }
+    fn transient(&self, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+    fn plugin_pages(&self) -> Vec<crate::menu::PluginPage> {
+        self.1.clone()
+    }
+}
+
+fn plugin(
+    parent: Option<&str>,
+    cap: &str,
+    slug: &str,
+    position: Option<i32>,
+) -> crate::menu::PluginPage {
+    crate::menu::PluginPage {
+        parent: parent.map(String::from),
+        page_title: slug.into(),
+        menu_title: slug.into(),
+        capability: cap.into(),
+        slug: slug.into(),
+        icon: String::new(),
+        position,
+    }
+}
+
+fn asked(pagenow: &'static str, page: &'static str) -> Screen<'static> {
+    Screen {
+        pagenow,
+        typenow: "",
+        taxonomy: "",
+        parent_file: None,
+        submenu_file: None,
+        plugin_page: Some(page),
+    }
+}
+
+/// Extensions' pages go where `add_menu_page()` and `add_submenu_page()`
+/// put them: a taken position moved a little past it, a free one kept,
+/// first in a submenu, under a menu that moved; denied ones left out and
+/// refused, as `user_can_access_admin_page()` refuses them.
+#[test]
+fn extension_pages_take_php_s_places() {
+    let user = Paged(
+        &["read", "import", "export", "manage_options"],
+        vec![
+            plugin(None, "read", "ext-a", Some(80)),
+            crate::menu::PluginPage {
+                icon: "dashicons-x".into(),
+                ..plugin(None, "read", "ext-b", Some(3))
+            },
+            plugin(None, "nope", "ext-locked", None),
+            plugin(Some("ext-locked"), "read", "ext-open", None),
+            plugin(None, "nope", "ext-hidden", None),
+            plugin(Some("options-general.php"), "read", "ext-first", Some(0)),
+            plugin(Some("options-general.php"), "nope", "ext-denied", None),
+            plugin(Some("tools.php"), "read", "ext-tool", None),
+            // Taken places, each moved by its slug's and title's hash.
+            plugin(None, "read", "ext-g", Some(80)),
+            plugin(None, "read", "ext-f", Some(3)),
+            plugin(None, "read", "ext-e", None),
+            plugin(None, "read", "ext-h", Some(101)),
+        ],
+    );
+    let menu = admin_menu(&user, &dashboard(), Look::Block).unwrap();
+    let at = |text: &str| menu.find(text).unwrap_or_else(|| panic!("{text}"));
+    assert!(at("menu-dashboard") < at("toplevel_page_ext-b"));
+    assert!(at("toplevel_page_ext-b") < at("wp-menu-separator"));
+    assert!(at("menu-settings") < at("toplevel_page_ext-a"));
+    // 80.07212 and 80.25761, 3 and 3.27759, then 100, 101.02914 and 102.
+    assert!(at("toplevel_page_ext-g") < at("toplevel_page_ext-a"));
+    assert!(at("toplevel_page_ext-b") < at("toplevel_page_ext-f"));
+    assert!(at("toplevel_page_ext-a") < at("toplevel_page_ext-locked"));
+    assert!(at("toplevel_page_ext-locked") < at("toplevel_page_ext-h"));
+    assert!(at("toplevel_page_ext-h") < at("toplevel_page_ext-e"));
+    assert!(at("\n\t<a href='admin?page=ext-a'") > 0);
+    assert!(!menu.contains("ext-hidden") && !menu.contains("ext-denied"));
+    assert!(at("dashicons-before dashicons-x") > at("toplevel_page_ext-b"));
+    // Under a menu the user may not open, its first page is not copied.
+    assert!(at("admin?page=ext-open") > at("toplevel_page_ext-locked"));
+    assert!(!menu.contains("admin?page=ext-locked"));
+    assert!(at("<a href='admin?page=ext-first' class=\"wp-has-submenu") > 0);
+    assert!(at("<li class=\"wp-first-item\"><a href='options-general?page=ext-first'") > 0);
+    assert!(at("<a href='import?page=ext-tool'>ext-tool</a>") > 0);
+    let current = admin_menu(
+        &user,
+        &asked("options-general.php", "ext-first"),
+        Look::Block,
+    );
+    assert!(current.unwrap().contains(
+        "<li class=\"wp-first-item current\"><a href='options-general?page=ext-first' class=\"wp-first-item current\" aria-current=\"page\">"
+    ));
+    for (pagenow, page) in [
+        ("admin.php", "ext-hidden"),
+        ("options-general.php", "ext-denied"),
+        ("admin.php", "ext-unknown"),
+    ] {
+        assert!(
+            admin_menu(&user, &asked(pagenow, page), Look::Block).is_none(),
+            "{page}"
+        );
+    }
+    assert!(admin_menu(&user, &asked("admin.php", "ext-b"), Look::Block).is_some());
+    assert_eq!(
+        plugin_page_hook(&user, "options-general.php", "ext-first").as_deref(),
+        Some("settings_page_ext-first")
+    );
+    assert_eq!(plugin_page_hook(&user, "tools.php", "ext-first"), None);
+    let commands = commands(&user, Look::Block, &|path| format!("/x/{path}"));
+    let url = |name: &str| {
+        let found = commands.iter().find(|(_, _, named)| named == name);
+        found.map(|(_, url, _)| url.as_str())
+    };
+    assert_eq!(url("ext-b"), Some("/x/admin?page=ext-b"));
+    assert_eq!(
+        url("options-general.php-ext-first"),
+        Some("/x/options-general?page=ext-first")
+    );
 }

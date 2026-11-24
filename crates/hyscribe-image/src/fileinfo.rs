@@ -10,6 +10,7 @@
 use crate::header::{getimagesize, image_mime};
 use crate::meta::Unported;
 
+mod cfb;
 mod media;
 mod text;
 mod zip;
@@ -49,6 +50,9 @@ pub fn finfo_candidates(bytes: &[u8]) -> Result<Vec<&'static str>, Unported> {
     }
     if bytes.starts_with(b"PK\x03\x04") {
         return zip::zip(bytes);
+    }
+    if bytes.starts_with(&cfb::MAGIC) {
+        return cfb::cfb(bytes);
     }
     text::text(bytes).ok_or(Unported)
 }

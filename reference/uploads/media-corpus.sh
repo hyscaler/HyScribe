@@ -48,6 +48,9 @@ if [ -f doc.odp ]; then
   HOME="$TMP" soffice --headless --convert-to pptx --outdir "$TMP" doc.odp > /dev/null 2>&1
   cp doc.pptx "$OUT/sample.pptx"
 fi
+# PowerPoint 97 from a one slide deck (LibreOffice cannot convert text to it).
+HOME="$TMP" soffice --headless --convert-to ppt --outdir "$TMP" "$ROOT/reference/uploads/deck.fodp" > /dev/null 2>&1
+cp deck.ppt "$OUT/sample.ppt"
 printf '%%!PS\n/Helvetica findfont 24 scalefont setfont 72 700 moveto (Hello) show showpage\n' > hello.ps
 gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile="$OUT/sample.pdf" hello.ps
 printf 'hello\n' > hello.txt

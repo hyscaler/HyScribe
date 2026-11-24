@@ -124,6 +124,7 @@ pub fn revision(site: &dyn PostsSite, query: &str, request: &Request) -> Option<
             taxonomy: "",
             parent_file: Some(parent),
             submenu_file: Some(parent),
+            plugin_page: None,
         },
         id: "revision",
         title: "Revisions",

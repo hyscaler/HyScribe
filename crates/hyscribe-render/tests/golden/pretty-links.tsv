@@ -16,6 +16,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/
@@ -83,6 +84,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/
@@ -150,6 +152,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/
@@ -217,6 +220,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/
@@ -284,6 +288,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/archives/category/uncategorized
 term_link tag	http://127.0.0.1:8081/archives/tag/a-tag
+term_link tag child	http://127.0.0.1:8081/archives/tag/a-child-tag
 term_link format	http://127.0.0.1:8081/archives/type/aside
 term_feed_link category 1	http://127.0.0.1:8081/archives/category/uncategorized/feed
 term_feed_link category 1 atom	http://127.0.0.1:8081/archives/category/uncategorized/feed/atom
@@ -351,6 +356,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/index.php/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/index.php/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/index.php/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/index.php/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/index.php/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/index.php/category/uncategorized/feed/atom/
@@ -418,6 +424,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/index.php/topics/uncategorized/
 term_link tag	http://127.0.0.1:8081/index.php/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/index.php/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/index.php/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/index.php/topics/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/index.php/topics/uncategorized/feed/atom/
@@ -485,6 +492,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/
@@ -552,6 +560,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/
@@ -619,6 +628,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/topics/uncategorized/
 term_link tag	http://127.0.0.1:8081/labels/a-tag/
+term_link tag child	http://127.0.0.1:8081/labels/a-child-tag/
 term_link format	http://127.0.0.1:8081/blog/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/topics/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/topics/uncategorized/feed/atom/
@@ -686,6 +696,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/sections//uncategorized
 term_link tag	http://127.0.0.1:8081/tags/a-tag
+term_link tag child	http://127.0.0.1:8081/tags/a-child-tag
 term_link format	http://127.0.0.1:8081/blog/type/aside
 term_feed_link category 1	http://127.0.0.1:8081/sections//uncategorized/feed
 term_feed_link category 1 atom	http://127.0.0.1:8081/sections//uncategorized/feed/atom
@@ -753,6 +764,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/
@@ -820,6 +832,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized
 term_link tag	http://127.0.0.1:8081/tag/a-tag
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag
 term_link format	http://127.0.0.1:8081/type/aside
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom
@@ -887,6 +900,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/
@@ -954,6 +968,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/
@@ -1021,6 +1036,7 @@ post_comments_feed_link unattached 13	http://127.0.0.1:8081/feed/?attachment_id=
 post_comments_feed_link unattached 13 atom	http://127.0.0.1:8081/feed/atom/?attachment_id=13
 term_link category 1	http://127.0.0.1:8081/category/uncategorized/
 term_link tag	http://127.0.0.1:8081/tag/a-tag/
+term_link tag child	http://127.0.0.1:8081/tag/a-child-tag/
 term_link format	http://127.0.0.1:8081/type/aside/
 term_feed_link category 1	http://127.0.0.1:8081/category/uncategorized/feed/
 term_feed_link category 1 atom	http://127.0.0.1:8081/category/uncategorized/feed/atom/

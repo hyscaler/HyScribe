@@ -474,6 +474,7 @@ pub fn plugins(
             taxonomy: "",
             parent_file: Some("plugins.php"),
             submenu_file: None,
+            plugin_page: None,
         },
         id: "plugins",
         title: "Plugins",

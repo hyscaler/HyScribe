@@ -21,6 +21,12 @@
 #   loads the same, see hyscribe_testkit::writes::load_theme_test_data)
 #   site-edits: reference/default-install/php.sh up, over the site editor's
 #   saves in reference/site-edits/content.sql, which it adds
+#   titles: reference/default-install/php.sh up, over the posts and pages
+#   of reference/pages/titles.sql (untitled, quoted and dashed titles), which
+#   it adds
+#   folder: reference/default-install/php.sh up; a site whose home URL has
+#   the folder /blog, by the options home and siteurl, plain and pretty: its
+#   redirects only, as the oracle's content URL constants stay at its root
 #   comments: reference/default-install/php.sh up, over the comments of
 #   reference/pages/comments.sql, which it adds, with the commenter cookies
 #   an option named _cookie sends (urlencoded, `name=value; name=value`)
@@ -32,7 +38,7 @@
 # reset it after.
 set -euo pipefail
 
-LIST="${1:?usage: $0 default|ttd|site-edits|comments|default-<theme>|ttd-<theme>}"
+LIST="${1:?usage: $0 default|ttd|site-edits|comments|titles|folder|default-<theme>|ttd-<theme>}"
 DOCKER="${DOCKER:-docker}"
 NAME="${HYSCRIBE_PHP_CONTAINER:-hyscribe-default-install-php}"
 DB="${HYSCRIBE_DB_CONTAINER:-hyscribe-default-install-db}"
@@ -68,9 +74,9 @@ if [ -n "$TTD" ]; then
 fi
 if [ "$LIST" = site-edits ]; then
   "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "$DATABASE" < "$ROOT/reference/site-edits/content.sql"
-elif [ "$LIST" = comments ]; then
+elif [ "$LIST" = comments ] || [ "$LIST" = titles ]; then
   "$DOCKER" exec "$DB" mariadb -uroot -preference-only "$DATABASE" -e "DELETE FROM wp_posts WHERE post_type = 'wp_navigation'"
-  "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "$DATABASE" < "$ROOT/reference/pages/comments.sql"
+  "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only "$DATABASE" < "$ROOT/reference/pages/$LIST.sql"
 else
   "$DOCKER" exec "$DB" mariadb -uroot -preference-only "$DATABASE" -e "DELETE FROM wp_posts WHERE post_type = 'wp_navigation'"
 fi

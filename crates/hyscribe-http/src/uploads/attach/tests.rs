@@ -238,6 +238,64 @@ async fn uploads_write_php_s_rows() {
             How::Media(0),
         ),
         (
+            "upload-async-doc",
+            ("sample.doc", "sample.doc"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-xls",
+            ("sample.xls", "My Sheet.xls"),
+            How::Media(1),
+        ),
+        (
+            "upload-async-ppt",
+            ("sample.ppt", "sample.ppt"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-ppt-pps",
+            ("sample.ppt", "slides.pps"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-xls-xlt",
+            ("sample.xls", "sheet.xlt"),
+            How::Media(0),
+        ),
+        (
+            "upload-rest-raw-doc",
+            ("sample.doc", "sample.doc"),
+            How::Rest(
+                false,
+                Upload {
+                    title: Some(b"A Word file".to_vec()),
+                    post: 1,
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
+            "upload-rest-form-xls",
+            ("sample.xls", "sample.xls"),
+            How::Rest(true, Upload::default()),
+        ),
+        (
+            "upload-async-pdf",
+            ("sample.pdf", "sample.pdf"),
+            How::Media(0),
+        ),
+        (
+            "upload-rest-raw-pdf",
+            ("sample.pdf", "sample.pdf"),
+            How::Rest(
+                false,
+                Upload {
+                    post: 1,
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
             "upload-rest-raw-text",
             ("plain.txt", "plain.txt"),
             How::Rest(false, text),
@@ -536,13 +594,13 @@ async fn uploads_are_titled_and_hooked_as_php_s() {
     }
 }
 
-/// A PDF, whose preview is Ghostscript's, and audio and video, whose
-/// metadata is getID3's, answer 501 and leave no file behind.
+/// Audio and video whose metadata is getID3's answer 501 and leave no file
+/// behind.
 #[tokio::test(flavor = "multi_thread")]
 async fn unported_types_leave_no_file() {
     let site = crate::tests::oracle_site().await;
     let time = (upload_time(&site, None, now()), WHO);
-    for name in ["sample.pdf", "clip.mp4"] {
+    for name in ["tone.flac", "clip.mp4"] {
         let dir = tempfile::tempdir().unwrap();
         let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
         let sent = sent(name, name);

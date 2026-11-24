@@ -11,6 +11,11 @@
 
 $uploads_corpus = __DIR__ . '/corpus/';
 
+// The must-use plugin that leaves a PDF without an image editor.
+$uploads_no_preview = function () {
+	require __DIR__ . '/no-pdf-preview.php';
+};
+
 // Every file under the uploads folder.
 $uploads_list = function () {
 	$dir = wp_upload_dir()['basedir'];
@@ -152,6 +157,18 @@ return array(
 	'upload-async-odt'      => $uploads_case( $uploads_handle( 'sample.odt', 'My Notes (1).odt' ) ),
 	'upload-async-zip'      => $uploads_case( $uploads_handle( 'sample.zip', 'sample.docx' ) ),
 	'upload-async-rtf'      => $uploads_case( $uploads_handle( 'sample.rtf', 'sample.rtf' ) ),
+	// Word, Excel and PowerPoint 97 to 2003 files: Compound File Binary
+	// files, typed by libmagic from their summary information.
+	'upload-async-doc'      => $uploads_case( $uploads_handle( 'sample.doc', 'sample.doc' ) ),
+	'upload-async-xls'      => $uploads_case( $uploads_handle( 'sample.xls', 'My Sheet.xls', 1 ) ),
+	'upload-async-ppt'      => $uploads_case( $uploads_handle( 'sample.ppt', 'sample.ppt' ) ),
+	'upload-async-ppt-pps'  => $uploads_case( $uploads_handle( 'sample.ppt', 'slides.pps' ) ),
+	'upload-async-xls-xlt'  => $uploads_case( $uploads_handle( 'sample.xls', 'sheet.xlt' ) ),
+	'upload-rest-raw-doc'   => $uploads_case( $uploads_rest( 'sample.doc', 'sample.doc', array( 'title' => 'A Word file', 'post' => 1 ), false ) ),
+	'upload-rest-form-xls'  => $uploads_case( $uploads_rest( 'sample.xls', 'sample.xls', array(), true ) ),
+	// A PDF with no image editor, as on a host without Imagick: no preview.
+	'upload-async-pdf'      => $uploads_case( $uploads_handle( 'sample.pdf', 'sample.pdf' ), $uploads_no_preview ),
+	'upload-rest-raw-pdf'   => $uploads_case( $uploads_rest( 'sample.pdf', 'sample.pdf', array( 'post' => 1 ), false ), $uploads_no_preview ),
 	'upload-async-text-again' => $uploads_case( $uploads_handle( 'plain.txt', 'plain.txt' ), $uploads_handle( 'plain.txt', 'plain.txt' ) ),
 	'upload-rest-raw-text'  => $uploads_case(
 		$uploads_rest(

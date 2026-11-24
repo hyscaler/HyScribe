@@ -25,7 +25,7 @@ const MAX_NAME: usize = 255;
 const MAX_TEXT: usize = 1_000;
 
 /// The SDK versions the host links (ADR 0022).
-pub const SDK: [&str; 3] = ["0.1", "0.2", "0.3"];
+pub const SDK: [&str; 4] = ["0.1", "0.2", "0.3", "0.4"];
 
 /// The SDK versions without the `theme` world (ADR 0023).
 const BEFORE_THEMES: [&str; 2] = ["0.1", "0.2"];

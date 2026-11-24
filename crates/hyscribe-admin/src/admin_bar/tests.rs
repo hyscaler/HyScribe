@@ -112,6 +112,9 @@ impl MenuUser for Fake {
     fn transient(&self, _: &str) -> Option<Vec<u8>> {
         None
     }
+    fn plugin_pages(&self) -> Vec<crate::menu::PluginPage> {
+        Vec::new()
+    }
 }
 
 impl BarSite for Fake {

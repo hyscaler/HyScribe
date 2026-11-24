@@ -5,9 +5,9 @@
 //! metadata of `wp_generate_attachment_metadata()`, made on the image
 //! worker pool (ADR 0015). A file is written under a temporary name and
 //! then linked to its own, so a crash leaves no half file, and never
-//! outside the uploads folder. What is not ported (ADR 0020: a
-//! PDF's preview, audio and video getID3 reads in depth, a type libmagic
-//! gives two ways) is answered 501, and the file it wrote is deleted.
+//! outside the uploads folder. What is not ported (ADR 0020: audio and
+//! video getID3 reads in depth, a type libmagic gives two ways) is answered
+//! 501, and the file it wrote is deleted.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -298,7 +298,7 @@ pub(crate) fn form(
 
 /// A file name that stays in its folder: not empty, no separator or NUL,
 /// and no leading dot, so never `.`, `..` or a temporary file.
-fn stays(name: &str) -> bool {
+pub(crate) fn stays(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && !name.contains(['/', '\\', '\0'])
 }
 

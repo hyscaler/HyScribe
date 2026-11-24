@@ -64,17 +64,13 @@ struct Read {
 }
 
 /// `wp_read_image_metadata( $file )` of an image upload, and getID3's
-/// reading of audio and video, before the attachment is inserted: 501 for
-/// EXIF and XMP PHP would read in ways not ported, for a PDF, whose preview
-/// PHP makes with Ghostscript, and for audio and video getID3 reads in ways
-/// not ported.
+/// reading of audio and video, before the attachment is inserted (a PDF
+/// gets no preview, ADR 0020): 501 for EXIF and XMP PHP would read in ways
+/// not ported, and for audio and video getID3 reads in ways not ported.
 fn read_upload(site: &Site, handled: &Handled) -> Result<Read, Refused> {
     let kind = handled.mime.as_str();
     let host = hyscribe_render::link::host(site.raw_option("siteurl"));
     let mut read = Read::default();
-    if kind == "application/pdf" {
-        return Err(Refused::Unported);
-    }
     if kind.starts_with("video/") {
         wp_read_video_metadata(&handled.bytes).map_err(|_| Refused::Unported)?;
     } else if kind.starts_with("audio/") {

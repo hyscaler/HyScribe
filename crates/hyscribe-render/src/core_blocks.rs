@@ -732,7 +732,8 @@ pub(crate) fn legacy_comments_ran(
         .filter(|post| legacy && (comments_open(context, post) || post.comment_count > 0))
 }
 
-pub(crate) use legacy_comments::legacy_cpage;
+pub(crate) use comment_form::{Look, TITLE, open_comment_form};
+pub(crate) use legacy_comments::{Style, Thread, legacy_cpage};
 
 /// `render_block_core_comments_title()`: how many responses the post has,
 /// with its title.

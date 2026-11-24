@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/hyscaler/HyScribe/blob/main/SECURITY.md
+    about: Please report vulnerabilities privately, not as a public issue.
+  - name: Operator documentation
+    url: https://github.com/hyscaler/HyScribe/tree/main/docs/operators
+    about: Installing, configuring, running and switching back.
+  - name: What is not supported yet
+    url: https://github.com/hyscaler/HyScribe/blob/main/docs/operators/not-supported.md
+    about: Screens and routes that answer 501 Not Implemented today.

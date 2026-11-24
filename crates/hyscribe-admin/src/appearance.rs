@@ -340,6 +340,7 @@ pub fn themes(site: &dyn PostsSite, request: &Request, asked: Notice) -> Answer 
             taxonomy: "",
             parent_file: Some("themes.php"),
             submenu_file: None,
+            plugin_page: None,
         },
         id: "themes",
         title: "Themes",

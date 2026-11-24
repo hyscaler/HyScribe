@@ -292,6 +292,7 @@ pub(crate) fn settings_page(site: &dyn SettingsSite, screen: &Form, request: &Re
             taxonomy: "",
             parent_file: Some("options-general.php"),
             submenu_file: None,
+            plugin_page: None,
         },
         id,
         title: screen.title,

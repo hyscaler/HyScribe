@@ -500,7 +500,7 @@ impl Frame<'_> {
         let mut classes = vec![
             format!("login-action-{}", self.action),
             "wp-core-ui".into(),
-            "admin-color-coffee".into(),
+            "admin-color-hyscribe".into(),
         ];
         if self.interim {
             out.push_str("\t<style>html{background-color: transparent;}</style>\n\t\t\t");

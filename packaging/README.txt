@@ -32,4 +32,7 @@ Verify this download
   gh attestation verify hyscribe_<version>_linux_<arch>.tar.gz --repo hyscaler/HyScribe
 
 License: AGPL-3.0-or-later (see LICENSE). Source: https://github.com/hyscaler/HyScribe
+The binary also embeds WordPress's files, its themes and Rust crates under
+their own licences: see THIRD-PARTY-NOTICES, which also says where their
+source is.
 Security reports: security@hyscribe.com

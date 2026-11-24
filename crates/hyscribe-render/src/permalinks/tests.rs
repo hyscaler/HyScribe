@@ -124,6 +124,7 @@ fn links_match_php() {
                 }
                 "term_link" => match words[1] {
                     "category" => term("category", "uncategorized"),
+                    "tag" if words.get(2) == Some(&"child") => term("post_tag", "a-child-tag"),
                     "tag" => term("post_tag", "a-tag"),
                     _ => term("post_format", "post-format-aside"),
                 },
@@ -181,7 +182,7 @@ fn links_match_php() {
         }
         assert_eq!(ours, expected, "{head}");
     }
-    assert_eq!(lines, 1056);
+    assert_eq!(lines, 1072);
 }
 
 /// Without pretty permalinks the comments feed of an attachment with no
@@ -404,6 +405,12 @@ fn links_walk_up_their_parents() {
     assert_eq!(
         String::from_utf8(term_link(&nested, "category", &leaf)).unwrap(),
         format!("{HOME}/category/top/mid/leaf/")
+    );
+    // A flat taxonomy's link ignores a stored parent.
+    let child = term(3, "child", 2);
+    assert_eq!(
+        String::from_utf8(term_link(&nested, "post_tag", &child)).unwrap(),
+        format!("{HOME}/tag/child/")
     );
     // Plain permalinks for the post types and taxonomies pretty ones skip.
     let book = post(11, "book", "publish", "b", "");

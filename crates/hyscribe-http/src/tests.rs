@@ -3160,6 +3160,9 @@ async fn assert_listed_pages(
             let options = named.split('&').filter_map(|o| o.split_once('='));
             for (name, value) in options.filter(|(name, _)| !name.starts_with('_')) {
                 let value = hyscribe_phpser::urldecode(value.as_bytes());
+                if name == "home" {
+                    site.home = String::from_utf8(value.clone()).unwrap();
+                }
                 site.options.insert(name.into(), value);
             }
             // The theme a `stylesheet` option names, as every request's reload picks it.
@@ -3581,6 +3584,61 @@ async fn edited_site_pages_match_php() {
     assert!(site.is_err());
 }
 
+/// A site not at the oracle's address: the 404 page's bundled theme image
+/// is under the site's own URL, not the exported one.
+#[tokio::test(flavor = "multi_thread")]
+async fn bundled_pattern_urls_follow_the_site() {
+    let own = "http://127.0.0.1:8180";
+    let site = site_at(Some(own), Some(own)).await;
+    let reply = request(&site, "GET", "/?p=999999").await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    let image = format!("{own}/wp-content/themes/twentytwentyfive/assets/images/404-image.webp");
+    assert!(reply.body.contains(&image), "{}", reply.body);
+    assert!(!reply.body.contains("127.0.0.1:8081"));
+}
+
+/// The pages of `reference/pages/folder.list` for a home URL in a folder,
+/// with plain and pretty permalinks: the canonical redirects keep the
+/// folder once, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_pages_match_php() {
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-folder.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, None, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 10);
+    // The canonical address itself is served, as PHP does (its body names
+    // the oracle's root content URL, so it is not in the golden).
+    let home = "http://127.0.0.1:8180/blog";
+    let site = site_at(Some(home), Some(home)).await;
+    assert_eq!(request(&site, "GET", "/blog/").await.status, StatusCode::OK);
+    let reply = request(&site, "GET", "/blog").await;
+    assert_eq!(reply.headers["location"], format!("{home}/"));
+    // A page on the front takes the slash too, none without a page chosen.
+    for (page, status) in [("2", StatusCode::MOVED_PERMANENTLY), ("0", StatusCode::OK)] {
+        let db = Db::connect(&fixture_config()).await.unwrap();
+        let mut site = Site::load(db, Some(home.into()), Some(home.into()))
+            .await
+            .unwrap();
+        site.options
+            .insert("show_on_front".into(), b"page".to_vec());
+        site.options.insert("page_on_front".into(), page.into());
+        assert_eq!(
+            request(&Arc::new(site), "GET", "/blog").await.status,
+            status
+        );
+    }
+}
+
 /// The pages of `reference/pages/comments.list` over the comments of
 /// `reference/pages/comments.sql`: paged comments, comment pages and their
 /// redirects, and the held comments, comment form and links the commenter
@@ -3614,6 +3672,41 @@ async fn commenter_pages_match_php() {
         0
     );
     assert_eq!(golden.lines().count(), 95);
+}
+
+/// The pages of `reference/pages/titles.list` over the posts and pages of
+/// `reference/pages/titles.sql`: the browser title of untitled posts and
+/// pages and of titles with quotes, dashes and entities, and of the posts
+/// page, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn title_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let titles = include_str!("../../../reference/pages/titles.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(titles))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-titles.tsv");
+    assert_eq!(
+        assert_listed_pages("wordpress_saves", golden, None, "").await,
+        0
+    );
+    assert_eq!(golden.lines().count(), 13);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

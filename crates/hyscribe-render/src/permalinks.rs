@@ -471,7 +471,13 @@ pub fn post_page(site: &dyn Site, post: &Post, link: &[u8], page: usize) -> Vec<
 /// `get_term_link( $term, $taxonomy )` on `site`, pretty or plain.
 pub fn term_link(site: &dyn Site, taxonomy: &str, term: &Term) -> Vec<u8> {
     let home = site.home_url();
-    let slugs = term_slugs(site, taxonomy, term);
+    // Only the category rewrite is hierarchical: a flat taxonomy's link
+    // ignores a stored parent.
+    let slugs = if taxonomy == "category" {
+        term_slugs(site, taxonomy, term)
+    } else {
+        vec![String::from_utf8_lossy(&term.slug).into_owned()]
+    };
     let slugs: Vec<&str> = slugs.iter().map(String::as_str).collect();
     Permalinks::of(site)
         .term_link(&String::from_utf8_lossy(&home), taxonomy, &slugs)

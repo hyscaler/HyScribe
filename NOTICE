@@ -1,0 +1,19 @@
+HyScribe
+Copyright (c) 2026 HyScaler and the HyScribe contributors.
+
+HyScribe is developed and supported by HyScaler (https://hyscaler.com).
+
+HyScribe is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version (see LICENSE). SPDX-License-Identifier: AGPL-3.0-or-later. The extension SDK crates are licensed Apache-2.0 OR MIT (see their own licence files). HyScribe is distributed WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Attribution (an additional term under section 7(b) of the GNU Affero General Public License, version 3)
+
+A copy or a modified version of HyScribe that is conveyed to others, or offered to users over a network, must preserve:
+
+1. This NOTICE file and the copyright and licence notices in the source files.
+2. In the Appropriate Legal Notices its user interfaces display, the statement "HyScribe is developed and supported by HyScaler (https://hyscaler.com)", or for a modified version a statement that it is based on HyScribe, developed by HyScaler (https://hyscaler.com), together with a prominent notice that it has been modified.
+
+This term asks for attribution only. It gives no right to use the HyScribe or HyScaler names or logos as the name or branding of a modified version (see brand/README.md), and it does not suggest that HyScaler endorses or supports a modified version.
+
+Third-party software
+
+HyScribe includes WordPress's own files and other third-party software, each under its own licence. A release archive lists them in THIRD-PARTY-NOTICES; in the source, see wordpress/, themes/README.md, docs/adr/0004-licensing.md and the Rust crates named in Cargo.lock.

@@ -175,7 +175,7 @@ async fn answers_match_php() {
     ));
     assert_eq!(replay(&sites, &golden, false).await, (64, 0));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/search.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 51, 2));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 53, 2));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/namespaces.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 33, 2));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/widgets-default.tsv");

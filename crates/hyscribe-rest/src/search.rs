@@ -162,6 +162,18 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
     Ok(response)
 }
 
+/// The `include` and `exclude` lists: both queries ignore `exclude` when
+/// `include` is not empty.
+fn include_exclude(params: &Params) -> (Vec<u64>, Vec<u64>) {
+    let include = ids(params, "include");
+    let exclude = if include.is_empty() {
+        ids(params, "exclude")
+    } else {
+        Vec::new()
+    };
+    (include, exclude)
+}
+
 /// `WP_REST_Post_Search_Handler::search_items()`: published posts, newest
 /// first, by relevance first for a search; with no type left, posts. The
 /// posts included leave none out.
@@ -176,12 +188,7 @@ fn posts(
     if post_types.is_empty() {
         post_types.push("post".into());
     }
-    let include = ids(params, "include");
-    let exclude = if include.is_empty() {
-        ids(params, "exclude")
-    } else {
-        Vec::new()
-    };
+    let (include, exclude) = include_exclude(params);
     let mut query = PostQuery {
         post_types,
         include: (!include.is_empty()).then_some(include),
@@ -224,11 +231,12 @@ fn terms(
 ) -> Result<(Vec<Found>, u64), RestError> {
     let mut taxonomies = asked(params, &TAXONOMIES).into_iter();
     let taxonomy = taxonomies.next().ok_or_else(RestError::not_ported)?;
+    let (include, exclude) = include_exclude(params);
     let query = TermQuery {
         taxonomy,
         taxonomies: taxonomies.collect(),
-        include: ids(params, "include"),
-        exclude: ids(params, "exclude"),
+        include,
+        exclude,
         search: search.map(|search| String::from_utf8_lossy(&search).into_owned()),
         order: Some((TermOrder::Name, false)),
         limit: Some(per_page),

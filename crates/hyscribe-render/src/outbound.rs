@@ -89,7 +89,7 @@ pub struct NavMenuItem {
     pub current: bool,
 }
 
-/// Where embeds may fetch from (`EMBED_ALLOWED_HOSTS`, an open question): the
+/// Where embeds may fetch from (`EMBED_ALLOWED_HOSTS`): the
 /// providers of WordPress's list, and further hosts, in lower case, whose
 /// pages may also be discovered.
 #[derive(Clone, Debug, PartialEq, Eq)]

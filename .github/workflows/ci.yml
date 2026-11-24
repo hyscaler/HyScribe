@@ -214,7 +214,7 @@ jobs:
           scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
 
   switch-back:
-    # The switch-back suite (MVP 8.5, GOALS S7, an open question), over both fixtures.
+    # The switch-back suite (MVP 8.5, GOALS S7), over both fixtures.
     needs: [coverage]
     if: ${{ !cancelled() && needs.coverage.result == 'success' }}
     runs-on: [self-hosted, hyscribe]
@@ -292,7 +292,7 @@ jobs:
           scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
 
   screenshots:
-    # The screenshot comparison (GOALS S8, an open question): PHP and HyScribe, pixel by pixel.
+    # The screenshot comparison (GOALS S8): PHP and HyScribe, pixel by pixel.
     needs: [coverage, switch-back]
     if: ${{ !cancelled() && needs.coverage.result == 'success' }}
     runs-on: [self-hosted, hyscribe]

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# The screenshot comparison (GOALS S8, an open question): every screen of screens.list,
+# The screenshot comparison (GOALS S8): every screen of screens.list,
 # as each role, rendered by a headless Chromium (Playwright's image, pinned
 # by digest, see Dockerfile) from PHP WordPress and from HyScribe over the same fixture
 # database, then compared pixel by pixel (compare.py states the tolerance).

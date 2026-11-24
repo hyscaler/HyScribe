@@ -2187,8 +2187,8 @@ impl Answer {
     }
 }
 
-/// `prepare_items()`'s view mode: a non-empty request's, which PHP saves
-///, else the user's setting.
+/// `prepare_items()`'s view mode: a non-empty request's, which PHP saves,
+/// else the user's setting.
 pub(crate) fn view_mode(
     site: &dyn PostsSite,
     mode: Option<&str>,

@@ -1519,7 +1519,7 @@ fn screen(
         "/hs-admin/post-new" => hyscribe_admin::editor::post_new(admin, query)
             .or_else(|| block_editor(admin, &request))?,
         "/hs-admin/revision" => hyscribe_admin::revisions::revision(admin, query, &request)?,
-        // Nobody may update here (the updates are HyScribe's releases, an open question;
+        // Nobody may update here (the updates are HyScribe's releases;
         // `update_core` is never granted): refused as PHP refuses the menu.
         "/hs-admin/update-core" => Answer::from_page(None),
         // The installed extensions listed.

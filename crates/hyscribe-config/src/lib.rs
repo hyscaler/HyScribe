@@ -189,8 +189,7 @@ pub struct LoginLimits {
     /// `LOGIN_LIMIT_WINDOW`, in seconds, default 900.
     pub window: u32,
     /// `REGISTRATION_LIMIT_ADDRESS`: accounts one client address may
-    /// create by registration in an hour, default 3; none for no cap
-    ///.
+    /// create by registration in an hour, default 3; none for no cap.
     pub registrations: Option<u32>,
 }
 

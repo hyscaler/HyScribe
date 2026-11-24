@@ -87,8 +87,7 @@ pub(super) fn file(
 }
 
 /// The answer to the upload `pending` plans, `upload` its fields, of a
-/// request with `headers`, `body` and `files`, refused without a writer
-///.
+/// request with `headers`, `body` and `files`, refused without a writer.
 pub(super) fn answer(
     site: &Site,
     request: &Request,

@@ -10,7 +10,7 @@ package=hyscribe_ext_guest
 if [ "${1:-}" = theme ]; then package=hyscribe_ext_theme; fi
 dir=${CARGO_TARGET_DIR:-$(pwd)/../../../target}/ext-guest
 # A clean environment: the host build's flags, wrappers and coverage
-# instrumentation (cargo llvm-cov, cargo-mutants, the gate script) are not the guest's.
+# instrumentation (cargo llvm-cov, cargo-mutants) are not the guest's.
 env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
   ${RUSTUP_HOME:+RUSTUP_HOME="$RUSTUP_HOME"} ${CARGO_HOME:+CARGO_HOME="$CARGO_HOME"} \
   ${RUSTUP_TOOLCHAIN:+RUSTUP_TOOLCHAIN="$RUSTUP_TOOLCHAIN"} \

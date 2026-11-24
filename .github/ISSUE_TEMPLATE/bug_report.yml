@@ -1,0 +1,73 @@
+name: Bug report
+description: HyScribe does something different from PHP WordPress, or fails.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. HyScribe is not yet production ready, and reports from real sites are how it gets there. Please search [existing issues](https://github.com/hyscaler/HyScribe/issues) first, and check [what is not supported yet](https://github.com/hyscaler/HyScribe/blob/main/docs/operators/not-supported.md). Security problems are reported privately, as [SECURITY.md](https://github.com/hyscaler/HyScribe/blob/main/SECURITY.md) says, not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what PHP WordPress does on the same site instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open /hs-admin/edit
+        2. Quick Edit a post and change its date
+        3. Save
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: HyScribe version
+      description: Shown in hs-admin's footer; the release archive's name carries it too.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: wordpress
+    attributes:
+      label: WordPress version of the site
+      placeholder: "7.1.3"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Front end pages
+        - Themes
+        - Blocks and formatting
+        - hs-admin
+        - Block editor or site editor
+        - Media and uploads
+        - REST API
+        - Login and users
+        - Comments
+        - Mail
+        - Scheduled jobs
+        - Plugins and extensions
+        - Setup wizard or install
+        - Switching back to PHP WordPress
+        - Other
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system and architecture, database and its version, active theme.
+      placeholder: Ubuntu 24.04 x86_64, MariaDB 11.4, Twenty Twenty-Five
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and screenshots
+      description: Lines from `hyscribe/logs/`, the response's status and body, or a screenshot. Remove keys, salts, passwords and personal data first.
+      render: text

@@ -3,11 +3,11 @@
 //
 // A must-use plugin for reference/screenshots/golden.sh: PHP WordPress with
 // HyScribe's answers where hs-admin differs on purpose. No WordPress update
-// is offered (an open question: hs-admin shows none), and no plugin or theme update
+// is offered (hs-admin shows none), and no plugin or theme update
 // either: the site reaches no other server (the wp-config.php blocks them).
 // Like HyScribe, it has no plugins but the must-use one and only the
 // embedded block themes (reference/appearance/variants.php), makes no
-// calls for the dashboard's Events and News (OQ pending: the Ajax request
+// calls for the dashboard's Events and News (pending a decision: the Ajax request
 // answers 501, as HyScribe's does), and knows a list of translations, which
 // the General settings screen needs to show its Site Language row.
 add_filter( 'all_plugins', '__return_empty_array' );

@@ -16,7 +16,7 @@
 .idea/
 .vscode/
 
-# Private private notes clone and scratch files
+# Local clones and scratch files
 /repos/
 /tmp/
 CLAUDE.local.md

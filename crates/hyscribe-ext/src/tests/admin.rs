@@ -46,6 +46,13 @@ fn pages_and_settings_are_registered_in_init() -> Result<(), Fault> {
             "hyscribe-test",
             38,
         ),
+        page(
+            None,
+            ("HyScribe Test Admin", "HyScribe Test Admin"),
+            "manage_options",
+            "hyscribe-test-admin",
+            43,
+        ),
     ];
     assert_eq!(request.pages(), pages.map(|page| (0, page)).to_vec());
     let setting = Setting {
@@ -88,6 +95,11 @@ fn a_page_prints_what_its_callback_answers() -> Result<(), Fault> {
     assert_eq!(printed("hyscribe-test"), settings(1));
     assert_eq!(printed("hyscribe-test"), settings(3));
     assert_eq!(printed("nope"), "");
+    // The host refuses a settings group not its own, which the site would print.
+    assert_eq!(
+        printed("hyscribe-test-admin"),
+        "<div class=\"wrap\"><h1>HyScribe Test Admin</h1><p id=\"ext-admin\">true</p></div>"
+    );
     assert!(request.page(1, "hyscribe-test").is_empty());
     // Without its fields the callback answers an error: nothing prints.
     site.set_option("ext_hooks", "fail");

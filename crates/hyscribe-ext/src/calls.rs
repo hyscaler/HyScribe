@@ -969,11 +969,8 @@ fn admin_page(params: &[Val]) -> AdminPage {
 }
 
 fn add_page(state: &mut State, page: AdminPage) -> Result<(), SdkError> {
-    let slug = |slug: &str| {
-        let allowed =
-            |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-';
-        !slug.is_empty() && slug.bytes().all(allowed)
-    };
+    let allowed = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-';
+    let slug = |slug: &str| !slug.is_empty() && slug.bytes().all(allowed);
     if !slug(&page.slug) {
         return Err(SdkError::Invalid(format!(
             "{} is not a page slug",
@@ -983,7 +980,8 @@ fn add_page(state: &mut State, page: AdminPage) -> Result<(), SdkError> {
     if page.capability.is_empty() {
         return Err(SdkError::Invalid("a page has a capability".into()));
     }
-    if !(page.icon.is_empty() || page.icon.starts_with("dashicons-")) {
+    // The menu prints the icon as a class, as `sanitize_html_class()` leaves it.
+    if !(page.icon.is_empty() || page.icon.starts_with("dashicons-") && slug(&page.icon)) {
         return Err(SdkError::Invalid(
             "an icon is a dashicons class, or none".into(),
         ));
@@ -1102,6 +1100,19 @@ fn add_field(
         None => fields.push(field),
     }
     Ok(())
+}
+
+/// `settings_fields( $group )` of a group the extension registered: the
+/// nonce of another's group is not its to print.
+fn settings_fields(state: &State, group: &str) -> Result<Vec<u8>, SdkError> {
+    let (site, shared, me) = state.live()?;
+    let extension = shared.extensions.list.get(me);
+    if !extension.is_some_and(|extension| extension.settings().iter().any(|s| s.group == group)) {
+        return Err(SdkError::Invalid(format!(
+            "{group} is not a settings group of its own"
+        )));
+    }
+    site.settings_fields(group).map_err(failed)
 }
 
 /// `do_settings_sections( $page )` of the extension's own sections: the
@@ -1320,10 +1331,7 @@ pub(crate) fn link(linker: &mut Linker<State>) -> wasmtime::Result<()> {
             func_wrap "add-section" => |mut cx: Cx<'_>, args| answer(add_section(cx.data_mut(), args)),
             func_wrap "add-field" => |mut cx: Cx<'_>, args| answer(add_field(cx.data_mut(), args)),
             func_wrap "sections" => |cx: Cx<'_>, (page,): (String,)| Ok((sections(cx.data(), &page),)),
-            func_wrap "settings-fields" => |cx: Cx<'_>, (group,): (String,)| {
-                let site = cx.data().site();
-                answer(site.and_then(|site| site.settings_fields(&group).map_err(failed)))
-            },
+            func_wrap "settings-fields" => |cx: Cx<'_>, (group,): (String,)| answer(settings_fields(cx.data(), &group)),
         }),
         interface!(linker, "template", 2, {
             func_wrap "have-posts" => |cx: Cx<'_>, (): ()| Ok((yes(theme_call(cx.data(), ThemeCall::HavePosts)),)),

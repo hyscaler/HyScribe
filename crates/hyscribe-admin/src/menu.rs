@@ -286,7 +286,8 @@ fn add_menu_page(menu: &mut Menu, user: &dyn MenuUser, page: PluginPage) {
         .iter()
         .map(|(key, _)| *key)
         .filter(|key| key.fract() == 0.0);
-    let next = integers.fold(-1.0, f64::max) + 1.0;
+    // `$menu[] = ...`: past the largest integer key.
+    let next = integers.max_by(f64::total_cmp).map_or(0.0, |max| max + 1.0);
     let key = match page.position.map(f64::from) {
         None => next,
         Some(position) if menu.items.iter().any(|(key, _)| *key == position) => {

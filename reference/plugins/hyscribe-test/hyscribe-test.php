@@ -53,8 +53,10 @@ add_filter(
 );
 
 // The admin pages and the settings page the extension adds (SDK 0.4): a
-// top level page with a Tools page under it, and a settings page under
-// Settings saving `ext_title`, kept to letters, digits and spaces.
+// top level page with a Tools page under it, a settings page under
+// Settings saving `ext_title`, kept to letters, digits and spaces, and a
+// top level page for administrators, where the extension prints `true`
+// when the host refuses it another's settings group.
 add_action(
 	'admin_menu',
 	function () {
@@ -88,6 +90,15 @@ add_action(
 				do_settings_sections( 'hyscribe-test' );
 				submit_button();
 				echo '</form></div>';
+			}
+		);
+		add_menu_page(
+			'HyScribe Test Admin',
+			'HyScribe Test Admin',
+			'manage_options',
+			'hyscribe-test-admin',
+			function () {
+				echo '<div class="wrap"><h1>HyScribe Test Admin</h1><p id="ext-admin">true</p></div>';
 			}
 		);
 	}

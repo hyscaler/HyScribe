@@ -21,6 +21,10 @@ fn printed(site: &Role, slug: &str, uri: &str) -> String {
             "<div class=\"wrap\"><h1>HyScribe Test Tools</h1><p id=\"ext-sub\">ext-sub</p></div>"
                 .into()
         }
+        "hyscribe-test-admin" => {
+            "<div class=\"wrap\"><h1>HyScribe Test Admin</h1><p id=\"ext-admin\">true</p></div>"
+                .into()
+        }
         _ => format!(
             "<div class=\"wrap\"><h1>HyScribe Test Settings</h1><form action=\"options.php\" method=\"post\">{}\
              <h2 id=\"wp-settings-section-hyscribe_test_main-1\">Main</h2>\n<p id=\"ext-section\">ext-section</p>\
@@ -36,7 +40,8 @@ fn printed(site: &Role, slug: &str, uri: &str) -> String {
 
 /// Each recorded view of the test extension's pages: PHP's page for one
 /// who may reach it, with the extension's output where its callback
-/// prints, and the refusal for one who may not.
+/// prints, the refusal for one who may not, and no hook for one who
+/// reaches a top level page under another menu without its capability.
 #[test]
 fn extension_pages_are_php_s() {
     let mut failures = Vec::new();
@@ -59,14 +64,16 @@ fn extension_pages_are_php_s() {
             plugin_page: Some(slug),
         };
         let reached = admin_menu(&site, &screen, Look::Block).is_some();
-        assert_eq!(reached, status == "200", "{role} {path}");
-        if !reached {
+        assert_eq!(reached, status != "403", "{role} {path}");
+        let hook = plugin_page_hook(&site, file, slug);
+        assert_eq!(hook.is_some(), status == "200", "{role} {path}");
+        let Some(hook) = hook else {
             continue;
-        }
-        let hook = plugin_page_hook(&site, file, slug).unwrap();
+        };
         let title = match slug {
             "hyscribe-test-top" => "HyScribe Test",
             "hyscribe-test-sub" => "HyScribe Test Tools",
+            "hyscribe-test-admin" => "HyScribe Test Admin",
             _ => "HyScribe Test Settings",
         };
         let printed = printed(&site, slug, &uri);

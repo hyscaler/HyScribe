@@ -74,6 +74,7 @@ hyscribe_sdk::callbacks! {
         Field => field,
         Sanitize => sanitize,
         More => more,
+        AdminPage => admin_page,
     }
 }
 
@@ -307,6 +308,13 @@ fn field(_: Vec<Value>) -> Answer {
 /// A field without a label.
 fn more(_: Vec<Value>) -> Answer {
     text("<span id=\"ext-more\">ext-more</span>".into())
+}
+
+/// The administrators' top level page: the settings group of another is
+/// refused it.
+fn admin_page(_: Vec<Value>) -> Answer {
+    let refused = admin::settings_fields("ext_other").is_err();
+    text(format!("<div class=\"wrap\"><h1>HyScribe Test Admin</h1><p id=\"ext-admin\">{refused}</p></div>"))
 }
 
 /// `ext_title`'s sanitize callback: letters, digits and spaces only.
@@ -854,6 +862,8 @@ fn admin_pages() -> Result<(), SdkError> {
     admin::add_submenu_page(top, tools, "Tools", "manage_options", "hyscribe-test-sub", Cb::SubPage, None)?;
     let settings = "HyScribe Test Settings";
     admin::add_options_page(settings, "HyScribe Test", "manage_options", "hyscribe-test", Cb::SettingsPage)?;
+    let title = "HyScribe Test Admin";
+    admin::add_menu_page(title, title, "manage_options", "hyscribe-test-admin", Cb::AdminPage, "", None)?;
     let string = "{\"type\":\"string\"}";
     admin::register_setting("hyscribe_test", "ext_title", string, Some(Cb::Sanitize.into()))?;
     let (main, page) = ("hyscribe_test_main", "hyscribe-test");

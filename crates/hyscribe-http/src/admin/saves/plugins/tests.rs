@@ -900,22 +900,27 @@ async fn the_extension_s_admin_pages_are_php_s() {
     write.commit().await.unwrap();
     let golden = include_str!("../../../../tests/golden/extension-admin.tsv");
     let mut seen = 0;
-    for line in golden.lines() {
-        let [_, path, role, _, page] = line.split('\t').collect::<Vec<_>>()[..] else {
-            panic!("{line}");
-        };
-        if role != "administrator" {
-            continue;
+    // User 1 as each role in turn, as the golden lists them.
+    for asked_as in ["administrator", "editor"] {
+        crate::admin::media::tests::as_role(&config, asked_as).await;
+        for line in golden.lines() {
+            let [_, path, role, status, page] = line.split('\t').collect::<Vec<_>>()[..] else {
+                panic!("{line}");
+            };
+            if role != asked_as {
+                continue;
+            }
+            seen += 1;
+            let php = String::from_utf8(hyscribe_testkit::unhex(page)).unwrap();
+            let php = hyscribe_testkit::hs_admin_page(&php);
+            let asked = format!("/hs-admin/{}", path.replacen(".php", "", 1));
+            let response = live(&site, &asked, &cookies).await;
+            assert_eq!(response.status().as_str(), status, "{role} {path}");
+            same(&compared(&php), &compared(&page_of(response).await), path);
         }
-        seen += 1;
-        let php = String::from_utf8(hyscribe_testkit::unhex(page)).unwrap();
-        let php = hyscribe_testkit::hs_admin_page(&php);
-        let asked = format!("/hs-admin/{}", path.replacen(".php", "", 1));
-        let response = live(&site, &asked, &cookies).await;
-        assert_eq!(response.status(), 200, "{path}");
-        same(&compared(&php), &compared(&page_of(response).await), path);
     }
-    assert_eq!(seen, 3);
+    crate::admin::media::tests::as_role(&config, "administrator").await;
+    assert_eq!(seen, 10);
     // A page no active extension has, and one asked with more, are not served.
     for asked in [
         "/hs-admin/admin?page=nope",

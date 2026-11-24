@@ -566,6 +566,11 @@ fn extension_pages_take_php_s_places() {
             plugin(Some("options-general.php"), "read", "ext-first", Some(0)),
             plugin(Some("options-general.php"), "nope", "ext-denied", None),
             plugin(Some("tools.php"), "read", "ext-tool", None),
+            // Taken places, each moved by its slug's and title's hash.
+            plugin(None, "read", "ext-g", Some(80)),
+            plugin(None, "read", "ext-f", Some(3)),
+            plugin(None, "read", "ext-e", None),
+            plugin(None, "read", "ext-h", Some(101)),
         ],
     );
     let menu = admin_menu(&user, &dashboard(), Look::Block).unwrap();
@@ -573,6 +578,12 @@ fn extension_pages_take_php_s_places() {
     assert!(at("menu-dashboard") < at("toplevel_page_ext-b"));
     assert!(at("toplevel_page_ext-b") < at("wp-menu-separator"));
     assert!(at("menu-settings") < at("toplevel_page_ext-a"));
+    // 80.07212 and 80.25761, 3 and 3.27759, then 100, 101.02914 and 102.
+    assert!(at("toplevel_page_ext-g") < at("toplevel_page_ext-a"));
+    assert!(at("toplevel_page_ext-b") < at("toplevel_page_ext-f"));
+    assert!(at("toplevel_page_ext-a") < at("toplevel_page_ext-locked"));
+    assert!(at("toplevel_page_ext-locked") < at("toplevel_page_ext-h"));
+    assert!(at("toplevel_page_ext-h") < at("toplevel_page_ext-e"));
     assert!(at("\n\t<a href='admin?page=ext-a'") > 0);
     assert!(!menu.contains("ext-hidden") && !menu.contains("ext-denied"));
     assert!(at("dashicons-before dashicons-x") > at("toplevel_page_ext-b"));

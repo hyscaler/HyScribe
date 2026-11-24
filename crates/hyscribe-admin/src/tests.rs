@@ -947,6 +947,13 @@ impl MenuUser for Role {
                 "manage_options",
                 "hyscribe-test",
             ),
+            page(
+                None,
+                "HyScribe Test Admin",
+                "HyScribe Test Admin",
+                "manage_options",
+                "hyscribe-test-admin",
+            ),
         ]
     }
 }

@@ -16,7 +16,8 @@
 #   the options as the action left them: value and autoload, or - for none,
 #   recently_activated's times as %time%.
 # - the extension's admin pages (SDK 0.4) in the x14page variant, the
-#   plugin active and ext_title set, as
+#   plugin active and ext_title set (a top level page asked under Media
+#   by one without its capability: "Cannot load"), as
 #   crates/hyscribe-http/tests/golden/extension-admin.tsv:
 #   variant<TAB>path<TAB>role<TAB>status<TAB>hex(page)
 # - the body tag of front end pages as a visitor with the plugin active and
@@ -157,7 +158,9 @@ screen x13inactive "$masked" administrator "$failed"
 : > "$ADMIN"
 for asked in administrator:options-general.php?page=hyscribe-test administrator:admin.php?page=hyscribe-test-top \
   administrator:admin.php?page=hyscribe-test-sub editor:admin.php?page=hyscribe-test-top \
-  editor:admin.php?page=hyscribe-test-sub editor:options-general.php?page=hyscribe-test; do
+  editor:admin.php?page=hyscribe-test-sub editor:options-general.php?page=hyscribe-test \
+  administrator:admin.php?page=hyscribe-test-admin editor:admin.php?page=hyscribe-test-admin \
+  editor:tools.php?page=hyscribe-test-admin editor:upload.php?page=hyscribe-test-admin; do
   role=${asked%%:*} path=${asked#*:}
   state x14page
   : > "$TMP"

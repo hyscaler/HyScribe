@@ -91,18 +91,24 @@ fn a_page_s_position_is_read() {
     assert_eq!(admin_page(&[]).position, None);
 }
 
-/// A field added again takes its own first place, not another's.
-#[test]
-fn a_field_added_again_keeps_its_place() {
+/// A store in `init`, taking registrations.
+fn in_init() -> wasmtime::Store<State> {
     let engine = wasmtime::Engine::default();
     let (grants, slug) = (Arc::new(crate::Grants::default()), Arc::from("ext"));
-    let mut store = State::store(
+    State::store(
         &engine,
         (&grants, &slug),
         Phase::Init,
         1 << 20,
         std::time::Duration::from_millis(50),
-    );
+    )
+}
+
+/// A field added again takes its own first place, not another's; one
+/// whose arguments are not JSON is refused.
+#[test]
+fn a_field_added_again_keeps_its_place() {
+    let mut store = in_init();
     let state = store.data_mut();
     let add = |state: &mut State, id: &str, title: &str| {
         let args = (
@@ -125,4 +131,41 @@ fn a_field_added_again_keeps_its_place() {
         .map(|f| f.title.as_str())
         .collect();
     assert_eq!(titles, ["A2", "B"]);
+    let args = (
+        "c".into(),
+        "C".into(),
+        1,
+        "p".into(),
+        "s".into(),
+        "[".into(),
+    );
+    let refused = SdkError::Invalid("not JSON".into());
+    assert_eq!(add_field(state, args), Err(refused));
+    assert_eq!(state.registered.fields.len(), 2);
+}
+
+/// A page's icon is a dashicons class the menu prints as it is, or none.
+#[test]
+fn a_page_s_icon_is_a_plain_class() {
+    let mut store = in_init();
+    let state = store.data_mut();
+    let page = |slug: &str, icon: &str| AdminPage {
+        parent: None,
+        page_title: "P".into(),
+        menu_title: "P".into(),
+        capability: "read".into(),
+        slug: slug.into(),
+        callback: 1,
+        icon: icon.into(),
+        position: None,
+    };
+    assert_eq!(add_page(state, page("a", "dashicons-admin-tools")), Ok(()));
+    assert_eq!(add_page(state, page("b", "")), Ok(()));
+    let refused = Err(SdkError::Invalid(
+        "an icon is a dashicons class, or none".into(),
+    ));
+    for icon in ["dashicons-x' data-x='y", "dashicons-X", "x.svg"] {
+        assert_eq!(add_page(state, page("c", icon)), refused, "{icon}");
+    }
+    assert_eq!(state.registered.pages.len(), 2);
 }

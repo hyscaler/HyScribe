@@ -424,9 +424,14 @@ impl MenuUser for Admin<'_> {
 
 /// An active extension's admin page asked with `page` alone under
 /// `screen` (`admin`, or a core menu's file), as `admin.php` serves it:
-/// the access check first, then its callback; `None` for a page no active
-/// extension has.
-fn extension_screen(admin: &Admin, screen: &str, query: &str, request: &Request) -> Option<Answer> {
+/// the access check first, then its callback if it is on the page's hook
+/// for the user; `None` for a page no active extension has.
+fn extension_screen(
+    admin: &Admin,
+    screen: &str,
+    query: &str,
+    request: &Request,
+) -> Option<Response> {
     use hyscribe_admin::extension_page::{extension_page, settings_fields};
     use hyscribe_admin::menu::{Look, Screen, admin_menu, plugin_page_hook};
     let slug = only_argument(query, "page")??;
@@ -443,10 +448,14 @@ fn extension_screen(admin: &Admin, screen: &str, query: &str, request: &Request)
         plugin_page: Some(&slug),
     };
     if admin_menu(admin, &asked, Look::Block).is_none() {
-        return Some(Answer::from_page(None));
+        return Some(served(admin, Answer::from_page(None)));
     }
-    // Its access granted, a callback is on its hook: `Cannot load` is not reached.
-    let hook = plugin_page_hook(admin, &pagenow, &slug).unwrap_or_default();
+    // A top level page asked under a menu the user may reach, without its
+    // capability: no callback is on its hook.
+    let Some(hook) = plugin_page_hook(admin, &pagenow, &slug) else {
+        let message = format!("Cannot load {slug}.");
+        return Some(died(admin, StatusCode::INTERNAL_SERVER_ERROR, &message));
+    };
     let groups = running
         .request
         .settings()
@@ -460,7 +469,7 @@ fn extension_screen(admin: &Admin, screen: &str, query: &str, request: &Request)
     let printed = running.request.page(ext, &slug);
     let titles = (page.page_title.as_str(), printed.as_slice());
     let page = extension_page(admin, (&pagenow, &slug, &hook), titles, request);
-    Some(Answer::from_page(page))
+    Some(served(admin, Answer::from_page(page)))
 }
 
 /// An extension's admin page as the menu adds it.
@@ -1546,8 +1555,8 @@ fn screen(
     };
     let raw = String::from_utf8_lossy(&stripslashes(request_uri.as_bytes())).into_owned();
     let query = raw.split_once('?').map_or("", |(_, query)| query);
-    if let Some(answer) = extension_screen(admin, screen, query, &request) {
-        return Some(served(admin, answer));
+    if let Some(response) = extension_screen(admin, screen, query, &request) {
+        return Some(response);
     }
     // The Settings screens are sent back with `settings-updated` or `updated` alone.
     let settings = || {

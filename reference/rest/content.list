@@ -27,6 +27,8 @@ GET	/?rest_route=/wp/v2/categories&context=embed
 GET	/?rest_route=/wp/v2/categories&per_page=2&page=2
 GET	/?rest_route=/wp/v2/categories&per_page=3&page=50
 GET	/?rest_route=/wp/v2/categories&page=9223372036854775807&per_page=100	default
+GET	/?rest_route=/wp/v2/categories&_envelope&_fields=id	default
+GET	/?rest_route=/wp/v2/categories&per_page=1&page=2&_envelope&_fields=id	default
 GET	/?rest_route=/wp/v2/categories&per_page=0
 GET	/?rest_route=/wp/v2/categories&per_page=101
 GET	/?rest_route=/wp/v2/categories&page=0

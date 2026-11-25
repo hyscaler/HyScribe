@@ -281,6 +281,7 @@ put('esds-wrong-config.m4a', movie(audio(1, sound(children=esds(tags=(3, 5, 5, 6
 put('esds-wrong-specific.m4a', movie(audio(1, sound(children=esds(tags=(3, 4, 6, 6))))))
 put('esds-long-length.m4a', movie(audio(1, sound(children=atom(b'esds', full(), b'\x03\x80\x80\x80\x20', be16(1), b'\0', b'\x04\x80\x80\x0d\x40\x15\0\x01\0', be32(70000), be32(64000), b'\x05\x02\x14\x08\x06\x01\x02')))))
 put('esds-cut.m4a', movie(audio(1, sound(children=atom(b'esds', full(), b'\x03\x19\0\x01\0\x04\x11\x40\x15\0\x01\0\0\x01\x11\x70\0\x00\xfa')))))
+put('esds-gps-inside.m4a', movie(audio(1, sound(children=esds() + atom(b'gps ', bytes(8))))))
 put('esds-outside.mp4', movie(V, extra=atom(b'esds', esds()[8:])))
 
 # The movie header: scales, durations, versions, dates, its place.
@@ -349,6 +350,7 @@ put('cover-two.m4a', movie(audio(1), head=mvhd() + ilst(item(b'covr', data_box(p
 put('cover-two-atoms.m4a', movie(audio(1), head=mvhd() + ilst(item(b'covr', data_box(gif(), 0)), item(b'covr', data_box(png(), 14)))))
 put('cover-bmp.m4a', movie(audio(1), head=mvhd() + ilst(item(b'covr', data_box(b'BM' + bytes(60), 27)))))
 put('cover-unknown.m4a', movie(audio(1), head=mvhd() + ilst(item(b'covr', data_box(b'not a picture', 13)))))
+put('cover-unknown.mp4', movie(V, head=mvhd() + ilst(item(b'covr', data_box(b'not a picture', 13)))))
 put('cover-unknown-zero.m4a', movie(audio(1), head=mvhd() + ilst(item(b'covr', data_box(b'not a picture', 0)))))
 put('cover-unknown-then-png.m4a', movie(audio(1), head=mvhd() + ilst(item(b'covr', data_box(png(), 0), data_box(b'not a picture', 0)))))
 put('cover-empty.m4a', movie(audio(1), head=mvhd() + ilst(item(b'covr', data_box(b'', 13)))))

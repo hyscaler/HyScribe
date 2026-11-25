@@ -212,6 +212,13 @@ mod tests {
         );
         assert_eq!(route(Taxonomy::Format, Some(term)), None);
         assert_eq!(route(Taxonomy::Category, None), None);
+        // An author archive's, by `get_queried_object_id()`, which may be
+        // no user's (`?author=-1`, in `pages-authors.tsv`).
+        let author = queried_resource_route(&Request {
+            archive: Some(Archive::Author(-1, None)),
+            ..Request::default()
+        });
+        assert_eq!(author.as_deref(), Some("/wp/v2/users/-1"));
         // `rest_get_route_for_post()`: attachments are media, and a post
         // type outside the REST API has no route.
         let single = |post_type| {

@@ -265,7 +265,8 @@ async fn database_errors_show_no_details() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
-        author_archives: false,
+        // On, so the author archive's queries run.
+        author_archives: true,
         proxies: None,
         time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),
@@ -287,6 +288,7 @@ async fn database_errors_show_no_details() {
         "/?p=1",
         "/?cat=1",
         "/?author=1",
+        "/?author_name=admin",
         "/?feed=rss2",
         "/?feed=rss2&cat=1",
         "/?feed=comments-rss2",
@@ -4185,16 +4187,6 @@ async fn author_archives_off_answer_404() {
             assert!(!reply.headers.contains_key("location"), "{form}");
             assert_eq!(reply.headers, first.headers, "{form}");
             assert_eq!(reply.body, first.body, "{form}");
-            let headers: Vec<String> = reply
-                .headers
-                .iter()
-                .map(|(k, v)| format!("{k}: {v:?}"))
-                .collect();
-            eprintln!(
-                "OFFPROOF {form} {} {}",
-                reply.status,
-                admin::tests::sha256(&format!("{headers:?}\n{}", reply.body))
-            );
         }
     }
 }

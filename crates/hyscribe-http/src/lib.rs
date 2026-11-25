@@ -2226,12 +2226,10 @@ fn single_post_title(post: &Post) -> String {
 
 /// `single_term_title()`: a category's or a tag's name through the
 /// `single_cat_title` and `single_tag_title` filters (`wptexturize()` and
-/// `strip_tags()`), any other taxonomy's as it is.
-fn term_title(taxonomy: Taxonomy, name: &[u8]) -> String {
-    match taxonomy {
-        Taxonomy::Format => lossy(name),
-        _ => lossy(&strip_tags(&wptexturize(name, &CORE_SHORTCODE_TAGS))),
-    }
+/// `strip_tags()`). A post format's name has no filter, and is a plain word
+/// they leave as it is.
+fn term_title(name: &[u8]) -> String {
+    lossy(&strip_tags(&wptexturize(name, &CORE_SHORTCODE_TAGS)))
 }
 
 /// `wp_get_document_title()`: the parts that are not empty, joined by
@@ -2619,9 +2617,7 @@ async fn list(
             term_archive
                 .as_ref()
                 .and_then(Archive::term)
-                .map_or_else(String::new, |(taxonomy, term)| {
-                    term_title(taxonomy, &term.name)
-                }),
+                .map_or_else(String::new, |(_, term)| term_title(&term.name)),
         )
     } else {
         // A week's or a time's archive has no title of its own.

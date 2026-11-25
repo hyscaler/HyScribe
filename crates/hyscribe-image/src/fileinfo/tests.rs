@@ -163,7 +163,7 @@ fn reads_images_that_have_a_size() {
 
 /// How many golden files are answered, of how many: every family the
 /// reader knows, so a rule that stops answering shows here.
-const ANSWERED: (usize, usize) = (1484, 2467);
+const ANSWERED: (usize, usize) = (1508, 2499);
 
 /// Text is read up to the limit libmagic reads, and no further.
 #[test]

@@ -921,6 +921,7 @@ pub(crate) fn published(site: &dyn PostsSite, kind: PostType) -> Vec<Post> {
         statuses: vec![StatusFilter {
             status: "publish".into(),
             author: None,
+            post_type: None,
         }],
         order: vec![(OrderBy::MenuOrder, true), (OrderBy::Title, true)],
         limit: u32::MAX,
@@ -1811,6 +1812,7 @@ fn all_statuses(site: &dyn PostsSite, kind: PostType) -> Vec<StatusFilter> {
             } else {
                 None
             },
+            post_type: None,
         })
         .collect()
 }
@@ -1826,6 +1828,7 @@ fn filtered(site: &dyn PostsSite, kind: PostType, filter: &str) -> Vec<StatusFil
     vec![StatusFilter {
         status: filter.into(),
         author: private_author(site, kind).filter(|_| filter == "private"),
+        post_type: None,
     }]
 }
 

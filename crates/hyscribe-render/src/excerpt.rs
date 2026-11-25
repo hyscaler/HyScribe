@@ -69,7 +69,7 @@ impl Renderer<'_> {
     /// own more link and length rule, made here for the block callback.
     pub(crate) fn post_excerpt(&mut self, block: &Block) -> Vec<u8> {
         let context = &self.context;
-        let Some(post) = context.post_id.and_then(|id| context.site.post(id)) else {
+        let Some(post) = context.post() else {
             return Vec::new();
         };
         let name = "core/post-excerpt";

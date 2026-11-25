@@ -233,4 +233,13 @@ fn registered_types_and_taxonomies() {
     );
     assert_eq!(taxonomy_cap("post_tag", "nope").as_deref(), Some(""));
     assert_eq!(taxonomy_cap("nope", "manage_terms"), None);
+    assert_eq!(
+        post_type_cap("page", "read_private_posts").as_deref(),
+        Some("read_private_pages")
+    );
+    assert_eq!(post_type_cap("page", "nope").as_deref(), Some(""));
+    assert_eq!(post_type_cap("nope", "read_private_posts"), None);
+    assert_eq!(post_status_flags("publish"), Some((true, false)));
+    assert_eq!(post_status_flags("private"), Some((false, true)));
+    assert_eq!(post_status_flags("nope"), None);
 }

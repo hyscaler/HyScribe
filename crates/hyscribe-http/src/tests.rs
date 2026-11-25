@@ -1324,7 +1324,7 @@ async fn reads_come_from_the_database_once() {
             ..hyscribe_model::Post::default()
         };
         assert_eq!(
-            reads.adjacent_post(&later, true, None).map(|p| p.id),
+            reads.adjacent_post(&later, true, None, &[]).map(|p| p.id),
             Some(1)
         );
         reads.finish().unwrap();
@@ -4151,3 +4151,4 @@ async fn a_write_cut_off_by_the_time_limit_rolls_back() {
 }
 
 pub(crate) mod classic;
+pub(crate) mod private_views;

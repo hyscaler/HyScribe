@@ -341,6 +341,7 @@ impl<T: Source> Site for T {
         post: &Post,
         previous: bool,
         terms: Option<(&str, &[u64])>,
+        _: &[hyscribe_model::StatusFilter],
     ) -> Option<Post> {
         let key = |p: &Post| (p.date.clone(), p.id);
         let mut found: Vec<Post> = self

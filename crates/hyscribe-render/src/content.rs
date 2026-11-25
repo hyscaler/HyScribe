@@ -31,7 +31,7 @@ impl Renderer<'_> {
         if self.open_posts.contains(&id) {
             return Vec::new();
         }
-        let Some(post) = self.context.site.post(id) else {
+        let Some(post) = self.context.post() else {
             return Vec::new();
         };
         self.open_posts.push(id);

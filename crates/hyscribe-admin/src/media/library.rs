@@ -408,6 +408,7 @@ fn query(
     .map(|status| StatusFilter {
         status: status.into(),
         author: None,
+        post_type: None,
     })
     .collect();
     if Value::String(args.get("cat").unwrap_or_default().into()).to_int() != 0 {

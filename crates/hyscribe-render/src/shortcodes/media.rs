@@ -138,6 +138,7 @@ impl Renderer<'_> {
             statuses: vec![StatusFilter {
                 status: "inherit".into(),
                 author: None,
+                post_type: None,
             }],
             mime_types: vec![format!("{}/%", kind.name())],
             parents: vec![post_id],

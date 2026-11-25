@@ -191,6 +191,7 @@ fn prepare(
         statuses: vec![StatusFilter {
             status: "inherit".into(),
             author: None,
+            post_type: None,
         }],
         parents: vec![post.id],
         order: vec![

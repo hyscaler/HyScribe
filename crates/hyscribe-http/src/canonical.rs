@@ -114,7 +114,7 @@ pub(crate) async fn pretty(
             )
         };
         if !asked.is_empty() || misplaced {
-            target = Some(site.permalink(post).await);
+            target = Some(site.permalink(&crate::viewer::linked(post)).await);
             strip.extend(asked);
         }
     } else if given("m") && found && request.date {

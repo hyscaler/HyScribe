@@ -157,6 +157,7 @@ impl Site for Oracle {
             statuses: vec![StatusFilter {
                 status: "inherit".into(),
                 author: None,
+                post_type: None,
             }],
             parents: vec![post],
             order: vec![(OrderBy::Date, false), (OrderBy::Id, false)],

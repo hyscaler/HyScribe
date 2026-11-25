@@ -95,6 +95,7 @@ pub(super) fn stale(site: &dyn ToolsSite) -> bool {
         statuses: vec![StatusFilter {
             status: "request-pending".into(),
             author: None,
+            post_type: None,
         }],
         limit: u32::MAX,
         ..PostQuery::default()
@@ -142,6 +143,7 @@ pub(super) fn listing(
             .map(|status| StatusFilter {
                 status,
                 author: None,
+                post_type: None,
             })
             .collect(),
         limit: u32::try_from(per_page).unwrap_or(u32::MAX),

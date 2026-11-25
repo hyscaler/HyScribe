@@ -215,6 +215,7 @@ fn query(params: &Params, parent: &Post) -> PostQuery {
         statuses: vec![StatusFilter {
             status: "inherit".into(),
             author: None,
+            post_type: None,
         }],
         parents: vec![parent.id],
         include: (!include.is_empty()).then_some(include),
@@ -353,6 +354,7 @@ fn all_revisions(context: &Context, parent: &Post) -> Vec<Post> {
         statuses: vec![StatusFilter {
             status: "inherit".into(),
             author: None,
+            post_type: None,
         }],
         parents: vec![parent.id],
         order: vec![(OrderBy::Date, false), (OrderBy::Id, false)],

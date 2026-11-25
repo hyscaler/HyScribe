@@ -468,10 +468,11 @@ impl Site for WithPost {
         post: &Post,
         previous: bool,
         terms: Option<(&str, &[u64])>,
+        statuses: &[hyscribe_model::StatusFilter],
     ) -> Option<Post> {
         match &self.forced {
             Some(forced) => Some(forced.clone()),
-            None => self.base.adjacent_post(post, previous, terms),
+            None => self.base.adjacent_post(post, previous, terms, statuses),
         }
     }
 }

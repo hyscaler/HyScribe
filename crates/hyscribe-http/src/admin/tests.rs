@@ -1891,6 +1891,7 @@ async fn dashboard_data() {
                 statuses: vec![hyscribe_model::StatusFilter {
                     status: "draft".into(),
                     author: None,
+                    post_type: None,
                 }],
                 limit: 5,
                 ..PostQuery::default()

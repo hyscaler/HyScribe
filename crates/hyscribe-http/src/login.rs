@@ -302,6 +302,20 @@ impl<'a> LoginReads<'a> {
         self.validate(cookie?, post, "logged_in")
     }
 
+    /// The user `determine_current_user` finds outside the admin, with
+    /// their session token: the auth cookie's (`wp_validate_auth_cookie()`),
+    /// else the logged in cookie's; `grace` for a POST or Ajax request.
+    pub(crate) fn current_user(
+        &self,
+        jar: &[(Vec<u8>, Vec<u8>)],
+        grace: bool,
+    ) -> Option<(u64, Vec<u8>)> {
+        let names = Names::new(self.site);
+        let https = is_ssl(self.site);
+        self.auth_user(cookie(jar, &names.auth(https)), grace, https)
+            .or_else(|| self.logged_in_user(cookie(jar, &names.logged_in()), grace))
+    }
+
     /// The user of a valid cookie of `scheme` and its session token.
     fn validate(&self, cookie: &[u8], post: bool, scheme: &str) -> Option<(u64, Vec<u8>)> {
         let parsed = parse_auth_cookie(cookie)?;

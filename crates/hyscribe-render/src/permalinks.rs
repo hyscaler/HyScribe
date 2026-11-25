@@ -406,8 +406,20 @@ fn link_with_front(site: &dyn Site, post: &Post, front_page: Option<u64>) -> Vec
             String::new()
         },
     };
+    // `wp_force_plain_post_permalink()` lets a private post the user may
+    // read have its pretty link, as `post_link()` gives a published one.
+    let readable = post.status == "private" && site.can_read_post(post.id);
+    let shown = readable.then(|| Post {
+        status: "publish".into(),
+        ..post.clone()
+    });
     links
-        .post_link(&String::from_utf8_lossy(&home), front_page, post, &parts)
+        .post_link(
+            &String::from_utf8_lossy(&home),
+            front_page,
+            shown.as_ref().unwrap_or(post),
+            &parts,
+        )
         .map_or_else(
             || link::permalink(&home, front_page, post),
             String::into_bytes,

@@ -31,6 +31,7 @@ pub fn attachments_query(
             .map(|status| StatusFilter {
                 status: status.into(),
                 author: None,
+                post_type: None,
             })
             .collect(),
         ..PostQuery::default()

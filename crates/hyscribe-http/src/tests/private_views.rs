@@ -2,8 +2,8 @@
 
 //! The front end for a visitor and each role logged in, over the posts of
 //! `reference/private-views/content.sql` in every status
-//! (`reference/private-views/golden.sh`), and the cookies that must leave a
-//! request a visitor's.
+//! (`reference/private-views/golden.sh`), the cookies that must leave a
+//! request a visitor's, and what a `pagename` finds.
 
 use std::sync::Arc;
 
@@ -75,7 +75,9 @@ async fn site(db: &hyscribe_config::Database, dir: &std::path::Path, options: &s
     site.hooks = Arc::new(NoFallback);
     site.build_rewriter();
     let sessions = hyscribe_auth::sessions::Sessions::new(dir);
-    Arc::new(salted(site).with_sessions(sessions))
+    // PHP serves author archives.
+    let site = salted(site).with_author_archives(true);
+    Arc::new(site.with_sessions(sessions))
 }
 
 /// The cookies of `login` logged in at `/hs-login`.
@@ -183,7 +185,7 @@ async fn private_views_match_php() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(golden.lines().count(), 312);
+    assert_eq!(golden.lines().count(), 553);
 }
 
 /// A cookie that does not verify leaves the request a visitor's, byte for
@@ -196,7 +198,17 @@ async fn untrusted_cookies_are_visitors() {
     let dir = tempfile::tempdir().unwrap();
     let site = site(&db, dir.path(), "").await;
     let now = crate::now();
-    let paths = ["/?p=904", "/?p=901", "/?p=901&preview=true", "/"];
+    // A private post, a draft and its preview, then lists: the home page,
+    // a page's query block, the posts feed and a private post's comment feed.
+    let paths = [
+        "/?p=904",
+        "/?p=901",
+        "/?p=901&preview=true",
+        "/",
+        "/?page_id=942",
+        "/?feed=rss2",
+        "/?p=941&feed=rss2",
+    ];
     let mut visitor = Vec::new();
     for path in paths {
         visitor.push(view(&site, path, "", now).await);
@@ -280,5 +292,36 @@ async fn renders_read_as_the_user() {
             reads.can_read_post(904)
         });
         assert_eq!(can.await.unwrap(), readable, "{login}");
+    }
+}
+
+/// A `pagename` finds pages only: an attachment at the path, even one
+/// stored as published or private, is no page for a visitor or a user, and
+/// the request goes on to the guess as it did before users were read.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pagename_finds_no_attachment() {
+    let _saves = SAVES.lock().await;
+    let db = database().await;
+    let dir = tempfile::tempdir().unwrap();
+    let stray = "INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, \
+                 post_title, post_excerpt, post_status, post_name, to_ping, pinged, \
+                 post_content_filtered, post_type, post_mime_type) VALUES \
+                 (960, 1, '2026-11-06 10:00:00', '2026-11-06 10:00:00', '', 'Stray file', '', \
+                 'publish', 'stray-file', '', '', '', 'attachment', 'image/png'), \
+                 (961, 1, '2026-11-06 11:00:00', '2026-11-06 11:00:00', '', 'Kept file', '', \
+                 'private', 'kept-file', '', '', '', 'attachment', 'image/png')";
+    execute(&db, stray).await;
+    let site = site(&db, dir.path(), "").await;
+    let admin = logged_in(&site, "admin").await;
+    let now = crate::now();
+    for cookie in ["", admin.as_str()] {
+        let published = view(&site, "/?pagename=stray-file", cookie, now).await;
+        assert_eq!(published.status, StatusCode::MOVED_PERMANENTLY, "{cookie}");
+        assert_eq!(
+            header_of(&published.headers, header::LOCATION),
+            "http://127.0.0.1:8081/?attachment_id=960"
+        );
+        let private = view(&site, "/?pagename=kept-file", cookie, now).await;
+        assert_eq!(private.status, StatusCode::NOT_FOUND, "{cookie}");
     }
 }

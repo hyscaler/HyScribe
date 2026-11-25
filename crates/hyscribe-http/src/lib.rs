@@ -1139,13 +1139,8 @@ async fn page(
         )
             .into_response(),
         Outcome::Feed(page, feed) => {
-            feed::respond(
-                site.clone(),
-                requested(*page, &original, &uri),
-                feed,
-                &headers,
-            )
-            .await
+            let page = requested(*page, &original, &uri);
+            feed::respond(site.clone(), page, feed, (&headers, viewer.clone())).await
         }
         Outcome::Xml(body) => {
             let content_type = [(header::CONTENT_TYPE, "application/xml; charset=UTF-8")];
@@ -2131,10 +2126,12 @@ async fn route(
                         .filter(|location| *location != current)
                         .or(redirect.filter(|_| !hidden))
                         .filter(|_| !preview);
-                    // The 404 feed lists the post, never its comments.
+                    // The 404 feed lists the post, never its comments; a post
+                    // the user is not shown has none listed, as ID 0 has none.
                     let feed_404 = garbled && by_id;
+                    let listed = found.as_ref().map_or(0, |post| post.id);
                     let comments = (comment_feed && !feed_404)
-                        .then_some(feed::CommentsOf::Post(id, post_type == "post"));
+                        .then_some(feed::CommentsOf::Post(listed, post_type == "post"));
                     let page = async {
                         Ok(found.map_or_else(
                             || Page {
@@ -3042,10 +3039,10 @@ async fn by_slug(
                 None => site.db.named_pages(&parts).await?,
             };
             // The page for posts lists the posts whatever its status; an
-            // attachment's inherited status is never shown so.
+            // attachment at the path is no page, whatever its status.
             let post = match page_by_path(&parts, &pages).cloned() {
                 Some(p) if site.posts_page() == Some(p.id) => Some(p),
-                post => visible(post).await,
+                post => visible(post.filter(|p| p.post_type == "page")).await,
             };
             narrowed(site, query, post, viewer).await
         };

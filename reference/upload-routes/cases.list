@@ -10,8 +10,12 @@
 # file as async-upload, restfile with the file as file; raw sends the file
 # as the body with Content-Type (type=) and Content-Disposition;
 # nodisposition and notype leave those out; nonce adds the user's
-# media-form nonce as _wpnonce, wrongnonce a wrong one. A REST request
-# carries the user's REST nonce.
+# media-form nonce as _wpnonce, wrongnonce a wrong one; crafted percent-decodes
+# the name sent, and sends a form as a body made byte for byte as the Rust
+# test makes it. A REST request carries the user's REST nonce. The crafted
+# names: steps out of the folder, an absolute path, a backslash, a NUL and a
+# line feed (in a form only, as no header carries them), a leading dot, only
+# dots, a device name, a name over 255 bytes, and one that is not UTF-8.
 POST	/wp-admin/async-upload.php	form,nonce	photo.jpg	action=upload-attachment&name=photo.jpg
 POST	/wp-admin/async-upload.php	form,nonce	small.jpg	action=upload-attachment&name=small.jpg&post_id=1
 POST	/wp-admin/async-upload.php	form,nonce	big.jpg	action=upload-attachment&name=big.jpg
@@ -142,3 +146,41 @@ POST	/wp-admin/async-upload.php	form,nonce	clip-audio.3gp	action=upload-attachme
 POST	/wp-admin/async-upload.php	form,nonce	alac.m4a	action=upload-attachment&name=alac.m4a
 POST	/?rest_route=/wp/v2/media	raw,type=video/quicktime	clip-audio.mov	title=A+movie&post=1
 POST	/?rest_route=/wp/v2/media	restfile	rotated.mp4	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:..%2F..%2Fx.jpg	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:..%2F..%2Fx.jpg	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:..%2F..%2Fx.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg,crafted	small.jpg:..%2F..%2Fx.jpg	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:%2Fabs%2Fx.jpg	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:%2Fabs%2Fx.jpg	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:%2Fabs%2Fx.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg,crafted	small.jpg:%2Fabs%2Fx.jpg	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:a%5Cb.jpg	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:a%5Cb.jpg	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:a%5Cb.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg,crafted	small.jpg:a%5Cb.jpg	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:a%00b.jpg	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:a%00b.jpg	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:a%00b.jpg	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:.x.jpg	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:.x.jpg	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:.x.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg,crafted	small.jpg:.x.jpg	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:..	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:..	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:..	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg,crafted	small.jpg:..	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:CON.jpg	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:CON.jpg	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:CON.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg,crafted	small.jpg:CON.jpg	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn.jpg	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn.jpg	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg,crafted	small.jpg:nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn.jpg	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:%9D.jpg	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:%9D.jpg	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:%9D.jpg	-
+POST	/?rest_route=/wp/v2/media	raw,type=image/jpeg,crafted	small.jpg:%9D.jpg	-
+POST	/wp-admin/async-upload.php	form,nonce,crafted	small.jpg:a.jpg%0A	action=upload-attachment
+POST	/wp-admin/media-new.php	form,nonce,crafted	small.jpg:a.jpg%0A	html-upload=Upload&post_id=0
+POST	/?rest_route=/wp/v2/media	restfile,crafted	small.jpg:a.jpg%0A	-

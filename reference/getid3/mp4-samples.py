@@ -453,3 +453,27 @@ put('nest-70.mp4', movie(V, head=mvhd() + deep))
 put('count-free.mp4', movie(V, head=mvhd() + atom(b'udta', atom(b'free') * 30000)))
 put('count-free-top.mp4', movie(V) + atom(b'free') * 30000)
 put('count-many-tracks.mp4', movie(*(video(n + 1, 16 * (n + 1), 12 * (n + 1)) for n in range(12))))
+
+# Edges of the reading, each between two ways it could go.
+A1 = audio(entry=sound(children=esds(1000)))
+put('edge-list-twelve.mp4', ftyp() + mdat() + atom(b'moov', bytes(4), atom(b'tkhd')))
+put('edge-size-one.mp4', ftyp() + mdat() + atom(b'moov', be32(1) + b'udta' + tkhd(1, 2000, 320, 240) + bytes(7)))
+put('edge-covr-in-udta.m4a', movie(audio(1), head=mvhd() + atom(b'udta', item(b'covr', data_box(png(), 14)))))
+put('edge-mvhd-twenty.mp4', movie(V, A1, head=atom(b'mvhd', full(), be32(0), be32(0), be32(1000), be32(2000))))
+put('edge-scale-kept.mp4', movie(video(1, scale=600, duration=1200, times=stts((50, 0))),
+                                 video(3, scale=300, duration=600, times=stts((2, 900000))), A1))
+NO_SCALE = trak(1, b'', 0, 0, b'vide', visual(width=0, height=0), stts((5, 3000)), 5, media=b'')
+put('edge-no-scale.mp4', ftyp() + mdat() + moov(NO_SCALE, head=b''))
+put('edge-zero-duration.mp4', movie(video(times=stts((50, 0))), A1))
+put('edge-low-scale.mp4', movie(video(scale=2, duration=6000, times=stts((2, 3000))), A1))
+put('edge-hev1-low.mp4', movie(video(entry=visual(b'hev1')), A1))
+for name, fourcc, count in (('count', b'avc1', 5), ('count-zero', b'avc1', 0), ('count-other', b'hev1', 5)):
+    put('edge-stbl-%s.mp4' % name, movie(video(header=b'', entry=visual(fourcc, width=0, height=0), scale=1,
+                                               duration=6000, times=stts((count, 3000)))))
+put('edge-stsd-trailing.mp4', movie(video(entry=atom(b'stsd', full(), be32(1), visual(), bytes(4)))))
+put('edge-vendor-seventy.mov', movie(video(entry=visual(vendor=b'FFMP', name=b'x', children=b'')), brand=QT))
+put('edge-audio-tall.mp4', movie(audio(1, header=tkhd(1, 2000, 0, 120))))
+put('edge-64-moov-mdat.mp4', ftyp() + mdat() + be32(1) + b'moov' + struct.pack('>Q', 16 + len(moov(V)) - 8)
+    + moov(V)[8:] + atom(b'mdat', bytes(8)))
+put('edge-two-codecs.mp4', movie(video(entry=stsd(visual(), visual(b'2vuY')))))
+put('edge-named-then-svq3.mov', movie(video(entry=stsd(visual(vendor=b'FFMP', name=b'Named'), visual(b'SVQ3'))), brand=QT))

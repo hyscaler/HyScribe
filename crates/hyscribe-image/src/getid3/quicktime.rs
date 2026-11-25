@@ -47,7 +47,7 @@ const MAC_EPOCH: i64 = 2_082_844_800;
 fn be(data: &[u8], at: usize, n: usize) -> Option<u64> {
     let rest = data.get(at..).unwrap_or_default();
     let part = rest.get(..n).unwrap_or(rest);
-    (!part.is_empty()).then(|| part.iter().fold(0, |v, &b| v << 8 | u64::from(b)))
+    (!part.is_empty()).then(|| part.iter().fold(0, |v, &b| v * 256 + u64::from(b)))
 }
 
 /// `FixedPoint16_16( substr( $data, $at, 4 ) )` of four bytes there.
@@ -69,7 +69,7 @@ fn descr_length(data: &[u8], at: &mut usize) -> u64 {
     for _ in 0..5 {
         let byte = data.get(*at).copied().unwrap_or(0);
         *at += 1;
-        length = length << 7 | u64::from(byte & 0x7f);
+        length = length * 128 + u64::from(byte & 0x7f);
         if byte & 0x80 == 0 {
             break;
         }
@@ -167,8 +167,8 @@ struct Video {
     dataformat: Option<&'static str>,
     fourcc: Option<Vec<u8>>,
     codec: Option<Vec<u8>>,
-    width: Option<f64>,
-    height: Option<f64>,
+    /// `resolution_x` and `resolution_y`, always set together.
+    size: Option<(f64, f64)>,
     /// `lossless` is set, always to `false`.
     lossless: bool,
     bitrate: Option<Num>,
@@ -176,7 +176,13 @@ struct Video {
     moving: bool,
 }
 
+/// `resolution_x` of `video`.
+fn width(video: &Video) -> Option<Num> {
+    video.size.map(|(width, _)| Num::Float(width))
+}
+
 /// What a sample table atom holds, for its `stbl`.
+#[derive(Debug, PartialEq)]
 enum Table {
     None,
     /// A sample description table, and whether an entry is AVC or MPEG-4
@@ -231,7 +237,30 @@ struct Movie<'a> {
     held: usize,
 }
 
-impl Movie<'_> {
+impl<'a> Movie<'a> {
+    /// `$info` as `openfile()` and the format test leave it for `file`.
+    fn new(file: &'a [u8]) -> Self {
+        let mut audio = Audio::default();
+        audio.set("dataformat", text(""));
+        Movie {
+            file,
+            format: "quicktime",
+            mime: "video/quicktime",
+            seconds: None,
+            bitrate: None,
+            data_at: 0,
+            video: Some(Video::default()),
+            audio,
+            quicktime_video: false,
+            quicktime_audio: false,
+            time_scale: None,
+            created: None,
+            picture: None,
+            atoms: 0,
+            held: 0,
+        }
+    }
+
     fn video(&mut self) -> &mut Video {
         self.video.get_or_insert_with(Video::default)
     }
@@ -267,12 +296,9 @@ impl Movie<'_> {
         held: usize,
     ) -> Result<Vec<Parsed>, Unported> {
         let mut found = Vec::new();
-        if data.len() == 4 && be(data, 0, 4) == Some(0) {
-            return Ok(found);
-        }
         let mut at = 0;
-        while at < data.len() {
-            let size = be(data, at, 4).unwrap_or(0) as usize;
+        while let Some(size) = be(data, at, 4) {
+            let size = size as usize;
             if size == 0 {
                 // A list may end in four zero bytes, which are skipped.
                 if data.len() > 12 {
@@ -377,11 +403,8 @@ impl Movie<'_> {
             if be(data, 1, 3).unwrap_or(0) & 1 == 1 {
                 let (width, height) = (fixed(data, 76), fixed(data, 80));
                 let video = self.video();
-                if video.width.is_none() || video.height.is_none() {
-                    (video.width, video.height) = (Some(width), Some(height));
-                }
-                video.width = video.width.map(|have| have.max(width));
-                video.height = video.height.map(|have| have.max(height));
+                let (have_width, have_height) = video.size.unwrap_or((width, height));
+                video.size = Some((have_width.max(width), have_height.max(height)));
             }
             return Ok(created);
         }
@@ -420,10 +443,11 @@ impl Movie<'_> {
                 }
                 // round( scale / duration, 3 ) is 0 below half a
                 // thousandth; at it, PHP's rounding is not ported.
-                if scale * 2000 == duration {
-                    return Err(Unported);
-                }
-                (rate, count) = (scale * 2000 > duration, samples);
+                rate = match (scale * 2000).cmp(&duration) {
+                    std::cmp::Ordering::Equal => return Err(Unported),
+                    order => order.is_gt(),
+                };
+                count = samples;
             }
         }
         if video && rate {
@@ -439,10 +463,8 @@ impl Movie<'_> {
     /// A sample description table: its entries, and as many past the end
     /// as PHP reads as empty video descriptions.
     fn stsd(&mut self, data: &[u8], depth: usize, held: usize) -> Result<Table, Unported> {
-        let mut count = be(data, 4, 4).unwrap_or(0);
-        if count > 0x00ff_ffff {
-            count &= 0x00ff_ffff;
-        }
+        // PHP masks off the upper byte of a count past it.
+        let count = be(data, 4, 4).unwrap_or(0) & 0x00ff_ffff;
         let (mut at, mut read, mut video) = (8, 0, false);
         while read < count && at < data.len() {
             let size = be(data, at, 4).unwrap_or(0) as usize;
@@ -459,11 +481,7 @@ impl Movie<'_> {
             }
             self.video().lossless = true;
         }
-        Ok(if count > 0 {
-            Table::Descriptions(video)
-        } else {
-            Table::None
-        })
+        Ok(Table::Descriptions(video))
     }
 
     /// One sample description of `format`, its `data` after the reference
@@ -493,7 +511,7 @@ impl Movie<'_> {
                     }
                     let (width, height) = (be(data, 16, 2), be(data, 18, 2));
                     if let (Some(w @ 1..), Some(h @ 1..)) = (width, height) {
-                        (video.width, video.height) = (Some(w as f64), Some(h as f64));
+                        video.size = Some((w as f64, h as f64));
                         self.quicktime_video = true;
                     }
                 } else if format == b"qtvr" {
@@ -634,8 +652,10 @@ impl Movie<'_> {
 
     /// The end of the module's `Analyze()`, for a file read to its end.
     fn finish(&mut self) {
-        if self.bitrate.is_none() && !zero(self.seconds) {
-            self.bitrate = self.seconds.map(|seconds| self.data_bits().div(seconds));
+        // No bitrate is set before: only getID3's MP3 reading in the media
+        // data, which is not ported, would.
+        if let Some(seconds) = self.seconds.filter(|seconds| !zero(Some(*seconds))) {
+            self.bitrate = Some(self.data_bits().div(seconds));
         }
         let audio_bitrate = self.audio_number("bitrate");
         if let (Some(bitrate), None, false) = (self.bitrate, audio_bitrate, self.quicktime_video) {
@@ -643,24 +663,19 @@ impl Movie<'_> {
         }
         let audio_bitrate = self.audio_number("bitrate");
         let bitrate = self.bitrate;
+        // An audio bitrate is never 0, and no video bitrate is set before.
         if let (Some(video), Some(total), Some(audio)) = (&mut self.video, bitrate, audio_bitrate) {
-            let more = total.float() > audio.float();
-            let wide = !zero(video.width.map(Num::Float));
-            if !zero(Some(total))
-                && !zero(Some(audio))
-                && zero(video.bitrate)
-                && video.moving
-                && wide
-                && more
-            {
-                video.bitrate = Some(total.sub(audio));
+            let more = total.sub(audio);
+            let gained = more.float().partial_cmp(&0.0) == Some(std::cmp::Ordering::Greater);
+            if gained && video.moving && !zero(width(video)) {
+                video.bitrate = Some(more);
             }
         }
         let mp4 = (key("dataformat"), text("mp4"));
         if self.audio.0.contains(&mp4) {
             self.format = "mp4";
             let video = self.video();
-            if zero(video.width.map(Num::Float)) {
+            if zero(width(video)) {
                 video.dataformat = None;
                 self.mime = "audio/mp4";
             } else {
@@ -675,7 +690,8 @@ impl Movie<'_> {
         if video.dataformat.is_none_or(str::is_empty) && quicktime_video {
             video.dataformat = Some("quicktime");
         }
-        let flat = zero(video.width.map(Num::Float)) && zero(video.height.map(Num::Float));
+        let height = video.size.map(|(_, height)| Num::Float(height));
+        let flat = zero(width(video)) && zero(height);
         if self.mime == "audio/mp4" && flat {
             self.video = None;
         }
@@ -703,8 +719,8 @@ impl Movie<'_> {
         let (bitrate, seconds) = (self.bitrate, self.seconds);
         if let Some(video) = &mut self.video {
             let undetermined = video.dataformat.is_some_and(|format| !format.is_empty());
-            let found = audio_bitrate.filter(|audio| audio.float() > 0.0);
-            let same = found
+            // An audio bitrate is never 0.
+            let same = audio_bitrate
                 .zip(bitrate)
                 .filter(|(audio, total)| audio.float() == total.float());
             let timed = seconds.filter(|seconds| seconds.float() > 0.0);
@@ -719,8 +735,9 @@ impl Movie<'_> {
         if self.seconds.is_none_or(|seconds| seconds.float() <= 0.0) && !zero(self.bitrate) {
             self.seconds = self.bitrate.map(|bitrate| bits.div(bitrate));
         }
-        if self.bitrate.is_none() && !zero(self.seconds) {
-            self.bitrate = self.seconds.map(|seconds| bits.div(seconds));
+        let seconds = self.seconds.filter(|seconds| !zero(Some(*seconds)));
+        if let (None, Some(seconds)) = (self.bitrate, seconds) {
+            self.bitrate = Some(bits.div(seconds));
         }
         let video_bitrate = self.video.as_ref().and_then(|video| video.bitrate);
         if let (Some(bitrate), true, true) = (
@@ -728,9 +745,9 @@ impl Movie<'_> {
             self.audio_empty("bitrate"),
             zero(video_bitrate),
         ) {
-            let width = self.video.as_ref().and_then(|video| video.width);
+            let wide = self.video.as_ref().is_some_and(|video| !zero(width(video)));
             let silent = self.audio_empty("dataformat");
-            if zero(width.map(Num::Float)) {
+            if !wide {
                 self.audio.set("bitrate", bitrate.value());
             } else if let (Some(video), true) = (&mut self.video, silent) {
                 video.bitrate = Some(bitrate);
@@ -826,27 +843,7 @@ pub(super) fn quicktime(b: &[u8]) -> bool {
 
 /// The file `b` read: the module, then `analyze()`'s sums.
 fn read(b: &[u8]) -> Result<Movie<'_>, Unported> {
-    let mut movie = Movie {
-        file: b,
-        format: "quicktime",
-        mime: "video/quicktime",
-        seconds: None,
-        bitrate: None,
-        data_at: 0,
-        video: Some(Video {
-            dataformat: Some(""),
-            ..Video::default()
-        }),
-        audio: Audio::default(),
-        quicktime_video: false,
-        quicktime_audio: false,
-        time_scale: None,
-        created: None,
-        picture: None,
-        atoms: 0,
-        held: 0,
-    };
-    movie.audio.set("dataformat", text(""));
+    let mut movie = Movie::new(b);
     let mut at = 0;
     let whole = loop {
         if at >= b.len() {
@@ -961,8 +958,11 @@ pub(super) fn video(b: &[u8]) -> Result<Vec<Entry>, Unported> {
     }
     let mut middle = Vec::new();
     for (name, side) in [
-        ("width", video.and_then(|v| v.width)),
-        ("height", video.and_then(|v| v.height)),
+        ("width", video.and_then(|v| v.size).map(|(width, _)| width)),
+        (
+            "height",
+            video.and_then(|v| v.size).map(|(_, height)| height),
+        ),
     ] {
         if let Some(side) = side.filter(|side| *side != 0.0) {
             middle.push((key(name), Value::Int(side as i64)));

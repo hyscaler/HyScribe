@@ -86,3 +86,107 @@ fn reads_numbers_as_php_does() {
     assert_eq!(descr_length(b"\0\x83\x01", &mut at), 0x181);
     assert_eq!(at, 3);
 }
+
+/// PHP's sums of integers stay integers; of a float, floats.
+#[test]
+fn adds_and_subtracts_as_php_does() {
+    assert_eq!(Num::Int(7).add(Num::Int(5)), Num::Int(12));
+    assert_eq!(Num::Int(7).sub(Num::Int(5)), Num::Int(2));
+    assert_eq!(Num::Int(7).add(Num::Float(0.5)), Num::Float(7.5));
+    assert_eq!(Num::Float(7.5).sub(Num::Int(5)), Num::Float(2.5));
+}
+
+/// The QuickTime lookup names its own formats; the RIFF one gives the rest
+/// later, SVQ3 among them.
+#[test]
+fn names_codecs_by_the_lookup_getid3_asks_first() {
+    assert!(quicktime_codec(b"avc1"));
+    assert!(!quicktime_codec(b"SVQ3"));
+    assert!(!quicktime_codec(b"2vuY"));
+    assert_eq!(codec_name(b"SVQ3"), "Sorenson Video 3 (Apple Quicktime 5)");
+}
+
+/// The fixed limits: nesting, atoms, the bytes held along a nesting and at
+/// the top level, each read up to its bound and left past it.
+#[test]
+fn reads_up_to_the_limits() {
+    let mut movie = Movie::new(b"");
+    assert!(movie.atom(b"free", b"", b"", DEPTH, 0, None).is_ok());
+    assert!(movie.atom(b"free", b"", b"", DEPTH + 1, 0, None).is_err());
+    let mut movie = Movie::new(b"");
+    movie.atoms = ATOMS - 1;
+    assert!(movie.atom(b"free", b"", b"", 0, 0, None).is_ok());
+    assert!(movie.atom(b"free", b"", b"", 0, 0, None).is_err());
+    let mut movie = Movie::new(b"");
+    let data = vec![0; 8];
+    assert!(
+        movie
+            .atom(b"free", &data, b"", 0, 2 * HELD - 8, None)
+            .is_ok()
+    );
+    assert!(
+        movie
+            .atom(b"free", &data, b"", 0, 2 * HELD - 7, None)
+            .is_err()
+    );
+    let top = |size: usize| atom(b"free", &vec![0; size]);
+    assert!(video(&top(HELD)).is_ok());
+    assert_eq!(video(&top(HELD + 1)), Err(Unported));
+}
+
+/// A controller type other than QuickTime VR's changes nothing.
+#[test]
+fn takes_only_the_vr_controller() {
+    let mut movie = Movie::new(b"");
+    movie.atom(b"ctyp", b"none", b"", 1, 0, None).unwrap();
+    assert_eq!(movie.video().dataformat, None);
+    movie.atom(b"ctyp", b"qtvr", b"", 1, 0, None).unwrap();
+    assert_eq!(movie.video().dataformat, Some("quicktimevr"));
+}
+
+/// An object descriptor whose tracks the atom could hold is read; one
+/// claiming more is left.
+#[test]
+fn leaves_descriptors_claiming_more_tracks_than_they_hold() {
+    let iods = |length: u8| {
+        let mut data = vec![0, 0, 0, 0, 0x10, length];
+        data.resize(16, 0);
+        data
+    };
+    let mut movie = Movie::new(b"");
+    assert!(movie.atom(b"iods", &iods(103), b"", 1, 0, None).is_ok());
+    assert!(movie.atom(b"iods", &iods(104), b"", 1, 0, None).is_err());
+}
+
+/// An atom of the header's size holds nothing, whatever follows it.
+#[test]
+fn reads_an_atom_of_the_header_s_size_as_empty() {
+    let mut movie = Movie::new(b"");
+    let list = [atom(b"udta", b""), atom(b"free", b"")].concat();
+    let found = movie.container(&list, b"moov", 1, 0).unwrap();
+    assert_eq!((found.len(), movie.atoms), (2, 2));
+}
+
+/// A data reference table of entries one after the other is read.
+#[test]
+fn reads_references_one_after_the_other() {
+    let entry = [&12u32.to_be_bytes()[..], b"url ", &[0, 0, 0, 1]].concat();
+    let table = [&[0, 0, 0, 0, 0, 0, 0, 2][..], &entry, &entry].concat();
+    assert!(dref(&table).is_ok());
+    assert!(dref(&table[..table.len() - 1]).is_err());
+}
+
+/// A time table's counts and durations in their order; one longer than
+/// PHP reads under 128M is left.
+#[test]
+fn reads_time_tables_in_order() {
+    let table = [
+        0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7, 0, 0, 0, 9, 0, 0, 0, 11,
+    ];
+    let read = stts(&table).unwrap();
+    let times = vec![(Some(5), Some(7)), (Some(9), Some(11))];
+    assert_eq!(read, Table::Times(times));
+    let long = |count: u32| [[0, 0, 0, 0], count.to_be_bytes()].concat();
+    assert!(stts(&long(13_421)).is_ok());
+    assert!(stts(&long(13_422)).is_err());
+}

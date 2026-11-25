@@ -190,3 +190,12 @@ fn reads_time_tables_in_order() {
     assert!(stts(&long(13_421)).is_ok());
     assert!(stts(&long(13_422)).is_err());
 }
+
+/// A cover data box of the header's size alone is a first picture of no
+/// data, which leaves the file without one.
+#[test]
+fn reads_a_cover_box_of_its_header_alone() {
+    let mut movie = Movie::new(b"");
+    movie.cover(&atom(b"data", b"")).unwrap();
+    assert_eq!(movie.picture, Some((Vec::new(), None)));
+}

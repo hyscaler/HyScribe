@@ -626,8 +626,8 @@ impl<'a> Movie<'a> {
             return Ok(());
         }
         let mut at = 0;
-        while at < data.len() {
-            let size = be(data, at, 4).unwrap_or(0) as usize;
+        while let Some(size) = be(data, at, 4) {
+            let size = size as usize;
             if size <= 1 {
                 break;
             }

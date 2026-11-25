@@ -7,7 +7,7 @@
 //! `reference/admin-look/hyscribe-look.php` gives PHP the same.
 
 use hyscribe_kses::esc_url;
-use hyscribe_phpser::{Key, Value, json_encode};
+use hyscribe_phpser::{Key, Value, json_encode, rawurlencode};
 
 /// `_x( $text, 'block description' )`'s changed strings.
 const BLOCK_TEXT: [(&str, &str); 3] = [
@@ -106,6 +106,45 @@ pub(crate) fn editor_icon_style(admin_url: &dyn Fn(&str) -> String) -> String {
     )
 }
 
+/// The address people porting themes or plugins write to.
+const CONTACT: &str = "contact@hyscribe.com";
+
+/// The release notes of a HyScribe version on GitHub.
+pub(crate) fn release_url(version: &str) -> String {
+    format!("https://github.com/hyscaler/HyScribe/releases/tag/v{version}")
+}
+
+/// The host and port of a URL, as `wp_parse_url()` finds them.
+fn domain(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    authority.rsplit('@').next().unwrap_or_default()
+}
+
+/// The `mailto:` link asking for porting help, as an escaped attribute: the
+/// subject names the site's domain, the body its home URL and HyScribe's
+/// version (RFC 6068, line breaks as `%0D%0A`).
+pub(crate) fn porting_mailto(home_url: &str, version: &str) -> String {
+    let encode = |text: &str| String::from_utf8_lossy(&rawurlencode(text.as_bytes())).into_owned();
+    let body = format!(
+        "Site: {home_url}\r\nHyScribe version: {version}\r\n\r\nWhat I need help with:\r\n"
+    );
+    format!(
+        "mailto:{CONTACT}?subject={}&amp;body={}",
+        encode(&format!("Porting help for {}", domain(home_url))),
+        encode(&body)
+    )
+}
+
+/// The dashboard's welcome banner in the brand's colours (the scheme's
+/// ink, blue and sky): core's artwork hidden, the mark beside the text.
+pub(crate) fn welcome_style(admin_url: &dyn Fn(&str) -> String) -> String {
+    let url = mark_url(admin_url, MARK);
+    format!(
+        ".welcome-panel-header-wrap{{background-color:#131b26;border-bottom:4px solid #1a5fd0}}.welcome-panel-header-image{{display:none}}.welcome-panel-header{{background:url({url}) no-repeat right 48px center/96px 96px;padding-right:192px}}.welcome-panel-header p a{{color:#7db2ff;text-decoration:underline}}.welcome-panel-header p.hyscribe-porting{{font-size:16px}}.welcome-panel-column>svg rect{{fill:#1a5fd0}}@media screen and (max-width:600px){{.welcome-panel-header{{background-image:none;padding-right:32px}}}}"
+    )
+}
+
 /// A block's description as hs-admin's editor shows it.
 pub(crate) fn block_description(text: &[u8]) -> Option<&'static str> {
     let found = BLOCK_TEXT.iter().find(|(from, _)| from.as_bytes() == text);
@@ -165,5 +204,54 @@ mod tests {
             let json = script_translations(handle).unwrap_or_default();
             assert_eq!(json.matches("\":[\"").count(), strings.len(), "{handle}");
         }
+    }
+
+    #[test]
+    fn the_release_notes_are_the_versions_tag() {
+        assert_eq!(
+            release_url("0.1.0"),
+            "https://github.com/hyscaler/HyScribe/releases/tag/v0.1.0"
+        );
+    }
+
+    /// Subject and body as `rawurlencode()` makes them: spaces `%20`, line
+    /// breaks `%0D%0A`, and the attribute's `&` escaped.
+    #[test]
+    fn the_porting_link_names_the_domain_and_the_site() {
+        assert_eq!(
+            porting_mailto("https://example.com/", "0.1.0"),
+            "mailto:contact@hyscribe.com?subject=Porting%20help%20for%20example.com&amp;body=Site%3A%20https%3A%2F%2Fexample.com%2F%0D%0AHyScribe%20version%3A%200.1.0%0D%0A%0D%0AWhat%20I%20need%20help%20with%3A%0D%0A"
+        );
+    }
+
+    #[test]
+    fn the_domain_keeps_its_port_and_drops_the_folder() {
+        let link = porting_mailto("http://localhost:8081/blog/", "0.1.0");
+        assert!(link.contains("subject=Porting%20help%20for%20localhost%3A8081&amp;body="));
+        assert!(link.contains("Site%3A%20http%3A%2F%2Flocalhost%3A8081%2Fblog%2F%0D%0A"));
+        assert!(!link.contains('+'));
+    }
+
+    #[test]
+    fn the_domain_is_the_host_alone() {
+        for (url, domain) in [
+            ("https://user:pw@example.com/a?b#c", "example.com"),
+            ("https://example.com?x=1", "example.com"),
+            ("example.com/x", "example.com"),
+            ("https://b\u{fc}cher.example/", "b\u{fc}cher.example"),
+            ("", ""),
+        ] {
+            assert_eq!(super::domain(url), domain, "{url}");
+        }
+        let link = porting_mailto("https://b\u{fc}cher.example/a&b c", "0.1.0");
+        assert!(link.contains("for%20b%C3%BCcher.example&amp;body="));
+        assert!(link.contains("a%26b%20c%0D%0A"));
+    }
+
+    #[test]
+    fn the_banner_style_uses_the_brand_mark() {
+        let style = welcome_style(&|path| format!("/hs-admin/{path}"));
+        assert!(style.contains("url(/hs-admin/images/hyscribe-mark.svg) no-repeat"));
+        assert!(style.contains("background-color:#131b26"));
     }
 }

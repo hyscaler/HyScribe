@@ -4006,12 +4006,10 @@ async fn attachment_pages_match_php() {
             .unwrap();
     }
     let golden = include_str!("../tests/golden/attachment-pages.tsv");
-    // The players of audio and video files need MediaElement.js.
-    let known = ["818", "821", "825"]
-        .map(|id| format!("wp_attachment_pages_enabled=1\t/?attachment_id={id}\tmediaelement\n"))
-        .concat();
+    // The audio player of this file needs MediaElement.js.
+    let known = "wp_attachment_pages_enabled=1\t/?attachment_id=825\tmediaelement\n";
     assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, None, &known).await,
+        assert_listed_pages("wordpress_saves", golden, None, known).await,
         0
     );
     assert_eq!(golden.lines().count(), 110);

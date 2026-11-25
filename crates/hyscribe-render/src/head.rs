@@ -289,6 +289,22 @@ impl Head<'_> {
             // no search feed either.
             term.as_ref()
                 .map(|term| self.term_feed_link(&name, *taxonomy, term))
+        } else if let Some(Archive::Author(id, user)) = &self.request.archive {
+            // get_the_author_meta( 'display_name', (int) get_query_var( 'author' ) ):
+            // for 0, `$authordata`'s, which the rendered template leaves at
+            // the first post's author.
+            let user = if *id == 0 {
+                let first = self.request.posts.first();
+                first.and_then(|post| self.site.user(post.author))
+            } else {
+                user.clone()
+            };
+            let display = user.map_or_else(Vec::new, |user| user.display_name);
+            let title = format!(
+                "{name} &raquo; Posts by {} Feed",
+                String::from_utf8_lossy(&display)
+            );
+            Some((title, permalinks::author_feed_link(self.site, *id, "rss2")))
         } else {
             self.request.search.as_ref().map(|search| {
                 let title = format!(

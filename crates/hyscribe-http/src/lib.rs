@@ -127,6 +127,9 @@ pub struct Site {
     defined: Vec<&'static str>,
     /// `REST_PUBLIC_USERS`: the public users REST endpoint is on.
     public_users: bool,
+    /// `AUTHOR_ARCHIVES`: author archives are served, as WordPress serves
+    /// them; off, they answer 404 (docs/SECURITY_MODEL.md).
+    author_archives: bool,
     /// `BEHIND_PROXY` with `TRUSTED_PROXIES`: the peers whose
     /// `X-Forwarded-For` names the client; none when not behind a
     /// proxy.
@@ -218,6 +221,7 @@ impl Site {
             writer: None,
             defined: Vec::new(),
             public_users: true,
+            author_archives: false,
             proxies: None,
             time_limit: DEFAULT_TIME_LIMIT,
             constants: hyscribe_config::Constants::default(),
@@ -275,6 +279,7 @@ impl Site {
             writer: self.writer.clone(),
             defined: self.defined.clone(),
             public_users: self.public_users,
+            author_archives: self.author_archives,
             proxies: self.proxies.clone(),
             time_limit: self.time_limit,
             constants: self.constants,
@@ -316,6 +321,14 @@ impl Site {
     pub fn with_public_users(self, public_users: bool) -> Site {
         Site {
             public_users,
+            ..self
+        }
+    }
+
+    /// The site with author archives on or off.
+    pub fn with_author_archives(self, author_archives: bool) -> Site {
+        Site {
+            author_archives,
             ..self
         }
     }
@@ -1835,6 +1848,12 @@ fn reserved(path: &str) -> bool {
     is_static(path) || path == "/hs-login" || path == "/hs-admin" || path.starts_with("/hs-admin/")
 }
 
+/// Whether query var `name` leaves an author archive ported: the author
+/// vars, paging, feeds, and names that are no query vars.
+fn author_alone(name: &str) -> bool {
+    ["author", "author_name", "paged", "feed"].contains(&name) || !rewrite::is_query_var(name)
+}
+
 /// The post a request asks for, as `(query var, ID, post type)`: a non-zero
 /// `page_id` takes the place of `p`'s ID, but `p` keeps the post type, and
 /// an ID of 0 asks for no post.
@@ -1876,11 +1895,14 @@ async fn route(
     // The path has been parsed or is ignored. Author archives give away
     // login names, so they are off by default (docs/SECURITY_MODEL.md).
     // A structure with `%author%` names the author of a post's link, which
-    // is no archive.
+    // is no archive. With them on, an author with other query vars than
+    // paging and feeds is not ported.
     let post_asked = ["p", "page_id", "name", "pagename"]
         .iter()
         .any(|name| query.get(*name).is_some_and(|v| !v.is_empty()));
-    if query.contains_key("author") || (query.contains_key("author_name") && !post_asked) {
+    if (query.contains_key("author") || (query.contains_key("author_name") && !post_asked))
+        && (!site.author_archives || query.keys().any(|name| !author_alone(name)))
+    {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
     // A negative or array `p` is `error=404` too: the 404 page with a 200
@@ -2401,10 +2423,63 @@ async fn main_query(
         site.db.find_terms(&slugs, &ids).await?
     };
     let hierarchy = site.options.get("category_children");
-    let resolved = tax.resolve(&terms, hierarchy.map_or(&[][..], Vec::as_slice));
+    let mut resolved = tax.resolve(&terms, hierarchy.map_or(&[][..], Vec::as_slice));
+    // An author with other archive vars is turned down in `route()`.
+    let authors = match query::authors(query) {
+        Some(authors) => Some(author_archive(site, &authors, &mut resolved).await?),
+        None => None,
+    };
     let term_archive = resolved.archive.is_some();
-    let post_query = post_query(site, query, feed, resolved.filters.clone(), term_archive);
+    let mut post_query = post_query(site, query, feed, resolved.filters.clone(), term_archive);
+    if let Some((included, excluded)) = authors {
+        match included {
+            Some(included) => post_query.authors = included,
+            None => post_query.include = Some(Vec::new()),
+        }
+        post_query.excluded_authors = excluded;
+    }
     Ok((post_query, resolved))
+}
+
+/// `is_author()`'s archive of `authors` into `resolved`, and the posts'
+/// `author__in` (none for no post) and `author__not_in`: `author`'s IDs,
+/// then the `author_name` user's, which `get_posts()` also requires.
+async fn author_archive(
+    site: &Site,
+    authors: &query::Authors,
+    resolved: &mut Resolved,
+) -> Result<(Option<Vec<u64>>, Vec<u64>), DbError> {
+    let (excluded, included): (Vec<i64>, Vec<i64>) = authors.ids.iter().partition(|&&id| id <= 0);
+    let mut excluded: Vec<u64> = excluded.iter().map(|id| id.unsigned_abs()).collect();
+    excluded.sort_unstable();
+    let mut included: Vec<u64> = included.iter().map(|id| id.unsigned_abs()).collect();
+    if !excluded.is_empty() {
+        included.clear();
+    }
+    // `(int) get_query_var( 'author' )`, and whether it is one number.
+    let mut id = authors.ids.first().copied().unwrap_or_default();
+    let mut numeric = authors.ids.len() == 1 && id > 0;
+    let mut matched = Some(included);
+    if let Some(name) = &authors.name {
+        let asked = hyscribe_model::UserQuery {
+            nicenames: vec![name.clone()],
+            limit: Some(1),
+            ..hyscribe_model::UserQuery::default()
+        };
+        let user = site.db.user_query(&asked).await?.into_iter().next();
+        let user_id = user.map_or(0, |user| user.id);
+        matched = matched.filter(|ids| ids.is_empty() || ids.contains(&user_id));
+        matched = matched.map(|_| vec![user_id]);
+        id = i64::try_from(user_id).unwrap_or_default();
+        numeric = user_id > 0;
+    }
+    let user = match u64::try_from(id) {
+        Ok(id) if id > 0 => site.db.user(id).await?,
+        _ => None,
+    };
+    resolved.author_exists = numeric && user.is_some();
+    resolved.archive = Some(Archive::Author(id, user));
+    Ok((matched, excluded))
 }
 
 /// The search, as parse_search() leaves it: without line breaks.
@@ -2577,10 +2652,11 @@ async fn list(
         Some(Archive::Term(_, term)) => term.as_ref(),
         _ => None,
     };
-    // An archive with nothing in it is a 404 unless it is of a term that
-    // exists, a search only when paged.
+    // An archive with nothing in it is a 404 unless it is of a term or an
+    // author that exists, a search only when paged.
     let is_archive = dated || term_archive.is_some();
-    let empty_404 = paging.is_paged() || is_archive && search.is_none() && term.is_none();
+    let empty_404 = paging.is_paged()
+        || is_archive && search.is_none() && term.is_none() && !terms.author_exists;
     if empty_404 && posts.is_empty() {
         let mut page = not_found(site, feed && !paging.is_paged());
         page.request.search_query = search.map_or_else(Vec::new, |s| s.as_bytes().to_vec());
@@ -2592,6 +2668,11 @@ async fn list(
             "Search Results for &#8220;{}&#8221;",
             esc_attr(s.as_bytes())
         ))
+    } else if let Some(Archive::Author(_, user)) = &term_archive {
+        Some(
+            user.as_ref()
+                .map_or_else(String::new, |user| esc_html(&user.display_name)),
+        )
     } else if term_archive.is_some() {
         Some(term.map_or_else(String::new, |term| esc_html(&term.name)))
     } else {
@@ -2633,7 +2714,12 @@ async fn list(
         query.contains_key("post_format"),
     );
     candidates.retain(|name| front || name != "front-page");
-    let queried_object_id = term.map_or(0, |term| term.id);
+    // An author's ID, which `get_queried_object_id()` gives the blocks
+    // that compare it with posts' as well.
+    let queried_object_id = match &term_archive {
+        Some(Archive::Author(id, _)) => u64::try_from(*id).unwrap_or_default(),
+        _ => term.map_or(0, |term| term.id),
+    };
     let archive = term_archive.or(dated.then(|| date.kind.clone().unwrap_or(Archive::Date)));
     // The home page lists the latest posts, the default install's setting;
     // a feed is never `is_home()`.
@@ -2667,8 +2753,9 @@ async fn list(
 
 /// The templates the template loader tries for a list page, in its order:
 /// a search's; those of the taxonomies in `kinds`, each from the queried
-/// term of `term_archive`; a date archive's; then the archive's, of posts
-/// first where a post format sets the `post` post type, or the home page's.
+/// term of `term_archive`; an author's; a date archive's; then the
+/// archive's, of posts first where a post format sets the `post` post type,
+/// or the home page's.
 fn list_templates(
     kinds: &[Taxonomy],
     term_archive: Option<&Archive>,
@@ -2701,6 +2788,14 @@ fn list_templates(
             } else {
                 templates.push(prefix);
             }
+        }
+        // get_author_template().
+        if let Some(Archive::Author(_, user)) = term_archive {
+            if let Some(user) = user {
+                templates.push(format!("author-{}", lossy(&user.nicename)));
+                templates.push(format!("author-{}", user.id));
+            }
+            templates.push("author".into());
         }
         if date {
             templates.push("date".into());

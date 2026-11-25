@@ -6,7 +6,7 @@ use hyscribe_kses::strip_tags;
 use hyscribe_model::Term;
 
 use crate::date::{self, Zone};
-use crate::formatting::{CORE_SHORTCODE_TAGS, wptexturize};
+use crate::formatting::{CORE_SHORTCODE_TAGS, ent2ncr, wptexturize};
 use crate::site::{Archive, Taxonomy};
 
 /// `get_the_archive_title()` in `archive`. `posted` is the global post's
@@ -42,6 +42,13 @@ pub fn archive_title(
         Archive::Year => (b"Year:", date("Y")),
         Archive::Month => (b"Month:", date("F Y")),
         Archive::Day => (b"Day:", date(&String::from_utf8_lossy(date_format))),
+        // get_the_author() of `$authordata`, the queried user, through
+        // the `the_author` filter's ent2ncr().
+        Archive::Author(_, user) => (
+            b"Author:",
+            user.as_ref()
+                .map_or_else(Vec::new, |user| ent2ncr(&user.display_name)),
+        ),
     };
     if show_prefix && !prefix.is_empty() {
         [prefix, b" <span>", &title, b"</span>"].concat()

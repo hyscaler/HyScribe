@@ -108,6 +108,62 @@ pub struct Resolved {
     /// `is_tax()`, `is_category()` and `is_tag()`, in the template loader's
     /// order.
     pub kinds: Vec<Taxonomy>,
+    /// `is_author()` of a user who exists by a single positive ID, which
+    /// `handle_404()` keeps from a 404 when the archive has no posts.
+    pub author_exists: bool,
+}
+
+/// `WP_Query`'s author vars, when they make `is_author()`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Authors {
+    /// `author`'s IDs as `get_posts()` sorts them: positive ones are
+    /// `author__in`, the others `author__not_in`. None without `author`.
+    pub ids: Vec<i64>,
+    /// `author_name` as `get_posts()` sanitizes it, when given.
+    pub name: Option<Vec<u8>>,
+}
+
+/// The author vars of `query`, none when they make no author archive:
+/// `author` keeps its digits, commas and minus signs, and a zero asks for
+/// none.
+pub fn authors(query: &HashMap<String, String>) -> Option<Authors> {
+    let author: String = query.get("author").map_or_else(String::new, |v| {
+        v.chars()
+            .filter(|c| c.is_ascii_digit() || *c == ',' || *c == '-')
+            .collect()
+    });
+    let name = query.get("author_name").filter(|name| !name.is_empty());
+    // `'0' == $author` compares numeric strings as numbers: `00` and `-0` too.
+    let digits = author.strip_prefix('-').unwrap_or(&author);
+    let zero = !digits.is_empty() && digits.bytes().all(|b| b == b'0');
+    let by_id = !author.is_empty() && !zero;
+    if !by_id && name.is_none() {
+        return None;
+    }
+    let mut ids = Vec::new();
+    if by_id {
+        // preg_split( '/[,\s]+/' ): empty pieces only at either end.
+        let pieces: Vec<&str> = author.split(',').collect();
+        let last = pieces.len() - 1;
+        for (i, piece) in pieces.into_iter().enumerate() {
+            if !piece.is_empty() || i == 0 || i == last {
+                ids.push(Value::String(piece.as_bytes().to_vec()).to_int());
+            }
+        }
+        ids.sort_unstable();
+        ids.dedup();
+    }
+    // The last part of a path, or the one before a trailing slash.
+    let name = name.map(|name| {
+        let mut parts = name.rsplit('/');
+        let last = parts.next().unwrap_or_default();
+        let part = match parts.next() {
+            Some(before) if last.is_empty() || last == "0" => before,
+            _ => last,
+        };
+        sanitize_title_for_query(part.as_bytes())
+    });
+    Some(Authors { ids, name })
 }
 
 /// The main query's tax query of `query`.
@@ -393,6 +449,7 @@ impl TaxQuery {
             filters,
             archive,
             kinds,
+            author_exists: false,
         }
     }
 }

@@ -554,6 +554,7 @@ fn serve(site: &Site<'_>, term: &mut setup::Terminal<'_>) -> Result<Reply, Strin
                     .map_err(|err| format!("cannot read the site options: {err}"))?
                     .with_salts(config.salts.clone())
                     .with_public_users(config.rest_public_users)
+                    .with_author_archives(config.author_archives)
                     .with_constants(config.constants)
                     .with_proxy(trusted_proxies(&config))
                     .with_time_limit(std::time::Duration::from_secs(u64::from(

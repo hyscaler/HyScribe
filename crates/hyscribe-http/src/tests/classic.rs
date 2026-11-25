@@ -32,6 +32,8 @@ pub(crate) async fn site_on(config: &hyscribe_config::Database, options: &str) -
     let db = hyscribe_db::Db::connect(config).await.unwrap();
     let oracle = Some("http://127.0.0.1:8081".to_string());
     let mut site = Site::load(db, oracle.clone(), oracle).await.unwrap();
+    // As PHP serves them.
+    site.author_archives = true;
     let named = options.split('&').filter_map(|o| o.split_once('='));
     for (name, value) in named.filter(|(name, _)| !name.starts_with('_')) {
         let value = hyscribe_phpser::urldecode(value.as_bytes());

@@ -1,0 +1,5 @@
+	/?author=1&cat=1	An author archive with a term is not ported: 404, as with author archives off
+	/?author=1&s=hello	An author archive with a search is not ported: 404, as with author archives off
+	/?author=1&m=2026	An author archive with a date is not ported: 404, as with author archives off
+permalink_structure=%2F%25postname%25%2F&posts_per_page=2	/author/jane-doe/	The query pagination block's links under pretty permalinks are not ported for any archive: they use ?paged=N
+permalink_structure=%2F%25postname%25%2F&posts_per_page=2	/author/jane-doe/page/2/	The query pagination block's links under pretty permalinks are not ported for any archive: they use ?paged=N

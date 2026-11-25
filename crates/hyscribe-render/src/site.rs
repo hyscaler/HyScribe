@@ -338,6 +338,9 @@ pub enum Archive {
     Day,
     /// A week's or a time's: no year, month or day.
     Date,
+    /// An author's (`is_author()`): `get_queried_object_id()`, which
+    /// `(int) get_query_var( 'author' )` gives, and that user, if any.
+    Author(i64, Option<User>),
 }
 
 impl Archive {

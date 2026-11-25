@@ -606,6 +606,19 @@ pub fn author_posts_url(site: &dyn Site, id: i64) -> Vec<u8> {
     }
 }
 
+/// `get_author_feed_link( $author_id, $feed )` on `site`.
+pub fn author_feed_link(site: &dyn Site, id: i64, feed: &str) -> Vec<u8> {
+    let links = Permalinks::of(site);
+    if !links.pretty() {
+        let home = String::from_utf8_lossy(&site.home_url()).into_owned();
+        return format!("{home}/?feed={feed}&amp;author={id}").into_bytes();
+    }
+    let link = author_posts_url(site, id);
+    links
+        .feed_under(&String::from_utf8_lossy(&link), feed)
+        .into_bytes()
+}
+
 /// The slugs of `term` and the terms above it, from the top. A loop in
 /// the parents ends the walk.
 fn term_slugs(site: &dyn Site, taxonomy: &str, term: &Term) -> Vec<String> {

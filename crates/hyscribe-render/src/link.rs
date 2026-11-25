@@ -52,7 +52,8 @@ pub fn rest_links(
 }
 
 /// `rest_get_queried_resource_route()`: the route of a singular request's
-/// post, or of a category or tag archive's term. Post formats have none.
+/// post, of a category or tag archive's term, or of an author archive's
+/// user, by `get_queried_object_id()`. Post formats have none.
 fn queried_resource_route(request: &Request) -> Option<String> {
     if let Some(post) = request.posts.first().filter(|_| request.singular) {
         let base = match post.post_type.as_str() {
@@ -68,6 +69,7 @@ fn queried_resource_route(request: &Request) -> Option<String> {
             Some(format!("/wp/v2/categories/{}", term.id))
         }
         Some(Archive::Term(Taxonomy::Tag, Some(term))) => Some(format!("/wp/v2/tags/{}", term.id)),
+        Some(Archive::Author(id, _)) => Some(format!("/wp/v2/users/{id}")),
         _ => None,
     }
 }

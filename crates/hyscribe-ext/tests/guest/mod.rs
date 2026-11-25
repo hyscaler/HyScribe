@@ -207,7 +207,7 @@ pub fn grants() -> Grants {
              admin_footer_text ext_transients ext_roles ext_http ext_slow",
         ),
         actions: names("ext_action ext_event"),
-        sensitive: names("map_meta_cap"),
+        sensitive: names("map_meta_cap rest_pre_dispatch rest_pre_insert_post"),
         shortcodes: names("ext ext_gone"),
         options: names("ext ext_fail ext_bytes ext_active ext_hooks ext_title"),
         meta: names("_ext _ext_*"),

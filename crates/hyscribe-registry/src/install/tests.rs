@@ -83,7 +83,7 @@ async fn installs_the_newest_version_that_fits() {
         "Installed HyScribe Test 0.2.0 into plugins/hyscribe-test/ from the registry, signed by its key {}, standing in for hyscribe-test/hyscribe-test.php. It asks for: {ASKS}; ",
         hyscribe_testkit::minisign::Key(11).id()
     )), "{done}");
-    assert!(done.contains("Sensitive hooks: map_meta_cap; limits of 50 ms a call, 250 ms a request and 16 MiB. Its page: https://pages.test/extensions/hyscribe-test/. It runs once activated from the Plugins screen.\n"), "{done}");
+    assert!(done.contains("Sensitive hooks: map_meta_cap, rest_pre_dispatch, rest_pre_insert_post; limits of 50 ms a call, 250 ms a request and 16 MiB. Its page: https://pages.test/extensions/hyscribe-test/. It runs once activated from the Plugins screen.\n"), "{done}");
     let origin = test.origin();
     assert_eq!(origin.signer.unwrap().0, Signer::Registry);
     assert_eq!(origin.sha256, signature::sha256(&package("0.2.0", "")));

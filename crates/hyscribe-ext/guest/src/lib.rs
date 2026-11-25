@@ -75,6 +75,7 @@ hyscribe_sdk::callbacks! {
         Sanitize => sanitize,
         More => more,
         AdminPage => admin_page,
+        Answers => answers,
     }
 }
 
@@ -127,6 +128,12 @@ fn order_a(args: Vec<Value>) -> Answer {
 
 fn echo(args: Vec<Value>) -> Answer {
     Ok(args.into_iter().next().unwrap_or(Value::Null))
+}
+
+/// An answer in place of any value: on the REST hooks around the checks,
+/// which the host does not let it change.
+fn answers(_: Vec<Value>) -> Answer {
+    text("answered by the extension".into())
 }
 
 fn count(args: Vec<Value>) -> Answer {
@@ -819,7 +826,7 @@ Err(SdkError::Invalid("a field's arguments are an object"))
 Err(SdkError::Failed("runs in a request, not in init"))
 []"#;
 
-const FILTERS: [(&str, Cb, i32, u32); 32] = [
+const FILTERS: [(&str, Cb, i32, u32); 34] = [
     ("the_content", Cb::Content, 10, 1),
     ("ext_trap", Cb::Trap, 10, 1),
     ("ext_loop", Cb::Spin, 10, 1),
@@ -845,6 +852,8 @@ const FILTERS: [(&str, Cb, i32, u32); 32] = [
     ("ext_stack", Cb::Deep, 10, 1),
     ("ext_count", Cb::Count, 10, 2),
     ("map_meta_cap", Cb::Echo, 10, 1),
+    ("rest_pre_dispatch", Cb::Answers, 10, 3),
+    ("rest_pre_insert_post", Cb::Answers, 10, 2),
     ("ext_nest", Cb::Nest, 10, 1),
     ("body_class", Cb::BodyClass, 10, 1),
     ("admin_footer_text", Cb::Footer, 10, 1),

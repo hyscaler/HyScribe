@@ -142,6 +142,14 @@ fn refuses_what_the_format_does_not_allow() {
             "[hooks]\nactions = ['map_meta_cap']\n",
             "map_meta_cap is a sensitive hook",
         ),
+        (
+            "[hooks]\nfilters = ['rest_pre_dispatch']\n",
+            "rest_pre_dispatch is a sensitive hook",
+        ),
+        (
+            "[hooks]\nfilters = ['the_content', 'rest_pre_insert_page']\n",
+            "rest_pre_insert_page is a sensitive hook",
+        ),
         ("[hooks]\nonly = []\n", "[hooks] has no key only"),
         (
             "[capabilities]\nmail = 'yes'\n",

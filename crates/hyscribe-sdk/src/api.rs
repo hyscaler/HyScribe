@@ -293,7 +293,8 @@ pub mod rest {
     use crate::sys::rest::{self as wit, Route};
 
     /// `register_rest_route( $namespace, $route, $args )`: requests reach
-    /// `callback` as one JSON value once `permission` answered `true`.
+    /// `callback` as one JSON value once `permission` answered `true`. The
+    /// host records the route; it does not serve extension routes yet.
     pub fn route(
         namespace: &str,
         path: &str,

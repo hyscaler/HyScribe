@@ -550,9 +550,9 @@ fn registers_in_init_only() -> Result<(), Fault> {
     let loaded = load(&["ext"], Limits::default())?;
     let extension = loaded.extensions.list().first().ok_or(Fault::Disabled)?;
     assert_eq!(extension.slug(), "ext");
-    assert_eq!(extension.hooks().len(), 34);
+    assert_eq!(extension.hooks().len(), 36);
     assert_eq!(
-        extension.hooks().get(32),
+        extension.hooks().get(34),
         Some(&Hook {
             hook: "ext_action".into(),
             action: true,

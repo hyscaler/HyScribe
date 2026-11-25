@@ -34,7 +34,7 @@ filters = [
   "ext_slow",
 ]
 shortcodes = ["ext", "ext_gone"]
-sensitive = ["map_meta_cap"]
+sensitive = ["map_meta_cap", "rest_pre_dispatch", "rest_pre_insert_post"]
 
 [meta]
 keys = ["_ext", "_ext_*"]

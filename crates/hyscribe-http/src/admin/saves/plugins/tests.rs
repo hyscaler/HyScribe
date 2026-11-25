@@ -710,8 +710,36 @@ async fn the_extension_runs_as_its_hooks_say() {
     };
     let done =
         |action| format!("{SITE}/hs-admin/plugins?{action}=true&plugin_status=all&paged=1&s=");
+    let nonce = session_nonce(&site, &cookies, "wp_rest").await;
+    let rest = async |method: &str, body: &str| {
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri("/?rest_route=/wp/v2/posts/1&context=edit")
+            .header(axum::http::header::HOST, "127.0.0.1:8081")
+            .header(axum::http::header::COOKIE, &cookies)
+            .header(
+                axum::http::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .header("x-wp-nonce", &nonce)
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        let response = tower::ServiceExt::oneshot(crate::live(site.clone()), request).await;
+        let response = response.unwrap();
+        (response.status(), page_of(response).await)
+    };
+    let before = rest("GET", "").await;
     assert_eq!(act("activate").await, done("activate"));
     assert_eq!(option("ext_active").await.as_deref(), Some(&b"1"[..]));
+    // Its callbacks on `rest_pre_dispatch` and `rest_pre_insert_post`, which
+    // its sensitive grant lets it add, change neither an answer nor a save.
+    assert_eq!(rest("GET", "").await, before);
+    let (status, saved) = rest("POST", "title=Kept").await;
+    assert_eq!(status, 200);
+    assert!(saved.contains("\"title\":{\"raw\":\"Kept\""), "{saved}");
+    let mut write = writer.begin().await.unwrap();
+    assert_eq!(write.post(1).await.unwrap().unwrap().title, b"Kept");
+    drop(write);
     assert_eq!(front("/").await, php_body("x13fail", "/"));
     hooks("on").await;
     for path in ["/", "/?p=1"] {

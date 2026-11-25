@@ -616,6 +616,15 @@ async fn canonical_redirects_match_wordpress() {
             "/?p=1&attachment=a%2Fhello-world",
         ),
         ("/?x=1&p=2&&y", "/?page_id=2&x=1&y"),
+        // Control bytes in a name are dropped or kept encoded.
+        ("/?p=2&%0A=1", "/?page_id=2&=1"),
+        ("/?p=2&a%0D%0Ab=%0D%0A", "/?page_id=2&ab="),
+        ("/?p=2&c%00d=%00", "/?page_id=2&c=%00"),
+        ("/?p=2&e%01%7F=%01%7F", "/?page_id=2&e%01%7F=%01%7F"),
+        (
+            "/index.php?p=1&v%5B%0A%5D=%09%0B%0C",
+            "/?p=1&v%5B%5D=%09%0B%0C",
+        ),
         ("/?page_id=1", "/?p=1"),
         ("/no/such/path", "/no/such/path/"),
         ("/robots.txt", "/robots.txt/"),
@@ -2141,6 +2150,58 @@ async fn pretty_canonical_redirects() {
             "{path}"
         );
     }
+}
+
+/// Control bytes in a query's names and values never reach a redirect's
+/// `Location`, nor any other header, and never leave a redirect without
+/// its target: `wp_redirect()` sends it through `wp_sanitize_redirect()`.
+#[tokio::test]
+async fn redirects_carry_no_control_bytes() {
+    let mut redirects = 0;
+    let plain = fixture_site(Some("http://127.0.0.1:8081")).await;
+    let pretty = pretty_site("/%postname%/", None).await;
+    let tails = [
+        "%0A=1",
+        "a%0D%0Ab=%0D%0A",
+        "c%00d=%00",
+        "e%01%7F=%01%7F",
+        "v%5B%0A%5D=%09%0B%0C",
+    ];
+    for (site, uri) in [
+        (&plain, "/?p=2"),
+        (&plain, "/?attachment_id=1"),
+        (&plain, "/index.php?p=1"),
+        (&plain, "/?p=1&feed=rss2"),
+        (&plain, "/?page_id=2&feed=rss2"),
+        (&plain, "/no/such/path?x=1"),
+        (&plain, "/wp-login.php?action=lostpassword"),
+        (&plain, "/wp-admin/edit.php?post_type=page"),
+        (&plain, "/hs-admin/edit.php?post_type=page"),
+        (&plain, "/hs-admin/edit?post_type=page"),
+        (&pretty, "/?p=1"),
+        (&pretty, "/?page_id=2"),
+        (&pretty, "/?m=2026&cat=1"),
+        (&pretty, "/?cat=1&x=1"),
+    ] {
+        assert!(request(site, "GET", uri).await.status.is_redirection());
+        for tail in tails {
+            let uri = format!("{uri}&{tail}");
+            let reply = request(site, "GET", &uri).await;
+            // A page instead is an answer too; a redirect names its target.
+            assert!(!reply.status.is_server_error(), "{uri}");
+            let location = reply.headers.get("location");
+            let named = location.is_some_and(|to| !to.is_empty());
+            assert_eq!(reply.status.is_redirection(), named, "{uri}");
+            assert_eq!(named, reply.body.is_empty(), "{uri}");
+            redirects += usize::from(named);
+            for (name, value) in &reply.headers {
+                let clean = value.as_bytes().iter().all(|&b| b >= 0x20 && b != 0x7f);
+                assert!(clean, "{uri}: {name}");
+            }
+        }
+    }
+    // All but two, which are answered as pages.
+    assert_eq!(redirects, 14 * 5 - 2);
 }
 
 /// The page on the front is titled as the home page, tagline and all.

@@ -1132,7 +1132,7 @@ async fn page(
         _ if post => StatusCode::METHOD_NOT_ALLOWED.into_response(),
         Outcome::Redirect(location) => (
             StatusCode::MOVED_PERMANENTLY,
-            [(header::LOCATION, location)],
+            [(header::LOCATION, sent_location(&location))],
         )
             .into_response(),
         Outcome::Feed(page, feed) => {
@@ -1530,6 +1530,12 @@ fn clean_location(location: &str, tidy: impl Fn(&str) -> String) -> String {
         || location.to_string(),
         |(base, query)| with_query(base, &tidy(query)),
     )
+}
+
+/// A redirect's `Location` as `wp_redirect()` sends it, through
+/// `wp_sanitize_redirect()`, which leaves only bytes a header carries.
+fn sent_location(location: &str) -> String {
+    lossy(&redirect::wp_sanitize_redirect(location.as_bytes()))
 }
 
 /// `base`, then `?query` unless the query is empty.

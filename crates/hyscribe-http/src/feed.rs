@@ -204,7 +204,7 @@ pub(crate) async fn respond(
     if let Some(location) = feed.redirect {
         let headers = [
             (header::CONTENT_TYPE, content_type),
-            (header::LOCATION, location),
+            (header::LOCATION, crate::sent_location(&location)),
         ];
         return (StatusCode::MOVED_PERMANENTLY, headers, cache).into_response();
     }

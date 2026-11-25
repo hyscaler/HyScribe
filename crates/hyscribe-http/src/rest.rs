@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::body::{Body, Bytes};
-use axum::http::{HeaderMap, HeaderValue, Method, Uri, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::Response;
 use hyscribe_admin::login::Site as LoginSite;
 use hyscribe_auth::caps::{CapabilityData, User as Capabilities};
@@ -382,13 +382,17 @@ pub(crate) fn preloads(
 
 /// The answer the API served.
 fn sent(served: Served) -> Response {
-    let response = served.headers.into_iter().fold(
-        Response::builder().status(served.status),
-        |response, (name, value)| response.header(name, value),
-    );
-    // Every header is the site's URL escaped, a request header's value or
-    // fixed text, which HTTP carries.
-    response.body(Body::from(served.body)).unwrap_or_default()
+    let mut response = Response::new(Body::from(served.body));
+    *response.status_mut() =
+        StatusCode::from_u16(served.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    // A value can hold a control byte of the request's (a query parameter's
+    // name in `Link`): that header alone is left out, where Apache answers 500.
+    for (name, value) in served.headers {
+        if let (Ok(name), Ok(value)) = (HeaderName::try_from(name), HeaderValue::try_from(value)) {
+            response.headers_mut().append(name, value);
+        }
+    }
+    response
 }
 
 mod uploads;

@@ -257,11 +257,20 @@ impl Served {
         }
     }
 
-    /// `header()`: a header replacing any of its name.
+    /// `send_header()`: a header replacing any of its name, each run of
+    /// whitespace (PCRE's `\s`: space, tab, LF, VT, FF, CR) one space.
     fn send(&mut self, name: &str, value: impl Into<String>) {
+        let mut collapsed = String::new();
+        for c in value.into().chars() {
+            if !matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r') {
+                collapsed.push(c);
+            } else if !collapsed.ends_with(' ') {
+                collapsed.push(' ');
+            }
+        }
         self.headers
             .retain(|(known, _)| !known.eq_ignore_ascii_case(name));
-        self.headers.push((name.into(), value.into()));
+        self.headers.push((name.into(), collapsed));
     }
 }
 

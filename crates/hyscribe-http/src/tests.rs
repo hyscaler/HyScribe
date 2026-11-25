@@ -24,7 +24,7 @@ async fn fixture_site(home: Option<&str>) -> Arc<Site> {
     site_at(home, None).await
 }
 
-async fn site_at(home: Option<&str>, siteurl: Option<&str>) -> Arc<Site> {
+pub(crate) async fn site_at(home: Option<&str>, siteurl: Option<&str>) -> Arc<Site> {
     let db = Db::connect(&fixture_config())
         .await
         .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
@@ -3802,7 +3802,7 @@ async fn title_pages_match_php() {
         assert_listed_pages("wordpress_saves", golden, None, "").await,
         0
     );
-    assert_eq!(golden.lines().count(), 13);
+    assert_eq!(golden.lines().count(), 25);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

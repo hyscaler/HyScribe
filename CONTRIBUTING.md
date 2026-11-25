@@ -40,7 +40,7 @@ cargo llvm-cov --workspace --ignore-filename-regex '/tests/' \
 cargo deny check
 ```
 
-Mutation testing (`cargo mutants`, limited to your change with `--in-diff`) is run on every change before it is merged; running it yourself saves a round of review. [docs/TESTING.md](docs/TESTING.md) explains each gate, and [CLAUDE.md](CLAUDE.md) lists the commands for every golden script.
+Mutation testing (`cargo mutants`, limited to your change with `--in-diff`) is run on every change before it is merged; running it yourself saves a round of review. [docs/TESTING.md](docs/TESTING.md) explains each gate, and [AGENTS.md](AGENTS.md) lists the commands for every golden script.
 
 ## The rules every change follows
 

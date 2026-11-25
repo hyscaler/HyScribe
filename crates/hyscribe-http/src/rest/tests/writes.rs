@@ -133,12 +133,13 @@ async fn post_writes_match_php() {
 }
 
 /// Form posts whose text is not valid UTF-8 are refused as PHP's `wpdb`
-/// refuses them, and an `id` below 1 is not found
-/// (`reference/rest/invalid-input.list`).
+/// refuses them, and an `id` below 1 is not found; control bytes in the
+/// names of a write's query and form change neither the write nor a
+/// header (`reference/rest/invalid-input.list`).
 #[tokio::test(flavor = "multi_thread")]
 async fn invalid_input_is_refused_as_php() {
     let golden = include_str!("../../../../hyscribe-rest/tests/golden/invalid-input.tsv");
-    assert_eq!(writes_match_php(golden, "", &[]).await, (6 * 10, 0));
+    assert_eq!(writes_match_php(golden, "", &[]).await, (6 * 12, 0));
 }
 
 /// PHP's answers to the navigation menus' and synced patterns' writes, over

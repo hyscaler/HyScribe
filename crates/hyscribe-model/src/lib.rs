@@ -263,6 +263,44 @@ pub struct StatusFilter {
     pub status: String,
     /// `post_author`, when only theirs.
     pub author: Option<u64>,
+    /// `post_type`, when only of that type.
+    pub post_type: Option<String>,
+}
+
+/// `wp_get_current_user()` as the front end's post queries see it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Viewer {
+    /// The user's ID, 0 for a visitor.
+    pub user: u64,
+    /// The post types whose `read_private_posts` capability the user has.
+    pub read_private: Vec<String>,
+}
+
+impl Viewer {
+    /// `WP_Query`'s status clause of a list of `post_types` that names no
+    /// status: for a logged in user, each type's published posts and the
+    /// private ones they may read, all or their own; none, which is the
+    /// published posts, for a visitor or no type.
+    pub fn statuses(&self, post_types: &[String]) -> Vec<StatusFilter> {
+        if self.user == 0 {
+            return Vec::new();
+        }
+        let mut filters = Vec::new();
+        for post_type in post_types {
+            let readable = self.read_private.contains(post_type);
+            for (status, author) in [
+                ("publish", None),
+                ("private", (!readable).then_some(self.user)),
+            ] {
+                filters.push(StatusFilter {
+                    status: status.into(),
+                    author,
+                    post_type: Some(post_type.clone()),
+                });
+            }
+        }
+        filters
+    }
 }
 
 /// The SQL part of a `WP_Term_Query` for one taxonomy: what its `WHERE`,

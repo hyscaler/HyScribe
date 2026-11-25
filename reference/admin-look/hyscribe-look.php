@@ -125,10 +125,26 @@ function hyscribe_look_bar_style() {
 add_action( 'admin_enqueue_scripts', 'hyscribe_look_bar_style' );
 add_action( 'wp_enqueue_scripts', 'hyscribe_look_bar_style' );
 
+// The block editors' publish panel draws the WordPress logo as an svg of class
+// components-site-icon when the site has no Site Icon (an img of the icon
+// otherwise): the mark is painted over it and the logo's path hidden, so the
+// bundle stays as released. Printed after the bar's style, as the admin bar's.
+add_action(
+	'admin_enqueue_scripts',
+	function () {
+		if ( get_current_screen()->is_block_editor() ) {
+			wp_add_inline_style(
+				'admin-bar',
+				sprintf( 'svg.components-site-icon{background:url(%s) center/36px no-repeat}svg.components-site-icon path{display:none}', esc_url( admin_url( 'images/hyscribe-mark.svg' ) ) )
+			);
+		}
+	}
+);
+
 // Core's own strings (the default text domain) on admin and login screens
 // name HyScribe; content, themes and plugins never pass through here.
 const HYSCRIBE_LOOK_TEXT = array(
-	'Thank you for creating with <a href="%s">WordPress</a>.' => 'Thank you for creating with HyScribe.',
+	'Thank you for creating with <a href="%s">WordPress</a>.' => 'Thank you for creating with HyScribe. HyScribe is developed and supported by <a href="https://hyscaler.com">HyScaler</a>.',
 	'WordPress %1$s running %2$s theme.' => 'Running %2$s theme.',
 	'<strong>At a Glance</strong> &mdash; Displays a summary of the content on your site and identifies which theme and version of WordPress you are using.' => '<strong>At a Glance</strong> &mdash; Displays a summary of the content on your site and identifies which theme you are using.',
 	'WordPress Events and News' => 'Events and News',
@@ -168,6 +184,76 @@ add_filter(
 		return 'HyScribe @HYSCRIBE_VERSION@';
 	},
 	11
+);
+
+// The mailto link asking for porting help, as hs-admin builds it: the subject
+// names the host (and port) of the home URL, the body the home URL and
+// HyScribe's version; RFC 6068 encoding, then the attribute escaped.
+function hyscribe_look_porting_mailto() {
+	$home    = home_url( '/' );
+	$parts   = wp_parse_url( $home );
+	$domain  = $parts['host'] . ( isset( $parts['port'] ) ? ':' . $parts['port'] : '' );
+	$subject = 'Porting help for ' . $domain;
+	$body    = "Site: $home\r\nHyScribe version: @HYSCRIBE_VERSION@\r\n\r\nWhat I need help with:\r\n";
+	return 'mailto:contact@hyscribe.com?subject=' . rawurlencode( $subject ) . '&amp;body=' . rawurlencode( $body );
+}
+
+// The footer's contact sentence, after the HyScaler credit.
+add_filter(
+	'admin_footer_text',
+	function ( $text ) {
+		return str_replace(
+			'</a>.</span>',
+			sprintf( '</a>. Need help porting your site or plugins? <a href="%s">Contact us</a>.</span>', hyscribe_look_porting_mailto() ),
+			$text
+		);
+	},
+	1
+);
+
+// The welcome banner: the release notes of HyScribe's version in place of
+// the About page, and the contact line under it, by rewriting what
+// wp_welcome_panel() prints (it has no filter); then the scheme's colours and
+// the mark in place of core's artwork, on the dashboard.
+add_action(
+	'welcome_panel',
+	function () {
+		ob_start();
+	},
+	0
+);
+add_action(
+	'welcome_panel',
+	function () {
+		$html  = ob_get_clean();
+		$about = esc_url( admin_url( 'about.php' ) );
+		$html  = str_replace( '<a href="' . $about . '">', '<a href="https://github.com/hyscaler/HyScribe/releases/tag/v@HYSCRIBE_VERSION@">', $html );
+		$html  = preg_replace( '/Learn more about the [^ ]+ version\./', 'Learn more about the @HYSCRIBE_VERSION@ version.', $html, 1 );
+		$html  = str_replace(
+			"</p>\n\t\t</div>\n\t</div>\n\t<div class=\"welcome-panel-column-container\">",
+			sprintf(
+				"</p>\n\t\t\t<p class=\"hyscribe-porting\">Trying HyScribe out? If you need help porting your custom themes or plugins, write to <a href=\"%s\">contact@hyscribe.com</a>.</p>\n\t\t</div>\n\t</div>\n\t<div class=\"welcome-panel-column-container\">",
+				hyscribe_look_porting_mailto()
+			),
+			$html
+		);
+		echo $html;
+	},
+	100
+);
+add_action(
+	'admin_enqueue_scripts',
+	function () {
+		if ( 'dashboard' === get_current_screen()->id ) {
+			wp_add_inline_style(
+				'admin-bar',
+				sprintf(
+					'.welcome-panel-header-wrap{background-color:#131b26;border-bottom:4px solid #1a5fd0}.welcome-panel-header-image{display:none}.welcome-panel-header{background:url(%s) no-repeat right 48px center/96px 96px;padding-right:192px}.welcome-panel-header p a{color:#7db2ff;text-decoration:underline}.welcome-panel-header p.hyscribe-porting{font-size:16px}.welcome-panel-column>svg rect{fill:#1a5fd0}@media screen and (max-width:600px){.welcome-panel-header{background-image:none;padding-right:32px}}',
+					esc_url( admin_url( 'images/hyscribe-mark.svg' ) )
+				)
+			);
+		}
+	}
 );
 
 // Block descriptions core translates with their context, as the editor's

@@ -25,7 +25,7 @@ use crate::assets::Urls;
 use crate::list_table::{
     Column, Order, Sort, View, bulk_actions, column_headers, fill, months_dropdown, pagination,
     row_actions, screen_options as list_screen_options, search_box, selected as selected_if,
-    table_description, views, wp_nonce_field,
+    table_description, views, without_referer, wp_nonce_field,
 };
 use crate::login::set_url_scheme;
 use crate::menu::Screen;
@@ -921,6 +921,7 @@ pub(crate) fn published(site: &dyn PostsSite, kind: PostType) -> Vec<Post> {
         statuses: vec![StatusFilter {
             status: "publish".into(),
             author: None,
+            post_type: None,
         }],
         order: vec![(OrderBy::MenuOrder, true), (OrderBy::Title, true)],
         limit: u32::MAX,
@@ -1811,6 +1812,7 @@ fn all_statuses(site: &dyn PostsSite, kind: PostType) -> Vec<StatusFilter> {
             } else {
                 None
             },
+            post_type: None,
         })
         .collect()
 }
@@ -1826,6 +1828,7 @@ fn filtered(site: &dyn PostsSite, kind: PostType, filter: &str) -> Vec<StatusFil
     vec![StatusFilter {
         status: filter.into(),
         author: private_author(site, kind).filter(|_| filter == "private"),
+        post_type: None,
     }]
 }
 
@@ -2024,6 +2027,9 @@ pub struct ListArgs {
     pub counts: [Option<String>; 5],
     /// `$_REQUEST['ids']`, the posts acted on, if given.
     pub ids: Option<String>,
+    /// `$_GET['_wp_http_referer']` is not empty: the list's own form sent
+    /// back, which `edit.php` redirects to the list without it.
+    pub sent_back: bool,
 }
 
 /// The counts `edit.php` is sent back with after a bulk action, in the
@@ -2212,8 +2218,18 @@ pub fn edit(
     browser: &Browser,
 ) -> Option<Answer> {
     let kind = args.post_type;
-    if !site.can(&kind.cap("edit_posts")) {
+    // The menu has the Posts list for who may edit posts; of another
+    // type's, the screen refuses.
+    if !site.can("edit_posts") {
         return Some(Answer::from_page(None));
+    }
+    if !site.can(&kind.cap("edit_posts")) {
+        return Some(Answer::Denied(
+            "<h1>You need a higher level of permission.</h1><p>Sorry, you are not allowed to edit posts in this post type.</p>",
+        ));
+    }
+    if args.sent_back {
+        return Some(Answer::Redirect(without_referer(request_uri)));
     }
     let own = site.own_posts(kind.name);
     let filter = args.status.as_str();
@@ -2341,6 +2357,7 @@ pub fn edit(
             taxonomy: "",
             parent_file: Some(&file),
             submenu_file: Some(&file),
+            plugin_page: None,
         },
         id: &id,
         title: kind.plural,

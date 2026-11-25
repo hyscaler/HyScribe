@@ -2,8 +2,8 @@
 
 //! `prepend_attachment()`: what `the_content` puts before the content of
 //! an attachment that is the global post, a link to its file, or the
-//! audio player of a song; and the admin's video player. A video player on
-//! the front end is not ported: callers answer 501 for one ([`plays_video`]).
+//! audio player of a song (a video's player is the renderer's
+//! `video_attachment()`); and the admin's video player.
 
 use std::cell::Cell;
 
@@ -74,14 +74,6 @@ fn split_name(file: &[u8]) -> (Vec<u8>, Vec<u8>) {
     (name.get(..end).unwrap_or_default().to_vec(), extension)
 }
 
-/// Whether `post` shows a video player, which is not ported: a video
-/// whose file a player plays.
-pub fn plays_video(site: &dyn Site, post: &Post) -> bool {
-    is_video(&attached_file(site, post), &post.mime_type)
-        && attachment_url(site, post.id)
-            .is_some_and(|url| VIDEO_TYPES.iter().any(|(ext, _)| *ext == extension(&url)))
-}
-
 /// The HTML `prepend_attachment()` puts before `post`'s content, and a
 /// newline; `audio` counts `wp_audio_shortcode()`'s instances, and a
 /// player enqueues MediaElement in `assets`.
@@ -94,10 +86,8 @@ pub(crate) fn prepend_attachment(
 ) -> Vec<u8> {
     let url = attachment_url(site, post.id).unwrap_or_default();
     let file = attached_file(site, post);
-    let html = if is_video(&file, &post.mime_type) {
-        // `wp_video_shortcode()` of a file no player plays.
-        embedded("video", &url)
-    } else if is_audio(&file, &post.mime_type) {
+    // A video's player is the renderer's `video_attachment()`.
+    let html = if is_audio(&file, &post.mime_type) {
         audio_shortcode(post.id, &url, audio).map_or_else(
             || embedded("audio", &url),
             |player| {
@@ -266,7 +256,7 @@ mod tests {
     }
 
     /// What `prepend_attachment()` puts before each kind of attachment:
-    /// a link to a video no player plays, a player for a song and a link
+    /// a player for a song and a link
     /// to one it does not play, the title of a file that is no image, its
     /// file's name without one, and without a file a missing one.
     #[test]
@@ -280,12 +270,6 @@ mod tests {
         // No `siteurl`: the uploads sit at the root.
         let uploads = "/wp-content/uploads/2026/10";
         let cases = [
-            (
-                attachment(1, "video/quicktime", "Clip"),
-                format!(
-                    "<a class=\"wp-embedded-video\" href=\"{uploads}/clip.mov\">{uploads}/clip.mov</a>\n"
-                ),
-            ),
             (
                 attachment(2, "audio/mpeg", "Song"),
                 format!(
@@ -329,12 +313,6 @@ mod tests {
         // The song's player enqueued MediaElement once; its link did not.
         assert_eq!(assets.styles, ["mediaelement", "wp-mediaelement"]);
         assert_eq!(assets.scripts, ["wp-mediaelement"]);
-        // Only a file a player plays is a video player, which is not ported.
-        assert!(super::plays_video(&Files, &attachment(7, "video/mp4", "")));
-        assert!(!super::plays_video(
-            &Files,
-            &attachment(1, "video/quicktime", "")
-        ));
         // The site's other reads, which prepending makes none of.
         assert_eq!(Files.home_url(), b"http://example.test");
         assert!(Files.post_terms(1, "category").is_empty());

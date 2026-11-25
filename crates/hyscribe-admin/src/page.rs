@@ -16,7 +16,7 @@ use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
 use crate::assets::{Assets, Urls, cookie_path, site_icon_tags};
-use crate::look::{bar_style, mark_icon};
+use crate::look::{bar_style, editor_icon_style, mark_icon, porting_mailto, welcome_style};
 use crate::menu::{Look, Screen, admin_menu, clean_links, commands};
 
 /// `wp_removable_query_args()`: what the canonical admin URL leaves out.
@@ -437,7 +437,13 @@ pub fn admin_page_with(
     let urls: &dyn Urls = site;
     let scheme = scheme(&site.admin_color().unwrap_or_default());
     let mut assets = Assets::new(true);
-    enqueue(&mut assets, site, page, (scheme, browser), look);
+    enqueue(
+        &mut assets,
+        site,
+        page,
+        (scheme, browser),
+        (look, extras.block_editor),
+    );
     for (handle, data) in page.script_data {
         assets.set_script_data(handle, "data", Value::String(data.as_bytes().to_vec()));
     }
@@ -501,7 +507,7 @@ fn enqueue(
     site: &dyn PageSite,
     page: &Page,
     (scheme, browser): (&Scheme, &Browser),
-    look: Look,
+    (look, block_editor): (Look, bool),
 ) {
     // `admin.php` enqueues the admin bar's, the screen its own, then
     // `admin-header.php` and its hooks the rest.
@@ -541,14 +547,18 @@ fn enqueue(
                 .collect(),
         )
     };
-    assets.set_style_data(
-        "admin-bar",
-        "after",
-        list(vec![
-            "@media print { #wpadminbar { display:none; } }".into(),
-            bar_style(&|path| Urls::admin_url(site, path)),
-        ]),
-    );
+    let mut bar = vec![
+        "@media print { #wpadminbar { display:none; } }".into(),
+        bar_style(&|path| Urls::admin_url(site, path)),
+    ];
+    // The look's `admin_enqueue_scripts` (ADR 0008), on the block editors.
+    if block_editor {
+        bar.push(editor_icon_style(&|path| Urls::admin_url(site, path)));
+    }
+    if page.id == "dashboard" {
+        bar.push(welcome_style(&|path| Urls::admin_url(site, path)));
+    }
+    assets.set_style_data("admin-bar", "after", list(bar));
     assets.set_style_data("wp-emoji-styles", "after", list(vec![EMOJI_STYLES.into()]));
     if scheme.stylesheet {
         let url = BarSite::admin_url(site, &format!("css/colors/{}/colors.min.css", scheme.name));
@@ -606,7 +616,8 @@ fn enqueue(
             json(&preferences)
         )]),
     );
-    let menu_commands = commands(site, look)
+    let admin_url = |path: &str| BarSite::admin_url(site, path);
+    let menu_commands = commands(site, look, &admin_url)
         .into_iter()
         .enumerate()
         .map(|(i, (label, url, name))| {
@@ -681,9 +692,17 @@ fn head(site: &dyn PageSite, page: &Page) -> Vec<u8> {
         esc_js(ajaxurl),
         esc_js(page.id),
         esc_js(page.screen.typenow),
-        esc_js(&admin_page_class(page.screen.pagenow)),
+        esc_js(&admin_page_class(hook_suffix(page))),
     )
     .into_bytes()
+}
+
+/// `$hook_suffix`: an extension's page's hook, else the screen's file.
+fn hook_suffix<'a>(page: &Page<'a>) -> &'a str {
+    match page.screen.plugin_page {
+        Some(_) => page.id,
+        None => page.screen.pagenow,
+    }
 }
 
 /// `$hook_suffix` as a class: what is not a letter, digit, `_` or `-`
@@ -737,7 +756,7 @@ fn body(
     let mut classes = format!(
         "{} {}",
         extras.body_class,
-        admin_page_class(page.screen.pagenow)
+        admin_page_class(hook_suffix(page))
     );
     classes = classes.trim_start().to_string();
     // `WP_Site_Health::admin_body_class()` comes first, as a filter's class.
@@ -853,10 +872,13 @@ fn screen_meta(page: &Page) -> String {
 /// HyScribe's version (ADR 0008).
 fn footer(site: &dyn PageSite, (page, extras): (&Page, &Extras), assets: &mut Assets) -> String {
     let urls: &dyn Urls = site;
-    let thanks = "<span id=\"footer-thankyou\">Thank you for creating with HyScribe.</span>";
+    let thanks = format!(
+        "<span id=\"footer-thankyou\">Thank you for creating with HyScribe. HyScribe is developed and supported by <a href=\"https://hyscaler.com\">HyScaler</a>. Need help porting your site or plugins? <a href=\"{}\">Contact us</a>.</span>",
+        porting_mailto(&BarSite::home_url(site), env!("CARGO_PKG_VERSION"))
+    );
     let mut out = format!(
         "\n<div class=\"clear\"></div></div><!-- wpbody-content -->\n<div class=\"clear\"></div></div><!-- wpbody -->\n<div class=\"clear\"></div></div><!-- wpcontent -->\n\n<div id=\"wpfooter\" role=\"contentinfo\">\n\t\t<p id=\"footer-left\" class=\"alignleft\">\n\t\t{}\t</p>\n\t<p id=\"footer-upgrade\" class=\"alignright\">\n\t\t{}\t</p>\n\t<div class=\"clear\"></div>\n</div>\n",
-        apply_filters("admin_footer_text", thanks.to_string(), &[]),
+        apply_filters("admin_footer_text", thanks, &[]),
         apply_filters(
             "update_footer",
             format!("HyScribe {}", env!("CARGO_PKG_VERSION")),

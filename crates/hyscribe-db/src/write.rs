@@ -468,6 +468,27 @@ impl<'w> Write<'w> {
         Ok(self.ids(query.bind(post)).await?.first().copied())
     }
 
+    /// The cover picture `wp_generate_attachment_metadata()` looks for
+    /// before it makes one: the newest attachment of `mime` whose
+    /// `_cover_hash` is `hash`.
+    pub async fn cover_attachment(
+        &mut self,
+        hash: &str,
+        mime: &[u8],
+    ) -> Result<Option<u64>, DbError> {
+        let query = self.sql(
+            "SELECT p.ID FROM {prefix}posts p INNER JOIN {prefix}postmeta m ON p.ID = m.post_id \
+             WHERE m.meta_key = '_cover_hash' AND m.meta_value = ? AND p.post_mime_type = ? \
+             AND p.post_type = 'attachment' AND p.post_status = 'inherit' \
+             GROUP BY p.ID ORDER BY p.post_date DESC LIMIT 1",
+        );
+        Ok(self
+            .ids(query.bind(hash).bind(mime))
+            .await?
+            .first()
+            .copied())
+    }
+
     // Comments.
 
     /// `wp_insert_comment()`'s `INSERT`: the new comment's ID.

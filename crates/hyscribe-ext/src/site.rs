@@ -367,4 +367,7 @@ pub trait Site: Send + Sync {
     ) -> Result<(), String>;
     /// A call of the theme `stylesheet` (SDK 0.3), answered as a PHP value.
     fn theme(&self, stylesheet: &str, call: &ThemeCall) -> Result<Value, String>;
+    /// `settings_fields( $group )` on the admin page the request serves
+    /// (SDK 0.4): its nonce is the current user's.
+    fn settings_fields(&self, group: &str) -> Result<Vec<u8>, String>;
 }

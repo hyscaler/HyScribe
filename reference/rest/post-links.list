@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The requests reference/rest/golden.sh records over post-links.sql for the links and
+# dates of posts a user may read but a visitor may not: method<TAB>target<TAB>flags.
+GET	/?rest_route=/wp/v2/posts/9301&context=edit&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/posts/9301&context=edit&_fields=id,link
+GET	/?rest_route=/wp/v2/posts/9301&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/posts/9304&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/posts/9305&context=edit&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/posts/9306&context=edit&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/posts/9302&context=edit&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/pages/9303&context=edit&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/posts&status=private&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/posts&status=private,draft,pending,future&context=edit&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/pages&status=private&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/posts&status=private&context=embed&_fields=id,link	pretty
+GET	/?rest_route=/wp/v2/posts/9302&context=edit&_fields=id,date,date_gmt,modified,modified_gmt
+GET	/?rest_route=/wp/v2/posts/9302&context=edit
+GET	/?rest_route=/wp/v2/posts&status=draft&context=edit&_fields=id,date,date_gmt,modified,modified_gmt

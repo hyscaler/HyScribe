@@ -15,10 +15,26 @@ use crate::media::Loading;
 use crate::navigation::{NavMenu, NavMenuArgs, Printed, wp_nav_menu};
 use crate::post::{body_classes, page_template_slug};
 use crate::site::{Archive, Request, Site, Taxonomy};
+use crate::theme::Theme;
+
+mod tags;
 
 /// A tag this host does not serve, or arguments it does not port.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Unserved;
+
+/// What the template tags read: the block theme whose context posts take,
+/// the site, the page's request and `current_theme_supports()`.
+pub struct Scope<'a> {
+    /// The block theme loaded.
+    pub theme: &'a Theme,
+    /// The site's reads.
+    pub site: &'a dyn Site,
+    /// The page's request.
+    pub request: &'a Request,
+    /// `current_theme_supports()`.
+    pub supports: &'a dyn Fn(&str) -> bool,
+}
 
 /// A classic theme's page: the main loop's place and what the page has
 /// printed so far, which the template tags read.
@@ -28,9 +44,18 @@ pub struct Classic {
     theme: (String, String),
     /// `$wp_query->current_post`, `None` for -1.
     current: Option<usize>,
+    /// The global `$post`: the main query's post at this place.
+    global: usize,
+    /// Whether `setup_postdata()` has run, which makes `$authordata` the
+    /// global post's author rather than the queried one.
+    set_up: bool,
     in_the_loop: bool,
     loading: Loading,
     printed: Printed,
+    /// Whether `_restore_wpautop_hook()` has put `wpautop()` back last.
+    autop_restored: bool,
+    /// The comments `comments_template()` set up.
+    comments: Option<crate::core_blocks::Thread>,
 }
 
 impl Classic {
@@ -39,9 +64,13 @@ impl Classic {
         Classic {
             theme: (template.into(), stylesheet.into()),
             current: None,
+            global: 0,
+            set_up: false,
             in_the_loop: false,
             loading: Loading::default(),
             printed: Printed::default(),
+            autop_restored: false,
+            comments: None,
         }
     }
 
@@ -59,7 +88,17 @@ impl Classic {
     /// `the_post()`: the next post of the main query.
     pub fn the_post(&mut self) {
         self.in_the_loop = true;
-        self.current = Some(self.current.map_or(0, |current| current + 1));
+        let current = self.current.map_or(0, |current| current + 1);
+        self.current = Some(current);
+        self.global = current;
+        self.set_up = true;
+    }
+
+    /// `wp_reset_postdata()`: the global post is the main query's again,
+    /// set up when there is one.
+    pub fn reset_postdata(&mut self, request: &Request) {
+        self.global = 0;
+        self.set_up |= !request.posts.is_empty();
     }
 
     /// `rewind_posts()`.
@@ -118,21 +157,28 @@ impl Classic {
             "is_page_template" => kind.is_some() && page_template(site, request, args.first()),
             "in_the_loop" => self.in_the_loop,
             "has_custom_logo" => logo(site, &self.theme.1).is_some(),
+            // On an author's archive, naming an author is not ported.
+            "is_author" => match request.archive {
+                Some(Archive::Author(..)) if args.first().is_some_and(|a| !a.is_empty()) => {
+                    return Err(Unserved);
+                }
+                Some(Archive::Author(..)) => true,
+                _ => false,
+            },
             // The front end, in English.
-            "is_author" | "is_rtl" => false,
-            _ => return Err(Unserved),
+            "is_rtl" => false,
+            _ => return self.is_post(site, request, name, args),
         })
     }
 
-    /// What the template tag `name` prints; `supports` is
-    /// `current_theme_supports()`.
+    /// What the template tag `name` prints.
     pub fn print(
         &mut self,
-        site: &dyn Site,
-        request: &Request,
+        scope: &Scope<'_>,
         (name, args): (&str, &[Value]),
-        supports: &dyn Fn(&str) -> bool,
     ) -> Result<Vec<u8>, Unserved> {
+        let (site, request) = (scope.site, scope.request);
+        let supports = scope.supports;
         let theme = (self.theme.0.as_str(), self.theme.1.as_str());
         Ok(match name {
             "language_attributes" => language_attributes(site, args.first()),
@@ -160,18 +206,18 @@ impl Classic {
                 [text] => hyscribe_kses::wp_strip_all_tags(&text.to_php_string(), false),
                 _ => return Err(Unserved),
             },
-            _ => return Err(Unserved),
+            _ => return self.print_tag(scope, name, args),
         })
     }
 
     /// What the template tag `name` answers.
     pub fn get(
         &mut self,
-        site: &dyn Site,
-        request: &Request,
+        scope: &Scope<'_>,
         name: &str,
         args: &[Value],
     ) -> Result<Value, Unserved> {
+        let (site, request) = (scope.site, scope.request);
         match name {
             // With `echo` false, whatever the arguments say.
             "wp_nav_menu" => {
@@ -185,7 +231,7 @@ impl Classic {
             "get_queried_object_id" if args.is_empty() => {
                 Ok(Value::Int(request.queried_object_id as i64))
             }
-            _ => Err(Unserved),
+            _ => self.get_tag(scope, name, args),
         }
     }
 }

@@ -126,7 +126,9 @@ pub fn post_class(site: &dyn Site, request: Option<&Request>, class: &str, post:
     let thumbnail = site
         .post_meta(id, "_thumbnail_id")
         .is_some_and(|meta| Value::String(meta).to_int() != 0);
-    if thumbnail && post.post_type != "attachment" && !password_required {
+    // is_attachment( $post ): the attachment page of this post.
+    let its_page = request.is_some_and(|r| r.attachment && r.queried_object_id == id);
+    if thumbnail && !its_page && !password_required {
         classes.push(b"has-post-thumbnail".to_vec());
     }
     let sticky = site
@@ -205,7 +207,7 @@ pub(crate) fn page_template_slug(site: &dyn Site, post: u64) -> Option<Vec<u8>> 
     (!is_empty_string(&slug) && slug != b"default").then_some(slug)
 }
 
-/// `get_body_class()` for a visitor of a block theme, with `template` as
+/// `get_body_class()` for a block theme, without the toolbar, with `template` as
 /// `get_template()` and `stylesheet` as `get_stylesheet()`, which differs
 /// for a child theme.
 pub fn body_class(site: &dyn Site, request: &Request, theme: (&str, &str)) -> Vec<u8> {
@@ -336,6 +338,22 @@ pub fn body_classes(
             );
             push(format!("{prefix}-{}", term.id).as_bytes());
         }
+    } else if let Some(Archive::Author(_, user)) = &request.archive {
+        push(b"author");
+        if let Some(user) = user {
+            let id = user.id.to_string();
+            push(
+                &[
+                    b"author-",
+                    &sanitize_html_class(&user.nicename, id.as_bytes())[..],
+                ]
+                .concat(),
+            );
+            push(format!("author-{id}").as_bytes());
+        }
+    }
+    if site.viewer().user != 0 {
+        push(b"logged-in");
     }
     if crate::core_blocks::logo(site, stylesheet).is_some() {
         push(b"wp-custom-logo");
@@ -358,6 +376,7 @@ pub fn body_classes(
                 archive_class(*taxonomy)
             }
             _ if request.date => "date",
+            (None, Some(Archive::Author(..))) => "author",
             _ if request.search.is_some() => "search",
             _ => "",
         };

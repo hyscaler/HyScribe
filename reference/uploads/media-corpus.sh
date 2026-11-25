@@ -48,6 +48,9 @@ if [ -f doc.odp ]; then
   HOME="$TMP" soffice --headless --convert-to pptx --outdir "$TMP" doc.odp > /dev/null 2>&1
   cp doc.pptx "$OUT/sample.pptx"
 fi
+# PowerPoint 97 from a one slide deck (LibreOffice cannot convert text to it).
+HOME="$TMP" soffice --headless --convert-to ppt --outdir "$TMP" "$ROOT/reference/uploads/deck.fodp" > /dev/null 2>&1
+cp deck.ppt "$OUT/sample.ppt"
 printf '%%!PS\n/Helvetica findfont 24 scalefont setfont 72 700 moveto (Hello) show showpage\n' > hello.ps
 gs -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite -sOutputFile="$OUT/sample.pdf" hello.ps
 printf 'hello\n' > hello.txt
@@ -66,6 +69,12 @@ gzip -n -c hello.txt > "$OUT/sample.gz"
 "${F[@]}" "${SINE[@]}" -ac 1 -c:a aac "$OUT/tone.m4a"
 "${F[@]}" "${SINE[@]}" -ac 1 -c:a aac -f adts "$OUT/tone.aac"
 "${F[@]}" "${SINE[@]}" -ac 1 -c:a wmav2 "$OUT/tone.wma"
+# An MP3 with all the tags media_handle_upload() writes into the text, and
+# a PNG cover picture WordPress makes an attachment of.
+"${F[@]}" "${SINE[@]}" -f lavfi -i testsrc=size=64x48:rate=1 -map 0:a -map 1:v -frames:v 1 -ac 1 \
+  -c:a libmp3lame -b:a 64k -c:v png -disposition:v attached_pic -id3v2_version 3 \
+  -metadata title="A Cover" -metadata artist="An Artist" -metadata album="An Album" \
+  -metadata date=2024 -metadata track=3/12 -metadata genre=Ambient "$OUT/covered.mp3"
 printf 'MThd\x00\x00\x00\x06\x00\x00\x00\x01\x00\x60MTrk\x00\x00\x00\x04\x00\xff\x2f\x00' > "$OUT/tune.mid"
 
 # Video.
@@ -79,4 +88,19 @@ printf 'MThd\x00\x00\x00\x06\x00\x00\x00\x01\x00\x60MTrk\x00\x00\x00\x04\x00\xff
 "${F[@]}" "${PICTURE[@]}" -c:v wmv2 "$OUT/clip.wmv"
 "${F[@]}" "${PICTURE[@]}" -c:v flv1 "$OUT/clip.flv"
 "${F[@]}" -f lavfi -i testsrc=duration=0.5:size=320x240:rate=25 -c:v mpeg1video -f mpeg "$OUT/clip.mpg"
+# MP4 and QuickTime in the shapes WordPress reads: the movie first, sound in
+# QuickTime and 3GPP, M4V, PCM, a rotated picture, tags, a cover picture,
+# Apple Lossless and MPEG-4 Part 2.
+BOTH=("${PICTURE[@]}" "${SINE[@]}" -ac 1 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest)
+"${F[@]}" "${BOTH[@]}" -movflags +faststart "$OUT/faststart.mp4"
+"${F[@]}" "${BOTH[@]}" "$OUT/clip-audio.mov"
+"${F[@]}" "${BOTH[@]}" "$OUT/clip-audio.3gp"
+"${F[@]}" "${BOTH[@]}" "$OUT/clip.m4v"
+"${F[@]}" "${BOTH[@]}" -metadata title="A Title" -metadata comment="Notes" "$OUT/tagged.mp4"
+"${F[@]}" "${PICTURE[@]}" "${SINE[@]}" -ac 1 -c:v libx264 -pix_fmt yuv420p -c:a pcm_s16be -shortest "$OUT/pcm.mov"
+"${F[@]}" -display_rotation 90 "${PICTURE[@]}" -c:v libx264 -pix_fmt yuv420p "$OUT/rotated.mp4"
+"${F[@]}" "${SINE[@]}" -f lavfi -i testsrc=size=64x48:rate=1 -map 0:a -map 1:v -frames:v 1 -ac 1 -c:a aac \
+  -c:v png -disposition:v attached_pic -metadata title="A Cover" -metadata artist="An Artist" "$OUT/covered.m4a"
+"${F[@]}" "${SINE[@]}" -ac 1 -c:a alac "$OUT/alac.m4a"
+"${F[@]}" "${PICTURE[@]}" -c:v mpeg4 "$OUT/mpeg4.mp4"
 ls -l "$OUT"

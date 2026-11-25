@@ -25,6 +25,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::marker::PhantomData;
 
+use crate::admin::{Page, Piece};
 use crate::assets::{Asset, AssetKind};
 use crate::customize::CustomizeKind;
 use crate::mail::Message;
@@ -216,6 +217,61 @@ pub struct State {
     pub mods: BTreeMap<String, Value>,
     /// What `$wp_customize` holds.
     pub customized: Vec<Customized>,
+    /// Admin pages, in the order added (SDK 0.4).
+    pub pages: Vec<Page>,
+    /// `register_setting()`s.
+    pub settings: Vec<Setting>,
+    /// `add_settings_section()`s.
+    pub sections: Vec<Section>,
+    /// `add_settings_field()`s.
+    pub fields: Vec<Field>,
+    /// What `do_settings_sections( $page )` prints, by page, in the host's
+    /// pieces; `settings_fields( $group )` answers `printed`'s
+    /// `settings_fields[<group>]`.
+    pub pieces: BTreeMap<String, Vec<Piece>>,
+}
+
+/// `register_setting()`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Setting {
+    /// `$option_group`.
+    pub group: String,
+    /// `$option_name`.
+    pub option: String,
+    /// `$args` as JSON.
+    pub args: String,
+    /// Its `sanitize_callback`.
+    pub sanitize: Option<u32>,
+}
+
+/// `add_settings_section()`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Section {
+    /// `$id`.
+    pub id: String,
+    /// `$title`.
+    pub title: String,
+    /// `$callback`.
+    pub callback: Option<u32>,
+    /// `$page`.
+    pub page: String,
+}
+
+/// `add_settings_field()`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Field {
+    /// `$id`.
+    pub id: String,
+    /// `$title`.
+    pub title: String,
+    /// `$callback`.
+    pub callback: u32,
+    /// `$page`.
+    pub page: String,
+    /// `$section`.
+    pub section: String,
+    /// `$args` as JSON.
+    pub args: String,
 }
 
 thread_local! {

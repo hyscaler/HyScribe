@@ -262,6 +262,7 @@ pub fn post_embed_html(
                 .map(|status| StatusFilter {
                     status: status.into(),
                     author: None,
+                    post_type: None,
                 })
                 .to_vec(),
             names: vec!["embed".into()],

@@ -73,11 +73,6 @@ async fn visitors_are_sent_to_log_in() {
             "other.test:9",
             "http%3A%2F%2Fother.test%3A9%2Fhs-admin%2F",
         ),
-        (
-            "/hs-admin",
-            "127.0.0.1:8081",
-            "http%3A%2F%2F127.0.0.1%3A8081%2Fhs-admin",
-        ),
     ] {
         let response = get(&site, uri, host, "").await;
         assert_eq!(response.status(), StatusCode::FOUND, "{uri}");
@@ -370,6 +365,8 @@ async fn logged_in_users_are_let_in() {
     for path in [
         "/hs-admin/plugins?s=x",
         "/hs-admin/nav-menus",
+        // An extension's page, with no extension active.
+        "/hs-admin/admin?page=hyscribe-test",
         "/hs-admin/site-health?tab=status",
         "/hs-admin/site-editor",
         "/hs-admin/site-editor?p=%2Fpage",
@@ -604,18 +601,31 @@ pub(crate) fn oracle_install() -> Install {
 /// `database` seen from the oracle's address, with a login for `admin`:
 /// the site and its cookies.
 pub(crate) async fn logged_in(database: &str, dir: &std::path::Path) -> (Arc<Site>, String) {
+    logged_in_at(database, dir, "http://127.0.0.1:8081").await
+}
+
+/// [`logged_in`] with `url` as the home and site URLs, a folder's included.
+pub(crate) async fn logged_in_at(
+    database: &str,
+    dir: &std::path::Path,
+    url: &str,
+) -> (Arc<Site>, String) {
     let config = hyscribe_config::Database {
         name: database.into(),
         ..hyscribe_testkit::fixture_database()
     };
     let db = hyscribe_db::Db::connect(&config).await.unwrap();
-    let url = Some("http://127.0.0.1:8081".to_string());
+    let path = format!(
+        "{}/hs-login",
+        url.split_once("8081").map_or("", |(_, path)| path)
+    );
+    let url = Some(url.to_string());
     let site = Site::load(db, url.clone(), url).await.unwrap();
     let site = site.with_install(oracle_install());
     let site = Arc::new(salted(site).with_sessions(hyscribe_auth::sessions::Sessions::new(dir)));
     let login = axum::http::Request::builder()
         .method("POST")
-        .uri("/hs-login")
+        .uri(path)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
         .body(Body::from("log=admin&pwd=reference-only-password"))
         .unwrap();
@@ -1598,11 +1608,47 @@ fn the_terms_list_reads_its_taxonomy() {
         "/hs-admin/edit-tags",
         "/hs-admin/edit-tags?taxonomy=nav_menu",
         "/hs-admin/edit-tags?taxonomy=category&x=1",
+        "/hs-admin/edit-tags?taxonomy=category&post_type=page",
         "/hs-admin/edit-tags?taxonomy=category&s[]=x",
         "/hs-admin/edit-tags?taxonomy[]=category",
         "/hs-admin/edit-tags?taxonomy=category&paged=%FF",
     ] {
         assert!(taxonomy(refused).is_none(), "{refused}");
+    }
+}
+
+/// The comments and users lists read the idle fields of their own forms and
+/// the referer that sends them back; a chosen action is not theirs to read.
+#[test]
+fn the_lists_read_their_forms_idle_fields() {
+    let sent = |query| comment_args(query).map(|args| args.sent_back);
+    assert_eq!(
+        sent(
+            "s=a&action=-1&action2=-1&_wpnonce=n&filter_action=Filter&_total=1&_per_page=20&_page=1&pagegen_timestamp=t&_ajax_fetch_list_nonce=n"
+        ),
+        Some(false)
+    );
+    assert_eq!(
+        sent("_wp_http_referer=%2Fhs-admin%2Fedit-comments"),
+        Some(true)
+    );
+    assert_eq!(sent("_wp_http_referer=0"), Some(false));
+    let sent = |query| user_args(query).map(|args| args.sent_back);
+    assert_eq!(
+        sent("s=a&action=-1&action2=-1&_wpnonce=n&new_role&new_role2="),
+        Some(false)
+    );
+    assert_eq!(sent("_wp_http_referer=%2Fhs-admin%2Fusers"), Some(true));
+    assert_eq!(sent("_wp_http_referer="), Some(false));
+    for refused in [
+        "action=trash",
+        "action2=trash",
+        "action[]=-1",
+        "changeit=Change",
+        "_wp_http_referer[]=x",
+    ] {
+        assert!(comment_args(refused).is_none(), "{refused}");
+        assert!(user_args(refused).is_none(), "{refused}");
     }
 }
 
@@ -1845,6 +1891,7 @@ async fn dashboard_data() {
                 statuses: vec![hyscribe_model::StatusFilter {
                     status: "draft".into(),
                     author: None,
+                    post_type: None,
                 }],
                 limit: 5,
                 ..PostQuery::default()
@@ -1919,6 +1966,9 @@ async fn the_posts_list_reads_its_arguments() {
             "/hs-admin/edit?order=%FF",
             "/hs-admin/edit?author=%FF",
             "/hs-admin/edit?trashed=%FF",
+            "/hs-admin/edit?action=trash",
+            "/hs-admin/edit?action2=trash",
+            "/hs-admin/edit?_wp_http_referer[]=x",
         ] {
             assert_eq!(args(refused), None, "{refused}");
         }
@@ -2978,5 +3028,7 @@ async fn the_site_health_info_tab() {
 
 mod clean_urls;
 mod comment_saves;
+mod folder;
+mod list_search;
 mod passwords;
 mod revisions;

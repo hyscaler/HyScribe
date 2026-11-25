@@ -3,10 +3,11 @@
 //! The upload routes' golden, `uploads.tsv` of
 //! `reference/upload-routes/golden.sh`: each case of its `cases.list` sent
 //! over HTTP as a visitor and each role to `wordpress_saves` with a writer
-//! and an uploads folder of PHP's 2 MB limit, the answer, its headers and
-//! the files written matched to PHP's, the database and the folder put
-//! back after a case that writes. What is not ported (see [`UNPORTED`])
-//! answers 501 once the checks before it pass.
+//! and an uploads folder of PHP's 2 MB limit, the answer, its headers, the
+//! files written and the new attachments' rows matched to PHP's, nothing
+//! written outside the folder, the database and the folder put back after
+//! a case that writes. What is not ported (see [`UNPORTED`]) answers 501
+//! once the checks before it pass.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -29,29 +30,18 @@ const WHO: [(&str, &str, u64); 6] = [
     ("subscriber", "subscriber", 704),
 ];
 
-/// The cases that answer 501 once the checks before them pass: a PDF, whose
-/// preview PHP makes with Ghostscript, audio and video, whose metadata is
-/// getID3's, a Word 97 file and bytes libmagic gives no type, and a Word
-/// file named as a ZIP, where libmagic may give either.
-const UNPORTED: [&str; 19] = [
-    "sample.pdf",
-    "sample.doc",
+/// The cases that answer 501 once the checks before them pass: audio and
+/// video getID3 reads in ways not ported, bytes libmagic gives no type, and
+/// a Word file named as a ZIP, where libmagic may give either.
+const UNPORTED: [&str; 9] = [
     "random.bin:random.mp3",
     "sample.docx:sample.zip",
-    "cbr.mp3",
-    "noxing.mp3",
-    "tagged.mp3",
     "tone.flac",
     "tone.ogg",
-    "tone.m4a",
     "tone.wma",
     "tune.mid",
-    "clip.mp4",
-    "clip-audio.mp4",
-    "clip.mov",
     "clip.avi",
     "clip.webm",
-    "clip.3gp",
     "clip.flv",
 ];
 
@@ -96,14 +86,14 @@ fn curl_type(name: &str) -> &'static str {
 /// A multipart form of `fields` with the file `name` of `kind` as `part`.
 fn multipart(
     (part, kind): (&str, &str),
-    name: &str,
+    name: &[u8],
     bytes: &[u8],
     fields: &[(String, String)],
 ) -> Vec<u8> {
-    let mut body = format!(
-        "--BOUNDARY\r\nContent-Disposition: form-data; name=\"{part}\"; filename=\"{name}\"\r\nContent-Type: {kind}\r\n\r\n"
-    )
-    .into_bytes();
+    let disposition =
+        format!("--BOUNDARY\r\nContent-Disposition: form-data; name=\"{part}\"; filename=\"");
+    let mut body = [disposition.as_bytes(), name].concat();
+    body.extend_from_slice(format!("\"\r\nContent-Type: {kind}\r\n\r\n").as_bytes());
     body.extend_from_slice(bytes);
     for (key, value) in fields {
         let field = format!(
@@ -272,6 +262,10 @@ fn request(line: &str, login: Option<&Login>) -> axum::http::Request<Body> {
     let (method, target, flags) = (case[0], case[1], case[2]);
     let (src, sent) = case[3].split_once(':').unwrap_or((case[3], case[3]));
     let flag = |name: &str| flags.split(',').any(|f| f == name);
+    let name = match flag("crafted") {
+        true => urldecode(sent.as_bytes()),
+        false => sent.as_bytes().to_vec(),
+    };
     let mut fields: Vec<(String, String)> = match case[4] {
         "-" => Vec::new(),
         given => given
@@ -316,7 +310,8 @@ fn request(line: &str, login: Option<&Login>) -> axum::http::Request<Body> {
         if flag("baddisposition") {
             request = request.header(header::CONTENT_DISPOSITION, "attachment");
         } else if !flag("nodisposition") {
-            let disposition = format!("attachment; filename={sent}");
+            let disposition = [&b"attachment; filename="[..], &name].concat();
+            let disposition = axum::http::HeaderValue::from_bytes(&disposition).unwrap();
             request = request.header(header::CONTENT_DISPOSITION, disposition);
         }
         if flag("md5") {
@@ -340,7 +335,7 @@ fn request(line: &str, login: Option<&Login>) -> axum::http::Request<Body> {
         request = request.header(header::CONTENT_TYPE, form);
         (
             target.clone(),
-            multipart((part, kind), sent, &bytes, &fields),
+            multipart((part, kind), &name, &bytes, &fields),
         )
     };
     request.uri(uri).body(Body::from(body)).unwrap()
@@ -368,16 +363,40 @@ fn emptied(uploads: &Path) {
     }
 }
 
+/// The attachments a case added: title, GUID and `_wp_attached_file`, a
+/// tab between them and a line each, as the golden keeps them.
+async fn added(month: &str) -> Vec<u8> {
+    let sql = "SELECT CONCAT_WS(CHAR(9), p.post_title, p.guid, IFNULL(m.meta_value, '')) \
+        FROM wp_posts p LEFT JOIN wp_postmeta m ON m.post_id = p.ID AND m.meta_key = '_wp_attached_file' \
+        WHERE p.ID > 900 AND p.post_type = 'attachment' ORDER BY p.ID";
+    let db = super::writes::saves();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let rows = sqlx::query_scalar::<_, Vec<u8>>(sql)
+        .fetch_all(&mut conn)
+        .await;
+    let rows = rows.unwrap().join(&b'\n');
+    hyscribe_render::template::replace(&rows, month.as_bytes(), b"%ym%/")
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn upload_routes_match_php() {
     let _saves = crate::admin::tests::SAVES.lock().await;
     reset().await;
-    let (sessions, uploads) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-    let mut site = uploading(sessions.path(), uploads.path()).await;
+    // The uploads folder two levels down, so a file written above it shows.
+    let (sessions, above) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let uploads = above.path().join("content/uploads");
+    std::fs::create_dir_all(&uploads).unwrap();
+    let mut site = uploading(sessions.path(), &uploads).await;
     let logins = logins(&site).await;
     let cases = cases();
     let golden = include_str!("../../../tests/golden/uploads.tsv");
-    let (mut matched, mut unported) = (0, 0);
+    let (mut matched, mut unported, mut stricter) = (0, 0, 0);
     for line in golden.lines() {
         let f: Vec<&str> = line.split('\t').collect();
         let (who, n) = (f[0], f[1].parse::<usize>().unwrap());
@@ -396,7 +415,12 @@ async fn upload_routes_match_php() {
         let end = now();
         let what = format!("{who} case {n}: {case}");
         let status = response.status();
-        let written = files(uploads.path());
+        let written = files(&uploads);
+        let inside: Vec<String> = written
+            .iter()
+            .map(|f| format!("content/uploads/{f}"))
+            .collect();
+        assert_eq!(files(above.path()), inside, "{who} case {n}: {case}");
         let sent = case.split('\t').nth(3).unwrap();
         let past_checks = matches!(who, "administrator" | "editor" | "author");
         if status == StatusCode::NOT_IMPLEMENTED && past_checks && f[2] != "501" {
@@ -404,6 +428,17 @@ async fn upload_routes_match_php() {
             assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{what}");
             assert!(written.is_empty(), "{what}");
             unported += 1;
+            continue;
+        }
+        let month = format_unix("Y/m/", start, Zone::Utc);
+        // A form's file named in bytes that are not UTF-8, for the REST API:
+        // PHP's insert fails on the title and leaves the file it stored;
+        // here the database error page answers and nothing is left.
+        if past_checks && case.contains("restfile,crafted\tsmall.jpg:%9D.jpg") {
+            assert_eq!((f[2], f[5], f[6]), ("400", "%ym%/unnamed-file.jpg", ""));
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{what}");
+            assert!(written.is_empty() && added(&month).await.is_empty());
+            stricter += 1;
             continue;
         }
         assert_eq!(status.as_u16().to_string(), f[2], "{what}");
@@ -441,18 +476,18 @@ async fn upload_routes_match_php() {
             false => text,
         };
         assert_eq!(settled(ours), settled(php), "{what}");
-        let month = format_unix("Y/m/", start, Zone::Utc);
         let written: Vec<String> = written.iter().map(|f| f.replace(&month, "%ym%/")).collect();
         let php_files: Vec<&str> = f[5].split(' ').filter(|f| !f.is_empty()).collect();
         assert_eq!(written, php_files, "{what}");
+        assert_eq!(added(&month).await, unhex(f[6]), "{what}");
         matched += 1;
         if status.is_success() || status.is_redirection() {
             reset().await;
-            emptied(uploads.path());
-            site = uploading(sessions.path(), uploads.path()).await;
+            emptied(&uploads);
+            site = uploading(sessions.path(), &uploads).await;
         }
     }
-    assert_eq!((matched, unported), (6 * 107 - 74, 74));
+    assert_eq!((matched, unported, stricter), (6 * 168 - 33, 30, 3));
 }
 
 /// An upload's plan is written by `rest::uploads`, never by `act()`.
@@ -477,7 +512,7 @@ async fn uploads_and_forms_are_read_from_posts_only() {
     let site = crate::tests::oracle_site().await;
     let multipart = multipart(
         ("file", "image/jpeg"),
-        "a.jpg",
+        b"a.jpg",
         b"x",
         &[("per_page".into(), "0".into())],
     );
@@ -566,9 +601,9 @@ async fn uploads_stop_short() {
         format!("{rest}\traw,type=image/jpeg,md5\tsmall.jpg\t-"),
         format!("{rest}\trestfile,part=other\tsmall.jpg\t-"),
         format!("{rest}\trestfile,kind=image/x-unknown\tsmall.jpg\t-"),
-        format!("{rest}\traw,type=application/pdf\tsample.pdf\t-"),
-        format!("{async_upload}\tform,nonce\tsample.pdf\tshort=1"),
-        format!("{media_new}\tform,nonce\tsample.pdf\thtml-upload=Upload"),
+        format!("{rest}\traw,type=audio/flac\ttone.flac\t-"),
+        format!("{async_upload}\tform,nonce\ttone.flac\tshort=1"),
+        format!("{media_new}\tform,nonce\ttone.flac\thtml-upload=Upload"),
     ] {
         let (status, _) = sent_case(&site, &line, admin).await;
         assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{line}");

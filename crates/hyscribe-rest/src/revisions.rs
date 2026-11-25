@@ -9,7 +9,6 @@
 use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter};
 use hyscribe_phpser::{Key, Value, add_query_arg};
 use hyscribe_render::order_by;
-use hyscribe_render::permalinks::permalink;
 use hyscribe_render::post::admin_title;
 use hyscribe_render::rest::Rendering;
 
@@ -216,6 +215,7 @@ fn query(params: &Params, parent: &Post) -> PostQuery {
         statuses: vec![StatusFilter {
             status: "inherit".into(),
             author: None,
+            post_type: None,
         }],
         parents: vec![parent.id],
         include: (!include.is_empty()).then_some(include),
@@ -354,6 +354,7 @@ fn all_revisions(context: &Context, parent: &Post) -> Vec<Post> {
         statuses: vec![StatusFilter {
             status: "inherit".into(),
             author: None,
+            post_type: None,
         }],
         parents: vec![parent.id],
         order: vec![(OrderBy::Date, false), (OrderBy::Id, false)],
@@ -568,7 +569,7 @@ fn preview_link(context: &Context, kind: Kind, parent: &Post, autosave: bool) ->
     }
     let id = parent.id.to_string();
     let nonce = context.site.nonce(&format!("post_preview_{id}"));
-    let link = permalink(context.site.reads(), parent);
+    let link = crate::posts::link(context, parent);
     let mut args: Vec<(&[u8], Option<&[u8]>)> = vec![(b"preview", Some(b"true"))];
     if autosave {
         args.splice(

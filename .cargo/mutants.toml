@@ -10,4 +10,8 @@ exclude_re = [
     "text_diff\\.rs:.*(in up$|replace up )",
     # hyscribe-image: a resampling window's edges hold weights of 0 (searched).
     "pixels\\.rs:.*(in window$|replace window )",
+    # getid3: no header's bitrate lies exactly one percent from its frames'.
+    "getid3/mp3\\.rs:.*replace < with <= in within_a_percent",
+    # render Site: the default user is a visitor, which is Viewer's default.
+    "hyscribe-render/src/site\\.rs:.*replace Site::viewer -> Viewer with Default::default",
 ]

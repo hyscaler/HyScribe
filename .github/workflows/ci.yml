@@ -7,13 +7,12 @@
 # between jobs except the named cache volumes hyscribe-cargo (cargo home and
 # tools) and hyscribe-sccache. The gates run for a release tag (v*), beside
 # the release build, and by hand; never for pull requests (a pull request
-# from a fork would run its code on that machine). Day to day, the same gates
-# run before a merge before a merge. The runner's paths come from the
-# repository variables HYSCRIBE_CI_WORK, HYSCRIBE_CI_DOCKER and
-# HYSCRIBE_CI_FIXTURES; its work, caches and Docker live in memory, so builds
-# do not write to its disks, and it frees them after every job. Fixture containers start through the
+# from a fork would run its code on that machine). The same gates are run
+# before every merge. The runner's paths come from the repository variables
+# HYSCRIBE_CI_WORK, HYSCRIBE_CI_DOCKER and HYSCRIBE_CI_FIXTURES, and the
+# runner frees them after every job. Fixture containers start through the
 # runner's rootless Docker (scripts/ci-net.sh joins them to the job).
-# Mutation testing runs before a merge, not here. The containers run
+# Mutation testing is not run here. The containers run
 # as root; the steps that run HyScribe or its tests go through
 # scripts/ci-as-user.sh, as the ordinary user they expect.
 name: CI
@@ -140,9 +139,9 @@ jobs:
       - run: scripts/ci-as-user.sh prepare
       - name: Theme Test Data fixture, the one the goldens were recorded on
         # A rebuilt fixture differs in its install dates, so the goldens'
-        # hashes need this one, kept on the runner (the data has no licence,
-        # so it is never committed). reference/theme-test-data/build.sh makes
-        # a new one.
+        # hashes need this one, supplied through HYSCRIBE_CI_FIXTURES (the
+        # data has no licence, so it is never committed).
+        # reference/theme-test-data/build.sh makes a new one.
         run: |
           mkdir -p target/fixtures
           ln -sfn "$HYSCRIBE_CI_FIXTURES/theme-test-data" target/fixtures/theme-test-data
@@ -394,8 +393,12 @@ jobs:
         working-directory: ${{ vars.HYSCRIBE_CI_WORK }}/HyScribe/HyScribe/fuzz
         run: |
           for target in $(cargo +nightly fuzz list); do
-            # The image targets start from the review's hostile cases too.
+            # The image targets start from the review's hostile cases too, the
+            # QuickTime one from the MP4 samples.
             seeds=()
-            case $target in image_*) mkdir -p "corpus/$target"; seeds=("corpus/$target" ../crates/hyscribe-image/tests/hostile) ;; esac
+            case $target in
+              image_*) mkdir -p "corpus/$target"; seeds=("corpus/$target" ../crates/hyscribe-image/tests/hostile) ;;
+              upload_quicktime) mkdir -p "corpus/$target"; seeds=("corpus/$target" ../crates/hyscribe-image/tests/mp4) ;;
+            esac
             cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${seeds[@]}" -- -max_total_time=30
           done

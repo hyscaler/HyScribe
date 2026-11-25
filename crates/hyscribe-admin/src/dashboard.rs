@@ -15,6 +15,7 @@ use hyscribe_render::{comment_avatar, number_format, wp_trim_words};
 use crate::admin_bar::BarSite;
 use crate::comments::{comment_classes, comment_reply, comment_views, editor_footer};
 use crate::list_table::{view_list, wp_nonce_field};
+use crate::look::{porting_mailto, release_url};
 use crate::menu::Screen;
 use crate::menu::{esc_link, link};
 use crate::page::{HelpTab, Page, Request, admin_page, json, object, text};
@@ -123,7 +124,7 @@ fn welcome_panel(site: &dyn DashboardSite) -> String {
     let url = |path: &str| {
         String::from_utf8_lossy(&esc_url(BarSite::admin_url(site, path).as_bytes())).into_owned()
     };
-    let version = VERSION.trim();
+    let hyscribe = env!("CARGO_PKG_VERSION");
     // `customize` maps to `edit_theme_options`, so the Customizer link shows.
     let (site_column, look) = if crate::page::has_block_theme(site) {
         (
@@ -156,8 +157,12 @@ fn welcome_panel(site: &dyn DashboardSite) -> String {
         )
         .replace("%nonce%", &site.nonce("welcome-panel-nonce"))
         .replace("%dismiss%", &url("?welcome=0"))
-        .replace("%about%", &url("about.php"))
-        .replace("%version%", version.split('-').next().unwrap_or(version))
+        .replace("%release%", &release_url(hyscribe))
+        .replace("%version%", hyscribe)
+        .replace(
+            "%mailto%",
+            &porting_mailto(&BarSite::home_url(site), hyscribe),
+        )
         .replace("%new_page%", &url("post-new.php?post_type=page"))
         .replace("%site%", &site_column)
         .replace("%look%", &look)
@@ -986,6 +991,7 @@ pub fn dashboard(site: &dyn DashboardSite, request: &Request) -> Option<String> 
             taxonomy: "",
             parent_file: Some("index.php"),
             submenu_file: None,
+            plugin_page: None,
         },
         id: "dashboard",
         title: "Dashboard",

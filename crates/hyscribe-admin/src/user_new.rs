@@ -84,6 +84,7 @@ pub fn user_new(
             taxonomy: "",
             parent_file: Some("users.php"),
             submenu_file: None,
+            plugin_page: None,
         },
         id: "user",
         title: "Add User",

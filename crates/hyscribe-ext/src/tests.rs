@@ -447,6 +447,13 @@ impl Site for TestSite {
             _ => Value::Null,
         })
     }
+
+    fn settings_fields(&self, group: &str) -> Result<Vec<u8>, String> {
+        if self.option("ext_hooks") == Some(text("fail")) {
+            return Err(FAIL.into());
+        }
+        Ok(format!("<fields {group}>").into_bytes())
+    }
 }
 
 pub(crate) struct Loaded {
@@ -474,7 +481,7 @@ pub(crate) fn load(slugs: &[&str], limits: Limits) -> Result<Loaded, Fault> {
         let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
         list.push(Arc::new(host.load(Package {
             kind: manifest::Kind::Plugin,
-            sdk: "0.3",
+            sdk: "0.4",
             slug,
             wasm: guest::component(),
             grants: grants(),
@@ -543,9 +550,9 @@ fn registers_in_init_only() -> Result<(), Fault> {
     let loaded = load(&["ext"], Limits::default())?;
     let extension = loaded.extensions.list().first().ok_or(Fault::Disabled)?;
     assert_eq!(extension.slug(), "ext");
-    assert_eq!(extension.hooks().len(), 33);
+    assert_eq!(extension.hooks().len(), 36);
     assert_eq!(
-        extension.hooks().last(),
+        extension.hooks().get(34),
         Some(&Hook {
             hook: "ext_action".into(),
             action: true,
@@ -602,7 +609,7 @@ fn registers_in_init_only() -> Result<(), Fault> {
     let request = loaded.request(&TestSite::new());
     assert_eq!(
         round(&request, "ext_late"),
-        [r#"Err(SdkError::Denied("registered in init only"))"#; 7].join(" ")
+        [r#"Err(SdkError::Denied("registered in init only"))"#; 11].join(" ")
     );
     Ok(())
 }
@@ -966,7 +973,7 @@ fn three_faults_in_ten_minutes_disable() -> Result<(), Fault> {
     let folder = loaded.folders.first().ok_or(Fault::Disabled)?.path();
     let again = Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.3",
+        sdk: "0.4",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -977,7 +984,7 @@ fn three_faults_in_ten_minutes_disable() -> Result<(), Fault> {
     faults::clear(folder).map_err(|e| Fault::Refused(e.to_string()))?;
     let cleared = Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.3",
+        sdk: "0.4",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -1112,7 +1119,7 @@ fn a_fault_record_that_cannot_be_written_is_reported() -> Result<(), Fault> {
     let gone = folder.path().join("gone");
     let package = Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.3",
+        sdk: "0.4",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -1151,7 +1158,7 @@ fn grants_nothing_by_default() -> Result<(), Fault> {
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let package = |grants| Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.3",
+        sdk: "0.4",
         slug: "ext",
         wasm: guest::component(),
         grants,
@@ -1185,7 +1192,7 @@ fn refuses_what_is_not_an_extension() -> Result<(), Fault> {
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let package = |wasm, limits| Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.3",
+        sdk: "0.4",
         slug: "ext",
         wasm,
         grants: grants(),
@@ -1199,7 +1206,7 @@ fn refuses_what_is_not_an_extension() -> Result<(), Fault> {
     let empty = [0, b'a', b's', b'm', 0x0d, 0, 1, 0];
     assert_eq!(
         host.load(package(&empty, Limits::default())).err(),
-        Some(Fault::Refused("no hyscribe:sdk/guest@0.3.0".into()))
+        Some(Fault::Refused("no hyscribe:sdk/guest@0.4.0".into()))
     );
     // A deadline of no ticks interrupts `init` at its first check.
     let hurried = Limits {
@@ -1242,11 +1249,11 @@ fn links_the_sdk_its_manifest_names() -> Result<(), Fault> {
         folder: folder.path(),
     };
     let Err(Fault::Refused(why)) = host.load(package) else {
-        panic!("a 0.3 component loaded as 0.1");
+        panic!("a 0.4 component loaded as 0.1");
     };
     assert!(why.starts_with("hyscribe:sdk/"), "{why}");
     assert!(
-        why.ends_with("@0.3.0 is not of SDK 0.1, which its manifest names"),
+        why.ends_with("@0.4.0 is not of SDK 0.1, which its manifest names"),
         "{why}"
     );
     assert!(extension::of_sdk("hyscribe:sdk/hooks@0.2.1", "0.2"));
@@ -1392,4 +1399,5 @@ fn dropping_the_host_stops_its_ticker() -> Result<(), Fault> {
     Ok(())
 }
 
+mod admin;
 mod theme;

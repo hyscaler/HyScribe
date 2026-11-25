@@ -87,6 +87,27 @@ fn forms_give_fields_and_files() {
     );
 }
 
+/// A NUL ends a part's header line, as it ends PHP's C string: the file
+/// name stops there, unquoted, and so does a type.
+#[test]
+fn a_nul_ends_a_header_line() {
+    let body = [
+        &part(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"a\0b.jpg\"\r\nContent-Type: image/jpeg\0x",
+            b"bytes",
+        ),
+        &b"--B--\r\n"[..],
+    ]
+    .concat();
+    let form = read(&body, b"B").unwrap();
+    let file = find(&form, "file").unwrap();
+    assert_eq!(
+        (&file.name[..], &file.kind[..]),
+        (&b"a"[..], &b"image/jpeg"[..])
+    );
+    assert_eq!(file.bytes, b"bytes");
+}
+
 #[test]
 fn files_past_the_limit_are_dropped() {
     let mut body = Vec::new();

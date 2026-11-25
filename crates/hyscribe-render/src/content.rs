@@ -8,7 +8,7 @@
 
 use hyscribe_kses::{esc_attr, esc_url, url_host, url_scheme};
 use hyscribe_model::Post;
-use hyscribe_phpser::{Maybe, Value, is_empty_string, maybe_unserialize, php_trim};
+use hyscribe_phpser::{Maybe, Value, add_query_arg, is_empty_string, maybe_unserialize, php_trim};
 
 use crate::attachment::prepend::prepend_attachment;
 use crate::autop::wpautop;
@@ -31,7 +31,7 @@ impl Renderer<'_> {
         if self.open_posts.contains(&id) {
             return Vec::new();
         }
-        let Some(post) = self.context.site.post(id) else {
+        let Some(post) = self.context.post() else {
             return Vec::new();
         };
         self.open_posts.push(id);
@@ -128,18 +128,20 @@ impl Renderer<'_> {
         };
         let content = autop_at(false, content);
         let content = shortcode_unautop(&content, &CORE_SHORTCODE_TAGS);
-        let content = match &self.attachment {
-            Some(post) => [
-                prepend_attachment(
-                    site,
-                    &self.context.loading,
-                    post,
-                    &self.audio_instances,
-                    &mut self.assets,
-                ),
-                content,
-            ]
-            .concat(),
+        let content = match self.attachment.clone() {
+            Some(post) => {
+                let prepended = match self.video_attachment(&post) {
+                    Some(player) => [player, b"\n".to_vec()].concat(),
+                    None => prepend_attachment(
+                        site,
+                        &self.context.loading,
+                        &post,
+                        &self.audio_instances,
+                        &mut self.assets,
+                    ),
+                };
+                [prepended, content].concat()
+            }
             None => content,
         };
         let content = replace_insecure_home_url(site, &content);
@@ -255,7 +257,7 @@ fn shows_more(request: &Request, post: &Post) -> bool {
 
 /// `wp_link_pages()` for `post`: a link to each of its pages, the one shown
 /// marked current unless only its teaser shows.
-fn wp_link_pages(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
+pub(crate) fn wp_link_pages(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
     let count = split_pages(&post.content).len();
     if count < 2 {
         return Vec::new();
@@ -274,6 +276,12 @@ fn wp_link_pages(renderer: &Renderer<'_>, post: &Post) -> Vec<u8> {
                 permalink.clone()
             } else {
                 crate::permalinks::post_page(renderer.context.site, post, &permalink, i)
+            };
+            // get_preview_post_link() on a preview.
+            let url = if request.preview {
+                add_query_arg(&[(b"preview", Some(b"true"))], &url)
+            } else {
+                url
             };
             out.extend_from_slice(
                 &[

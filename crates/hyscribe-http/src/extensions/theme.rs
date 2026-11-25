@@ -13,7 +13,7 @@ use hyscribe_db::DbError;
 use hyscribe_ext::{Asset, AssetKind, Part, TemplateFile, ThemeCall, locate};
 use hyscribe_model::hooks::do_action;
 use hyscribe_phpser::{Key, Value};
-use hyscribe_render::classic::{Classic, Unserved};
+use hyscribe_render::classic::{Classic, Scope, Unserved};
 use hyscribe_render::head::classic::{ClassicPage, Enqueued, Link, hoist};
 use hyscribe_render::site::Request;
 use hyscribe_render::theme::GlobalStyles;
@@ -124,8 +124,10 @@ impl Theme {
                 classic.rewind_posts();
                 Ok(Value::Null)
             }),
-            // The global post follows the main loop: no other query sets it.
-            ThemeCall::ResetPostdata => self.on_page(&|_, _, _| Ok(Value::Null)),
+            ThemeCall::ResetPostdata => self.on_page(&|classic, _, shared| {
+                classic.reset_postdata(&shared.request);
+                Ok(Value::Null)
+            }),
             ThemeCall::InTheLoop => {
                 self.on_page(&|classic, _, _| Ok(Value::Bool(classic.in_the_loop())))
             }
@@ -140,16 +142,19 @@ impl Theme {
             ThemeCall::Print(name, args) if args.is_empty() && name == "wp_footer" => {
                 self.printed(false)
             }
-            ThemeCall::Print(name, args) => {
-                let supports = lock(&self.0).supports.clone();
-                let supported = move |feature: &str| supports.iter().any(|s| s == feature);
-                self.on_page(&|classic, reads, shared| {
-                    let printed = classic.print(reads, &shared.request, (name, args), &supported);
-                    printed.map(Value::String)
-                })
+            // A theme without its own `comments.php` gets core's compat
+            // template, which is not ported for a classic theme.
+            ThemeCall::Print(name, _)
+                if name == "comments_template" && !self.has("comments.php") =>
+            {
+                Err(UNSERVED.into())
             }
-            ThemeCall::Get(name, args) => self
-                .on_page(&|classic, reads, shared| classic.get(reads, &shared.request, name, args)),
+            ThemeCall::Print(name, args) => {
+                self.tag(&|classic, scope| classic.print(scope, (name, args)).map(Value::String))
+            }
+            ThemeCall::Get(name, args) => {
+                self.tag(&|classic, scope| classic.get(scope, name, args))
+            }
             ThemeCall::Part(kind, slug, name, args) => {
                 self.on_page(&|_, _, shared| Ok(part(&shared.files, (*kind, slug, name, args))))
             }
@@ -174,6 +179,30 @@ impl Theme {
             progress.error.get_or_insert(failed);
         }
         answer.map_err(|Unserved| UNSERVED.to_string())
+    }
+
+    /// Whether the page's theme has the template file `file`.
+    fn has(&self, file: &str) -> bool {
+        let page = lock(&self.0).page.clone();
+        page.is_some_and(|page| page.files.iter().any(|known| known.file == file))
+    }
+
+    /// A tag that prints or answers a value, over the page being rendered.
+    fn tag(
+        &self,
+        tag: &dyn Fn(&mut Classic, &Scope<'_>) -> Result<Value, Unserved>,
+    ) -> Result<Value, String> {
+        let supports = lock(&self.0).supports.clone();
+        let supported = |feature: &str| supports.iter().any(|s| s == feature);
+        self.on_page(&|classic, reads, shared| {
+            let scope = Scope {
+                theme: &shared.site.theme,
+                site: reads,
+                request: &shared.request,
+                supports: &supported,
+            };
+            tag(classic, &scope)
+        })
     }
 
     /// `wp_head()` or `wp_footer()` of the page, for a theme with a

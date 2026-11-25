@@ -1,0 +1,80 @@
+# The rows PHP WordPress writes for the action upload-async-mp3-cover (reference/writes/golden.sh).
+# %now% and %unix% stand for times from 2026-11-24 12:09:13 to 2026-11-24 12:09:13 UTC.
+# %wp_posts:1% is 9611.
+# %wp_posts:2% is 9612.
+# %wp_postmeta:1% is 9626.
+# %wp_postmeta:2% is 9627.
+# %wp_postmeta:3% is 9628.
+# %wp_postmeta:4% is 9629.
+# %wp_postmeta:5% is 9630.
+# %wp_postmeta:6% is 9631.
+wp_postmeta	%wp_postmeta:1%	+	meta_id	%wp_postmeta:1%
+wp_postmeta	%wp_postmeta:1%	+	meta_key	_wp_attached_file
+wp_postmeta	%wp_postmeta:1%	+	meta_value	2026/10/covered.mp3
+wp_postmeta	%wp_postmeta:1%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:2%	+	meta_id	%wp_postmeta:2%
+wp_postmeta	%wp_postmeta:2%	+	meta_key	_wp_attached_file
+wp_postmeta	%wp_postmeta:2%	+	meta_value	%ym%/covered-mp3-image.png
+wp_postmeta	%wp_postmeta:2%	+	post_id	%wp_posts:2%
+wp_postmeta	%wp_postmeta:3%	+	meta_id	%wp_postmeta:3%
+wp_postmeta	%wp_postmeta:3%	+	meta_key	_cover_hash
+wp_postmeta	%wp_postmeta:3%	+	meta_value	d8d423e1e2e84ca6fe630fe0028f8e48
+wp_postmeta	%wp_postmeta:3%	+	post_id	%wp_posts:2%
+wp_postmeta	%wp_postmeta:4%	+	meta_id	%wp_postmeta:4%
+wp_postmeta	%wp_postmeta:4%	+	meta_key	_wp_attachment_metadata
+wp_postmeta	%wp_postmeta:4%	+	meta_value	a:6:{s:5:"width";i:64;s:6:"height";i:48;s:4:"file";s:29:"%ym%/covered-mp3-image.png";s:8:"filesize";i:%filesize%;s:5:"sizes";a:0:{}s:10:"image_meta";a:13:{s:8:"aperture";s:1:"0";s:6:"credit";s:0:"";s:6:"camera";s:0:"";s:7:"caption";s:0:"";s:17:"created_timestamp";s:1:"0";s:9:"copyright";s:0:"";s:12:"focal_length";s:1:"0";s:3:"iso";s:1:"0";s:13:"shutter_speed";s:1:"0";s:5:"title";s:0:"";s:11:"orientation";s:1:"0";s:8:"keywords";a:0:{}s:3:"alt";s:0:"";}}
+wp_postmeta	%wp_postmeta:4%	+	post_id	%wp_posts:2%
+wp_postmeta	%wp_postmeta:5%	+	meta_id	%wp_postmeta:5%
+wp_postmeta	%wp_postmeta:5%	+	meta_key	_thumbnail_id
+wp_postmeta	%wp_postmeta:5%	+	meta_value	%wp_posts:2%
+wp_postmeta	%wp_postmeta:5%	+	post_id	%wp_posts:1%
+wp_postmeta	%wp_postmeta:6%	+	meta_id	%wp_postmeta:6%
+wp_postmeta	%wp_postmeta:6%	+	meta_key	_wp_attachment_metadata
+wp_postmeta	%wp_postmeta:6%	+	meta_value	a:23:{s:10:"dataformat";s:3:"mp3";s:8:"channels";i:1;s:11:"sample_rate";i:22050;s:7:"bitrate";d:66887.78409090909;s:11:"channelmode";s:4:"mono";s:12:"bitrate_mode";s:3:"vbr";s:8:"lossless";b:0;s:15:"encoder_options";s:3:"VBR";s:17:"compression_ratio";d:0.18959122474747475;s:10:"fileformat";s:3:"mp3";s:8:"filesize";i:%filesize%;s:9:"mime_type";s:10:"audio/mpeg";s:6:"length";i:1;s:16:"length_formatted";s:4:"0:01";s:5:"title";s:7:"A Cover";s:6:"artist";s:9:"An Artist";s:5:"album";s:8:"An Album";s:4:"year";s:4:"2024";s:12:"track_number";s:1:"3";s:5:"genre";s:7:"Ambient";s:16:"encoder_settings";s:13:"Lavf62.13.101";s:11:"totaltracks";s:2:"12";s:5:"image";a:3:{s:4:"mime";s:9:"image/png";s:5:"width";i:64;s:6:"height";i:48;}}
+wp_postmeta	%wp_postmeta:6%	+	post_id	%wp_posts:1%
+wp_posts	%wp_posts:1%	+	ID	%wp_posts:1%
+wp_posts	%wp_posts:1%	+	comment_count	0
+wp_posts	%wp_posts:1%	+	comment_status	open
+wp_posts	%wp_posts:1%	+	guid	http://127.0.0.1:8081/wp-content/uploads/2026/10/covered.mp3
+wp_posts	%wp_posts:1%	+	menu_order	0
+wp_posts	%wp_posts:1%	+	ping_status	closed
+wp_posts	%wp_posts:1%	+	pinged	
+wp_posts	%wp_posts:1%	+	post_author	1
+wp_posts	%wp_posts:1%	+	post_content	"A Cover" from An Album by An Artist. Released: 2024. Track 3. Genre: Ambient.
+wp_posts	%wp_posts:1%	+	post_content_filtered	
+wp_posts	%wp_posts:1%	+	post_date	%now%
+wp_posts	%wp_posts:1%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_excerpt	
+wp_posts	%wp_posts:1%	+	post_mime_type	audio/mpeg
+wp_posts	%wp_posts:1%	+	post_modified	%now%
+wp_posts	%wp_posts:1%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:1%	+	post_name	a-cover
+wp_posts	%wp_posts:1%	+	post_parent	1
+wp_posts	%wp_posts:1%	+	post_password	
+wp_posts	%wp_posts:1%	+	post_status	inherit
+wp_posts	%wp_posts:1%	+	post_title	A Cover
+wp_posts	%wp_posts:1%	+	post_type	attachment
+wp_posts	%wp_posts:1%	+	to_ping	
+wp_posts	%wp_posts:2%	+	ID	%wp_posts:2%
+wp_posts	%wp_posts:2%	+	comment_count	0
+wp_posts	%wp_posts:2%	+	comment_status	open
+wp_posts	%wp_posts:2%	+	guid	http://127.0.0.1:8081/?attachment_id=%wp_posts:2%
+wp_posts	%wp_posts:2%	+	menu_order	0
+wp_posts	%wp_posts:2%	+	ping_status	closed
+wp_posts	%wp_posts:2%	+	pinged	
+wp_posts	%wp_posts:2%	+	post_author	1
+wp_posts	%wp_posts:2%	+	post_content	
+wp_posts	%wp_posts:2%	+	post_content_filtered	
+wp_posts	%wp_posts:2%	+	post_date	%now%
+wp_posts	%wp_posts:2%	+	post_date_gmt	%now%
+wp_posts	%wp_posts:2%	+	post_excerpt	
+wp_posts	%wp_posts:2%	+	post_mime_type	image/png
+wp_posts	%wp_posts:2%	+	post_modified	%now%
+wp_posts	%wp_posts:2%	+	post_modified_gmt	%now%
+wp_posts	%wp_posts:2%	+	post_name	%wp_posts:2%
+wp_posts	%wp_posts:2%	+	post_parent	0
+wp_posts	%wp_posts:2%	+	post_password	
+wp_posts	%wp_posts:2%	+	post_status	inherit
+wp_posts	%wp_posts:2%	+	post_title	
+wp_posts	%wp_posts:2%	+	post_type	attachment
+wp_posts	%wp_posts:2%	+	to_ping	

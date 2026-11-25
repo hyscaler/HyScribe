@@ -904,6 +904,58 @@ impl MenuUser for Role {
         };
         Some(counts.to_vec())
     }
+    /// The test extension's pages, in the variants where it is active.
+    fn plugin_pages(&self) -> Vec<crate::menu::PluginPage> {
+        let active = [
+            "x13active",
+            "x13hooks",
+            "x13missing",
+            "x24active",
+            "x14page",
+        ];
+        if !active
+            .iter()
+            .any(|variant| self.variant().starts_with(variant))
+        {
+            return Vec::new();
+        }
+        let page =
+            |parent: Option<&str>, page_title: &str, menu_title: &str, cap: &str, slug: &str| {
+                crate::menu::PluginPage {
+                    parent: parent.map(String::from),
+                    page_title: page_title.into(),
+                    menu_title: menu_title.into(),
+                    capability: cap.into(),
+                    slug: slug.into(),
+                    ..Default::default()
+                }
+            };
+        let top = "hyscribe-test-top";
+        vec![
+            page(None, "HyScribe Test", "HyScribe Test", "read", top),
+            page(
+                Some(top),
+                "HyScribe Test Tools",
+                "Tools",
+                "manage_options",
+                "hyscribe-test-sub",
+            ),
+            page(
+                Some("options-general.php"),
+                "HyScribe Test Settings",
+                "HyScribe Test",
+                "manage_options",
+                "hyscribe-test",
+            ),
+            page(
+                None,
+                "HyScribe Test Admin",
+                "HyScribe Test Admin",
+                "manage_options",
+                "hyscribe-test-admin",
+            ),
+        ]
+    }
 }
 
 impl Urls for Role {

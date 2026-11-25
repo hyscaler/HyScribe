@@ -60,18 +60,36 @@ const CORE_ROLES: [&str; 5] = [
 ];
 
 /// The hooks that change who is logged in, what they may do, what is
-/// filtered, or that see passwords, keys or mail: a grant of their own.
-const SENSITIVE: [&str; 19] = [
+/// filtered, or that see passwords, keys or mail; that can answer a REST
+/// request before its checks or replace what they, or an upload's, let
+/// through; or whose answer decides a check: a grant of their own.
+const SENSITIVE: [&str; 35] = [
     "after_password_reset",
     "authenticate",
     "determine_current_user",
+    "lostpassword_errors",
+    "lostpassword_user_data",
     "map_meta_cap",
     "password_reset",
+    "password_reset_expiration",
+    "post_password_required",
     "pre_wp_mail",
+    "registration_errors",
+    "rest_allow_anonymous_comments",
     "rest_authentication_errors",
+    "rest_dispatch_request",
+    "rest_endpoints",
+    "rest_post_dispatch",
+    "rest_pre_dispatch",
+    "rest_pre_echo_response",
+    "rest_pre_serve_request",
+    "rest_request_after_callbacks",
+    "rest_request_before_callbacks",
     "retrieve_password_key",
     "upload_mimes",
     "user_has_cap",
+    "user_request_key_expiration",
+    "wp_handle_upload",
     "wp_kses_allowed_html",
     "wp_mail",
     "wp_mail_charset",
@@ -83,9 +101,15 @@ const SENSITIVE: [&str; 19] = [
     "wp_set_password",
 ];
 
-/// The option filters that are sensitive for an option outside the
-/// extension's own options grant.
-const OPTION_HOOKS: [&str; 3] = ["pre_option_", "option_", "pre_update_option_"];
+/// Sensitive hooks by prefix, and whether a name after it in the
+/// extension's own options grant is not: the option filters, and
+/// `rest_pre_insert_{$post_type}`, which changes a save after its checks.
+const PREFIXED: [(&str, bool); 4] = [
+    ("pre_option_", true),
+    ("option_", true),
+    ("pre_update_option_", true),
+    ("rest_pre_insert_", false),
+];
 
 /// Hooks no extension attaches to: the stand-in for `phpmailer_init`
 /// replaces the transport (ADR 0022 refuses its object).
@@ -95,9 +119,9 @@ impl Grants {
     /// Whether `hook` needs the sensitive grant for this extension.
     pub fn is_sensitive(&self, hook: &str) -> bool {
         SENSITIVE.contains(&hook)
-            || OPTION_HOOKS.iter().any(|prefix| {
+            || PREFIXED.iter().any(|(prefix, own)| {
                 hook.strip_prefix(prefix)
-                    .is_some_and(|option| !self.options.contains(option))
+                    .is_some_and(|name| !(*own && self.options.contains(name)))
             })
     }
 

@@ -198,6 +198,10 @@ require '/var/www/html/wp-load.php';
 			if ( 'wp_options' === $table && 'wp_page_for_privacy_policy' === $row['option_name'] && isset( $new['wp_posts'][ $row['option_value'] ] ) ) {
 				$row['option_value'] = $new['wp_posts'][ $row['option_value'] ];
 			}
+			// A post's thumbnail among the posts of the action, as an audio file's new cover.
+			if ( 'wp_postmeta' === $table && '_thumbnail_id' === $row['meta_key'] && isset( $new['wp_posts'][ $row['meta_value'] ] ) ) {
+				$row['meta_value'] = $new['wp_posts'][ $row['meta_value'] ];
+			}
 			$out[ implode( ',', array_map( fn( $c ) => $row[ $c ], $tables[ $table ][1] ) ) ] = $row;
 		}
 		return $out;

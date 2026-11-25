@@ -24,6 +24,7 @@ for path in "$ROOT"/reference/writes/*.php; do
   "$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/$file" < "$path"
 done
 # The image corpus the uploads upload (actions-uploads.php).
+"$DOCKER" exec -i "$NAME" sh -c "cat > $DIR/no-pdf-preview.php" < "$ROOT/reference/uploads/no-pdf-preview.php"
 "$DOCKER" exec "$NAME" mkdir -p "$DIR/corpus"
 "$DOCKER" cp "$ROOT/crates/hyscribe-image/tests/corpus/." "$NAME:$DIR/corpus/"
 # The front end comment posts' cases and answers (actions-comment-post.php).

@@ -82,6 +82,7 @@ pub fn post_new(site: &dyn PostsSite, query: &str) -> Option<Answer> {
         taxonomy: "",
         parent_file: None,
         submenu_file: None,
+        plugin_page: None,
     };
     // The theme changes the Appearance menu only, not this screen's access.
     if admin_menu(site, &screen, Look::Block).is_none() {

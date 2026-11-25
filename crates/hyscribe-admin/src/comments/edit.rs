@@ -291,6 +291,7 @@ pub fn comment_edit(site: &dyn CommentEditSite, id: u64, request: &Request) -> O
             taxonomy: "",
             parent_file: Some("edit-comments.php"),
             submenu_file: Some("edit-comments.php"),
+            plugin_page: None,
         },
         id: "comment",
         title: "Edit Comment",

@@ -10,7 +10,7 @@ import sys
 
 corpus, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)
-MEDIA = ('.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.mid', '.mp4', '.mov', '.avi', '.webm', '.mkv', '.3gp', '.wmv', '.flv', '.mpg')
+MEDIA = ('.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.mid', '.mp4', '.m4v', '.mov', '.avi', '.webm', '.mkv', '.3gp', '.wmv', '.flv', '.mpg')
 
 
 def put(name, data):

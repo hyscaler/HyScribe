@@ -15,7 +15,7 @@ use hyscribe_render::site::Site;
 
 use hyscribe_testkit::{Dump, SqlValue};
 
-fn default_install() -> &'static Dump {
+pub(super) fn default_install() -> &'static Dump {
     static DUMP: OnceLock<Dump> = OnceLock::new();
     DUMP.get_or_init(|| hyscribe_testkit::default_install("7.1.3").unwrap())
 }

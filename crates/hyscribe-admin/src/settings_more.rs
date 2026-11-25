@@ -390,6 +390,7 @@ pub fn privacy(site: &dyn SettingsSite, request: &Request) -> Answer {
             .map(|status| StatusFilter {
                 status: status.into(),
                 author: None,
+                post_type: None,
             })
             .to_vec(),
         order: vec![(OrderBy::MenuOrder, true), (OrderBy::Title, true)],

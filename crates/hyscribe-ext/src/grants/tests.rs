@@ -44,6 +44,57 @@ fn sensitive_hooks_by_name_and_by_option() {
     assert!(!grants.is_sensitive("the_content"));
 }
 
+/// The hooks that can answer a REST request before its checks or change a
+/// save or an upload after them, and those whose answer decides a check,
+/// need the sensitive grant: named as a plain filter or action they refuse
+/// the package, and a callback is taken only under the sensitive grant.
+#[test]
+fn hooks_around_the_checks_are_sensitive() {
+    let around = [
+        "rest_pre_dispatch",
+        "rest_request_before_callbacks",
+        "rest_dispatch_request",
+        "rest_request_after_callbacks",
+        "rest_post_dispatch",
+        "rest_pre_serve_request",
+        "rest_pre_echo_response",
+        "rest_authentication_errors",
+        "rest_endpoints",
+        "rest_allow_anonymous_comments",
+        "rest_pre_insert_post",
+        "rest_pre_insert_page",
+        "rest_pre_insert_attachment",
+        "rest_pre_insert_wp_template",
+        "rest_pre_insert_ext_item",
+        "rest_pre_insert_wpcf7",
+        "registration_errors",
+        "lostpassword_errors",
+        "lostpassword_user_data",
+        "password_reset_expiration",
+        "user_request_key_expiration",
+        "post_password_required",
+        "wp_handle_upload",
+    ];
+    for hook in around {
+        let mut named = grants();
+        assert!(named.is_sensitive(hook), "{hook}");
+        named.filters.insert(hook.into());
+        let refused = format!("{hook} is a sensitive hook: name it under [hooks] sensitive");
+        assert_eq!(named.check(), Err(refused.clone()));
+        let mut named = grants();
+        named.actions.insert(hook.into());
+        assert_eq!(named.check(), Err(refused));
+        assert!(named.hook(hook, true).is_err(), "{hook}");
+        named.actions.remove(hook);
+        named.sensitive.insert(hook.into());
+        assert_eq!(named.check(), Ok(()));
+        assert_eq!(named.hook(hook, false), Ok(()));
+    }
+    for hook in ["rest_insert_post", "rest_prepare_post", "rest_pre_insert"] {
+        assert!(!grants().is_sensitive(hook), "{hook}");
+    }
+}
+
 #[test]
 fn checks_the_manifest_before_loading() {
     assert_eq!(grants().check(), Ok(()));

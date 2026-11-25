@@ -80,18 +80,9 @@ async fn uploaded(
         }
     };
     let prepared = prepared.map_err(|refused| format!("{refused:?}"))?;
-    let ctx = context();
-    let mut write = writer.begin_on(conn).await.map_err(|e| e.to_string())?;
-    let id = attach(&mut write, &ctx, &prepared)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
-    write.commit().await.map_err(|e| e.to_string())?;
-    let generated = uploads.generate(site, &prepared.handled, id).unwrap();
-    let mut write = writer.begin_on(conn).await.map_err(|e| e.to_string())?;
-    save(&mut write, id, &generated)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
-    write.commit().await.map_err(|e| e.to_string())
+    let (actions, ctx) = (Actions::On(&writer, conn, None), context());
+    let completed = uploads.complete(site, actions, &ctx, &prepared);
+    completed.await.map(drop).map_err(|e| format!("{e:?}"))
 }
 
 /// Each upload of `reference/writes/actions-uploads.php` writes PHP's rows.
@@ -247,6 +238,64 @@ async fn uploads_write_php_s_rows() {
             How::Media(0),
         ),
         (
+            "upload-async-doc",
+            ("sample.doc", "sample.doc"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-xls",
+            ("sample.xls", "My Sheet.xls"),
+            How::Media(1),
+        ),
+        (
+            "upload-async-ppt",
+            ("sample.ppt", "sample.ppt"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-ppt-pps",
+            ("sample.ppt", "slides.pps"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-xls-xlt",
+            ("sample.xls", "sheet.xlt"),
+            How::Media(0),
+        ),
+        (
+            "upload-rest-raw-doc",
+            ("sample.doc", "sample.doc"),
+            How::Rest(
+                false,
+                Upload {
+                    title: Some(b"A Word file".to_vec()),
+                    post: 1,
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
+            "upload-rest-form-xls",
+            ("sample.xls", "sample.xls"),
+            How::Rest(true, Upload::default()),
+        ),
+        (
+            "upload-async-pdf",
+            ("sample.pdf", "sample.pdf"),
+            How::Media(0),
+        ),
+        (
+            "upload-rest-raw-pdf",
+            ("sample.pdf", "sample.pdf"),
+            How::Rest(
+                false,
+                Upload {
+                    post: 1,
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
             "upload-rest-raw-text",
             ("plain.txt", "plain.txt"),
             How::Rest(false, text),
@@ -286,6 +335,59 @@ async fn uploads_write_php_s_rows() {
             ("tone.aac", "tone.aac"),
             How::Rest(true, Upload::default()),
         ),
+        (
+            "upload-async-mp3",
+            ("tagged.mp3", "tagged.mp3"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-mp3-cover",
+            ("covered.mp3", "covered.mp3"),
+            How::Media(1),
+        ),
+        (
+            "upload-rest-raw-mp3",
+            ("cbr.mp3", "cbr.mp3"),
+            How::Rest(
+                false,
+                Upload {
+                    title: Some(b"A song".to_vec()),
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
+            "upload-rest-form-mp3-cover",
+            ("covered.mp3", "covered.mp3"),
+            How::Rest(true, Upload::default()),
+        ),
+        (
+            "upload-async-mp4",
+            ("faststart.mp4", "faststart.mp4"),
+            How::Media(0),
+        ),
+        (
+            "upload-async-m4a-cover",
+            ("covered.m4a", "covered.m4a"),
+            How::Media(1),
+        ),
+        (
+            "upload-rest-raw-mov",
+            ("clip-audio.mov", "clip-audio.mov"),
+            How::Rest(
+                false,
+                Upload {
+                    title: Some(b"A movie".to_vec()),
+                    post: 1,
+                    ..Upload::default()
+                },
+            ),
+        ),
+        (
+            "upload-rest-form-m4v",
+            ("clip.m4v", "clip.m4v"),
+            How::Rest(true, Upload::default()),
+        ),
     ];
     for (golden, file, how) in cases {
         let dir = tempfile::tempdir().unwrap();
@@ -318,6 +420,24 @@ async fn uploads_write_php_s_rows() {
     };
     let report = check_writes(&fixture_database(), "upload-async-again", setup, again).await;
     report.unwrap();
+    // The same cover picture again is the attachment made the first time.
+    for (golden, name) in [
+        ("upload-async-mp3-cover-again", "covered.mp3"),
+        ("upload-async-m4a-cover-again", "covered.m4a"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+        let covered = (name, name);
+        let setup = async |conn: &mut Connection| {
+            uploaded((&site, &uploads), conn, covered, How::Media(0)).await
+        };
+        let again = async |conn: &mut Connection, ()| {
+            uploaded((&site, &uploads), conn, covered, How::Media(0)).await
+        };
+        check_writes(&fixture_database(), golden, setup, again)
+            .await
+            .unwrap();
+    }
     // A text file's number: its copies are not looked for.
     let dir = tempfile::tempdir().unwrap();
     let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
@@ -405,7 +525,7 @@ async fn actions_stop_whole() {
     for budget in 0.. {
         let mut write = writer.begin_on(&mut outer).await.unwrap();
         write.fail_after(budget);
-        match saved(Ok(write), id, &generated).await {
+        match saved(Ok(write), id, &generated, None).await {
             Ok(()) => break,
             Err(err) => assert!(spent(&err), "{err:?}"),
         }
@@ -418,7 +538,16 @@ async fn actions_stop_whole() {
     let refused = writer.begin_on(&mut outer).await;
     assert!(inserted(refused, &ctx, &prepared).await.is_err());
     let refused = writer.begin_on(&mut outer).await;
-    assert!(saved(refused, id, &generated).await.is_err());
+    assert!(saved(refused, id, &generated, None).await.is_err());
+    let refused = writer.begin_on(&mut outer).await;
+    assert!(found(refused, "hash", b"image/png").await.is_err());
+    let refused = writer.begin_on(&mut outer).await;
+    let args = PostArgs::default();
+    assert!(
+        covered(refused, &ctx, args, &big.handled, "hash")
+            .await
+            .is_err()
+    );
 }
 
 /// Hooks that record the prefilter run and give their own scaling threshold.
@@ -496,13 +625,13 @@ async fn uploads_are_titled_and_hooked_as_php_s() {
     }
 }
 
-/// A PDF, whose preview is Ghostscript's, and audio and video, whose
-/// metadata is getID3's, answer 501 and leave no file behind.
+/// Audio and video whose metadata is getID3's answer 501 and leave no file
+/// behind.
 #[tokio::test(flavor = "multi_thread")]
 async fn unported_types_leave_no_file() {
     let site = crate::tests::oracle_site().await;
     let time = (upload_time(&site, None, now()), WHO);
-    for name in ["sample.pdf", "cbr.mp3", "clip.mp4", "tagged.mp3"] {
+    for name in ["tone.flac", "clip.webm"] {
         let dir = tempfile::tempdir().unwrap();
         let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
         let sent = sent(name, name);
@@ -529,4 +658,233 @@ async fn unported_types_leave_no_file() {
 /// stop a write a budget loop retries, so one that always fails ends it.
 fn spent(err: &hyscribe_write::Error) -> bool {
     matches!(err, hyscribe_write::Error::Db(db) if db.to_string().contains("budget is spent"))
+}
+
+/// A track number `number_format()` would give past a float's exact
+/// integers is not ported; one below is written as PHP writes it.
+#[test]
+fn audio_text_keeps_to_exact_track_numbers() {
+    let meta = |track: &str| {
+        let key = Key::String(b"track_number".to_vec());
+        vec![(key, Value::String(track.into()))]
+    };
+    let (_, content) = audio_text(&meta("999999999999999/2"), Vec::new()).unwrap();
+    assert_eq!(content, b" Track 999,999,999,999,999 of 2.");
+    // A part that is no number: the total left out, or no track at all.
+    let text = |track: &str| audio_text(&meta(track), Vec::new()).unwrap().1;
+    assert_eq!(text("3/x"), b" Track 3.");
+    assert_eq!(text("x/2"), b"");
+    assert_eq!(text("x"), b"");
+    for track in ["1000000000000000", "1/1e15"] {
+        assert_eq!(audio_text(&meta(track), Vec::new()), Err(Refused::Unported));
+    }
+}
+
+/// Cover hooks: `wp_upload_bits` refuses the picture, or
+/// `attachment_thumbnail_args` gives the cover a text.
+struct Covers(bool);
+
+impl hyscribe_image::hooks::Hooks for Covers {}
+
+impl crate::uploads::UploadHooks for Covers {
+    fn wp_upload_bits(&self, name: &str, bits: &[u8]) -> Option<String> {
+        assert!(name == "covered-mp3-image.png" && bits.starts_with(b"\x89PNG"));
+        self.0.then(|| "Refused.".to_string())
+    }
+
+    fn attachment_thumbnail_args(&self, args: PostArgs, uploaded: &Handled) -> PostArgs {
+        assert_eq!(uploaded.mime, "image/png");
+        PostArgs {
+            content: b"A cover".to_vec(),
+            ..args
+        }
+    }
+}
+
+/// A cover `wp_upload_bits` refuses is no attachment and no thumbnail; the
+/// arguments `attachment_thumbnail_args` gives are the cover's.
+#[tokio::test(flavor = "multi_thread")]
+async fn covers_follow_their_hooks() {
+    use sqlx::Connection as _;
+    let site = crate::tests::oracle_site().await;
+    let writer = hyscribe_db::Writer::open(&fixture_database(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let db = fixture_database();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let time = upload_time(&site, None, now());
+    for refused in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+        let uploads = uploads.with_hooks(std::sync::Arc::new(Covers(refused)));
+        let sent = sent("covered.mp3", "covered.mp3");
+        let prepared = uploads
+            .media_handle_upload(&site, sent, 0, (&time, WHO))
+            .unwrap();
+        let mut conn = Connection::connect_with(&options).await.unwrap();
+        let mut outer = conn.begin().await.unwrap();
+        let actions = Actions::On(&writer, &mut outer, None);
+        let ctx = context();
+        let id = uploads.complete(&site, actions, &ctx, &prepared);
+        let id = id.await.unwrap();
+        let thumbnail: Option<(String,)> = sqlx::query_as(
+            "SELECT meta_value FROM wp_postmeta WHERE post_id = ? AND meta_key = '_thumbnail_id'",
+        )
+        .bind(id)
+        .fetch_optional(&mut *outer)
+        .await
+        .unwrap();
+        let content: Option<(String,)> = sqlx::query_as(
+            "SELECT post_content FROM wp_posts WHERE post_mime_type = 'image/png' AND ID > ?",
+        )
+        .bind(id)
+        .fetch_optional(&mut *outer)
+        .await
+        .unwrap();
+        match refused {
+            true => assert_eq!((thumbnail, content), (None, None)),
+            false => {
+                assert!(thumbnail.is_some());
+                assert_eq!(content, Some(("A cover".to_string(),)));
+            }
+        }
+    }
+}
+
+/// Each action of an upload with a cover picture stops whole at any
+/// statement that fails: the audio's insert, the cover looked for, the
+/// cover's insert, its metadata and the audio's.
+#[tokio::test(flavor = "multi_thread")]
+async fn cover_actions_stop_whole() {
+    use sqlx::Connection as _;
+    let site = crate::tests::oracle_site().await;
+    let writer = hyscribe_db::Writer::open(&fixture_database(), Mode::Primary)
+        .await
+        .unwrap()
+        .unwrap();
+    let db = fixture_database();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let time = upload_time(&site, None, now());
+    let ctx = context();
+    for action in 0..5 {
+        for statements in 0.. {
+            let dir = tempfile::tempdir().unwrap();
+            let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+            let sent = sent("covered.mp3", "covered.mp3");
+            let prepared = uploads
+                .media_handle_upload(&site, sent, 0, (&time, WHO))
+                .unwrap();
+            let mut conn = Connection::connect_with(&options).await.unwrap();
+            let mut outer = conn.begin().await.unwrap();
+            let actions = Actions::On(&writer, &mut outer, Some((action, statements)));
+            match uploads.complete(&site, actions, &ctx, &prepared).await {
+                Ok(_) => break,
+                Err(refused) => assert!(matches!(refused, Refused::Failed(_)), "{refused:?}"),
+            }
+        }
+    }
+}
+
+/// Hooks whose audio filter gives a track number past a float's exact
+/// integers.
+struct Track;
+
+impl hyscribe_image::hooks::Hooks for Track {
+    fn wp_read_audio_metadata(&self, _meta: Value, _format: Option<&str>) -> Value {
+        let key = Key::String(b"track_number".to_vec());
+        Value::Array(vec![(key, Value::String(b"1e20".to_vec()))])
+    }
+}
+
+impl crate::uploads::UploadHooks for Track {}
+
+/// An audio file whose text is not ported answers 501 and leaves no file;
+/// a cover the month's folder cannot take is no attachment.
+#[tokio::test(flavor = "multi_thread")]
+async fn uploads_stop_where_their_cover_or_text_does() {
+    let site = crate::tests::oracle_site().await;
+    let time = upload_time(&site, None, now());
+    let (year, month) = (time.get(..4).unwrap(), time.get(5..7).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+    let uploads = uploads.with_hooks(std::sync::Arc::new(Track));
+    let tagged = sent("tagged.mp3", "tagged.mp3");
+    let refused = uploads.media_handle_upload(&site, tagged, 0, (&time, WHO));
+    assert_eq!(refused.unwrap_err(), Refused::Unported);
+    assert_eq!(std::fs::read_dir(dir.path().join(year)).unwrap().count(), 1);
+    // The cover goes to the folder of this month, here a file.
+    let dir = tempfile::tempdir().unwrap();
+    let uploads = Uploads::new(dir.path().into(), 64 << 20, ImageLimits::default());
+    let parent = site.db.post(1).await.unwrap();
+    let dated = upload_time(&site, parent, now());
+    assert_ne!(dated.get(..7), time.get(..7));
+    let prepared = uploads
+        .media_handle_upload(&site, sent("covered.mp3", "covered.mp3"), 1, (&dated, WHO))
+        .unwrap();
+    std::fs::create_dir_all(dir.path().join(year)).unwrap();
+    std::fs::write(dir.path().join(year).join(month), b"").unwrap();
+    let generated = uploads.generate(&site, &prepared.handled, 1).unwrap();
+    let cover = generated.cover.unwrap();
+    let name = ("covered-mp3-image.png", cover.mime.as_slice());
+    let bits = cover.data.clone().into();
+    assert!(uploads.upload_bits(&site, name, &bits, &time).is_none());
+}
+
+/// A cover's extension follows its type, `.jpg` for any other.
+#[test]
+fn covers_are_named_by_type() {
+    let types: [&[u8]; 5] = [
+        b"image/gif",
+        b"image/png",
+        b"image/webp",
+        b"image/jpeg",
+        b"",
+    ];
+    let names = types.map(cover_extension);
+    assert_eq!(names, ["gif", "png", "webp", "jpg", "jpg"]);
+}
+
+/// The text `media_handle_upload()` writes from a title, album and artist,
+/// each present or not, as its `sprintf()` formats them.
+#[test]
+fn audio_text_names_what_the_tags_give() {
+    let meta = |pairs: &[(&str, &str)]| -> Vec<(Key, Value)> {
+        pairs
+            .iter()
+            .map(|(k, v)| {
+                (
+                    Key::String(k.as_bytes().to_vec()),
+                    Value::String(v.as_bytes().to_vec()),
+                )
+            })
+            .collect()
+    };
+    let text = |pairs: &[(&str, &str)], name: &str| {
+        let (title, content) = audio_text(&meta(pairs), name.into()).unwrap();
+        (
+            String::from_utf8(title).unwrap(),
+            String::from_utf8(content).unwrap(),
+        )
+    };
+    let named = |content: &str| ("song".to_string(), content.to_string());
+    let untitled = |content: &str| (String::new(), content.to_string());
+    assert_eq!(text(&[("album", "Al")], "song"), named("\"song\" from Al."));
+    assert_eq!(text(&[("artist", "Ar")], "song"), named("\"song\" by Ar."));
+    assert_eq!(text(&[], "song"), named("\"song\"."));
+    let both = [("album", "Al"), ("artist", "Ar")];
+    assert_eq!(text(&both, ""), untitled("Al by Ar."));
+    assert_eq!(text(&[("album", "Al")], ""), untitled("Al."));
+    assert_eq!(text(&[("artist", "Ar")], ""), untitled("Ar."));
+    assert_eq!(text(&[], ""), untitled(""));
 }

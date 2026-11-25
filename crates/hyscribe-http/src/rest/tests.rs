@@ -124,8 +124,10 @@ async fn log_in_as(site: &Arc<Site>, login: &str, id: u64) -> (String, String) {
     (cookie, nonce(site, id, token).await)
 }
 
-/// The headers the golden keeps, sorted.
+/// The headers the golden keeps, sorted; no header holds a control byte.
 fn kept(headers: &HeaderMap, nonce: &str) -> Vec<String> {
+    let control = |value: &HeaderValue| value.as_bytes().iter().any(|&b| b < 0x20 || b == 0x7f);
+    assert!(!headers.values().any(control));
     let kept = |name: &str| {
         [
             "content-type",
@@ -167,7 +169,7 @@ async fn answers_match_php() {
     let golden = include_str!("../../../hyscribe-rest/tests/golden/rest.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 69, 2 * 4));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/content.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 89 + 6, 0));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 93 + 6, 0));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/templates.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 85, 0));
     let golden = fixture_users(include_str!(
@@ -175,7 +177,7 @@ async fn answers_match_php() {
     ));
     assert_eq!(replay(&sites, &golden, false).await, (64, 0));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/search.tsv");
-    assert_eq!(replay(&sites, golden, false).await, (2 * 49, 2));
+    assert_eq!(replay(&sites, golden, false).await, (2 * 63, 2));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/namespaces.tsv");
     assert_eq!(replay(&sites, golden, false).await, (2 * 33, 2));
     let golden = include_str!("../../../hyscribe-rest/tests/golden/widgets-default.tsv");
@@ -280,7 +282,7 @@ async fn people_match_php() {
     let golden = fixture_users(include_str!(
         "../../../hyscribe-rest/tests/golden/people.tsv"
     ));
-    assert_eq!(replay(&sites, &golden, false).await, (230, 0));
+    assert_eq!(replay(&sites, &golden, false).await, (232, 0));
     let sites = (
         ttd_site(false, dir.path()).await,
         ttd_site(true, dir.path()).await,
@@ -445,6 +447,39 @@ async fn only_rest_routes_reach_the_api() {
         send(&plain, stranger, "").await.status(),
         StatusCode::FORBIDDEN
     );
+}
+
+/// A control byte in a parameter's name reaches a collection's `Link`
+/// header, whose whitespace `send_header()` collapses (search.tsv). One of
+/// the others, which Apache answers 500 for, leaves that header out: the
+/// status, the other headers and the body are those of the plain request.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_header_http_cannot_carry_is_left_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = site(false, dir.path()).await;
+    let search = "/?rest_route=/wp/v2/search&per_page=1";
+    let get = |uri: String| axum::http::Request::builder().uri(uri);
+    let link = |response: &Response| response.headers().get(header::LINK).cloned();
+    let normal = send(&plain, get(format!("{search}&v=1")), "").await;
+    let next = "<http://127.0.0.1:8081/index.php?rest_route=%2Fwp%2Fv2%2Fsearch&per_page=1&v=1&page=2>; rel=\"next\"";
+    assert_eq!(link(&normal).unwrap(), next);
+    let normal = (kept(normal.headers(), "no nonce"), body(normal).await);
+    let others = (1..0x20).filter(|b| !(9..=13).contains(b)).chain([0x7f]);
+    for byte in others {
+        for query in [format!("&a%{byte:02X}=1"), format!("&v%5B%{byte:02X}%5D=1")] {
+            let response = send(&plain, get(format!("{search}{query}")), "").await;
+            assert_eq!(response.status(), StatusCode::OK, "{query}");
+            assert_eq!(link(&response), None, "{query}");
+            let headers = kept(response.headers(), "no nonce");
+            let without: Vec<_> = normal
+                .0
+                .iter()
+                .filter(|h| !h.starts_with("link:"))
+                .collect();
+            assert_eq!(headers.iter().collect::<Vec<_>>(), without, "{query}");
+            assert_eq!(body(response).await, normal.1, "{query}");
+        }
+    }
 }
 
 /// A database failure reading the cookie's user shows the error page.

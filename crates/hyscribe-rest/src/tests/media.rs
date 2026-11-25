@@ -116,12 +116,28 @@ fn image_sizes_are_registered() {
     );
 }
 
-/// Embedding a featured image that is not ported, a video player, answers
-/// 501, enveloped or not, and a list with the post too; a visitor, who may
-/// not see the trashed video, gets the post.
+/// Embedding what is not ported answers 501, enveloped or not, and a list
+/// with the post too: a private featured image whose caption renders a
+/// login link. A visitor, who may not see it, gets the post.
 #[test]
 fn embedding_what_is_not_ported() {
-    let oracle = oracle(false);
+    let sql = include_str!("../../../../reference/rest/media.sql").replace(
+        "(9151,9101,'_thumbnail_id','9140')",
+        "(9151,9101,'_thumbnail_id','9157')",
+    );
+    let mut rows = site::default_install().rows.clone();
+    rows.extend(hyscribe_testkit::Dump::parse(sql.as_bytes()).unwrap().rows);
+    let state = Box::leak(Box::new(hyscribe_testkit::Dump { rows }));
+    let oracle = Oracle {
+        role: "administrator",
+        fixture: site::Fixture {
+            ttd: false,
+            pretty: false,
+            extra: false,
+            state: Some(state),
+        },
+        deny: &[],
+    };
     let get = |who: &str, route: &str, query: &str| {
         let get = hyscribe_phpser::parse_str(query.as_bytes());
         let user = u64::from(who == "administrator");
@@ -163,15 +179,9 @@ fn revisions_routes_are_their_own() {
     assert!(crate::revisions::endpoints("/wp/v2/users").is_none());
 }
 
-/// What only those who may edit them see and is not ported: a video
-/// player, a file size missing from the metadata, and a revision with a
-/// gallery shortcode.
-const UNPORTED: [(&str, &str); 15] = [
-    ("administrator", "/?rest_route=/wp/v2/media/9140"),
-    (
-        "administrator",
-        "/?rest_route=/wp/v2/media/9140&_fields=caption",
-    ),
+/// What only those who may edit them see and is not ported: a file size
+/// missing from the metadata, and a revision with a gallery shortcode.
+const UNPORTED: [(&str, &str); 11] = [
     ("administrator", "/?rest_route=/wp/v2/media/9141"),
     (
         "administrator",
@@ -183,8 +193,6 @@ const UNPORTED: [(&str, &str); 15] = [
     ),
     ("administrator", "/?rest_route=/wp/v2/media/9157"),
     ("administrator", "/?rest_route=/wp/v2/posts/9106/revisions"),
-    ("editor", "/?rest_route=/wp/v2/media/9140"),
-    ("editor", "/?rest_route=/wp/v2/media/9140&_fields=caption"),
     ("editor", "/?rest_route=/wp/v2/media/9141"),
     ("editor", "/?rest_route=/wp/v2/media/9152&_fields=filesize"),
     ("editor", "/?rest_route=/wp/v2/media/9153&_fields=filesize"),
@@ -199,7 +207,7 @@ fn media_match_php() {
     replay(
         include_str!("../../tests/golden/media.tsv"),
         (false, true),
-        6 * 148,
+        6 * 152,
         &UNPORTED,
     );
 }

@@ -26,6 +26,7 @@ GET	/?rest_route=/wp/v2/media&search=manual&_fields=id	default
 GET	/?rest_route=/wp/v2/media&search=page-image.png&_fields=id	default
 GET	/?rest_route=/wp/v2/media&orderby=title&order=asc&_fields=id,title	default
 GET	/?rest_route=/wp/v2/media&per_page=2&page=2&_fields=id	default
+GET	/?rest_route=/wp/v2/media&page=9223372036854775807&per_page=100&_fields=id	default
 GET	/?rest_route=/wp/v2/media&page=9	default
 GET	/?rest_route=/wp/v2/media&author=702&_fields=id,author	default
 GET	/?rest_route=/wp/v2/media&author_exclude=1&include=9131,9132,9133&orderby=include&_fields=id	default
@@ -166,6 +167,9 @@ GET	/?rest_route=/wp/v2/pages&_embed=wp:featuredmedia&_fields=id,featured_media,
 GET	/?rest_route=/wp/v2/posts&_embed=wp:featuredmedia&status=draft,publish&_fields=id,_embedded	default
 GET	/?rest_route=/wp/v2/posts/9102&_embed=wp:featuredmedia	default
 GET	/?rest_route=/wp/v2/posts/9106&_embed=wp:featuredmedia&context=edit&_fields=id,_embedded	default
+GET	/?rest_route=/wp/v2/posts/9101&_embed=wp:featuredmedia	default
+GET	/?rest_route=/wp/v2/posts/9101&_embed=wp:featuredmedia&_envelope	default
+GET	/?rest_route=/wp/v2/posts&author=702&_embed=wp:featuredmedia	default
 GET	/wp-json/wp/v2/posts/1?_embed=wp:featuredmedia	default,pretty
 GET	/?rest_route=/wp/v2/posts&_embed=wp:featuredmedia&per_page=50&orderby=id&_fields=id,featured_media,_embedded	ttd
 GET	/?rest_route=/wp/v2/pages&_embed=wp:featuredmedia&per_page=50&orderby=id&_fields=id,featured_media,_embedded	ttd

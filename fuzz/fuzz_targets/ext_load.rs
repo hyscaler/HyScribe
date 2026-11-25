@@ -99,6 +99,9 @@ impl Site for Empty {
     fn theme(&self, _: &str, _: &ThemeCall) -> Result<Value, String> {
         Err("read only".into())
     }
+    fn settings_fields(&self, _: &str) -> Result<Vec<u8>, String> {
+        Err("read only".into())
+    }
     fn get_transient(&self, _: &str, _: bool) -> Result<Option<Value>, String> {
         Ok(None)
     }

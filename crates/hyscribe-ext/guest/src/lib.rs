@@ -25,8 +25,8 @@ use hyscribe_sdk::bindings::hyscribe::sdk::types::ValueKind;
 use hyscribe_sdk::mail::{self, Message};
 use hyscribe_sdk::query::{self, Query};
 use hyscribe_sdk::{
-    ObjectKind, Plugin, SdkError, Value, auth, blocks, content, cron, hooks, http, i18n, json,
-    meta, options, rest, roles, shortcodes, transients,
+    ObjectKind, Plugin, SdkError, Value, admin, auth, blocks, content, cron, hooks, http, i18n,
+    json, meta, options, rest, roles, shortcodes, transients,
 };
 
 hyscribe_sdk::callbacks! {
@@ -67,6 +67,15 @@ hyscribe_sdk::callbacks! {
         Roles => roles_round,
         Http => http_round,
         Slow => slow,
+        TopPage => top_page,
+        SubPage => sub_page,
+        SettingsPage => settings_page,
+        Section => section,
+        Field => field,
+        Sanitize => sanitize,
+        More => more,
+        AdminPage => admin_page,
+        Answers => answers,
     }
 }
 
@@ -119,6 +128,12 @@ fn order_a(args: Vec<Value>) -> Answer {
 
 fn echo(args: Vec<Value>) -> Answer {
     Ok(args.into_iter().next().unwrap_or(Value::Null))
+}
+
+/// An answer in place of any value: on the REST hooks around the checks,
+/// which the host does not let it change.
+fn answers(_: Vec<Value>) -> Answer {
+    text("answered by the extension".into())
 }
 
 fn count(args: Vec<Value>) -> Answer {
@@ -255,6 +270,67 @@ fn rounds(steps: &[&dyn Debug]) -> Answer {
     text(all.join(" "))
 }
 
+/// The top level admin page, which prints its own markup only.
+fn top_page(_: Vec<Value>) -> Answer {
+    text("<div class=\"wrap\"><h1>HyScribe Test</h1><p id=\"ext-top\">ext-top</p></div>".into())
+}
+
+/// Its submenu page.
+fn sub_page(_: Vec<Value>) -> Answer {
+    text("<div class=\"wrap\"><h1>HyScribe Test Tools</h1><p id=\"ext-sub\">ext-sub</p></div>".into())
+}
+
+/// The settings page under Settings: a form of the settings API, as the
+/// PHP plugin prints it.
+fn settings_page(_: Vec<Value>) -> Answer {
+    let fields = admin::settings_fields("hyscribe_test").map_err(why)?;
+    let sections = admin::do_settings_sections::<Guest>("hyscribe-test");
+    let mut page = String::from(
+        "<div class=\"wrap\"><h1>HyScribe Test Settings</h1><form action=\"options.php\" method=\"post\">",
+    );
+    page.push_str(&String::from_utf8_lossy(&fields));
+    page.push_str(&String::from_utf8_lossy(&sections));
+    page.push_str(admin::SUBMIT_BUTTON);
+    page.push_str("</form></div>");
+    text(page)
+}
+
+/// The settings section's introduction.
+fn section(_: Vec<Value>) -> Answer {
+    text("<p id=\"ext-section\">ext-section</p>".into())
+}
+
+/// The field of `ext_title`: its value, which its sanitize callback keeps
+/// to letters, digits and spaces, so it needs no escaping.
+fn field(_: Vec<Value>) -> Answer {
+    let value = match options::get("ext_title") {
+        Ok(Some(Value::Text(value))) => value,
+        _ => String::new(),
+    };
+    text(format!(
+        "<input name=\"ext_title\" type=\"text\" id=\"ext_title\" value=\"{value}\" class=\"regular-text\" />"
+    ))
+}
+
+/// A field without a label.
+fn more(_: Vec<Value>) -> Answer {
+    text("<span id=\"ext-more\">ext-more</span>".into())
+}
+
+/// The administrators' top level page: the settings group of another is
+/// refused it.
+fn admin_page(_: Vec<Value>) -> Answer {
+    let refused = admin::settings_fields("ext_other").is_err();
+    text(format!("<div class=\"wrap\"><h1>HyScribe Test Admin</h1><p id=\"ext-admin\">{refused}</p></div>"))
+}
+
+/// `ext_title`'s sanitize callback: letters, digits and spaces only.
+fn sanitize(args: Vec<Value>) -> Answer {
+    let given = first(&args);
+    let kept = given.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ');
+    text(kept.collect())
+}
+
 /// Every registration, after `init`: each refused.
 fn late(_: Vec<Value>) -> Answer {
     rounds(&[
@@ -265,6 +341,10 @@ fn late(_: Vec<Value>) -> Answer {
         &rest::route("ext/v1", "/late", &["GET"], Cb::Route, Cb::Permission, "{}"),
         &shortcodes::register("ext", Cb::Shortcode),
         &blocks::register("blocks/late", None),
+        &admin::add_menu_page("T", "T", "read", "ext-late", Cb::TopPage, "", None),
+        &admin::register_setting("hyscribe_test", "ext_title", "{}", None),
+        &admin::add_settings_section("x", "X", None, "ext"),
+        &admin::add_settings_field("x", "X", Cb::Field, "ext", "x", "{}"),
     ])
 }
 
@@ -592,7 +672,10 @@ fn in_init() -> String {
     let post = ObjectKind::Post;
     let long_type = "ext_item_named_too_long";
     let long_taxonomy = "ext_kind_named_far_too_long_for_wp";
-    let steps: [&dyn Debug; 56] = [
+    let page = |slug, parent| {
+        admin::add_submenu_page(parent, "T", "T", "read", slug, Cb::TopPage, None)
+    };
+    let steps: [&dyn Debug; 72] = [
         &options::get("ext"),
         &transients::get("ext_cache"),
         &transients::set("ext_cache", &one, 0),
@@ -649,6 +732,22 @@ fn in_init() -> String {
         &blocks::register("../x", None),
         &hooks::on_filter("user_has_cap", Cb::Echo, 10, 1),
         &hooks::on_action("the_content", Cb::Echo, 10, 1),
+        &page("Bad Slug", "tools.php"),
+        &page("ext_x2", "profile.php"),
+        &page("hyscribe-test", "tools.php"),
+        &admin::add_menu_page("T", "T", "", "ext-x", Cb::TopPage, "", Some(5)),
+        &admin::add_menu_page("T", "T", "read", "ext-x", Cb::TopPage, "x.svg", None),
+        &admin::register_setting("hyscribe_test", "siteurl", "{}", None),
+        &admin::register_setting("general", "ext", "{}", None),
+        &admin::register_setting("hyscribe_test", "ext", "{\"default\":1}", None),
+        &admin::register_setting("hyscribe_test", "ext", "[", None),
+        &admin::register_setting("hyscribe_test", "ext", "[1]", None),
+        &admin::register_setting("hyscribe_test", "ext", "1", None),
+        &admin::add_settings_section("x", "X", None, "reading"),
+        &admin::add_settings_field("x", "X", Cb::Field, "", "x", "{}"),
+        &admin::add_settings_field("x", "X", Cb::Field, "ext", "x", "1"),
+        &admin::settings_fields("hyscribe_test"),
+        &admin::do_settings_sections::<Guest>("hyscribe-test"),
     ];
     let all: Vec<String> = steps.iter().map(|step| format!("{step:?}")).collect();
     all.join("\n")
@@ -709,9 +808,25 @@ Err(SdkError::Invalid("not JSON"))
 Err(SdkError::Denied("shortcode gallery is not in the manifest"))
 Err(SdkError::Invalid("../x is not a folder inside the package"))
 Err(SdkError::Denied("user_has_cap is not in the manifest"))
-Err(SdkError::Denied("the_content is not in the manifest"))"#;
+Err(SdkError::Denied("the_content is not in the manifest"))
+Err(SdkError::Invalid("Bad Slug is not a page slug"))
+Err(SdkError::Invalid("profile.php is not a menu"))
+Err(SdkError::Invalid("page hyscribe-test is added"))
+Err(SdkError::Invalid("a page has a capability"))
+Err(SdkError::Invalid("an icon is a dashicons class, or none"))
+Err(SdkError::Denied("option siteurl is not in the manifest"))
+Err(SdkError::Invalid("general is not a settings group of its own"))
+Err(SdkError::Invalid("a setting's arguments are its type, label and description"))
+Err(SdkError::Invalid("not JSON"))
+Err(SdkError::Invalid("a setting's arguments are its type, label and description"))
+Err(SdkError::Invalid("a setting's arguments are its type, label and description"))
+Err(SdkError::Invalid("reading is not a settings page of its own"))
+Err(SdkError::Invalid(" is not a settings page of its own"))
+Err(SdkError::Invalid("a field's arguments are an object"))
+Err(SdkError::Failed("runs in a request, not in init"))
+[]"#;
 
-const FILTERS: [(&str, Cb, i32, u32); 32] = [
+const FILTERS: [(&str, Cb, i32, u32); 34] = [
     ("the_content", Cb::Content, 10, 1),
     ("ext_trap", Cb::Trap, 10, 1),
     ("ext_loop", Cb::Spin, 10, 1),
@@ -737,6 +852,8 @@ const FILTERS: [(&str, Cb, i32, u32); 32] = [
     ("ext_stack", Cb::Deep, 10, 1),
     ("ext_count", Cb::Count, 10, 2),
     ("map_meta_cap", Cb::Echo, 10, 1),
+    ("rest_pre_dispatch", Cb::Answers, 10, 3),
+    ("rest_pre_insert_post", Cb::Answers, 10, 2),
     ("ext_nest", Cb::Nest, 10, 1),
     ("body_class", Cb::BodyClass, 10, 1),
     ("admin_footer_text", Cb::Footer, 10, 1),
@@ -745,6 +862,31 @@ const FILTERS: [(&str, Cb, i32, u32); 32] = [
     ("ext_http", Cb::Http, 10, 1),
     ("ext_slow", Cb::Slow, 10, 1),
 ];
+
+/// The admin pages and settings, as the PHP plugin adds them.
+fn admin_pages() -> Result<(), SdkError> {
+    let top = "hyscribe-test-top";
+    admin::add_menu_page("HyScribe Test", "HyScribe Test", "read", top, Cb::TopPage, "", None)?;
+    let tools = "HyScribe Test Tools";
+    admin::add_submenu_page(top, tools, "Tools", "manage_options", "hyscribe-test-sub", Cb::SubPage, None)?;
+    let settings = "HyScribe Test Settings";
+    admin::add_options_page(settings, "HyScribe Test", "manage_options", "hyscribe-test", Cb::SettingsPage)?;
+    let title = "HyScribe Test Admin";
+    admin::add_menu_page(title, title, "manage_options", "hyscribe-test-admin", Cb::AdminPage, "", None)?;
+    let string = "{\"type\":\"string\"}";
+    admin::register_setting("hyscribe_test", "ext_title", string, Some(Cb::Sanitize.into()))?;
+    let (main, page) = ("hyscribe_test_main", "hyscribe-test");
+    // Each added twice: the second takes the first one's place.
+    for _ in 0..2 {
+        admin::add_settings_section(main, "Main", Some(Cb::Section.into()), page)?;
+        let label = "{\"label_for\":\"ext_title\"}";
+        admin::add_settings_field("ext_title", "Title", Cb::Field, page, main, label)?;
+    }
+    admin::add_settings_section("hyscribe_test_more", "", None, page)?;
+    let class = "{\"class\":\"ext-row\"}";
+    admin::add_settings_field("ext_more", "More", Cb::More, page, "hyscribe_test_more", class)?;
+    admin::add_settings_section("hyscribe_test_empty", "Empty", None, page)
+}
 
 fn why(e: SdkError) -> String {
     match e {
@@ -774,6 +916,7 @@ impl Plugin for Guest {
         shortcodes::register("ext", Cb::Shortcode).map_err(why)?;
         blocks::register("blocks/card", Some(Cb::Render.into())).map_err(why)?;
         blocks::register("blocks/static", None).map_err(why)?;
+        admin_pages().map_err(why)?;
         let answered = in_init();
         if answered == IN_INIT {
             Ok(())

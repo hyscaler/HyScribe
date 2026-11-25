@@ -3,7 +3,8 @@
 //! What dynamic blocks read from the site and the request (ADR 0009).
 
 use hyscribe_model::{
-    CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, TermQuery, User,
+    CalendarMonth, Comment, DateCount, Period, Post, PostQuery, StatusFilter, Term, TermQuery,
+    User, Viewer,
 };
 use hyscribe_phpser::Value;
 
@@ -19,6 +20,17 @@ pub trait Site {
 
     /// `get_post( $id )`, whatever its type and status.
     fn post(&self, id: u64) -> Option<Post>;
+
+    /// `wp_get_current_user()` as the queries see it: a visitor without one.
+    fn viewer(&self) -> Viewer {
+        Viewer::default()
+    }
+
+    /// `current_user_can( 'read_post', $id )`, which a visitor never can
+    /// of a post that is not public.
+    fn can_read_post(&self, _id: u64) -> bool {
+        false
+    }
 
     /// `get_the_terms( $post_id, $taxonomy )`, in WordPress's order.
     fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<Term>;
@@ -151,15 +163,16 @@ pub trait Site {
         vec![]
     }
 
-    /// `get_adjacent_post()` for a visitor: the published post of `post`'s
-    /// type just before (`previous`) or after it by date, then ID, sharing
-    /// one of `terms` in their taxonomy when given. Sites without other
-    /// posts have none.
+    /// `get_adjacent_post()`: the post of `post`'s type in one of
+    /// `statuses` (published, for none) just before (`previous`) or after
+    /// it by date, then ID, sharing one of `terms` in their taxonomy when
+    /// given. Sites without other posts have none.
     fn adjacent_post(
         &self,
         _post: &Post,
         _previous: bool,
         _terms: Option<(&str, &[u64])>,
+        _statuses: &[StatusFilter],
     ) -> Option<Post> {
         None
     }
@@ -338,6 +351,9 @@ pub enum Archive {
     Day,
     /// A week's or a time's: no year, month or day.
     Date,
+    /// An author's (`is_author()`): `get_queried_object_id()`, which
+    /// `(int) get_query_var( 'author' )` gives, and that user, if any.
+    Author(i64, Option<User>),
 }
 
 impl Archive {

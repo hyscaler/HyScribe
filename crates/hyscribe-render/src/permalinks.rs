@@ -406,8 +406,20 @@ fn link_with_front(site: &dyn Site, post: &Post, front_page: Option<u64>) -> Vec
             String::new()
         },
     };
+    // `wp_force_plain_post_permalink()` lets a private post the user may
+    // read have its pretty link, as `post_link()` gives a published one.
+    let readable = post.status == "private" && site.can_read_post(post.id);
+    let shown = readable.then(|| Post {
+        status: "publish".into(),
+        ..post.clone()
+    });
     links
-        .post_link(&String::from_utf8_lossy(&home), front_page, post, &parts)
+        .post_link(
+            &String::from_utf8_lossy(&home),
+            front_page,
+            shown.as_ref().unwrap_or(post),
+            &parts,
+        )
         .map_or_else(
             || link::permalink(&home, front_page, post),
             String::into_bytes,
@@ -471,7 +483,13 @@ pub fn post_page(site: &dyn Site, post: &Post, link: &[u8], page: usize) -> Vec<
 /// `get_term_link( $term, $taxonomy )` on `site`, pretty or plain.
 pub fn term_link(site: &dyn Site, taxonomy: &str, term: &Term) -> Vec<u8> {
     let home = site.home_url();
-    let slugs = term_slugs(site, taxonomy, term);
+    // Only the category rewrite is hierarchical: a flat taxonomy's link
+    // ignores a stored parent.
+    let slugs = if taxonomy == "category" {
+        term_slugs(site, taxonomy, term)
+    } else {
+        vec![String::from_utf8_lossy(&term.slug).into_owned()]
+    };
     let slugs: Vec<&str> = slugs.iter().map(String::as_str).collect();
     Permalinks::of(site)
         .term_link(&String::from_utf8_lossy(&home), taxonomy, &slugs)
@@ -598,6 +616,19 @@ pub fn author_posts_url(site: &dyn Site, id: i64) -> Vec<u8> {
     } else {
         link::author_posts_url(&home, id)
     }
+}
+
+/// `get_author_feed_link( $author_id, $feed )` on `site`.
+pub fn author_feed_link(site: &dyn Site, id: i64, feed: &str) -> Vec<u8> {
+    let links = Permalinks::of(site);
+    if !links.pretty() {
+        let home = String::from_utf8_lossy(&site.home_url()).into_owned();
+        return format!("{home}/?feed={feed}&amp;author={id}").into_bytes();
+    }
+    let link = author_posts_url(site, id);
+    links
+        .feed_under(&String::from_utf8_lossy(&link), feed)
+        .into_bytes()
 }
 
 /// The slugs of `term` and the terms above it, from the top. A loop in

@@ -816,7 +816,8 @@ fn pretty_embed_urls_look_for_a_post_named_embed() {
             ]
             .map(|status| hyscribe_model::StatusFilter {
                 status: status.into(),
-                author: None
+                author: None,
+                post_type: None
             })
             .to_vec(),
             names: vec!["embed".into()],

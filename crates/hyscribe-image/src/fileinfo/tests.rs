@@ -7,6 +7,23 @@ use crate::tests::corpus;
 
 const GOLDEN: &str = include_str!("../../tests/golden/fileinfo.tsv");
 
+/// Bytes from hex, where `bb{n}` stands for the byte `bb` n times.
+fn decode(text: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    for piece in text.split_inclusive('}') {
+        match piece.split_once('{') {
+            Some((hex, count)) => {
+                let (plain, byte) = hex.split_at(hex.len() - 2);
+                out.extend(unhex(plain));
+                let count: usize = count.trim_end_matches('}').parse().unwrap();
+                out.extend(std::iter::repeat_n(unhex(byte)[0], count));
+            }
+            None => out.extend(unhex(piece)),
+        }
+    }
+    out
+}
+
 /// Every golden file: its name, bytes and PHP's answer.
 fn files() -> Vec<(String, Vec<u8>, &'static str)> {
     GOLDEN
@@ -15,11 +32,45 @@ fn files() -> Vec<(String, Vec<u8>, &'static str)> {
             let f: Vec<&str> = line.split('\t').collect();
             match f[0] {
                 "corpus" => (f[1].to_string(), corpus(f[1]), f[2]),
-                _ => (f[1].to_string(), unhex(f[2]), f[3]),
+                _ => (f[1].to_string(), decode(f[2]), f[3]),
             }
         })
         .collect()
 }
+
+/// The types the Compound File Binary samples are read as, with how many
+/// of them each: a rule that stops answering, or answers more, shows here
+/// as the golden test above guards that every answer is libmagic's.
+#[test]
+fn reads_compound_files() {
+    let mut counts = std::collections::BTreeMap::new();
+    for (name, bytes, _) in files() {
+        if name.starts_with("cfb-") {
+            for mime in finfo_candidates(&bytes).unwrap_or_default() {
+                *counts.entry(mime).or_insert(0usize) += 1;
+            }
+        }
+    }
+    let counts: Vec<(&str, usize)> = counts.into_iter().collect();
+    assert_eq!(counts, COMPOUND, "{counts:?}");
+}
+
+/// Samples of the Compound File Binary family, by the type they are read as.
+const COMPOUND: [(&str, usize); 13] = [
+    ("application/encrypted", 4),
+    ("application/msword", 209),
+    ("application/quickbooks", 2),
+    ("application/vnd.ms-excel", 38),
+    ("application/vnd.ms-msi", 11),
+    ("application/vnd.ms-office", 99),
+    ("application/vnd.ms-outlook", 2),
+    ("application/vnd.ms-powerpoint", 18),
+    ("application/x-empty", 1),
+    ("application/x-hwp", 7),
+    ("application/x-msi", 3),
+    ("application/x-ole-storage", 13),
+    ("application/x-rpt", 2),
+];
 
 /// Whenever it answers, libmagic is among the types it gives, and it
 /// answers for the families it reads.
@@ -112,7 +163,7 @@ fn reads_images_that_have_a_size() {
 
 /// How many golden files are answered, of how many: every family the
 /// reader knows, so a rule that stops answering shows here.
-const ANSWERED: (usize, usize) = (1068, 1791);
+const ANSWERED: (usize, usize) = (1508, 2499);
 
 /// Text is read up to the limit libmagic reads, and no further.
 #[test]
@@ -133,6 +184,9 @@ fn reads_what_wordpress_uploads() {
         ("captions.vtt", "text/vtt"),
         ("event.ics", "text/calendar"),
         ("sample.pdf", "application/pdf"),
+        ("sample.doc", "application/msword"),
+        ("sample.xls", "application/vnd.ms-excel"),
+        ("sample.ppt", "application/vnd.ms-powerpoint"),
         ("sample.rtf", "text/rtf"),
         ("sample.zip", "application/zip"),
         ("sample.tar", "application/x-tar"),

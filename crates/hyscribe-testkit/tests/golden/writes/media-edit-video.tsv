@@ -1,5 +1,5 @@
 # The rows PHP WordPress writes for the action media-edit-video (reference/writes/golden.sh).
-# %now% and %unix% stand for times from 2026-11-18 15:49:34 to 2026-11-18 15:49:34 UTC.
+# %now% and %unix% stand for times from 2026-11-24 12:09:12 to 2026-11-24 12:09:12 UTC.
 # %wp_posts:1% is 801.
 # %wp_posts:2% is 802.
 # %wp_posts:3% is 803.
@@ -85,8 +85,8 @@
 # %wp_postmeta:52% is 852.
 # %wp_postmeta:53% is 853.
 # %wp_postmeta:54% is 854.
-# %wp_postmeta:55% is 878.
-# %wp_postmeta:56% is 879.
+# %wp_postmeta:55% is 9612.
+# %wp_postmeta:56% is 9613.
 # %wp_comments:1% is 801.
 # %wp_users:1% is 2.
 # %wp_users:2% is 3.
@@ -99,7 +99,7 @@
 wp_postmeta	%wp_postmeta:29%	~	meta_value	a:9:{s:8:"filesize";i:%filesize%;s:9:"mime_type";s:9:"video/mp4";s:6:"length";i:3723;s:16:"length_formatted";s:7:"1:02:03";s:5:"width";i:1280;s:6:"height";i:720;s:10:"fileformat";s:3:"mp4";s:7:"bitrate";i:2000000;s:5:"audio";a:2:{s:10:"dataformat";s:3:"mp4";s:5:"codec";s:19:"ISO/IEC 14496-3 AAC";}}	a:10:{s:8:"filesize";i:%filesize%;s:9:"mime_type";s:9:"video/mp4";s:6:"length";i:3723;s:16:"length_formatted";s:7:"1:02:03";s:5:"width";i:1280;s:6:"height";i:720;s:10:"fileformat";s:3:"mp4";s:7:"bitrate";i:2000000;s:5:"audio";a:2:{s:10:"dataformat";s:3:"mp4";s:5:"codec";s:19:"ISO/IEC 14496-3 AAC";}s:6:"artist";s:8:"Director";}
 wp_postmeta	%wp_postmeta:30%	-	meta_id	%wp_postmeta:30%
 wp_postmeta	%wp_postmeta:30%	-	meta_key	_thumbnail_id
-wp_postmeta	%wp_postmeta:30%	-	meta_value	805
+wp_postmeta	%wp_postmeta:30%	-	meta_value	%wp_posts:5%
 wp_postmeta	%wp_postmeta:30%	-	post_id	%wp_posts:18%
 wp_postmeta	%wp_postmeta:55%	+	meta_id	%wp_postmeta:55%
 wp_postmeta	%wp_postmeta:55%	+	meta_key	_edit_last

@@ -5,6 +5,8 @@
 # valid UTF-8: wpdb's strip_invalid_text() refuses the row, so PHP answers
 # db_insert_error or db_update_error and writes nothing. An `id` of 0 or
 # less, from the body or the query, which overrides the route's: 404.
+# Control bytes in the names of a write's query and form: written as any
+# other write, and no header carries them.
 POST	/?rest_route=/wp/v2/posts	form,restore	title=Bad&content=%3Ca+title%3D%22x%FFy%22%3Ez%3C%2Fa%3E
 POST	/?rest_route=/wp/v2/posts	form,restore	title=a%FFb&excerpt=c%C0%AFd&password=%FE
 POST	/?rest_route=/wp/v2/pages	form,restore	title=p%EDq
@@ -15,3 +17,5 @@ PUT	/?rest_route=/wp/v2/posts/1	json,restore	{"id":-1,"title":"Negative"}
 GET	/?rest_route=/wp/v2/posts/1&id=-1
 GET	/?rest_route=/wp/v2/pages/2&id=-2&context=edit
 DELETE	/?rest_route=/wp/v2/posts/1&id=-1	restore
+POST	/?rest_route=/wp/v2/posts&%0A=1&%0D%0A=2&%09=3&%01=4&x%00=5&%7F=6	form,restore	title=Controls&a%0D%0Ab=%01%0A
+POST	/?rest_route=/wp/v2/posts/1&a%0Ab=1&v%5B%01%5D=2	json,restore	{"title":"Controls"}

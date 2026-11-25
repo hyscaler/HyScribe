@@ -7,13 +7,15 @@ use hyscribe_kses::wp_strip_all_tags;
 use hyscribe_model::Post;
 use hyscribe_phpser::{Value, php_trim};
 
+use crate::autop::wpautop;
 use crate::blocks::{Block, parse_blocks};
-use crate::content::get_the_content;
+use crate::content::{get_the_content, replace_insecure_home_url};
+use crate::content_tags::wp_filter_content_tags;
 use crate::core_blocks::{prepared, render};
-use crate::formatting::{CORE_SHORTCODE_TAGS, contains};
+use crate::formatting::{CORE_SHORTCODE_TAGS, contains, convert_chars, wptexturize};
 use crate::shortcode::strip_shortcodes;
 use crate::site::{Request, Site};
-use crate::template::{Renderer, replace};
+use crate::template::{Renderer, replace, site_smilies};
 use crate::theme::Theme;
 
 /// The blocks whose markup an excerpt keeps (`null` is HTML between
@@ -35,7 +37,7 @@ const INNER_BLOCKS: [Option<&str>; 12] = [
 const WRAPPER_BLOCKS: [&str; 3] = ["core/columns", "core/column", "core/group"];
 
 /// `excerpt_length` and `excerpt_more`.
-const EXCERPT_LENGTH: i64 = 55;
+pub(crate) const EXCERPT_LENGTH: i64 = 55;
 pub(crate) const EXCERPT_MORE: &[u8] = b" [&hellip;]";
 
 /// `get_the_excerpt( $post )` outside a page, as the admin's lists read it.
@@ -52,11 +54,22 @@ impl Renderer<'_> {
         self.excerpt(post, EXCERPT_LENGTH, EXCERPT_MORE)
     }
 
+    /// `apply_filters( 'the_excerpt', get_the_excerpt() )` for `post`, with
+    /// `excerpt_length` as `length`.
+    pub(crate) fn the_excerpt_filtered(&mut self, post: &Post, length: i64) -> Vec<u8> {
+        let excerpt = self.excerpt(post, length, EXCERPT_MORE);
+        let site = self.context.site;
+        let excerpt = wptexturize(&excerpt, &CORE_SHORTCODE_TAGS);
+        let excerpt = convert_chars(&site_smilies(site, &excerpt));
+        let excerpt = replace_insecure_home_url(site, &wpautop(&excerpt, true));
+        wp_filter_content_tags(site, &self.context.loading, &excerpt)
+    }
+
     /// `render_block_core_post_excerpt()`: the excerpt, which the block's
     /// own more link and length rule, made here for the block callback.
     pub(crate) fn post_excerpt(&mut self, block: &Block) -> Vec<u8> {
         let context = &self.context;
-        let Some(post) = context.post_id.and_then(|id| context.site.post(id)) else {
+        let Some(post) = context.post() else {
             return Vec::new();
         };
         let name = "core/post-excerpt";

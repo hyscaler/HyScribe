@@ -843,7 +843,7 @@ async fn a_site_in_a_subfolder_sets_cookies_on_both_paths() {
     let names = Names::new(&site);
     assert_eq!(names.site_paths(), ["/", "/wp/"]);
     let site = Arc::new(site);
-    let reply = send(&site, "GET", "/hs-login", "", "").await;
+    let reply = send(&site, "GET", "/wp/hs-login", "", "").await;
     assert_eq!(all(&reply.headers, header::SET_COOKIE).len(), 2);
 }
 

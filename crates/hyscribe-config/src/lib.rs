@@ -260,6 +260,9 @@ pub struct Config {
     /// `REST_PUBLIC_USERS`: `on` (default) answers visitors' REST users
     /// requests as WordPress does, `off` as if no user had published posts.
     pub rest_public_users: bool,
+    /// `AUTHOR_ARCHIVES`: `on` serves author archives (`?author=N`,
+    /// `/author/<nicename>/`) as WordPress does; `off` (default) answers 404.
+    pub author_archives: bool,
     /// `HTTP_OUTBOUND`: `on` lets the server fetch from other sites through
     /// the outbound client (ADR 0019); `off` (default) fetches nothing.
     pub http_outbound: bool,
@@ -270,8 +273,8 @@ pub struct Config {
     /// answers 503 and rolls back its write. Default 30.
     pub request_time_limit: u32,
     /// `RSS_ALLOWED_HOSTS`: the hosts the RSS block may fetch feeds from,
-    /// comma separated, lower case; none by default (the decision
-    /// of 2026-11-10).
+    /// comma separated, lower case; none by default (decided
+    /// 2026-11-10).
     pub rss_allowed_hosts: Vec<String>,
     /// `EMBED_ALLOWED_HOSTS`: where embeds may fetch from.
     pub embed_allowed: EmbedAllowed,
@@ -443,6 +446,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
 
     let rest_public_users = boolean(get("REST_PUBLIC_USERS"), "REST_PUBLIC_USERS", true)?;
     let http_outbound = boolean(get("HTTP_OUTBOUND"), "HTTP_OUTBOUND", false)?;
+    let author_archives = boolean(get("AUTHOR_ARCHIVES"), "AUTHOR_ARCHIVES", false)?;
 
     let rss_allowed_hosts = host_list("RSS_ALLOWED_HOSTS", get("RSS_ALLOWED_HOSTS"))?;
     let embed_allowed = embed_allowed(get("EMBED_ALLOWED_HOSTS"))?;
@@ -544,6 +548,7 @@ pub fn from_map(values: &HashMap<String, String>) -> Result<Config, ConfigError>
         site_url: get("WP_SITEURL").map(String::from),
         salts,
         rest_public_users,
+        author_archives,
         http_outbound,
         trusted_proxies,
         request_time_limit,

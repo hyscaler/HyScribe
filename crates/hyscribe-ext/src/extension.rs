@@ -131,9 +131,67 @@ pub struct TemplateFile {
     pub post_types: Vec<String>,
 }
 
+/// `add_menu_page()` or `add_submenu_page()` (SDK 0.4).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdminPage {
+    /// The parent's file or slug; none for a top level page.
+    pub parent: Option<String>,
+    /// `$page_title`, markup.
+    pub page_title: String,
+    /// `$menu_title`, markup.
+    pub menu_title: String,
+    /// `$capability`, which the host checks.
+    pub capability: String,
+    /// `$menu_slug`.
+    pub slug: String,
+    /// `$callback`, whose answer the page prints.
+    pub callback: u32,
+    /// A top level page's `$icon_url`: a `dashicons-*` class, or empty.
+    pub icon: String,
+    /// `$position`.
+    pub position: Option<i32>,
+}
+
+/// `register_setting()`: its sanitize callback is a filter on
+/// `sanitize_option_{$option}`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Setting {
+    /// `$option_group`, which `options.php` saves.
+    pub group: String,
+    /// `$option_name`, one the manifest grants.
+    pub option: String,
+}
+
+/// `add_settings_section()`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Section {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) callback: Option<u32>,
+    pub(crate) page: String,
+}
+
+/// `add_settings_field()`, with the `label_for` and `class` its row takes
+/// from its `args` when they are not empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Field {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) callback: u32,
+    pub(crate) page: String,
+    pub(crate) section: String,
+    pub(crate) args: String,
+    pub(crate) label_for: Option<Vec<u8>>,
+    pub(crate) class: Option<Vec<u8>>,
+}
+
 /// What `init` registered.
 #[derive(Debug, Default)]
 pub(crate) struct Registrations {
+    pub(crate) pages: Vec<AdminPage>,
+    pub(crate) settings: Vec<Setting>,
+    pub(crate) sections: Vec<Section>,
+    pub(crate) fields: Vec<Field>,
     pub(crate) hooks: Vec<Hook>,
     pub(crate) post_types: Vec<(String, Value)>,
     pub(crate) taxonomies: Vec<Taxonomy>,
@@ -349,6 +407,16 @@ impl Extension {
     /// Its blocks.
     pub fn blocks(&self) -> &[Block] {
         &self.registered.blocks
+    }
+
+    /// Its admin pages, in the order added.
+    pub fn pages(&self) -> &[AdminPage] {
+        &self.registered.pages
+    }
+
+    /// Its settings, in the order registered.
+    pub fn settings(&self) -> &[Setting] {
+        &self.registered.settings
     }
 
     /// A theme's template files.

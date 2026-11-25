@@ -24,7 +24,7 @@ async fn fixture_site(home: Option<&str>) -> Arc<Site> {
     site_at(home, None).await
 }
 
-async fn site_at(home: Option<&str>, siteurl: Option<&str>) -> Arc<Site> {
+pub(crate) async fn site_at(home: Option<&str>, siteurl: Option<&str>) -> Arc<Site> {
     let db = Db::connect(&fixture_config())
         .await
         .expect(hyscribe_testkit::NO_FIXTURE_DATABASE);
@@ -265,6 +265,7 @@ async fn database_errors_show_no_details() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
+        author_archives: false,
         proxies: None,
         time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),
@@ -340,6 +341,13 @@ async fn database_errors_show_no_details() {
             .await
             .is_err()
     );
+    // With author archives on, the author archive's own queries fail first.
+    let site = Arc::new(Arc::into_inner(site).unwrap().with_author_archives(true));
+    for uri in ["/?author=1", "/?author_name=admin"] {
+        let reply = request(&site, "GET", uri).await;
+        assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR, "{uri}");
+        assert!(!reply.body.contains("missing_"));
+    }
 }
 
 #[tokio::test]
@@ -608,6 +616,15 @@ async fn canonical_redirects_match_wordpress() {
             "/?p=1&attachment=a%2Fhello-world",
         ),
         ("/?x=1&p=2&&y", "/?page_id=2&x=1&y"),
+        // Control bytes in a name are dropped or kept encoded.
+        ("/?p=2&%0A=1", "/?page_id=2&=1"),
+        ("/?p=2&a%0D%0Ab=%0D%0A", "/?page_id=2&ab="),
+        ("/?p=2&c%00d=%00", "/?page_id=2&c=%00"),
+        ("/?p=2&e%01%7F=%01%7F", "/?page_id=2&e%01%7F=%01%7F"),
+        (
+            "/index.php?p=1&v%5B%0A%5D=%09%0B%0C",
+            "/?p=1&v%5B%5D=%09%0B%0C",
+        ),
         ("/?page_id=1", "/?p=1"),
         ("/no/such/path", "/no/such/path/"),
         ("/robots.txt", "/robots.txt/"),
@@ -888,6 +905,9 @@ async fn admin_and_login_urls_are_clean() {
             "/hs-admin/css/forms.css",
         ),
         ("GET", "/hs-login.php", permanent, "/hs-login"),
+        ("GET", "/hs-admin", moved, "/hs-admin/"),
+        ("GET", "/hs-admin?x=1&y=2", moved, "/hs-admin/?x=1&y=2"),
+        ("POST", "/hs-admin", moved, "/hs-admin/"),
         (
             "GET",
             "/hs-admin/edit.php?post_type=page",
@@ -921,7 +941,7 @@ async fn admin_and_login_urls_are_clean() {
         request(&site, "GET", "/hs-login").await.status,
         StatusCode::OK
     );
-    for uri in ["/hs-admin", "/hs-admin/", "/hs-admin/edit"] {
+    for uri in ["/hs-admin/", "/hs-admin/edit"] {
         let reply = request(&site, "GET", uri).await;
         assert_eq!(reply.status, StatusCode::FOUND, "{uri}");
         let location = reply.headers["location"].to_str().unwrap();
@@ -1019,6 +1039,7 @@ async fn the_front_page_links_to_home() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
+        author_archives: false,
         proxies: None,
         time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),
@@ -1210,6 +1231,7 @@ async fn failed_reads_answer_defaults() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
+        author_archives: false,
         proxies: None,
         time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),
@@ -1321,7 +1343,7 @@ async fn reads_come_from_the_database_once() {
             ..hyscribe_model::Post::default()
         };
         assert_eq!(
-            reads.adjacent_post(&later, true, None).map(|p| p.id),
+            reads.adjacent_post(&later, true, None, &[]).map(|p| p.id),
             Some(1)
         );
         reads.finish().unwrap();
@@ -2128,6 +2150,58 @@ async fn pretty_canonical_redirects() {
             "{path}"
         );
     }
+}
+
+/// Control bytes in a query's names and values never reach a redirect's
+/// `Location`, nor any other header, and never leave a redirect without
+/// its target: `wp_redirect()` sends it through `wp_sanitize_redirect()`.
+#[tokio::test]
+async fn redirects_carry_no_control_bytes() {
+    let mut redirects = 0;
+    let plain = fixture_site(Some("http://127.0.0.1:8081")).await;
+    let pretty = pretty_site("/%postname%/", None).await;
+    let tails = [
+        "%0A=1",
+        "a%0D%0Ab=%0D%0A",
+        "c%00d=%00",
+        "e%01%7F=%01%7F",
+        "v%5B%0A%5D=%09%0B%0C",
+    ];
+    for (site, uri) in [
+        (&plain, "/?p=2"),
+        (&plain, "/?attachment_id=1"),
+        (&plain, "/index.php?p=1"),
+        (&plain, "/?p=1&feed=rss2"),
+        (&plain, "/?page_id=2&feed=rss2"),
+        (&plain, "/no/such/path?x=1"),
+        (&plain, "/wp-login.php?action=lostpassword"),
+        (&plain, "/wp-admin/edit.php?post_type=page"),
+        (&plain, "/hs-admin/edit.php?post_type=page"),
+        (&plain, "/hs-admin/edit?post_type=page"),
+        (&pretty, "/?p=1"),
+        (&pretty, "/?page_id=2"),
+        (&pretty, "/?m=2026&cat=1"),
+        (&pretty, "/?cat=1&x=1"),
+    ] {
+        assert!(request(site, "GET", uri).await.status.is_redirection());
+        for tail in tails {
+            let uri = format!("{uri}&{tail}");
+            let reply = request(site, "GET", &uri).await;
+            // A page instead is an answer too; a redirect names its target.
+            assert!(!reply.status.is_server_error(), "{uri}");
+            let location = reply.headers.get("location");
+            let named = location.is_some_and(|to| !to.is_empty());
+            assert_eq!(reply.status.is_redirection(), named, "{uri}");
+            assert_eq!(named, reply.body.is_empty(), "{uri}");
+            redirects += usize::from(named);
+            for (name, value) in &reply.headers {
+                let clean = value.as_bytes().iter().all(|&b| b >= 0x20 && b != 0x7f);
+                assert!(clean, "{uri}: {name}");
+            }
+        }
+    }
+    // All but two, which are answered as pages.
+    assert_eq!(redirects, 14 * 5 - 2);
 }
 
 /// The page on the front is titled as the home page, tagline and all.
@@ -3114,13 +3188,13 @@ fn kept_pages(list: &str) -> String {
 /// page, or with `hashed` (a list's name and the time it was recorded at)
 /// the page's hash, the page itself in `kept_pages`.
 /// The requests of `known`, `options<TAB>path<TAB>why` lines, still differ.
-/// Author archives are off (docs/SECURITY_MODEL.md): their count is returned.
+/// Author archives are on, as PHP serves them (`AUTHOR_ARCHIVES`).
 async fn assert_listed_pages(
     database: &str,
     golden: &str,
     hashed: Option<(&str, i64)>,
     known: &str,
-) -> usize {
+) {
     let known: Vec<(&str, &str)> = known
         .lines()
         .map(|line| {
@@ -3129,7 +3203,7 @@ async fn assert_listed_pages(
         })
         .collect();
     let mut sites: HashMap<String, Arc<Site>> = HashMap::new();
-    let (mut failures, mut authors, mut kept) = (Vec::new(), 0, None);
+    let (mut failures, mut kept) = (Vec::new(), None);
     for line in golden.lines() {
         let fields: Vec<&str> = line.split('\t').collect();
         // An option named `_cookie` is the cookies the request sends.
@@ -3152,11 +3226,15 @@ async fn assert_listed_pages(
             };
             let db = Db::connect(&config).await.unwrap();
             let oracle = Some("http://127.0.0.1:8081".to_string());
-            let mut site = Site::load(db, oracle.clone(), oracle).await.unwrap();
+            let site = Site::load(db, oracle.clone(), oracle).await.unwrap();
+            let mut site = site.with_author_archives(true);
             // Names from `_` are the golden script's, not options.
             let options = named.split('&').filter_map(|o| o.split_once('='));
             for (name, value) in options.filter(|(name, _)| !name.starts_with('_')) {
                 let value = hyscribe_phpser::urldecode(value.as_bytes());
+                if name == "home" {
+                    site.home = String::from_utf8(value.clone()).unwrap();
+                }
                 site.options.insert(name.into(), value);
             }
             // The theme a `stylesheet` option names, as every request's reload picks it.
@@ -3192,11 +3270,6 @@ async fn assert_listed_pages(
             Some((_, clock)) => PINNED_NOW.scope(clock, request).await,
             None => request.await,
         };
-        if path.contains("author=") {
-            assert_eq!(reply.status, StatusCode::NOT_FOUND, "{path}");
-            authors += 1;
-            continue;
-        }
         let location = reply
             .headers
             .get("location")
@@ -3253,7 +3326,6 @@ async fn assert_listed_pages(
         failures.len(),
         failures.join("\n")
     );
-    authors
 }
 
 /// The default install's requests of `reference/pages/default.list`: query
@@ -3264,10 +3336,7 @@ async fn assert_listed_pages(
 async fn listed_pages_match_php() {
     let golden = include_str!("../tests/golden/pages-default.tsv");
     let known = include_str!("../tests/golden/pages-default-known.tsv");
-    assert_eq!(
-        assert_listed_pages("wordpress", golden, None, known).await,
-        0
-    );
+    assert_listed_pages("wordpress", golden, None, known).await;
     assert_eq!(golden.lines().count(), 101);
 }
 
@@ -3291,7 +3360,7 @@ async fn theme_test_data_pages_match_php() {
 }
 
 /// The requests of a Theme Test Data list `list` recorded at `clock`, by
-/// hash: ten author archives are off and 747 requests are listed.
+/// hash: 747 requests are listed.
 async fn assert_ttd_pages(list: &str, golden: &str, clock: i64, known: &str) {
     let _saves = admin::tests::SAVES.lock().await;
     let db = hyscribe_config::Database {
@@ -3306,10 +3375,7 @@ async fn assert_ttd_pages(list: &str, golden: &str, clock: i64, known: &str) {
         .await
         .unwrap();
     let hashed = Some((list, clock));
-    assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, hashed, known).await,
-        10
-    );
+    assert_listed_pages("wordpress_saves", golden, hashed, known).await;
     assert_eq!(golden.lines().count(), 747);
 }
 
@@ -3334,10 +3400,7 @@ macro_rules! theme_pages {
                 ".clock"
             )));
             let hashed = Some((list, clock));
-            assert_eq!(
-                assert_listed_pages("wordpress", golden, hashed, known).await,
-                0
-            );
+            assert_listed_pages("wordpress", golden, hashed, known).await;
             assert_eq!(golden.lines().count(), 101);
         }
 
@@ -3560,10 +3623,7 @@ async fn edited_site_pages_match_php() {
         .await
         .unwrap();
     let golden = include_str!("../tests/golden/pages-site-edits.tsv");
-    assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, None, "").await,
-        0
-    );
+    assert_listed_pages("wordpress_saves", golden, None, "").await;
     assert_eq!(golden.lines().count(), 12);
     // Options without posts: the global styles post cannot be read.
     let broken = "CREATE TABLE broken_options AS SELECT * FROM wp_options";
@@ -3576,6 +3636,154 @@ async fn edited_site_pages_match_php() {
     let drop = "DROP TABLE broken_options";
     sqlx::raw_sql(drop).execute(&mut conn).await.unwrap();
     assert!(site.is_err());
+}
+
+/// A site not at the oracle's address: the 404 page's bundled theme image
+/// is under the site's own URL, not the exported one.
+#[tokio::test(flavor = "multi_thread")]
+async fn bundled_pattern_urls_follow_the_site() {
+    let own = "http://127.0.0.1:8180";
+    let site = site_at(Some(own), Some(own)).await;
+    let reply = request(&site, "GET", "/?p=999999").await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    let image = format!("{own}/wp-content/themes/twentytwentyfive/assets/images/404-image.webp");
+    assert!(reply.body.contains(&image), "{}", reply.body);
+    assert!(!reply.body.contains("127.0.0.1:8081"));
+}
+
+/// The pages of `reference/pages/folder.list` for a home URL in a folder,
+/// with plain and pretty permalinks: the canonical redirects keep the
+/// folder once, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_pages_match_php() {
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-folder.tsv");
+    assert_listed_pages("wordpress_saves", golden, None, "").await;
+    assert_eq!(golden.lines().count(), 10);
+    // The canonical address itself is served, as PHP does (its body names
+    // the oracle's root content URL, so it is not in the golden).
+    let home = "http://127.0.0.1:8180/blog";
+    let site = site_at(Some(home), Some(home)).await;
+    assert_eq!(request(&site, "GET", "/blog/").await.status, StatusCode::OK);
+    let reply = request(&site, "GET", "/blog").await;
+    assert_eq!(reply.headers["location"], format!("{home}/"));
+    // A page on the front takes the slash too, none without a page chosen.
+    for (page, status) in [("2", StatusCode::MOVED_PERMANENTLY), ("0", StatusCode::OK)] {
+        let db = Db::connect(&fixture_config()).await.unwrap();
+        let mut site = Site::load(db, Some(home.into()), Some(home.into()))
+            .await
+            .unwrap();
+        site.options
+            .insert("show_on_front".into(), b"page".to_vec());
+        site.options.insert("page_on_front".into(), page.into());
+        assert_eq!(
+            request(&Arc::new(site), "GET", "/blog").await.status,
+            status
+        );
+    }
+}
+
+/// A home URL in a folder: login, admin, loaders and bundled files answer
+/// under the folder, and nothing outside it or beside it reaches them.
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_site_serves_its_own_files() {
+    let home = "http://127.0.0.1:8180/blog";
+    let site = site_at(Some(home), Some(home)).await;
+    let get = |uri: &'static str| request(&site, "GET", uri);
+    let login = get("/blog/hs-login").await;
+    assert_eq!(login.status, StatusCode::OK);
+    assert!(login.body.contains(&format!("{home}/hs-login")));
+    let script = "/blog/wp-includes/js/jquery/jquery.min.js";
+    let reply = get(script).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert!(
+        reply.headers["content-type"]
+            .to_str()
+            .unwrap()
+            .contains("javascript")
+    );
+    let styles = get("/blog/hs-admin/load-styles?c=0&load[]=dashicons").await;
+    assert_eq!(styles.status, StatusCode::OK);
+    assert!(
+        styles.headers["content-type"]
+            .to_str()
+            .unwrap()
+            .contains("css")
+    );
+    let admin = get("/blog/hs-admin/").await;
+    assert_eq!(admin.status, StatusCode::FOUND);
+    assert!(
+        admin.headers["location"]
+            .to_str()
+            .unwrap()
+            .starts_with(&format!("{home}/hs-login"))
+    );
+    let redirect = get("/blog/wp-login.php?x=1").await;
+    assert_eq!(redirect.status, StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(redirect.headers["location"], format!("{home}/hs-login?x=1"));
+    let rest = get("/blog/wp-json/").await;
+    assert_eq!(rest.status, StatusCode::OK);
+    // Outside the folder, beside it, doubled, climbing out and encoded:
+    // none of them is a login form, a script or an admin screen.
+    for uri in [
+        "/hs-login",
+        "/blogs/hs-login",
+        "/blog/blog/hs-login",
+        "/blog/../hs-login",
+        "/blog%2Fhs-login",
+        "/blog/hs-login/../x",
+        "/wp-includes/js/jquery/jquery.min.js",
+        "/blogs/wp-includes/js/jquery/jquery.min.js",
+        "/blog/blog/wp-includes/js/jquery/jquery.min.js",
+        "/blog/wp-includes/../wp-config.php",
+        "/blog/wp-includes/%2e%2e/%2e%2e/wp-config.php",
+        "/blog%2Fwp-includes/js/jquery/jquery.min.js",
+        "/hs-admin/load-styles?c=0&load[]=dashicons",
+        "/blogs/hs-admin/load-styles?c=0&load[]=dashicons",
+        "/hs-admin/",
+        "/blogs/hs-admin/",
+        "/blog/blog/hs-admin/",
+        "/hs-login.php",
+        "/wp-login.php",
+        "/wp-admin/",
+    ] {
+        let reply = get(uri).await;
+        // Plain permalinks answer any path with the home page, so a 200 is
+        // fine as long as it is not a file, a form or an admin redirect.
+        let kind = reply
+            .headers
+            .get("content-type")
+            .map_or("", |v| v.to_str().unwrap());
+        let sent = reply
+            .headers
+            .get("location")
+            .map_or("", |v| v.to_str().unwrap());
+        assert!(
+            !kind.contains("javascript")
+                && !kind.contains("css")
+                && !reply.body.contains("id=\"loginform\"")
+                && !sent.contains("hs-login?redirect_to"),
+            "{uri}"
+        );
+    }
+}
+
+/// The REST index of a site in a folder, as PHP answers it for the
+/// `home` option: `reference/pages/folder-rest.list`. Its other requests
+/// (login, bundled files) have no PHP counterpart: the oracle serves its
+/// files from its root only.
+#[tokio::test(flavor = "multi_thread")]
+async fn folder_rest_matches_php() {
+    let golden = include_str!("../tests/golden/pages-folder-rest.tsv");
+    assert_listed_pages("wordpress", golden, None, "").await;
+    assert_eq!(golden.lines().count(), 6);
 }
 
 /// The pages of `reference/pages/comments.list` over the comments of
@@ -3606,11 +3814,73 @@ async fn commenter_pages_match_php() {
         .await
         .unwrap();
     let golden = include_str!("../tests/golden/pages-comments.tsv");
-    assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, None, "").await,
-        0
-    );
+    assert_listed_pages("wordpress_saves", golden, None, "").await;
     assert_eq!(golden.lines().count(), 95);
+}
+
+/// The pages of `reference/pages/titles.list` over the posts and pages of
+/// `reference/pages/titles.sql`: the browser title of untitled posts and
+/// pages and of titles with quotes, dashes and entities, and of the posts
+/// page, in `wordpress_saves`.
+#[tokio::test(flavor = "multi_thread")]
+async fn title_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let titles = include_str!("../../../reference/pages/titles.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(titles))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-titles.tsv");
+    assert_listed_pages("wordpress_saves", golden, None, "").await;
+    assert_eq!(golden.lines().count(), 25);
+}
+
+/// The author archives of `reference/pages/authors.list`, plain and pretty,
+/// over the users and posts of `reference/pages/authors.sql`: an author with
+/// posts, one with none and one with only a draft and a private post,
+/// their redirects, pages and feeds.
+#[tokio::test(flavor = "multi_thread")]
+async fn author_pages_match_php() {
+    use sqlx::Connection;
+    let _saves = admin::tests::SAVES.lock().await;
+    let db = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let options = sqlx::mysql::MySqlConnectOptions::new()
+        .host(&db.host)
+        .port(db.port)
+        .database(&db.name)
+        .username(&db.user)
+        .password(db.password.expose());
+    let mut conn = sqlx::MySqlConnection::connect_with(&options).await.unwrap();
+    let authors = include_str!("../../../reference/pages/authors.sql");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(authors))
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    let golden = include_str!("../tests/golden/pages-authors.tsv");
+    let known = include_str!("../tests/golden/pages-authors-known.tsv");
+    assert_listed_pages("wordpress_saves", golden, None, known).await;
+    assert_eq!(golden.lines().count(), 73);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test
@@ -3814,14 +4084,9 @@ async fn attachment_pages_match_php() {
             .unwrap();
     }
     let golden = include_str!("../tests/golden/attachment-pages.tsv");
-    // The players of audio and video files need MediaElement.js.
-    let known = ["818", "821", "825"]
-        .map(|id| format!("wp_attachment_pages_enabled=1\t/?attachment_id={id}\tmediaelement\n"))
-        .concat();
-    assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, None, &known).await,
-        0
-    );
+    // The audio player of this file needs MediaElement.js.
+    let known = "wp_attachment_pages_enabled=1\t/?attachment_id=825\tmediaelement\n";
+    assert_listed_pages("wordpress_saves", golden, None, known).await;
     assert_eq!(golden.lines().count(), 110);
     // Without the table of its meta the file of an attachment is unread.
     let tables = [
@@ -3893,10 +4158,7 @@ async fn duotone_pages_match_php() {
         .await
         .unwrap();
     let golden = include_str!("../tests/golden/duotone-pages.tsv");
-    assert_eq!(
-        assert_listed_pages("wordpress_saves", golden, None, "").await,
-        0
-    );
+    assert_listed_pages("wordpress_saves", golden, None, "").await;
     assert_eq!(golden.lines().count(), 2);
 }
 
@@ -3961,3 +4223,37 @@ async fn a_write_cut_off_by_the_time_limit_rolls_back() {
 }
 
 pub(crate) mod classic;
+pub(crate) mod private_views;
+
+/// `AUTHOR_ARCHIVES` off, the default: every author-shaped request answers
+/// the plain 404 page, with no redirect, under plain and pretty permalinks
+/// (where the paths name an author, plain permalinks ignoring paths).
+#[tokio::test]
+async fn author_archives_off_answer_404() {
+    let forms = [
+        "/?author=1",
+        "/?author=1,2",
+        "/?author=-1",
+        "/?author_name=admin",
+        "/?p=1&author=1",
+        "/author/admin/",
+        "/author/admin/page/2/",
+        "/author/admin/feed/",
+    ];
+    let plain = fixture_site(None).await;
+    let pretty = pretty_site("/%postname%/", None).await;
+    for (site, forms) in [(&plain, &forms[..5]), (&pretty, &forms[..])] {
+        let first = request(site, "GET", forms[0]).await;
+        assert_eq!(
+            title(&first.body),
+            "Page not found &#8211; HyScribe Default Install"
+        );
+        for form in forms {
+            let reply = request(site, "GET", form).await;
+            assert_eq!(reply.status, StatusCode::NOT_FOUND, "{form}");
+            assert!(!reply.headers.contains_key("location"), "{form}");
+            assert_eq!(reply.headers, first.headers, "{form}");
+            assert_eq!(reply.body, first.body, "{form}");
+        }
+    }
+}

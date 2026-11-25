@@ -24,7 +24,7 @@ use hyper_util::server::graceful::GracefulShutdown;
 use hyper_util::service::TowerToHyperService;
 use hyscribe_db::{Db, DbError};
 use hyscribe_kses::{esc_attr, esc_html, esc_url_raw, strip_tags};
-use hyscribe_model::{OrderBy, Post, PostQuery, Term, TermFilter, TimeCondition};
+use hyscribe_model::{OrderBy, Post, PostQuery, StatusFilter, Term, TermFilter, TimeCondition};
 use hyscribe_phpser::{
     Key, Value, add_query_values, is_empty_string, parse_str, php_trim, rawurlencode,
     rawurlencode_deep, remove_query_arg, urldecode, urlencode,
@@ -67,6 +67,7 @@ mod rewrite;
 mod sitemaps;
 mod trackback;
 mod uploads;
+mod viewer;
 
 pub use uploads::Uploads;
 
@@ -127,6 +128,9 @@ pub struct Site {
     defined: Vec<&'static str>,
     /// `REST_PUBLIC_USERS`: the public users REST endpoint is on.
     public_users: bool,
+    /// `AUTHOR_ARCHIVES`: author archives are served, as WordPress serves
+    /// them; off, they answer 404 (docs/SECURITY_MODEL.md).
+    author_archives: bool,
     /// `BEHIND_PROXY` with `TRUSTED_PROXIES`: the peers whose
     /// `X-Forwarded-For` names the client; none when not behind a
     /// proxy.
@@ -218,6 +222,7 @@ impl Site {
             writer: None,
             defined: Vec::new(),
             public_users: true,
+            author_archives: false,
             proxies: None,
             time_limit: DEFAULT_TIME_LIMIT,
             constants: hyscribe_config::Constants::default(),
@@ -275,6 +280,7 @@ impl Site {
             writer: self.writer.clone(),
             defined: self.defined.clone(),
             public_users: self.public_users,
+            author_archives: self.author_archives,
             proxies: self.proxies.clone(),
             time_limit: self.time_limit,
             constants: self.constants,
@@ -316,6 +322,14 @@ impl Site {
     pub fn with_public_users(self, public_users: bool) -> Site {
         Site {
             public_users,
+            ..self
+        }
+    }
+
+    /// The site with author archives on or off.
+    pub fn with_author_archives(self, author_archives: bool) -> Site {
+        Site {
+            author_archives,
             ..self
         }
     }
@@ -532,9 +546,22 @@ impl Site {
         .filter(|&id| id != 0)
     }
 
-    /// The site title, as `wp_get_document_title()` prints it.
+    /// The site title, as `get_bloginfo( 'name', 'display' )` returns it.
     fn name(&self) -> String {
-        esc_html(self.option("blogname").as_bytes())
+        self.bloginfo_display("blogname")
+    }
+
+    /// The site's tagline, as `get_bloginfo( 'description', 'display' )`
+    /// returns it.
+    fn tagline(&self) -> String {
+        self.bloginfo_display("blogdescription")
+    }
+
+    /// An option through the `bloginfo` filters: `wptexturize()`,
+    /// `convert_chars()` and `esc_html()`.
+    fn bloginfo_display(&self, option: &str) -> String {
+        let text = wptexturize(self.option(option).as_bytes(), &CORE_SHORTCODE_TAGS);
+        esc_html(&convert_chars(&text))
     }
 
     /// `get_permalink( $post )`; see [`Site::links`].
@@ -711,7 +738,12 @@ async fn current(
         Ok(now) => {
             let now = admin::saves::themes::checked(now).await;
             // The extensions answer the hooks of the request's work (ADR 0022).
-            let running = extensions::request(&now, extensions::admin_request(uri.path()));
+            let running = extensions::request(
+                &now,
+                extensions::admin_request(
+                    under_folder(home_path(&now.option("siteurl")), uri.path()).unwrap_or("/"),
+                ),
+            );
             let now = Site {
                 running: running.clone(),
                 ..now
@@ -952,23 +984,29 @@ async fn page(
 ) -> Response {
     // Before the method check, so a login form's POST is redirected too.
     let read = method == Method::GET || method == Method::HEAD;
-    if let Some((status, location)) = admin_redirect(&site, uri.path(), uri.query(), read) {
+    let siteurl = site.option("siteurl");
+    // The site's own files, login and admin are answered by the path below
+    // the home folder; a request outside it gets `/`, which none answers.
+    let inner = below_folder(home_path(&siteurl), &uri);
+    if let Some((status, location)) = admin_redirect(&site, inner.path(), inner.query(), read) {
         return (status, [(header::LOCATION, location)]).into_response();
     }
+    let inner = in_place(inner);
     let uri = in_place(uri);
     let (head, post) = (method == Method::HEAD, method == Method::POST);
     let page_method = method == Method::GET || head || post;
     if !post && page_method {
         let now = now() as u64;
-        let file = uploads::serve::serve(&site, uri.path(), &headers, now)
-            .or_else(|| files::static_file(uri.path(), &headers, now));
+        let file = uploads::serve::serve(&site, inner.path(), &headers, now)
+            .or_else(|| files::static_file(inner.path(), &headers, now))
+            .or_else(|| files::installed_theme_file(&site, inner.path(), &headers, now));
         if let Some(response) = file {
             return response;
         }
     }
     let peer = peer.map(|axum::Extension(Peer(ip))| ip);
     // `_show_post_preview()` runs on `init`, before the entry point's work.
-    if uri.path() == login::PATH && page_method {
+    if inner.path() == login::PATH && page_method {
         if let Some(refused) =
             preview_nonce::refuse(&site, &headers, uri.query(), post, Entry::Page).await
         {
@@ -988,8 +1026,7 @@ async fn page(
         };
         return login::respond(&site, asked).await;
     }
-    let siteurl = site.option("siteurl");
-    if uri.path().strip_prefix(home_path(&siteurl)) == Some(comment_post::PATH) {
+    if under_folder(home_path(&siteurl), uri.path()) == Some(comment_post::PATH) {
         // Only a POST gets as far as loading WordPress.
         if post
             && let Some(refused) =
@@ -1006,11 +1043,11 @@ async fn page(
         return comment_post::respond(&site, asked).await;
     }
     // The loaders read only the query, whatever the method, as PHP's do.
-    if let Some(loader) = loaders::Loader::at(uri.path()).filter(|_| page_method) {
+    if let Some(loader) = loaders::Loader::at(inner.path()).filter(|_| page_method) {
         return loaders::load(loader, uri.query(), &headers, now() as u64);
     }
-    if admin::is_admin(uri.path()) && page_method {
-        let entry = if uri.path() == "/hs-admin/admin-ajax" {
+    if admin::is_admin(inner.path()) && page_method {
+        let entry = if inner.path() == "/hs-admin/admin-ajax" {
             Entry::Ajax
         } else {
             Entry::Page
@@ -1021,7 +1058,7 @@ async fn page(
             return refused;
         }
         let max = site.upload_max();
-        let multipart = uploads::takes_upload(&uri)
+        let multipart = uploads::takes_upload(&inner)
             .then(|| uploads::form(&headers, &body, max))
             .flatten();
         let (form, files) = match multipart {
@@ -1038,7 +1075,7 @@ async fn page(
                 (read.then_some(form), Vec::new())
             }
         };
-        return admin::respond(&site, uri, headers, (post, peer), (form, files)).await;
+        return admin::respond(&site, inner, headers, (post, peer), (form, files)).await;
     }
     // The request as made is `$_SERVER['REQUEST_URI']` and `$_GET`.
     let original = uri.clone();
@@ -1048,7 +1085,7 @@ async fn page(
         query.insert("s".into(), String::new());
     }
     // Before the REST API or a query.
-    let rpc = uri.path().strip_prefix(home_path(&siteurl)) == Some("/xmlrpc.php");
+    let rpc = under_folder(home_path(&siteurl), uri.path()) == Some("/xmlrpc.php");
     let entry = if rpc { Entry::XmlRpc } else { Entry::Page };
     if let Some(refused) = preview_nonce::refuse(&site, &headers, uri.query(), post, entry).await {
         return refused;
@@ -1076,9 +1113,11 @@ async fn page(
     }
     // `WP::send_headers()` sends the status `error` asks for; these end the
     // request before any redirect.
+    let viewer = viewer::current(&site, &headers, post).await;
     let status = error_status(&query);
     if let Some(status) = status.filter(|s| matches!(s.as_u16(), 403 | 500 | 502 | 503)) {
-        return (status, [(header::CONTENT_TYPE, "text/html; charset=UTF-8")]).into_response();
+        let response = (status, [(header::CONTENT_TYPE, "text/html; charset=UTF-8")]);
+        return uncached(response.into_response(), viewer.is_some());
     }
     let file = trackback::is_file(uri.path());
     let routed = if file {
@@ -1086,7 +1125,7 @@ async fn page(
             .await
             .map(|outcome| (outcome, Vec::new()))
     } else {
-        outcome(&site, (&uri, &original), &query).await
+        outcome(&site, (&uri, &original), &query, viewer.as_ref()).await
     };
     let (outcome, links) = match routed {
         Ok(routed) => routed,
@@ -1109,17 +1148,12 @@ async fn page(
         _ if post => StatusCode::METHOD_NOT_ALLOWED.into_response(),
         Outcome::Redirect(location) => (
             StatusCode::MOVED_PERMANENTLY,
-            [(header::LOCATION, location)],
+            [(header::LOCATION, sent_location(&location))],
         )
             .into_response(),
         Outcome::Feed(page, feed) => {
-            feed::respond(
-                site.clone(),
-                requested(*page, &original, &uri),
-                feed,
-                &headers,
-            )
-            .await
+            let page = requested(*page, &original, &uri);
+            feed::respond(site.clone(), page, feed, (&headers, viewer.clone())).await
         }
         Outcome::Xml(body) => {
             let content_type = [(header::CONTENT_TYPE, "application/xml; charset=UTF-8")];
@@ -1140,7 +1174,8 @@ async fn page(
             let embed = embeds(&query, &uri, page.request.singular);
             page.request.embed = embed;
             page.request.commenter = comment_post::commenter(&site, &headers);
-            let mut response = html(render(&site, requested(*page, &original, &uri)).await);
+            let mut response =
+                html(render(&site, requested(*page, &original, &uri), viewer.clone()).await);
             if embed {
                 response
                     .headers_mut()
@@ -1159,6 +1194,20 @@ async fn page(
         .filter_map(|l| HeaderValue::try_from(l).ok())
     {
         response.headers_mut().append(header::LINK, link);
+    }
+    uncached(response, viewer.is_some())
+}
+
+/// `response` with `nocache_headers()` when a user is logged in, as
+/// `WP::send_headers()` sends them, so no shared cache keeps their view.
+fn uncached(mut response: Response, logged_in: bool) -> Response {
+    if logged_in {
+        let headers = login::nocache().into_iter();
+        for (name, value) in
+            headers.filter_map(|(n, v)| HeaderValue::try_from(v).ok().map(|v| (n, v)))
+        {
+            response.headers_mut().insert(name, value);
+        }
     }
     response
 }
@@ -1255,8 +1304,9 @@ async fn outcome(
     site: &Arc<Site>,
     (uri, original): (&Uri, &Uri),
     query: &HashMap<String, String>,
+    viewer: Option<&Arc<viewer::Viewer>>,
 ) -> Result<(Outcome, Vec<String>), DbError> {
-    let outcome = route(site, uri.path(), uri.query(), query).await?;
+    let outcome = route(site, uri.path(), uri.query(), query, viewer).await?;
     let links = link_headers(
         site,
         match &outcome {
@@ -1267,7 +1317,7 @@ async fn outcome(
     let get = parse_str(uri.query().unwrap_or_default().as_bytes());
     let outcome = match quiet(query, uri.query()) {
         Some(kind) => uncanonical(kind, uri, query, outcome),
-        None => match preview(query, &get, outcome) {
+        None => match preview(query, &get, outcome, preview_nonce::asked(uri.query())) {
             ControlFlow::Break(outcome) => outcome,
             ControlFlow::Continue(outcome) if site.permalinks().pretty() => {
                 canonical::pretty(site, original, query, outcome).await
@@ -1341,19 +1391,29 @@ fn php_set(get: &Value, name: &str) -> bool {
 
 /// A preview, for which `redirect_canonical()` does nothing and the page
 /// prints `wp_post_preview_js()`, or the outcome as it was to go on with.
-/// `is_preview()` is a set `preview` that a visitor, who never previews,
-/// keeps unless the query is a 404 or finds the published post its `p`
-/// or `page_id` asks for.
+/// `is_preview()` is a post the query previews, or a set `preview` kept
+/// unless the query is a 404 or finds the published post its `p` or
+/// `page_id` asks for without a preview nonce (which verified, as `nonce`
+/// says it was given).
 fn preview(
     query: &HashMap<String, String>,
     get: &Value,
     outcome: Outcome,
+    nonce: bool,
 ) -> ControlFlow<Outcome, Outcome> {
     let set = php_set(get, "preview");
     let asked = ["p", "page_id", "attachment_id", "subpost_id"]
         .iter()
         .any(|k| query.get(*k).is_some_and(|v| absint(v) > 0));
-    let shown = |page: &Page| set && !page.request.not_found && !(asked && page.request.singular);
+    // A post or page a visitor could not see is not published.
+    let unpublished = |page: &Page| {
+        page.request.posts.first().is_some_and(|post| {
+            matches!(post.post_type.as_str(), "post" | "page") && post.status != "publish"
+        })
+    };
+    let dropped = |page: &Page| asked && page.request.singular && !nonce && !unpublished(page);
+    let shown =
+        |page: &Page| page.request.preview || set && !page.request.not_found && !dropped(page);
     match outcome {
         Outcome::Page(mut page) if shown(&page) => {
             page.request.preview = true;
@@ -1509,6 +1569,12 @@ fn clean_location(location: &str, tidy: impl Fn(&str) -> String) -> String {
     )
 }
 
+/// A redirect's `Location` as `wp_redirect()` sends it, through
+/// `wp_sanitize_redirect()`, which leaves only bytes a header carries.
+fn sent_location(location: &str) -> String {
+    lossy(&redirect::wp_sanitize_redirect(location.as_bytes()))
+}
+
 /// `base`, then `?query` unless the query is empty.
 fn with_query(base: &str, query: &str) -> String {
     if query.is_empty() {
@@ -1533,7 +1599,7 @@ fn requested(page: Page, uri: &Uri, vars: &Uri) -> Page {
 }
 
 /// `page` rendered through its template.
-async fn render(site: &Arc<Site>, page: Page) -> Rendered {
+async fn render(site: &Arc<Site>, page: Page, viewer: Option<Arc<viewer::Viewer>>) -> Rendered {
     let rendering = Arc::clone(site);
     let (candidates, request, title) = (
         page.candidates.clone(),
@@ -1541,7 +1607,7 @@ async fn render(site: &Arc<Site>, page: Page) -> Rendered {
         page.title.clone(),
     );
     let body = tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
-        render_page(&rendering, &candidates, &request, &title)
+        render_page(&rendering, (&candidates, &request, &title), viewer)
     }))
     .await;
     rendered(site, page, body)
@@ -1623,11 +1689,11 @@ fn database_error(site: &Site, err: &dyn std::fmt::Display) -> Rendered {
 /// head its blocks enqueued styles for; or for an embed, the embed page.
 fn render_page(
     site: &Arc<Site>,
-    candidates: &[String],
-    request: &Request,
-    title: &str,
+    (candidates, request, title): (&[String], &Request, &str),
+    viewer: Option<Arc<viewer::Viewer>>,
 ) -> Result<String, extensions::Failed> {
-    let reads = Reads::new(site, tokio::runtime::Handle::current());
+    let mut reads = Reads::new(site, tokio::runtime::Handle::current());
+    reads.read_as(viewer);
     let running = site.running.as_ref();
     let classic = running.and_then(|running| Some((running, running.request.templates()?)));
     let document = if request.embed {
@@ -1726,19 +1792,23 @@ fn now() -> i64 {
 /// on the front page. `None` when `path` is canonical.
 fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<String> {
     let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
+    // A requested path already starts with the home URL's folder.
+    let origin = site
+        .home
+        .strip_suffix(home_path(&site.home))
+        .unwrap_or(&site.home);
     if path.contains("/index.php/") {
         return Some(format!(
-            "{}{}{query}",
-            site.home,
+            "{origin}{}{query}",
             path.replace("/index.php/", "/")
         ));
     }
     if let Some(folder) = path.strip_suffix("index.php").filter(|f| f.ends_with('/')) {
-        return Some(format!("{}{folder}{query}", site.home));
+        return Some(format!("{origin}{folder}{query}"));
     }
     // The home page these paths show takes it only as `is_front_page()`.
     let front = site.posts_on_front() || site.front_page().is_some_and(|id| id != 0);
-    (front && !path.ends_with('/')).then(|| format!("{}{path}/{query}", site.home))
+    (front && !path.ends_with('/')).then(|| format!("{origin}{path}/{query}"))
 }
 
 /// HyScribe's admin and login URLs have no `.php` (ADR 0008):
@@ -1749,7 +1819,8 @@ fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<St
 /// Those redirects are 307: browsers do not cache them, so a site switched
 /// back to PHP WordPress gets its own admin back, and a POST stays a POST.
 /// `/hs-login.php` gets a permanent 308; `/hs-admin/<screen>.php` a 301 when
-/// `read` (GET or HEAD), else it is served [`in_place`].
+/// `read` (GET or HEAD), else it is served [`in_place`]. Bare `/hs-admin` gets
+/// Apache's directory slash, a 301 to `/hs-admin/` for any method.
 fn admin_redirect(
     site: &Site,
     path: &str,
@@ -1760,6 +1831,8 @@ fn admin_redirect(
         "/wp-login.php" => (StatusCode::TEMPORARY_REDIRECT, "/hs-login".to_string()),
         "/hs-login.php" => (StatusCode::PERMANENT_REDIRECT, "/hs-login".to_string()),
         "/wp-admin" => (StatusCode::TEMPORARY_REDIRECT, "/hs-admin/".to_string()),
+        // Apache's directory slash: a 301 with the query kept, for any method.
+        "/hs-admin" => (StatusCode::MOVED_PERMANENTLY, "/hs-admin/".to_string()),
         _ => {
             let (status, screen) = match (
                 path.strip_prefix("/wp-admin/"),
@@ -1780,6 +1853,24 @@ fn admin_redirect(
     Some((status, format!("{}{target}{query}", site.home)))
 }
 
+/// `path` below the site's `folder`, `None` outside it or at it: a folder is
+/// a whole path segment, so `/blogs` is not in `/blog`.
+fn under_folder<'a>(folder: &str, path: &'a str) -> Option<&'a str> {
+    let rest = path.strip_prefix(folder.trim_end_matches('/'))?;
+    rest.starts_with('/').then_some(rest)
+}
+
+/// `uri` below the site's `folder`, with its query; `/` outside it or at it.
+fn below_folder(folder: &str, uri: &Uri) -> Uri {
+    let Some(path) = under_folder(folder, uri.path()) else {
+        return Uri::from_static("/");
+    };
+    let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+    format!("{path}{query}")
+        .parse()
+        .unwrap_or(Uri::from_static("/"))
+}
+
 /// `uri` with `/hs-admin/<screen>.php` as `/hs-admin/<screen>`: a request
 /// other than a GET or HEAD is served there, as a redirect would drop its body.
 fn in_place(uri: Uri) -> Uri {
@@ -1798,6 +1889,12 @@ fn in_place(uri: Uri) -> Uri {
 /// and hs-admin.
 fn reserved(path: &str) -> bool {
     is_static(path) || path == "/hs-login" || path == "/hs-admin" || path.starts_with("/hs-admin/")
+}
+
+/// Whether query var `name` leaves an author archive ported: the author
+/// vars, paging, feeds, and names that are no query vars.
+fn author_alone(name: &str) -> bool {
+    ["author", "author_name", "paged", "feed"].contains(&name) || !rewrite::is_query_var(name)
 }
 
 /// The post a request asks for, as `(query var, ID, post type)`: a non-zero
@@ -1824,6 +1921,7 @@ async fn route(
     path: &str,
     raw_query: Option<&str>,
     query: &HashMap<String, String>,
+    viewer: Option<&Arc<viewer::Viewer>>,
 ) -> Result<Outcome, DbError> {
     if reserved(path) {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
@@ -1841,11 +1939,14 @@ async fn route(
     // The path has been parsed or is ignored. Author archives give away
     // login names, so they are off by default (docs/SECURITY_MODEL.md).
     // A structure with `%author%` names the author of a post's link, which
-    // is no archive.
+    // is no archive. With them on, an author with other query vars than
+    // paging and feeds is not ported.
     let post_asked = ["p", "page_id", "name", "pagename"]
         .iter()
         .any(|name| query.get(*name).is_some_and(|v| !v.is_empty()));
-    if query.contains_key("author") || (query.contains_key("author_name") && !post_asked) {
+    if (query.contains_key("author") || (query.contains_key("author_name") && !post_asked))
+        && (!site.author_archives || query.keys().any(|name| !author_alone(name)))
+    {
         return Ok(Outcome::Page(Box::new(not_found(site, false))));
     }
     // A negative or array `p` is `error=404` too: the 404 page with a 200
@@ -1925,7 +2026,7 @@ async fn route(
     }
     let single = match single_post(query) {
         Some(single) => Some(single),
-        None => match by_slug(site, raw_query, query).await? {
+        None => match by_slug(site, raw_query, query, viewer).await? {
             Some(Slug::Moved(location)) => return Ok(Outcome::Redirect(location)),
             Some(Slug::Attachment(post, asked)) => {
                 return attachment_page::outcome(site, *post, raw_query, asked).await;
@@ -1967,6 +2068,7 @@ async fn route(
         // A search's or archive's comment feed lists the comments on the
         // posts it matches.
         let (post_query, terms) = main_query(site, query, true).await?;
+        let post_query = viewer::listing(post_query, viewer);
         let comments = comment_feed.then(|| {
             if archive || terms.archive.is_some() {
                 feed::CommentsOf::Posts(Box::new(post_query.clone()))
@@ -1991,74 +2093,101 @@ async fn route(
     match single {
         Some((name, id, post_type)) => {
             let post = site.db.post(id).await?;
-            let hidden = post.as_ref().is_some_and(|p| hides(p, format.is_some()));
+            // `redirect_canonical()` keeps a redirect to a post the user can
+            // see: published, or private and theirs to read.
+            let readable = match &post {
+                Some(p) => viewer::private_readable(site, viewer, p).await,
+                None => false,
+            };
+            let hidden = post
+                .as_ref()
+                .is_some_and(|p| hides(p, format.is_some()) && !readable);
+            let found = match post.filter(|p| matches!(p.post_type.as_str(), "post" | "page")) {
+                // Of the other type, it is only redirected to.
+                Some(p) if p.post_type != post_type => {
+                    (readable || viewable(&p, &[&p.post_type])).then_some((p, false))
+                }
+                Some(p) => shown(site, viewer, p, raw_query).await,
+                None => None,
+            };
+            let preview = found.as_ref().is_some_and(|(_, preview)| *preview);
+            let post = found.map(|(post, _)| post);
             let link = match &post {
-                Some(post) => site.permalink(post).await,
+                Some(post) => site.permalink(&viewer::linked(post)).await,
                 None => String::new(),
             };
             // `?p=` for a page or `?page_id=` for a post.
             let elsewhere = |post: &Post| {
                 (post.post_type != post_type).then(|| post_location(&link, post, raw_query))
             };
-            Ok(
-                match (format, post.filter(|p| viewable(p, &["post", "page"]))) {
-                    // A feed's redirect keeps the feed's headers.
-                    (Some(format), found) => {
-                        let past = found
-                            .as_ref()
-                            .filter(|p| past_pages(asked, p))
-                            .map(|_| past_pages_location(query, &link, raw_query, name));
-                        // A `page` past the last that is no number.
-                        let garbled = matches!(past, Some(None));
-                        let by_id = name == "p" || name == "page_id";
-                        let redirect = found
-                            .as_ref()
-                            .and_then(elsewhere)
-                            .or(past.flatten())
-                            // Asked for by ID, a garbled `page` is a 404
-                            // feed; by name, it goes to the feed by ID.
-                            .or_else(|| {
-                                found.as_ref().filter(|_| by_id != garbled).map(|post| {
-                                    single_feed_location(site, raw_query, post, garbled)
-                                })
-                            })
-                            .filter(|location| *location != current)
-                            .or(redirect.filter(|_| !hidden));
-                        // The 404 feed lists the post, never its comments.
-                        let feed_404 = garbled && by_id;
-                        let comments = (comment_feed && !feed_404)
-                            .then_some(feed::CommentsOf::Post(id, post_type == "post"));
-                        let page = async {
-                            Ok(found.map_or_else(
-                                || Page {
-                                    hidden,
-                                    ..missing_single(site)
-                                },
-                                |p| {
-                                    let mut page = single_page(site, p, Paging::default());
-                                    if feed_404 {
-                                        page.title = not_found(site, false).title;
-                                    }
-                                    page
-                                },
-                            ))
-                        };
-                        return feed::outcome(site, page, comments, format, redirect, feed_404)
-                            .await;
-                    }
-                    (None, Some(post)) => match elsewhere(&post) {
-                        Some(location) => Outcome::Redirect(location),
-                        None => paged_single(site, asked, query, raw_query, &link, name, post),
+            Ok(match (format, post) {
+                // A feed's redirect keeps the feed's headers; a preview has none.
+                (Some(format), found) => {
+                    let past = found
+                        .as_ref()
+                        .filter(|p| past_pages(asked, p))
+                        .map(|_| past_pages_location(query, &link, raw_query, name));
+                    // A `page` past the last that is no number.
+                    let garbled = matches!(past, Some(None));
+                    let by_id = name == "p" || name == "page_id";
+                    let redirect = found
+                        .as_ref()
+                        .and_then(elsewhere)
+                        .or(past.flatten())
+                        // Asked for by ID, a garbled `page` is a 404
+                        // feed; by name, it goes to the feed by ID.
+                        .or_else(|| {
+                            found
+                                .as_ref()
+                                .filter(|_| by_id != garbled)
+                                .map(|post| single_feed_location(site, raw_query, post, garbled))
+                        })
+                        .filter(|location| *location != current)
+                        .or(redirect.filter(|_| !hidden))
+                        .filter(|_| !preview);
+                    // The 404 feed lists the post, never its comments; a post
+                    // the user is not shown has none listed, as ID 0 has none.
+                    let feed_404 = garbled && by_id;
+                    let listed = found.as_ref().map_or(0, |post| post.id);
+                    let comments = (comment_feed && !feed_404)
+                        .then_some(feed::CommentsOf::Post(listed, post_type == "post"));
+                    let page = async {
+                        Ok(found.map_or_else(
+                            || Page {
+                                hidden,
+                                ..missing_single(site)
+                            },
+                            |p| {
+                                let mut page = single_page(site, p, Paging::default());
+                                if feed_404 {
+                                    page.title = not_found(site, false).title;
+                                }
+                                page.request.preview = preview;
+                                page
+                            },
+                        ))
+                    };
+                    return feed::outcome(site, page, comments, format, redirect, feed_404).await;
+                }
+                (None, Some(post)) => match elsewhere(&post) {
+                    Some(location) => Outcome::Redirect(location),
+                    None => match paged_single(site, asked, query, raw_query, &link, name, post) {
+                        Outcome::Page(mut page) => {
+                            page.request.preview = preview;
+                            Outcome::Page(page)
+                        }
+                        outcome => outcome,
                     },
-                    (None, None) => Outcome::Page(Box::new(Page {
-                        hidden,
-                        ..not_found(site, false)
-                    })),
                 },
-            )
+                (None, None) => Outcome::Page(Box::new(Page {
+                    hidden,
+                    ..not_found(site, false)
+                })),
+            })
         }
         None => {
-            let main = main_query(site, query, false).await?;
+            let (post_query, terms) = main_query(site, query, false).await?;
+            let main = (viewer::listing(post_query, viewer), terms);
             let ids = posts_page.map(|(_, id)| id);
             let (page, found) = list(site, query, false, main, ids).await?;
             let redirect =
@@ -2173,7 +2302,15 @@ impl Paging {
 
 /// `single_post_title()`: the title through its filters.
 fn single_post_title(post: &Post) -> String {
-    lossy(&strip_tags(&wptexturize(&post.title, &CORE_SHORTCODE_TAGS)))
+    term_title(&post.title)
+}
+
+/// `single_term_title()`: a category's or a tag's name through the
+/// `single_cat_title` and `single_tag_title` filters (`wptexturize()` and
+/// `strip_tags()`), the filters `single_post_title` has too. A post format's name has no filter, and is a plain word
+/// they leave as it is.
+fn term_title(name: &[u8]) -> String {
+    lossy(&strip_tags(&wptexturize(name, &CORE_SHORTCODE_TAGS)))
 }
 
 /// `wp_get_document_title()`: the parts that are not empty, joined by
@@ -2307,8 +2444,7 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
     Page {
         status: StatusCode::OK,
         title: if front {
-            let tagline = site.option("blogdescription");
-            let tagline = Some(esc_html(tagline.as_bytes())).filter(|t| !t.is_empty());
+            let tagline = Some(site.tagline()).filter(|t| !t.is_empty());
             document_title([Some(site.name()), paging.title(), tagline])
         } else {
             document_title([
@@ -2366,10 +2502,64 @@ async fn main_query(
         site.db.find_terms(&slugs, &ids).await?
     };
     let hierarchy = site.options.get("category_children");
-    let resolved = tax.resolve(&terms, hierarchy.map_or(&[][..], Vec::as_slice));
+    let mut resolved = tax.resolve(&terms, hierarchy.map_or(&[][..], Vec::as_slice));
+    // An author with other archive vars is turned down in `route()`.
+    let authors = match query::authors(query) {
+        Some(authors) => Some(author_archive(site, &authors, &mut resolved).await?),
+        None => None,
+    };
     let term_archive = resolved.archive.is_some();
-    let post_query = post_query(site, query, feed, resolved.filters.clone(), term_archive);
+    let mut post_query = post_query(site, query, feed, resolved.filters.clone(), term_archive);
+    if let Some((included, excluded)) = authors {
+        match included {
+            Some(included) => post_query.authors = included,
+            None => post_query.include = Some(Vec::new()),
+        }
+        post_query.excluded_authors = excluded;
+    }
     Ok((post_query, resolved))
+}
+
+/// `is_author()`'s archive of `authors` into `resolved`, and the posts'
+/// `author__in` (none for no post) and `author__not_in`: `author`'s IDs,
+/// then the `author_name` user's, which `get_posts()` also requires.
+async fn author_archive(
+    site: &Site,
+    authors: &query::Authors,
+    resolved: &mut Resolved,
+) -> Result<(Option<Vec<u64>>, Vec<u64>), DbError> {
+    let (excluded, included): (Vec<i64>, Vec<i64>) = authors.ids.iter().partition(|&&id| id <= 0);
+    let mut excluded: Vec<u64> = excluded.iter().map(|id| id.unsigned_abs()).collect();
+    excluded.sort_unstable();
+    let mut included: Vec<u64> = included.iter().map(|id| id.unsigned_abs()).collect();
+    if !excluded.is_empty() {
+        included.clear();
+    }
+    // `(int) get_query_var( 'author' )`, and whether it is one number:
+    // `author_name` makes it the ID of the user it names, or 0.
+    let mut id = authors.ids.first().copied().unwrap_or_default();
+    let mut numeric = authors.ids.len() == 1;
+    let mut matched = Some(included);
+    if let Some(name) = &authors.name {
+        let asked = hyscribe_model::UserQuery {
+            nicenames: vec![name.clone()],
+            ..hyscribe_model::UserQuery::default()
+        };
+        let user = site.db.user_query(&asked).await?.into_iter().next();
+        let user_id = user.map_or(0, |user| user.id);
+        matched = matched.filter(|ids| ids.is_empty() || ids.contains(&user_id));
+        matched = matched.map(|_| vec![user_id]);
+        id = i64::try_from(user_id).unwrap_or_default();
+        numeric = true;
+    }
+    // A user exists only for a positive ID.
+    let user = match u64::try_from(id) {
+        Ok(id) => site.db.user(id).await?,
+        Err(_) => None,
+    };
+    resolved.author_exists = numeric && user.is_some();
+    resolved.archive = Some(Archive::Author(id, user));
+    Ok((matched, excluded))
 }
 
 /// The search, as parse_search() leaves it: without line breaks.
@@ -2542,10 +2732,11 @@ async fn list(
         Some(Archive::Term(_, term)) => term.as_ref(),
         _ => None,
     };
-    // An archive with nothing in it is a 404 unless it is of a term that
-    // exists, a search only when paged.
+    // An archive with nothing in it is a 404 unless it is of a term or an
+    // author that exists, a search only when paged.
     let is_archive = dated || term_archive.is_some();
-    let empty_404 = paging.is_paged() || is_archive && search.is_none() && term.is_none();
+    let empty_404 = paging.is_paged()
+        || is_archive && search.is_none() && term.is_none() && !terms.author_exists;
     if empty_404 && posts.is_empty() {
         let mut page = not_found(site, feed && !paging.is_paged());
         page.request.search_query = search.map_or_else(Vec::new, |s| s.as_bytes().to_vec());
@@ -2557,8 +2748,18 @@ async fn list(
             "Search Results for &#8220;{}&#8221;",
             esc_attr(s.as_bytes())
         ))
+    } else if let Some(Archive::Author(_, user)) = &term_archive {
+        Some(
+            user.as_ref()
+                .map_or_else(String::new, |user| esc_html(&user.display_name)),
+        )
     } else if term_archive.is_some() {
-        Some(term.map_or_else(String::new, |term| esc_html(&term.name)))
+        Some(
+            term_archive
+                .as_ref()
+                .and_then(Archive::term)
+                .map_or_else(String::new, |(_, term)| term_title(&term.name)),
+        )
     } else {
         // A week's or a time's archive has no title of its own.
         dated.then(|| {
@@ -2572,7 +2773,6 @@ async fn list(
             })
         })
     };
-    let tagline = site.option("blogdescription");
     let front = site.posts_on_front();
     let title = match heading {
         // A term or date archive without a title has the site's name alone.
@@ -2587,7 +2787,7 @@ async fn list(
         None => document_title([
             Some(site.name()),
             paging.title(),
-            Some(esc_html(tagline.as_bytes())).filter(|t| !t.is_empty()),
+            Some(site.tagline()).filter(|t| !t.is_empty()),
         ]),
     };
     let mut candidates = list_templates(
@@ -2598,7 +2798,12 @@ async fn list(
         query.contains_key("post_format"),
     );
     candidates.retain(|name| front || name != "front-page");
-    let queried_object_id = term.map_or(0, |term| term.id);
+    // An author's ID, which `get_queried_object_id()` gives the blocks
+    // that compare it with posts' as well.
+    let queried_object_id = match &term_archive {
+        Some(Archive::Author(id, _)) => u64::try_from(*id).unwrap_or_default(),
+        _ => term.map_or(0, |term| term.id),
+    };
     let archive = term_archive.or(dated.then(|| date.kind.clone().unwrap_or(Archive::Date)));
     // The home page lists the latest posts, the default install's setting;
     // a feed is never `is_home()`.
@@ -2632,8 +2837,9 @@ async fn list(
 
 /// The templates the template loader tries for a list page, in its order:
 /// a search's; those of the taxonomies in `kinds`, each from the queried
-/// term of `term_archive`; a date archive's; then the archive's, of posts
-/// first where a post format sets the `post` post type, or the home page's.
+/// term of `term_archive`; an author's; a date archive's; then the
+/// archive's, of posts first where a post format sets the `post` post type,
+/// or the home page's.
 fn list_templates(
     kinds: &[Taxonomy],
     term_archive: Option<&Archive>,
@@ -2666,6 +2872,14 @@ fn list_templates(
             } else {
                 templates.push(prefix);
             }
+        }
+        // get_author_template().
+        if let Some(Archive::Author(_, user)) = term_archive {
+            if let Some(user) = user {
+                templates.push(format!("author-{}", lossy(&user.nicename)));
+                templates.push(format!("author-{}", user.id));
+            }
+            templates.push("author".into());
         }
         if date {
             templates.push("date".into());
@@ -2702,6 +2916,27 @@ fn rss2_query(raw_query: Option<&str>) -> String {
         })
         .collect::<Vec<_>>()
         .join("&")
+}
+
+/// `post`, of the type a singular query asks for, as `get_posts()` gives
+/// it to the user (see [`viewer::seen`]), and whether it is previewed.
+async fn shown(
+    site: &Arc<Site>,
+    viewer: Option<&Arc<viewer::Viewer>>,
+    post: Post,
+    raw_query: Option<&str>,
+) -> Option<(Post, bool)> {
+    let seen = viewer::seen(site, viewer, &post).await;
+    if seen == viewer::Seen::Hidden {
+        return None;
+    }
+    let preview = php_set(
+        &parse_str(raw_query.unwrap_or_default().as_bytes()),
+        "preview",
+    );
+    let asked = (preview, preview_nonce::asked(raw_query));
+    let post = viewer::previewed(site, viewer, (post, seen), asked).await;
+    Some((post, seen == viewer::Seen::Preview))
 }
 
 /// Whether a visitor sees `post`: published, and of one of `post_types`.
@@ -2791,18 +3026,37 @@ async fn by_slug(
     site: &Arc<Site>,
     raw_query: Option<&str>,
     query: &HashMap<String, String>,
+    viewer: Option<&Arc<viewer::Viewer>>,
 ) -> Result<Option<Slug>, DbError> {
     let var = |name| query.get(name).map(|v| v.trim()).filter(|v| !v.is_empty());
     let queryable = queryable_post_type(query);
+    // A post the user may not see is not found, as for a visitor.
+    let visible = async |post: Option<Post>| match post {
+        Some(post) if viewer::seen(site, viewer, &post).await != viewer::Seen::Hidden => Some(post),
+        _ => None,
+    };
     let (key, post_type, found, name) = if let Some(name) = var("name") {
         let name = sanitize_title_for_query(name.as_bytes());
         let post = async {
             let name = String::from_utf8_lossy(&name);
             match queryable {
                 Some("attachment") => {
-                    narrowed(site, query, site.db.attachment_by_name(&name).await?).await
+                    narrowed(
+                        site,
+                        query,
+                        site.db.newest_by_name(&name, "attachment").await?,
+                        None,
+                    )
+                    .await
                 }
-                _ => narrowed(site, query, site.db.post_by_name(&name).await?).await,
+                // A logged in user's query finds the post in any status.
+                _ => {
+                    let found = match viewer {
+                        Some(_) => site.db.newest_by_name(&name, "post").await,
+                        None => site.db.post_by_name(&name).await,
+                    };
+                    narrowed(site, query, visible(found?).await, viewer).await
+                }
             }
         };
         ("name", "post", post.await?, name)
@@ -2814,11 +3068,13 @@ async fn by_slug(
                 Some(_) => Vec::new(),
                 None => site.db.named_pages(&parts).await?,
             };
-            // The page for posts lists the posts whatever its status.
-            let post = page_by_path(&parts, &pages)
-                .filter(|p| viewable(p, &["page"]) || site.posts_page() == Some(p.id))
-                .cloned();
-            narrowed(site, query, post).await
+            // The page for posts lists the posts whatever its status; an
+            // attachment at the path is no page, whatever its status.
+            let post = match page_by_path(&parts, &pages).cloned() {
+                Some(p) if site.posts_page() == Some(p.id) => Some(p),
+                post => visible(post.filter(|p| p.post_type == "page")).await,
+            };
+            narrowed(site, query, post, viewer).await
         };
         let post = post.await?;
         let name = sanitize_title_for_query(&hyscribe_phpser::wp_basename(path.as_bytes()));
@@ -2831,7 +3087,13 @@ async fn by_slug(
         let name = sanitize_title_for_query(&hyscribe_phpser::wp_basename(attachment.as_bytes()));
         let post = async {
             let name = String::from_utf8_lossy(&name);
-            narrowed(site, query, site.db.attachment_by_name(&name).await?).await
+            narrowed(
+                site,
+                query,
+                site.db.newest_by_name(&name, "attachment").await?,
+                None,
+            )
+            .await
         };
         ("attachment", "attachment", post.await?, name)
     } else {
@@ -2884,19 +3146,28 @@ async fn by_slug(
 
 /// `post` if it is one the query's date vars and search also match, as
 /// `WP_Query` adds them to a slug's query; its taxonomy vars are ignored.
+/// A logged in user's post may be in any status.
 async fn narrowed(
     site: &Site,
     query: &HashMap<String, String>,
     post: Option<Post>,
+    viewer: Option<&Arc<viewer::Viewer>>,
 ) -> Result<Option<Post>, DbError> {
     let date = date_query(query);
     // An invalid date still adds its conditions, which nothing meets.
     let dated = date.archive || date.invalid;
+    let checked = |post: &Post| post.status == "publish" || viewer.is_some();
     match post {
-        Some(post) if post.status == "publish" && (query.contains_key("s") || dated) => {
+        Some(post) if checked(&post) && (query.contains_key("s") || dated) => {
             let all = post_query(site, query, false, Vec::new(), false);
             let only = PostQuery {
                 post_types: vec![post.post_type.clone()],
+                // A singular query has no status clause: the post's own.
+                statuses: vec![StatusFilter {
+                    status: post.status.clone(),
+                    ..StatusFilter::default()
+                }],
+                logged_in: viewer.is_some(),
                 // Conflicting dates already include nothing.
                 include: all.include.or(Some(vec![post.id])),
                 ..all
@@ -3083,7 +3354,7 @@ fn not_found(site: &Site, feed: bool) -> Page {
         title: if feed {
             site.name()
         } else {
-            format!("Page not found &#8211; {}", site.name())
+            document_title([Some("Page not found".into()), None, Some(site.name())])
         },
         candidates: vec!["404".into(), "index".into()],
         request,

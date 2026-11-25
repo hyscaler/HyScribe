@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-/// HyScribe's extension SDK 0.3 (ADR 0022): what a plugin or theme component
+/// HyScribe's extension SDK 0.4 (ADR 0022): what a plugin or theme component
 /// imports from the host and exports to it. Every import is checked against
 /// the extension's manifest on every call; nothing is granted by default.
 /// Each minor version only adds to the one before, whose interfaces the
 /// host links under every later version too: 0.2 added transients, roles
-/// and outbound requests, 0.3 the `theme` world (ADR 0023).
-package hyscribe:sdk@0.3.0;
+/// and outbound requests, 0.3 the `theme` world (ADR 0023), 0.4 admin
+/// pages and the settings API.
+package hyscribe:sdk@0.4.0;
 
 interface types {
     /// The kind of a PHP value.
@@ -307,6 +308,60 @@ interface http {
     send: func(method: string, url: string, headers: list<header>, body: list<u8>, timeout: u32) -> result<response, sdk-error>;
 }
 
+/// Admin pages and the settings API (0.4): registered in `init`, shown in
+/// hs-admin's menu where PHP puts them and served behind their capability,
+/// which the host checks; a page prints what its callback answers, as an
+/// action that prints does.
+interface admin {
+    use types.{sdk-error};
+
+    /// `add_menu_page()` (no `parent`) or `add_submenu_page()`. Titles are
+    /// markup, as PHP prints them; `slug` is lower case letters, digits,
+    /// `_` and `-`; `parent` a core menu's file (`options-general.php`) or
+    /// one of the extension's own menu pages.
+    record page {
+        parent: option<string>,
+        page-title: string,
+        menu-title: string,
+        capability: string,
+        slug: string,
+        callback: u32,
+        /// A top level page's icon: a `dashicons-*` class, or empty.
+        icon: string,
+        position: option<s32>,
+    }
+
+    /// Registers a page; a slug it already added is refused.
+    add-page: func(page: page) -> result<_, sdk-error>;
+
+    /// `register_setting( $group, $option, $args )` for an option the
+    /// manifest grants: `args` as JSON (`type`, `label`, `description`),
+    /// `sanitize` its `sanitize_callback`.
+    register-setting: func(group: string, name: string, args: string, sanitize: option<u32>) -> result<_, sdk-error>;
+
+    /// `add_settings_section( $id, $title, $callback, $page )`.
+    add-section: func(id: string, title: string, callback: option<u32>, page: string) -> result<_, sdk-error>;
+
+    /// `add_settings_field( $id, $title, $callback, $page, $section, $args )`:
+    /// `args` as JSON (`label_for`, `class`), handed to the callback.
+    add-field: func(id: string, title: string, callback: u32, page: string, section: string, args: string) -> result<_, sdk-error>;
+
+    /// What `do_settings_sections( $page )` prints: the host's markup, or
+    /// one of the extension's own callbacks, which the SDK runs with its
+    /// argument (a section as JSON, or a field's `args`) and prints.
+    variant piece {
+        markup(list<u8>),
+        call(tuple<u32, string>),
+    }
+
+    /// `do_settings_sections( $page )`, in pieces.
+    sections: func(page: string) -> list<piece>;
+
+    /// `settings_fields( $group )`: the group's hidden fields, its nonce
+    /// for the current user among them.
+    settings-fields: func(group: string) -> result<list<u8>, sdk-error>;
+}
+
 /// What the host calls in the extension.
 interface guest {
     use types.{value};
@@ -465,6 +520,7 @@ world plugin {
     import transients;
     import roles;
     import http;
+    import admin;
     export guest;
 }
 

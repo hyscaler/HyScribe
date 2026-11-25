@@ -344,3 +344,61 @@ fn the_query_style_is_queued_by_an_interactive_query_only() {
         );
     }
 }
+
+/// The default install for a logged in user, keeping the queries asked.
+struct LoggedIn {
+    base: DefaultInstall,
+    user: u64,
+    asked: std::cell::RefCell<Vec<hyscribe_model::PostQuery>>,
+}
+
+impl crate::site::Site for LoggedIn {
+    fn option(&self, name: &str) -> Option<Vec<u8>> {
+        self.base.option(name)
+    }
+    fn home_url(&self) -> Vec<u8> {
+        self.base.home_url()
+    }
+    fn post(&self, id: u64) -> Option<hyscribe_model::Post> {
+        self.base.post(id)
+    }
+    fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<hyscribe_model::Term> {
+        self.base.post_terms(post_id, taxonomy)
+    }
+    fn post_meta(&self, post_id: u64, key: &str) -> Option<Vec<u8>> {
+        self.base.post_meta(post_id, key)
+    }
+    fn query(&self, query: &hyscribe_model::PostQuery) -> Vec<hyscribe_model::Post> {
+        self.asked.borrow_mut().push(query.clone());
+        self.base.query(query)
+    }
+    fn viewer(&self) -> hyscribe_model::Viewer {
+        hyscribe_model::Viewer {
+            user: self.user,
+            read_private: vec!["post".into()],
+        }
+    }
+}
+
+/// A query block's own query lists a logged in user's readable private
+/// posts and searches password protected posts too; a visitor's neither.
+#[test]
+fn own_queries_follow_the_user() {
+    let theme = twentytwentyfive();
+    let markup = br#"<!-- wp:query {"query":{"perPage":3,"search":"hello","inherit":false}} --><div><!-- wp:post-template --><!-- wp:post-title /--><!-- /wp:post-template --></div><!-- /wp:query -->"#;
+    for user in [0, 3] {
+        let site = LoggedIn {
+            base: DefaultInstall {
+                home: b"http://example.test".to_vec(),
+            },
+            user,
+            asked: Default::default(),
+        };
+        render_content(&theme, &site, &Request::default(), markup);
+        let asked = site.asked.borrow();
+        let query = asked.first().unwrap();
+        assert_eq!(query.logged_in, user != 0);
+        let readable = crate::site::Site::viewer(&site).statuses(&["post".to_string()]);
+        assert_eq!(query.statuses, readable);
+    }
+}

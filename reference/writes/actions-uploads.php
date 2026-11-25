@@ -11,6 +11,11 @@
 
 $uploads_corpus = __DIR__ . '/corpus/';
 
+// The must-use plugin that leaves a PDF without an image editor.
+$uploads_no_preview = function () {
+	require __DIR__ . '/no-pdf-preview.php';
+};
+
 // Every file under the uploads folder.
 $uploads_list = function () {
 	$dir = wp_upload_dir()['basedir'];
@@ -152,6 +157,18 @@ return array(
 	'upload-async-odt'      => $uploads_case( $uploads_handle( 'sample.odt', 'My Notes (1).odt' ) ),
 	'upload-async-zip'      => $uploads_case( $uploads_handle( 'sample.zip', 'sample.docx' ) ),
 	'upload-async-rtf'      => $uploads_case( $uploads_handle( 'sample.rtf', 'sample.rtf' ) ),
+	// Word, Excel and PowerPoint 97 to 2003 files: Compound File Binary
+	// files, typed by libmagic from their summary information.
+	'upload-async-doc'      => $uploads_case( $uploads_handle( 'sample.doc', 'sample.doc' ) ),
+	'upload-async-xls'      => $uploads_case( $uploads_handle( 'sample.xls', 'My Sheet.xls', 1 ) ),
+	'upload-async-ppt'      => $uploads_case( $uploads_handle( 'sample.ppt', 'sample.ppt' ) ),
+	'upload-async-ppt-pps'  => $uploads_case( $uploads_handle( 'sample.ppt', 'slides.pps' ) ),
+	'upload-async-xls-xlt'  => $uploads_case( $uploads_handle( 'sample.xls', 'sheet.xlt' ) ),
+	'upload-rest-raw-doc'   => $uploads_case( $uploads_rest( 'sample.doc', 'sample.doc', array( 'title' => 'A Word file', 'post' => 1 ), false ) ),
+	'upload-rest-form-xls'  => $uploads_case( $uploads_rest( 'sample.xls', 'sample.xls', array(), true ) ),
+	// A PDF with no image editor, as on a host without Imagick: no preview.
+	'upload-async-pdf'      => $uploads_case( $uploads_handle( 'sample.pdf', 'sample.pdf' ), $uploads_no_preview ),
+	'upload-rest-raw-pdf'   => $uploads_case( $uploads_rest( 'sample.pdf', 'sample.pdf', array( 'post' => 1 ), false ), $uploads_no_preview ),
 	'upload-async-text-again' => $uploads_case( $uploads_handle( 'plain.txt', 'plain.txt' ), $uploads_handle( 'plain.txt', 'plain.txt' ) ),
 	'upload-rest-raw-text'  => $uploads_case(
 		$uploads_rest(
@@ -175,4 +192,18 @@ return array(
 	'upload-async-aac'      => $uploads_case( $uploads_handle( 'tone.aac', 'tone.aac', 1 ) ),
 	'upload-rest-raw-wav'   => $uploads_case( $uploads_rest( 'tone.wav', 'tone.wav', array( 'title' => 'A tone', 'post' => 1 ), false ) ),
 	'upload-rest-form-aac'  => $uploads_case( $uploads_rest( 'tone.aac', 'tone.aac', array(), true ) ),
+	// MP3 files: the title and text of their tags, and a cover picture made
+	// an attachment of its own, or found again by its hash.
+	'upload-async-mp3'      => $uploads_case( $uploads_handle( 'tagged.mp3', 'tagged.mp3' ) ),
+	'upload-async-mp3-cover' => $uploads_case( $uploads_handle( 'covered.mp3', 'covered.mp3', 1 ) ),
+	'upload-async-mp3-cover-again' => $uploads_case( $uploads_handle( 'covered.mp3', 'covered.mp3' ), $uploads_handle( 'covered.mp3', 'covered.mp3' ) ),
+	'upload-rest-raw-mp3'   => $uploads_case( $uploads_rest( 'cbr.mp3', 'cbr.mp3', array( 'title' => 'A song' ), false ) ),
+	'upload-rest-form-mp3-cover' => $uploads_case( $uploads_rest( 'covered.mp3', 'covered.mp3', array(), true ) ),
+	// MP4 and QuickTime files: video with sound, an M4A file's audio and its
+	// cover picture, found again by its hash the second time.
+	'upload-async-mp4'      => $uploads_case( $uploads_handle( 'faststart.mp4', 'faststart.mp4' ) ),
+	'upload-async-m4a-cover' => $uploads_case( $uploads_handle( 'covered.m4a', 'covered.m4a', 1 ) ),
+	'upload-async-m4a-cover-again' => $uploads_case( $uploads_handle( 'covered.m4a', 'covered.m4a' ), $uploads_handle( 'covered.m4a', 'covered.m4a' ) ),
+	'upload-rest-raw-mov'   => $uploads_case( $uploads_rest( 'clip-audio.mov', 'clip-audio.mov', array( 'title' => 'A movie', 'post' => 1 ), false ) ),
+	'upload-rest-form-m4v'  => $uploads_case( $uploads_rest( 'clip.m4v', 'clip.m4v', array(), true ) ),
 );

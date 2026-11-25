@@ -135,6 +135,19 @@ pub fn post_type_exists(name: &str) -> bool {
     registry().post_types.contains_key(name)
 }
 
+/// The post type's capability `name` (`read_private_posts` and so on),
+/// `None` for a post type not registered.
+pub fn post_type_cap(post_type: &str, name: &str) -> Option<String> {
+    let caps = registry().post_types.get(post_type)?;
+    Some(caps.cap.get(name).cloned().unwrap_or_default())
+}
+
+/// `get_post_status_object( $status )`'s `public` and `private` flags,
+/// `None` for a status not registered.
+pub fn post_status_flags(status: &str) -> Option<(bool, bool)> {
+    registry().statuses.get(status).copied()
+}
+
 /// The taxonomy's capability `name` (`manage_terms`, `edit_terms` and so
 /// on), `None` for a taxonomy not registered.
 pub fn taxonomy_cap(taxonomy: &str, name: &str) -> Option<String> {

@@ -11,13 +11,14 @@ use hyscribe_db::{DbError, Meta, Write, Writer};
 use hyscribe_image::getid3::{wp_read_audio_metadata, wp_read_video_metadata};
 use hyscribe_image::header::getimagesize;
 use hyscribe_image::meta::wp_read_image_metadata;
-use hyscribe_image::subsizes::Generated;
+use hyscribe_image::subsizes::{Cover, Generated};
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, is_empty_string, lookup, php_trim, stripslashes, wp_basename};
 use hyscribe_render::date::format_unix;
 use hyscribe_render::formatting::{sanitize_text_field, sanitize_title};
+use hyscribe_render::number_format;
 use hyscribe_rest::Upload;
-use hyscribe_write::options::update_metadata;
+use hyscribe_write::options::{add_metadata, update_metadata};
 use hyscribe_write::posts::{Context, PostArgs, wp_insert_attachment};
 use tokio::runtime::Handle;
 
@@ -53,29 +54,90 @@ pub(crate) fn upload_time(site: &Site, parent: Option<Post>, now: i64) -> String
 /// An image's `image_meta`, `None` for what is not an image.
 type ImageMeta = Option<Vec<(Key, Value)>>;
 
-/// `wp_read_image_metadata( $file )` of an image upload, as the attachment
-/// reads it before it is inserted: `None` for what is not an image, 501
-/// for EXIF and XMP PHP would read in ways not ported, for a PDF, whose
-/// preview PHP makes with Ghostscript, and for audio and video getID3 reads
-/// in ways not ported. The audio and video ported have no tags, so the
-/// attachment's title and text are the name's.
-fn image_meta(site: &Site, handled: &Handled) -> Result<ImageMeta, Refused> {
+/// What an upload is read as before it is inserted: the image's metadata,
+/// and an audio file's as `wp_read_audio_metadata()` reads it before its
+/// filter.
+#[derive(Default)]
+struct Read {
+    image: ImageMeta,
+    audio: Option<Vec<(Key, Value)>>,
+}
+
+/// `wp_read_image_metadata( $file )` of an image upload, and getID3's
+/// reading of audio and video, before the attachment is inserted (a PDF
+/// gets no preview, ADR 0020): 501 for EXIF and XMP PHP would read in ways
+/// not ported, and for audio and video getID3 reads in ways not ported.
+fn read_upload(site: &Site, handled: &Handled) -> Result<Read, Refused> {
     let kind = handled.mime.as_str();
-    let media = if kind.starts_with("video/") {
-        Some(wp_read_video_metadata(&handled.bytes))
+    let host = hyscribe_render::link::host(site.raw_option("siteurl"));
+    let mut read = Read::default();
+    if kind.starts_with("video/") {
+        wp_read_video_metadata(&handled.bytes).map_err(|_| Refused::Unported)?;
     } else if kind.starts_with("audio/") {
-        Some(wp_read_audio_metadata(&handled.bytes))
-    } else {
-        None
-    };
-    if kind == "application/pdf" || media.is_some_and(|read| read.is_err()) {
-        return Err(Refused::Unported);
+        let entries =
+            wp_read_audio_metadata(&handled.bytes, &host).map_err(|_| Refused::Unported)?;
+        read.audio = Some(entries);
     }
     let size = getimagesize(&handled.bytes).filter(|_| handled.mime.starts_with("image/"));
-    let host = hyscribe_render::link::host(site.raw_option("siteurl"));
-    size.map(|size| wp_read_image_metadata(&handled.bytes, &size, &host))
+    read.image = size
+        .map(|size| wp_read_image_metadata(&handled.bytes, &size, &host))
         .transpose()
-        .map_err(|_| Refused::Unported)
+        .map_err(|_| Refused::Unported)?;
+    Ok(read)
+}
+
+/// The text of an audio attachment: its title and what
+/// `media_handle_upload()` writes in its content from the tags of `meta`.
+fn audio_text(meta: &[(Key, Value)], name: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>), Refused> {
+    let tag = |field| {
+        lookup(meta, field)
+            .map(Value::to_php_string)
+            .filter(|value| !is_empty_string(value))
+    };
+    let title = tag("title").unwrap_or(name);
+    let (album, artist) = (tag("album"), tag("artist"));
+    let join = |parts: &[&[u8]]| parts.concat();
+    let mut content = match (!is_empty_string(&title), &album, &artist) {
+        (true, Some(album), Some(artist)) => {
+            join(&[b"\"", &title, b"\" from ", album, b" by ", artist, b"."])
+        }
+        (true, Some(album), None) => join(&[b"\"", &title, b"\" from ", album, b"."]),
+        (true, None, Some(artist)) => join(&[b"\"", &title, b"\" by ", artist, b"."]),
+        (true, None, None) => join(&[b"\"", &title, b"\"."]),
+        (false, Some(album), Some(artist)) => join(&[album, b" by ", artist, b"."]),
+        (false, Some(album), None) => join(&[album, b"."]),
+        (false, None, Some(artist)) => join(&[artist, b"."]),
+        (false, None, None) => Vec::new(),
+    };
+    if let Some(year) = tag("year") {
+        let year = Value::String(year).to_int();
+        content.extend(format!(" Released: {year}.").into_bytes());
+    }
+    if let Some(track) = tag("track_number") {
+        let mut parts = track
+            .split(|&b| b == b'/')
+            .map(|part| Value::String(part.to_vec()));
+        let (first, second) = (parts.next(), parts.next());
+        // number_format() of a number past a float's exact integers is
+        // not ported.
+        let exact = |value: &Value| value.to_float().abs() < 1e15;
+        if ![&first, &second].into_iter().flatten().all(exact) {
+            return Err(Refused::Unported);
+        }
+        let format = |value: &Value| number_format(value.to_float().round() as i128);
+        match (first, second) {
+            (Some(first), Some(second)) if first.is_numeric() && second.is_numeric() => content
+                .extend(format!(" Track {} of {}.", format(&first), format(&second)).into_bytes()),
+            (Some(first), _) if first.is_numeric() => {
+                content.extend(format!(" Track {}.", format(&first)).into_bytes());
+            }
+            _ => {}
+        }
+    }
+    if let Some(genre) = tag("genre") {
+        content.extend([b" Genre: ".as_slice(), &genre, b"."].concat());
+    }
+    Ok((title, content))
 }
 
 /// The fields of an image's metadata an attachment takes: its title, if
@@ -100,10 +162,10 @@ impl Uploads {
         sent: Sent,
         (time, who): (&str, Who),
         sideload: bool,
-    ) -> Result<(Handled, ImageMeta), Refused> {
+    ) -> Result<(Handled, Read), Refused> {
         let handled = self.handle(site, sent, (time, who), sideload)?;
-        match image_meta(site, &handled) {
-            Ok(meta) => Ok((handled, meta)),
+        match read_upload(site, &handled) {
+            Ok(read) => Ok((handled, read)),
             Err(refused) => {
                 self.discard(&handled);
                 Err(refused)
@@ -120,18 +182,26 @@ impl Uploads {
         post_id: u64,
         (time, who): (&str, Who),
     ) -> Result<Prepared, Refused> {
-        let (handled, meta) = self.written(site, sent, (time, who), false)?;
+        let (handled, read) = self.written(site, sent, (time, who), false)?;
         // The name as sent, its type's extension given, without it.
         let base = wp_basename(&handled.name);
         let dot = base.iter().rposition(|&b| b == b'.').filter(|&at| at > 0);
         let stem = dot.and_then(|at| base.get(..at)).unwrap_or(&base);
-        let [title, caption, alt] = image_fields(meta.as_deref());
+        let [title, caption, alt] = image_fields(read.image.as_deref());
         let title = title.unwrap_or_else(|| sanitize_text_field(stem));
-        // An audio file's text is its title, as no tag is read here.
-        let audio = handled.mime.starts_with("audio");
-        let content = match audio && !title.is_empty() {
-            true => [b"\"".as_slice(), title.as_slice(), b"\".".as_slice()].concat(),
-            false => Vec::new(),
+        // An audio file's title and text come from its tags, as the
+        // filter of wp_read_audio_metadata() leaves them.
+        let (title, content) = match read.audio {
+            Some(meta) => {
+                let format = lookup(&meta, "fileformat").map(Value::to_php_string);
+                let format = format.map(|format| String::from_utf8_lossy(&format).into_owned());
+                let meta = self
+                    .hooks
+                    .wp_read_audio_metadata(Value::Array(meta), format.as_deref());
+                let text = audio_text(meta.as_array().unwrap_or_default(), title);
+                text.inspect_err(|_| self.discard(&handled))?
+            }
+            None => (title, Vec::new()),
         };
         // wp_insert_post() unslashes what media_handle_upload() gives it.
         let args = PostArgs {
@@ -160,9 +230,9 @@ impl Uploads {
         (time, who): (&str, Who),
     ) -> Result<Prepared, Refused> {
         let name = sent.name.clone();
-        let (handled, meta) = self.written(site, sent, (time, who), !form)?;
+        let (handled, read) = self.written(site, sent, (time, who), !form)?;
         let given = |value: &Option<Vec<u8>>| value.clone().filter(|value| !is_empty_string(value));
-        let [meta_title, meta_caption, alt] = image_fields(meta.as_deref());
+        let [meta_title, meta_caption, alt] = image_fields(read.image.as_deref());
         // A form's name as sent without its extension, else the file's.
         let dot = name.iter().rposition(|&b| b == b'.');
         let stem = dot.and_then(|at| name.get(..at));
@@ -196,8 +266,9 @@ impl Uploads {
     }
 
     /// The attachment of `prepared` inserted in one action, then its sizes
-    /// made and its metadata saved in another: its ID. The upload is
-    /// deleted again where the insert stops.
+    /// made, a cover picture made an attachment of its own, and its
+    /// metadata saved: its ID. The upload is deleted again where the insert
+    /// stops.
     pub(crate) fn completed(
         &self,
         site: &Site,
@@ -205,21 +276,154 @@ impl Uploads {
         ctx: &Context,
         prepared: &Prepared,
     ) -> Result<u64, Refused> {
-        let handle = Handle::current();
-        let inserted =
-            handle.block_on(async { inserted(writer.begin().await, ctx, prepared).await });
+        let actions = Actions::Pool(writer);
+        Handle::current().block_on(self.complete(site, actions, ctx, prepared))
+    }
+
+    /// [`Uploads::completed`] with its actions run by `actions`.
+    pub(crate) async fn complete(
+        &self,
+        site: &Site,
+        mut actions: Actions<'_>,
+        ctx: &Context,
+        prepared: &Prepared,
+    ) -> Result<u64, Refused> {
+        let inserted = inserted(actions.begin().await, ctx, prepared).await;
         let id = inserted.map_err(|err| {
             self.discard(&prepared.handled);
             Refused::from(err)
         })?;
         self.added(id);
-        let generated = self
-            .generate(site, &prepared.handled, id)
-            .map_err(|err| Refused::Failed(err.to_string()))?;
-        let saved = handle.block_on(async { saved(writer.begin().await, id, &generated).await });
-        saved.map_err(Refused::from)?;
+        self.finish(site, &mut actions, ctx, &prepared.handled, id)
+            .await?;
         Ok(id)
     }
+
+    /// `wp_generate_attachment_metadata( $id, $file )` of the attachment
+    /// `id` of `handled`, its cover picture made, and the metadata saved.
+    async fn finish(
+        &self,
+        site: &Site,
+        actions: &mut Actions<'_>,
+        ctx: &Context,
+        handled: &Handled,
+        id: u64,
+    ) -> Result<(), Refused> {
+        let generated = self
+            .generate(site, handled, id)
+            .map_err(|err| Refused::Failed(err.to_string()))?;
+        let thumbnail = match &generated.cover {
+            Some(cover) => Box::pin(self.cover(site, actions, ctx, handled, cover)).await?,
+            None => None,
+        };
+        saved(actions.begin().await, id, &generated, thumbnail).await?;
+        Ok(())
+    }
+
+    /// The cover picture `wp_generate_attachment_metadata()` gives an audio
+    /// or video file `handled` as its thumbnail: the attachment made of the
+    /// same picture before (its `_cover_hash`), else a new one, written as
+    /// `wp_upload_bits()` writes it; none where that fails.
+    async fn cover(
+        &self,
+        site: &Site,
+        actions: &mut Actions<'_>,
+        ctx: &Context,
+        handled: &Handled,
+        cover: &Cover,
+    ) -> Result<Option<u64>, Refused> {
+        let hash = hyscribe_phpser::md5(&cover.data);
+        if let Some(id) = found(actions.begin().await, &hash, &cover.mime).await? {
+            return Ok(Some(id));
+        }
+        let ext = cover_extension(&cover.mime);
+        let base = String::from_utf8_lossy(&wp_basename(handled.file.as_bytes())).replace('.', "-");
+        let name = format!("{base}-image.{ext}");
+        let time = upload_time(site, None, ctx.now);
+        let bits = cover.data.clone().into();
+        let Some(uploaded) = self.upload_bits(site, (&name, &cover.mime), &bits, &time) else {
+            return Ok(None);
+        };
+        let args = PostArgs {
+            mime_type: uploaded.mime.clone(),
+            ..PostArgs::default()
+        };
+        let args = self.hooks.attachment_thumbnail_args(args, &uploaded);
+        let id = covered(actions.begin().await, ctx, args, &uploaded, &hash).await?;
+        self.added(id);
+        self.finish(site, actions, ctx, &uploaded, id).await?;
+        Ok(Some(id))
+    }
+}
+
+/// The extension `wp_generate_attachment_metadata()` gives a cover picture
+/// of `mime`.
+fn cover_extension(mime: &[u8]) -> &'static str {
+    match mime {
+        b"image/gif" => "gif",
+        b"image/png" => "png",
+        b"image/webp" => "webp",
+        _ => "jpg",
+    }
+}
+
+/// Where an upload's actions run: on the writer's pool, or in a test's
+/// transaction.
+pub(crate) enum Actions<'a> {
+    /// The writer's own connections.
+    Pool(&'a Writer),
+    /// A connection already in a transaction, and the action, counted from
+    /// 0, that fails after the given number of statements.
+    #[cfg(test)]
+    On(
+        &'a Writer,
+        &'a mut hyscribe_db::Connection,
+        Option<(usize, usize)>,
+    ),
+}
+
+impl Actions<'_> {
+    /// Starts an action.
+    async fn begin(&mut self) -> Result<Write<'_>, DbError> {
+        match self {
+            Actions::Pool(writer) => writer.begin().await,
+            #[cfg(test)]
+            Actions::On(writer, conn, fail) => {
+                let mut write = writer.begin_on(conn).await;
+                if let (Ok(write), Some((0, statements))) = (&mut write, *fail) {
+                    write.fail_after(statements);
+                }
+                *fail = fail.map(|(action, statements)| (action.wrapping_sub(1), statements));
+                write
+            }
+        }
+    }
+}
+
+/// The attachment of the same cover picture made before, by its `hash`
+/// and type, looked for once begun.
+async fn found(
+    write: Result<Write<'_>, DbError>,
+    hash: &str,
+    mime: &[u8],
+) -> Result<Option<u64>, hyscribe_write::Error> {
+    Ok(write?.cover_attachment(hash, mime).await?)
+}
+
+/// The cover attachment of `args` for the picture `uploaded` inserted as one
+/// action, with its `_cover_hash`, once begun.
+async fn covered(
+    write: Result<Write<'_>, DbError>,
+    ctx: &Context,
+    args: PostArgs,
+    uploaded: &Handled,
+    hash: &str,
+) -> Result<u64, hyscribe_write::Error> {
+    let mut write = write?;
+    let id = wp_insert_attachment(&mut write, ctx, args, &uploaded.file).await?;
+    let hash = Value::String(hash.as_bytes().to_vec());
+    add_metadata(&mut write, Meta::Post, id, "_cover_hash", &hash, false).await?;
+    write.commit().await.map(|()| id).map_err(Into::into)
 }
 
 /// The attachment of `prepared` inserted as one action, once begun.
@@ -234,13 +438,27 @@ pub(crate) async fn inserted(
 }
 
 /// What `generate()` made of the attachment `id` saved as one action, once
-/// begun.
+/// begun, after its cover picture's `thumbnail`.
 pub(crate) async fn saved(
     write: Result<Write<'_>, DbError>,
     id: u64,
     generated: &Generated,
+    thumbnail: Option<u64>,
 ) -> Result<(), hyscribe_write::Error> {
     let mut write = write?;
+    if let Some(thumbnail) = thumbnail {
+        let any = Value::String(Vec::new());
+        let thumbnail = Value::Int(thumbnail as i64);
+        update_metadata(
+            &mut write,
+            Meta::Post,
+            id,
+            "_thumbnail_id",
+            &thumbnail,
+            &any,
+        )
+        .await?;
+    }
     save(&mut write, id, generated).await?;
     write.commit().await.map_err(Into::into)
 }

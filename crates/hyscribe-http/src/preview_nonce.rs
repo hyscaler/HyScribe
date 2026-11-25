@@ -14,7 +14,7 @@ use hyscribe_admin::die::page;
 use hyscribe_phpser::{Value, isset, parse_str};
 use tokio::runtime::Handle;
 
-use crate::login::{LoginReads, Names, cookie, cookies, is_ssl, joined, nocache, response};
+use crate::login::{LoginReads, cookies, joined, nocache, response};
 use crate::{Site, now};
 
 const MESSAGE: &str = "Sorry, you are not allowed to preview drafts.";
@@ -31,6 +31,14 @@ pub(crate) enum Entry {
     XmlRpc,
 }
 
+/// Whether the query sets `preview_id` and `preview_nonce`: past
+/// [`refuse`], a preview whose nonce verified, which `_set_preview()` and
+/// `redirect_canonical()` act on.
+pub(crate) fn asked(query: Option<&str>) -> bool {
+    let get = parse_str(query.unwrap_or_default().as_bytes());
+    isset(get.get_str("preview_id")) && isset(get.get_str("preview_nonce"))
+}
+
 /// The refusal of a request whose preview nonce does not verify, else none.
 pub(crate) async fn refuse(
     site: &Arc<Site>,
@@ -39,11 +47,11 @@ pub(crate) async fn refuse(
     post: bool,
     entry: Entry,
 ) -> Option<Response> {
-    let get = parse_str(query.unwrap_or_default().as_bytes());
-    let (id, nonce) = (get.get_str("preview_id"), get.get_str("preview_nonce"));
-    if !isset(id) || !isset(nonce) {
+    if !asked(query) {
         return None;
     }
+    let get = parse_str(query.unwrap_or_default().as_bytes());
+    let (id, nonce) = (get.get_str("preview_id"), get.get_str("preview_nonce"));
     let action = format!("post_preview_{}", id.map_or(0, Value::to_int));
     let nonce = nonce.map(Value::to_php_string).unwrap_or_default();
     let values = headers.get_all(header::COOKIE).iter();
@@ -79,12 +87,7 @@ fn verifies(
     grace: bool,
 ) -> bool {
     let mut reads = LoginReads::new(site, handle, now);
-    let names = Names::new(site);
-    let https = is_ssl(site);
-    let user = reads
-        .auth_user(cookie(jar, &names.auth(https)), grace, https)
-        .or_else(|| reads.logged_in_user(cookie(jar, &names.logged_in()), grace));
-    if let Some((user, token)) = user {
+    if let Some((user, token)) = reads.current_user(jar, grace) {
         reads.act_as(user, token);
     }
     reads.verify_nonce(nonce, action)

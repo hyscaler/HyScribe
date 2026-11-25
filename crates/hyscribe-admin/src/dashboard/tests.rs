@@ -40,6 +40,22 @@ fn the_welcome_panel_is_php_s() {
     }
 }
 
+/// The banner links the release notes of HyScribe's version and asks people
+/// porting themes or plugins to write.
+#[test]
+fn the_welcome_panel_links_the_release_notes_and_the_contact() {
+    let html = welcome_panel(&Role("administrator"));
+    let version = env!("CARGO_PKG_VERSION");
+    assert!(html.contains(&format!(
+        "<a href=\"https://github.com/hyscaler/HyScribe/releases/tag/v{version}\">\n\t\t\t\tLearn more about the {version} version.\t\t\t\t</a>\n\t\t\t</p>\n"
+    )));
+    let mailto = porting_mailto(&BarSite::home_url(&Role("administrator")), version);
+    assert!(html.contains(&format!(
+        "\t\t\t<p class=\"hyscribe-porting\">Trying HyScribe out? If you need help porting your custom themes or plugins, write to <a href=\"{mailto}\">contact@hyscribe.com</a>.</p>\n\t\t</div>\n"
+    )));
+    assert!(!html.contains("about.php"));
+}
+
 #[test]
 fn meta_boxes_are_php_s() {
     let php = golden("administrator");

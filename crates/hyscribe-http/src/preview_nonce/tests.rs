@@ -33,8 +33,7 @@ async fn nonce(site: &Arc<Site>, cookie: &str) -> String {
     tokio::task::spawn_blocking(move || {
         let mut reads = LoginReads::new(&site, Handle::current(), now());
         let jar = cookies([cookie.as_bytes()]);
-        let names = Names::new(&site);
-        let user = reads.logged_in_user(self::cookie(&jar, &names.logged_in()), false);
+        let user = reads.current_user(&jar, false);
         if let Some((user, token)) = user {
             reads.act_as(user, token);
         }

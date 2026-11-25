@@ -19,5 +19,7 @@ fuzz_target!(|data: &[u8]| {
     let tax = query::tax_query(&vars.into_iter().collect());
     let _ = tax.lookups();
     let _ = tax.resolve(&[], data);
+    let authors = ["author", "author_name"].map(|name| (name.to_string(), text.to_string()));
+    let _ = query::authors(&authors.into_iter().collect());
     let _ = hyscribe_render::search_terms(&text);
 });

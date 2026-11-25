@@ -184,6 +184,9 @@ impl Site for Quiet {
     fn theme(&self, _: &str, _: &ThemeCall) -> Result<Value, String> {
         Ok(Value::Null)
     }
+    fn settings_fields(&self, _: &str) -> Result<Vec<u8>, String> {
+        Ok(Vec::new())
+    }
 }
 
 fn names(names: &str) -> std::collections::BTreeSet<String> {
@@ -204,9 +207,9 @@ pub fn grants() -> Grants {
              admin_footer_text ext_transients ext_roles ext_http ext_slow",
         ),
         actions: names("ext_action ext_event"),
-        sensitive: names("map_meta_cap"),
+        sensitive: names("map_meta_cap rest_pre_dispatch rest_pre_insert_post"),
         shortcodes: names("ext ext_gone"),
-        options: names("ext ext_fail ext_bytes ext_active ext_hooks"),
+        options: names("ext ext_fail ext_bytes ext_active ext_hooks ext_title"),
         meta: names("_ext _ext_*"),
         post_types: names("ext_item ext_item_named_too_long"),
         taxonomies: names("ext_kind ext_kind_named_far_too_long_for_wp"),

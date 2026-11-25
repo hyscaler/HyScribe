@@ -498,6 +498,7 @@ async fn a_failed_read_is_the_database_error_page() {
         writer: writer.unwrap().map(Arc::new),
         defined: Vec::new(),
         public_users: true,
+        author_archives: false,
         proxies: None,
         time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),

@@ -25,7 +25,7 @@ fn reads_the_test_extensions_manifest() {
     assert_eq!(manifest.kind, Kind::Plugin);
     assert_eq!(manifest.id, "hyscribe-test");
     assert_eq!(manifest.version, "0.1.0");
-    assert_eq!(manifest.sdk, "0.3");
+    assert_eq!(manifest.sdk, "0.4");
     assert_eq!(
         manifest.replaces.as_deref(),
         Some("hyscribe-test/hyscribe-test.php")
@@ -108,7 +108,7 @@ fn refuses_what_the_format_does_not_allow() {
             "version must be a valid",
         ),
         (
-            "[extension]\nkind = 'plugin'\nid = 'd'\nversion = '1'\nsdk = '0.4'\n",
+            "[extension]\nkind = 'plugin'\nid = 'd'\nversion = '1'\nsdk = '0.5'\n",
             "sdk must be",
         ),
     ];
@@ -141,6 +141,14 @@ fn refuses_what_the_format_does_not_allow() {
         (
             "[hooks]\nactions = ['map_meta_cap']\n",
             "map_meta_cap is a sensitive hook",
+        ),
+        (
+            "[hooks]\nfilters = ['rest_pre_dispatch']\n",
+            "rest_pre_dispatch is a sensitive hook",
+        ),
+        (
+            "[hooks]\nfilters = ['the_content', 'rest_pre_insert_page']\n",
+            "rest_pre_insert_page is a sensitive hook",
         ),
         ("[hooks]\nonly = []\n", "[hooks] has no key only"),
         (

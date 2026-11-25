@@ -64,3 +64,108 @@ fn the_post_types_a_query_reads() {
         Err(SdkError::Invalid("query variables are an object".into()))
     );
 }
+
+/// `admin.page`'s position read from its record.
+#[test]
+fn a_page_s_position_is_read() {
+    let some = |value: Val| Val::Option(Some(Box::new(value)));
+    let record = Val::Record(
+        [
+            ("parent", some(Val::String("tools.php".into()))),
+            ("page-title", Val::String("P".into())),
+            ("menu-title", Val::String("M".into())),
+            ("capability", Val::String("read".into())),
+            ("slug", Val::String("p".into())),
+            ("callback", Val::U32(3)),
+            ("icon", Val::String(String::new())),
+            ("position", some(Val::S32(5))),
+        ]
+        .map(|(name, value)| (name.to_string(), value))
+        .to_vec(),
+    );
+    let page = admin_page(&[record]);
+    assert_eq!(
+        (page.parent.as_deref(), page.position),
+        (Some("tools.php"), Some(5))
+    );
+    assert_eq!(admin_page(&[]).position, None);
+}
+
+/// A store in `init`, taking registrations.
+fn in_init() -> wasmtime::Store<State> {
+    let engine = wasmtime::Engine::default();
+    let (grants, slug) = (Arc::new(crate::Grants::default()), Arc::from("ext"));
+    State::store(
+        &engine,
+        (&grants, &slug),
+        Phase::Init,
+        1 << 20,
+        std::time::Duration::from_millis(50),
+    )
+}
+
+/// A field added again takes its own first place, not another's; one
+/// whose arguments are not JSON is refused.
+#[test]
+fn a_field_added_again_keeps_its_place() {
+    let mut store = in_init();
+    let state = store.data_mut();
+    let add = |state: &mut State, id: &str, title: &str| {
+        let args = (
+            id.into(),
+            title.into(),
+            1,
+            "p".into(),
+            "s".into(),
+            "{}".into(),
+        );
+        add_field(state, args)
+    };
+    for (id, title) in [("a", "A"), ("b", "B"), ("a", "A2")] {
+        assert_eq!(add(state, id, title), Ok(()));
+    }
+    let titles: Vec<_> = state
+        .registered
+        .fields
+        .iter()
+        .map(|f| f.title.as_str())
+        .collect();
+    assert_eq!(titles, ["A2", "B"]);
+    let args = (
+        "c".into(),
+        "C".into(),
+        1,
+        "p".into(),
+        "s".into(),
+        "[".into(),
+    );
+    let refused = SdkError::Invalid("not JSON".into());
+    assert_eq!(add_field(state, args), Err(refused));
+    assert_eq!(state.registered.fields.len(), 2);
+}
+
+/// A page's icon is a dashicons class the menu prints as it is, or none.
+#[test]
+fn a_page_s_icon_is_a_plain_class() {
+    let mut store = in_init();
+    let state = store.data_mut();
+    let page = |slug: &str, icon: &str| AdminPage {
+        parent: None,
+        page_title: "P".into(),
+        menu_title: "P".into(),
+        capability: "read".into(),
+        slug: slug.into(),
+        callback: 1,
+        icon: icon.into(),
+        position: None,
+    };
+    assert_eq!(add_page(state, page("a", "dashicons-admin-tools")), Ok(()));
+    assert_eq!(add_page(state, page("b", "")), Ok(()));
+    let refused = Err(SdkError::Invalid(
+        "an icon is a dashicons class, or none".into(),
+    ));
+    for icon in ["dashicons-x' data-x='y", "dashicons-X", "x.svg"] {
+        assert_eq!(add_page(state, page("c", icon)), refused, "{icon}");
+    }
+    assert_eq!(state.registered.pages.len(), 2);
+}

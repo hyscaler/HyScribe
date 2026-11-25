@@ -3,8 +3,8 @@
 //! `WP_REST_Attachments_Controller`: `/wp/v2/media` and its single items,
 //! read only, as the posts controller serves them with the attachments'
 //! own arguments, fields and links. What PHP reads from the file on disk
-//! (a size missing from the metadata, an original image's dimensions) and
-//! a video player answer 501.
+//! (a size missing from the metadata, an original image's dimensions)
+//! answers 501.
 
 use std::sync::LazyLock;
 
@@ -13,7 +13,6 @@ use hyscribe_image::subsizes::{
 };
 use hyscribe_model::Post;
 use hyscribe_phpser::{Key, Value, is_empty_string, json_decode, wp_basename};
-use hyscribe_render::attachment::prepend::plays_video;
 use hyscribe_render::attachment::{attachment_url, image_downsize, is_image, metadata};
 use hyscribe_render::rest::Rendering;
 
@@ -303,7 +302,7 @@ pub(crate) fn fields(
     // A caption from an empty excerpt renders the content too.
     let renders = wants("description") || wants("caption");
     let logged_in = context.user != 0;
-    if renders && (writes_or_unported(&post.content, logged_in) || plays_video(reads, post)) {
+    if renders && writes_or_unported(&post.content, logged_in) {
         return Err(RestError::not_ported());
     }
     let file = context

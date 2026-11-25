@@ -110,6 +110,8 @@ fn part(raw: &[u8]) -> Option<Part<'_>> {
     let (head, body) = split(raw, b"\r\n\r\n")?;
     let (mut name, mut file, mut kind) = (None, None, Vec::new());
     for line in head.split(|&b| b == b'\n') {
+        // PHP holds a header line as a C string, which a NUL ends.
+        let line = line.split(|&b| b == 0).next().unwrap_or(line);
         let line = line.strip_suffix(b"\r").unwrap_or(line);
         let Some((header, value)) = split(line, b":") else {
             continue;

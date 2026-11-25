@@ -201,6 +201,7 @@ pub fn term_edit(site: &dyn TermEditSite, args: &TermEditArgs, request: &Request
             taxonomy: taxonomy.name,
             parent_file: Some("edit.php"),
             submenu_file: Some(&submenu),
+            plugin_page: None,
         },
         id: &screen_id,
         title: &title,

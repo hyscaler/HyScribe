@@ -174,6 +174,36 @@ pub struct Generated {
     pub attached_file: Option<String>,
     /// Why the image got no sizes, for the log.
     pub unedited: Option<Error>,
+    /// An audio or video file's cover picture, which PHP makes an
+    /// attachment of its own.
+    pub cover: Option<Cover>,
+}
+
+/// The picture `wp_generate_attachment_metadata()` makes an attachment of:
+/// `image`'s `data` and `mime` of the metadata read, as the filters left it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cover {
+    /// `data`: the picture's bytes.
+    pub data: Vec<u8>,
+    /// `mime`.
+    pub mime: Vec<u8>,
+}
+
+/// The cover of a video or audio file's metadata `entries`, where its
+/// `image` has `data` PHP does not take as empty; the data is taken out
+/// of the metadata, as PHP unsets it.
+fn take_cover(entries: &mut [(Key, Value)]) -> Option<Cover> {
+    let (_, Value::Array(image)) = entries.iter_mut().find(|(k, _)| *k == key("image"))? else {
+        return None;
+    };
+    let data = lookup(image, "data").map(Value::to_php_string);
+    image.retain(|(k, _)| *k != key("data"));
+    let data = data.filter(|data| !hyscribe_phpser::is_empty_string(data))?;
+    let mime = lookup(image, "mime").map(Value::to_php_string);
+    Some(Cover {
+        data,
+        mime: mime.unwrap_or_default(),
+    })
 }
 
 fn key(name: &str) -> Key {
@@ -340,7 +370,7 @@ pub fn wp_generate_attachment_metadata(
             let file_format = format(&read);
             hooks.wp_read_video_metadata(Value::Array(read), file_format.as_deref())
         } else if mime.starts_with("audio/") {
-            let read = wp_read_audio_metadata(upload.bytes)?;
+            let read = wp_read_audio_metadata(upload.bytes, upload_host)?;
             let file_format = format(&read);
             hooks.wp_read_audio_metadata(Value::Array(read), file_format.as_deref())
         } else {
@@ -351,6 +381,7 @@ pub fn wp_generate_attachment_metadata(
             Value::Array(entries) => entries,
             _ => Vec::new(),
         };
+        let cover = take_cover(&mut entries);
         if lookup(&entries, "filesize").is_none() {
             entries.push((key("filesize"), int(upload.bytes.len() as i64)));
         }
@@ -361,6 +392,7 @@ pub fn wp_generate_attachment_metadata(
             files: Vec::new(),
             attached_file: None,
             unedited: None,
+            cover,
         });
     };
     let meta = Meta {
@@ -443,6 +475,7 @@ impl Making<'_> {
             files: self.files,
             attached_file,
             unedited: self.unedited,
+            cover: None,
         }
     }
 }

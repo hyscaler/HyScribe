@@ -25,6 +25,7 @@ fn hello_files() -> Vec<TemplateFile> {
         "header.php",
         "footer.php",
         "template-parts/single.php",
+        "comments.php",
     ];
     names
         .map(|file| TemplateFile {
@@ -70,7 +71,202 @@ fn told(theme: &Theme, call: ThemeCall) -> Vec<u8> {
         Ok(Value::Bool(true)) => b"true".to_vec(),
         Ok(Value::Bool(false)) => b"false".to_vec(),
         Ok(Value::String(printed)) => printed,
+        Ok(Value::Int(number)) => number.to_string().into_bytes(),
         other => format!("{other:?}").into_bytes(),
+    }
+}
+
+fn print(name: &str, args: &[&str]) -> ThemeCall {
+    ThemeCall::Print(name.into(), args.iter().map(|arg| text(arg)).collect())
+}
+
+fn get(name: &str, args: &[&str]) -> ThemeCall {
+    ThemeCall::Get(name.into(), args.iter().map(|arg| text(arg)).collect())
+}
+
+fn array(pairs: &[(&str, Value)]) -> Value {
+    let pairs = pairs
+        .iter()
+        .map(|(key, value)| (Key::String(key.as_bytes().to_vec()), value.clone()));
+    Value::Array(pairs.collect())
+}
+
+/// Hello's `comments.php` as its port renders it, from the host's tags.
+fn hello_comments(theme: &Theme) -> Vec<u8> {
+    let is = |name: &str, args: Vec<Value>| {
+        theme.answer(&ThemeCall::Conditional(name.into(), args)) == Ok(Value::Bool(true))
+    };
+    let post_type = told(theme, get("get_post_type", &[]));
+    let supports = is(
+        "post_type_supports",
+        vec![Value::String(post_type), text("comments")],
+    );
+    // `comments_template()` sets the comments up, and on a post or page
+    // shown on its own the theme renders its `comments.php`.
+    assert_eq!(told(theme, print("comments_template", &[])), b"");
+    let shown = is("is_singular", Vec::new()) && supports;
+    if !shown || !is("have_comments", Vec::new()) && !is("comments_open", Vec::new()) {
+        return Vec::new();
+    }
+    let mut out = b"<section id=\"comments\" class=\"comments-area\">\n\n\t".to_vec();
+    if is("have_comments", Vec::new()) {
+        let number = String::from_utf8(told(theme, get("get_comments_number", &[]))).unwrap();
+        let title = if number == "1" {
+            "One Response".to_string()
+        } else {
+            format!("{number} Responses")
+        };
+        let navigation = told(theme, print("the_comments_navigation", &[]));
+        let args = array(&[
+            ("style", text("ol")),
+            ("short_ping", Value::Bool(true)),
+            ("avatar_size", Value::Int(42)),
+        ]);
+        let list = told(
+            theme,
+            ThemeCall::Print("wp_list_comments".into(), vec![args]),
+        );
+        out.extend(
+            format!("\t\t<h2 class=\"title-comments\">\n\t\t\t{title}\t\t</h2>\n\n\t\t").bytes(),
+        );
+        out.extend(&navigation);
+        out.extend(b"\n\t\t<ol class=\"comment-list\">\n\t\t\t");
+        out.extend(list);
+        out.extend(b"\t\t</ol>\n\n\t\t");
+        out.extend(&navigation);
+        out.extend(b"\n\t");
+    }
+    out.extend(b"\n\t");
+    out.extend(told(theme, comment_form()));
+    out.extend(b"\n</section>\n");
+    out
+}
+
+/// Hello's `comment_form()`.
+fn comment_form() -> ThemeCall {
+    let args = array(&[
+        (
+            "title_reply_before",
+            text("<h2 id=\"reply-title\" class=\"comment-reply-title\">"),
+        ),
+        ("title_reply_after", text("</h2>")),
+    ]);
+    ThemeCall::Print("comment_form".into(), vec![args])
+}
+
+/// The tags `tags.php` records after the first ones, in its order.
+fn more_tags(theme: &Theme, out: &mut Vec<(String, Vec<u8>)>) {
+    macro_rules! put {
+        ($name:expr, $call:expr $(,)?) => {
+            out.push(($name, told(theme, $call)))
+        };
+    }
+    let shows = [
+        "name",
+        "description",
+        "charset",
+        "url",
+        "wpurl",
+        "html_type",
+        "language",
+        "rss2_url",
+        "atom_url",
+        "comments_rss2_url",
+        "pingback_url",
+        "nope",
+    ];
+    for show in shows {
+        put!(format!("get_bloginfo:{show}"), get("get_bloginfo", &[show]));
+        let display = get("get_bloginfo", &[show, "display"]);
+        put!(format!("get_bloginfo:{show}:display"), display);
+    }
+    for show in ["charset", "name"] {
+        put!(format!("bloginfo:{show}"), print("bloginfo", &[show]));
+    }
+    put!("home_url".into(), get("home_url", &[]));
+    put!("home_url:/".into(), get("home_url", &["/"]));
+    let samples = [
+        "#content",
+        "http://127.0.0.1:8081/?p=1&a=b",
+        "example.test/a b",
+        "javascript:alert(1)",
+        "a\"b<c>&amp;'d",
+        "<p onclick=\"x\">Hi <script>x</script><a href=\"https://w.test/\">w</a></p>",
+    ];
+    for (at, sample) in samples.iter().enumerate() {
+        for name in ["esc_url", "esc_attr", "esc_html", "wp_kses_post"] {
+            put!(format!("{name}:{at}"), print(name, &[sample]));
+        }
+    }
+    let title = print(
+        "the_archive_title",
+        &["<h1 class=\"entry-title\">", "</h1>"],
+    );
+    put!("the_archive_title".into(), title);
+    let description = ["<p class=\"archive-description\">", "</p>"];
+    put!(
+        "the_archive_description".into(),
+        print("the_archive_description", &description),
+    );
+    put!("get_search_query".into(), get("get_search_query", &[]));
+    let raw = ThemeCall::Get("get_search_query".into(), vec![Value::Bool(false)]);
+    put!("get_search_query:raw".into(), raw);
+    put!("max_num_pages".into(), get("max_num_pages", &[]));
+    let previous = "<span class=\"meta-nav\">&larr;</span> Previous";
+    put!(
+        "previous_posts_link".into(),
+        print("previous_posts_link", &[previous]),
+    );
+    let next = "Next <span class=\"meta-nav\">&rarr;</span>";
+    put!("next_posts_link".into(), print("next_posts_link", &[next]));
+    while theme.answer(&ThemeCall::HavePosts) == Ok(Value::Bool(true)) {
+        theme.answer(&ThemeCall::ThePost).unwrap();
+        let id = String::from_utf8(told(theme, get("get_the_ID", &[]))).unwrap();
+        let at = |name: &str| format!("post:{id}:{name}");
+        let title = print("the_title", &["<h1 class=\"entry-title\">", "</h1>"]);
+        put!(at("the_title"), title);
+        for name in ["get_the_title", "get_permalink"] {
+            put!(at(name), get(name, &[]));
+        }
+        put!(at("the_permalink"), print("the_permalink", &[]));
+        put!(at("post_class"), print("post_class", &["site-main"]));
+        put!(at("get_post_type"), get("get_post_type", &[]));
+        let post_type = String::from_utf8(told(theme, get("get_post_type", &[]))).unwrap();
+        let supports = ThemeCall::Conditional(
+            "post_type_supports".into(),
+            vec![text(&post_type), text("comments")],
+        );
+        put!(at("post_type_supports:comments"), supports);
+        let thumbnail = ThemeCall::Conditional("has_post_thumbnail".into(), Vec::new());
+        put!(at("has_post_thumbnail"), thumbnail);
+        let thumbnail = vec![Value::Null, text("large")];
+        let thumbnail = ThemeCall::Get("get_the_post_thumbnail".into(), thumbnail);
+        put!(at("get_the_post_thumbnail"), thumbnail);
+        for name in ["the_excerpt", "the_content", "wp_link_pages"] {
+            put!(at(name), print(name, &[]));
+        }
+        put!(
+            at("has_tag"),
+            ThemeCall::Conditional("has_tag".into(), Vec::new()),
+        );
+        let tags = ["<span class=\"tag-links\">Tagged ", ", ", "</span>"];
+        put!(at("the_tags"), print("the_tags", &tags));
+        let open = ThemeCall::Conditional("comments_open".into(), Vec::new());
+        put!(at("comments_open"), open);
+        out.push((at("comments_template"), hello_comments(theme)));
+        let have = ThemeCall::Conditional("have_comments".into(), Vec::new());
+        put!(at("have_comments"), have);
+        put!(at("get_comments_number"), get("get_comments_number", &[]));
+        let navigation = print("the_comments_navigation", &[]);
+        put!(at("the_comments_navigation"), navigation);
+        let args = array(&[
+            ("style", text("ol")),
+            ("short_ping", Value::Bool(true)),
+            ("avatar_size", Value::Int(42)),
+        ]);
+        let list = ThemeCall::Print("wp_list_comments".into(), vec![args]);
+        put!(at("wp_list_comments"), list);
+        put!(at("comment_form"), comment_form());
     }
 }
 
@@ -160,6 +356,7 @@ fn tags(theme: &Theme, request: &Request) -> Vec<(String, Vec<u8>)> {
     for part in ["header", "footer"] {
         out.push((format!("the_custom_logo:{part}"), told(theme, logo.clone())));
     }
+    more_tags(theme, &mut out);
     out
 }
 
@@ -173,8 +370,8 @@ fn told_answer(answer: Result<Value, String>) -> Vec<u8> {
 /// Hello's template tags answer on each page of
 /// `reference/pages/default.list` as PHP answers them where its template
 /// loader has picked the template, over the default install and with a
-/// custom logo and menus; author archives, which HyScribe answers 404,
-/// are left out.
+/// custom logo and menus, and on the author archives of
+/// `reference/theme-tags/authors.list` with author archives on.
 #[tokio::test(flavor = "multi_thread")]
 async fn hello_s_tags_answer_as_php() {
     let _saves = crate::admin::tests::SAVES.lock().await;
@@ -187,16 +384,16 @@ async fn hello_s_tags_answer_as_php() {
         let mut expected = Vec::new();
         while let Some(tag) = lines.peek().and_then(|l| l.strip_prefix("tag\t")) {
             let (name, value) = tag.split_once('\t').unwrap();
+            lines.next();
             let mut value = hyscribe_testkit::unhex(value);
             if name == "body_class" {
                 let class = String::from_utf8(value).unwrap();
                 value = class.replace(HELLO_CLASS, "").into_bytes();
             }
             expected.push((name.to_string(), value));
-            lines.next();
         }
         let path = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
-        if expected.is_empty() || path.contains("author=") {
+        if expected.is_empty() {
             continue;
         }
         let site = match sites.get(fields[0]) {
@@ -204,6 +401,9 @@ async fn hello_s_tags_answer_as_php() {
             None => {
                 let config = if fields[0].starts_with("_tags=content") {
                     content.clone()
+                } else if fields[0].starts_with("_tags=authors") {
+                    // The scratch database again, its content's pages done.
+                    content_db(include_str!("../../../../../reference/pages/authors.sql")).await
                 } else {
                     hyscribe_testkit::fixture_database()
                 };
@@ -220,6 +420,8 @@ async fn hello_s_tags_answer_as_php() {
             let theme = Theme::default();
             let support = ThemeCall::AddSupport("responsive-embeds".into(), Vec::new());
             assert_eq!(theme.answer(&support), Ok(Value::Null));
+            assert_eq!(theme.answer(&support), Ok(Value::Null));
+            let support = ThemeCall::AddSupport("post-thumbnails".into(), Vec::new());
             assert_eq!(theme.answer(&support), Ok(Value::Null));
             theme.begin((&site, &request), &hello_files(), ("", None));
             let got = tags(&theme, &request);
@@ -241,7 +443,7 @@ async fn hello_s_tags_answer_as_php() {
         assert_eq!(expected.len(), got.len(), "{path}");
         pages += 1;
     }
-    assert_eq!(pages, 132);
+    assert_eq!(pages, 143);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -795,4 +997,334 @@ async fn the_description_s_tags_answer() {
     })
     .await
     .unwrap();
+}
+
+/// What `call` answers on the page `path` of `site`, Hello's files listed
+/// but for `comments.php` when `comments` is false, `post-thumbnails`
+/// supported when `thumbnails`.
+async fn on_page(
+    site: &Arc<Site>,
+    path: &str,
+    flags: (bool, bool),
+    calls: Vec<ThemeCall>,
+) -> Vec<Vec<u8>> {
+    let (request, _, _) = page_of(site, path).await.unwrap();
+    on_request(site, request, flags, calls).await
+}
+
+/// What `calls` answer over `request` of `site`, as [`on_page`].
+async fn on_request(
+    site: &Arc<Site>,
+    request: Request,
+    (comments, thumbnails): (bool, bool),
+    calls: Vec<ThemeCall>,
+) -> Vec<Vec<u8>> {
+    let site = site.clone();
+    tokio::task::spawn_blocking(move || {
+        let theme = Theme::default();
+        if thumbnails {
+            let support = ThemeCall::AddSupport("post-thumbnails".into(), Vec::new());
+            theme.answer(&support).unwrap();
+        }
+        let mut files = hello_files();
+        files.retain(|file| comments || file.file != "comments.php");
+        theme.begin((&site, &request), &files, ("", None));
+        let answers = calls.into_iter().map(|call| told(&theme, call)).collect();
+        assert!(theme.end(Ok(Vec::new())).is_ok());
+        answers
+    })
+    .await
+    .unwrap()
+}
+
+/// `is_author()` naming an author is not ported on an author's archive,
+/// and elsewhere is false.
+#[tokio::test(flavor = "multi_thread")]
+async fn is_author_naming_an_author_is_refused() {
+    let options = "template=hello-elementor&stylesheet=hello-elementor";
+    let site = site_on(&hyscribe_testkit::fixture_database(), options).await;
+    let unserved = format!("{:?}", Err::<Value, String>(UNSERVED.into())).into_bytes();
+    let named = || ThemeCall::Conditional("is_author".into(), vec![text("admin")]);
+    let answers = on_page(&site, "/?author=1", (true, false), vec![named()]).await;
+    assert_eq!(answers, [unserved]);
+    let answers = on_page(&site, "/?cat=1", (true, false), vec![named()]).await;
+    assert_eq!(answers, [b"false".to_vec()]);
+    // `$authordata` is the queried author's, none for ID 0, until
+    // `wp_reset_postdata()` sets the first post up, as after the loop in
+    // `pages-authors.tsv`'s `/?author=1,`.
+    let title = || print("the_archive_title", &[]);
+    let calls = vec![title(), ThemeCall::ResetPostdata, title()];
+    let answers = on_page(&site, "/?author=1,", (true, false), calls).await;
+    let reset = &b"Ok(Null)"[..];
+    assert_eq!(
+        answers,
+        [
+            &b"Author: <span></span>"[..],
+            reset,
+            b"Author: <span>admin</span>"
+        ]
+    );
+}
+
+/// The tags' arguments and the states the pages of `tags.php` do not
+/// reach: what is not ported answers not served.
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_refuse_what_is_not_ported() {
+    let _saves = crate::admin::tests::SAVES.lock().await;
+    let db = content_db(
+        "UPDATE wp_term_taxonomy SET description = 'About' WHERE term_taxonomy_id = 1;
+        UPDATE wp_posts SET post_password = 'x' WHERE ID = 1;",
+    )
+    .await;
+    let options = "template=hello-elementor&stylesheet=hello-elementor&blog_charset=";
+    let site = site_on(&db, options).await;
+    let unserved = format!("{:?}", Err::<Value, String>(UNSERVED.into())).into_bytes();
+    let conditional = |name: &str, args: Vec<Value>| ThemeCall::Conditional(name.into(), args);
+    let supports = |post_type: &str| {
+        conditional(
+            "post_type_supports",
+            vec![text(post_type), text("comments")],
+        )
+    };
+    let raw = |name: &str, args: Vec<Value>| ThemeCall::Print(name.into(), args);
+    let list = Value::Array(vec![(Key::Int(0), text("x"))]);
+    let answers = on_page(
+        &site,
+        "/?cat=1",
+        (true, false),
+        vec![
+            supports("attachment"),
+            supports("thing"),
+            conditional("post_type_supports", Vec::new()),
+            conditional("has_post_thumbnail", vec![Value::Int(1)]),
+            print("the_archive_description", &[]),
+            print("post_class", &[]),
+            raw(
+                "post_class",
+                vec![Value::Array(vec![(
+                    Key::Int(0),
+                    text("has-post-thumbnail"),
+                )])],
+            ),
+            print("the_tags", &[]),
+            raw("wp_list_comments", vec![array(&[("style", text("div"))])]),
+            raw("wp_list_comments", vec![array(&[("walker", text("x"))])]),
+            raw("comment_form", vec![list.clone()]),
+            raw("next_posts_link", vec![Value::Null, Value::Int(1)]),
+            print("the_comments_navigation", &[]),
+            print("the_none", &[]),
+            get("get_bloginfo", &["charset"]),
+            get("get_bloginfo", &["text_direction"]),
+            get("get_bloginfo", &["admin_email"]),
+            ThemeCall::Get("home_url".into(), vec![Value::Int(1)]),
+            ThemeCall::Get("get_the_post_thumbnail".into(), Vec::new()),
+            print("comments_template", &[]),
+        ],
+    )
+    .await;
+    let expected: [&[u8]; 20] = [
+        b"true",
+        b"false",
+        &unserved,
+        &unserved,
+        &unserved,
+        b"class=\"post-1 post type-post status-publish format-standard post-password-required hentry category-uncategorized\"",
+        b"class=\"has-post-thumbnail post-1 post type-post status-publish format-standard post-password-required hentry category-uncategorized\"",
+        b"",
+        &unserved,
+        &unserved,
+        &unserved,
+        b"",
+        b"",
+        &unserved,
+        b"UTF-8",
+        b"ltr",
+        &unserved,
+        &unserved,
+        b"",
+        &unserved,
+    ];
+    for (at, (ours, wanted)) in answers.iter().zip(expected).enumerate() {
+        assert_eq!(
+            String::from_utf8_lossy(ours),
+            String::from_utf8_lossy(wanted),
+            "{at}"
+        );
+    }
+    let answers = on_page(
+        &site,
+        "/?p=1",
+        (false, true),
+        vec![
+            print("comments_template", &[]),
+            raw("the_tags", vec![Value::Null]),
+            raw("wp_list_comments", vec![array(&[("style", text("ul"))])]),
+            raw("comment_form", Vec::new()),
+        ],
+    )
+    .await;
+    assert_eq!(answers[0], unserved);
+    assert_eq!(answers[1], b"");
+    assert_eq!(answers[2], b"");
+    let answers = on_page(
+        &site,
+        "/?p=1",
+        (true, true),
+        vec![print("comments_template", &[])],
+    )
+    .await;
+    assert_eq!(answers[0], unserved);
+    let answers = on_page(
+        &site,
+        "/?p=3",
+        (true, true),
+        vec![
+            get("get_the_ID", &[]),
+            conditional("have_comments", Vec::new()),
+        ],
+    )
+    .await;
+    assert_eq!(answers, [b"false".to_vec(), b"false".to_vec()]);
+    // Without a global post, or showing what is not served.
+    let mut calls: Vec<ThemeCall> = [
+        "the_title",
+        "the_permalink",
+        "post_class",
+        "the_content",
+        "the_excerpt",
+        "wp_link_pages",
+        "the_tags",
+        "comments_template",
+        "comment_form",
+    ]
+    .iter()
+    .map(|name| print(name, &[]))
+    .collect();
+    for name in [
+        "get_the_title",
+        "get_permalink",
+        "get_post_type",
+        "get_comments_number",
+        "get_the_post_thumbnail",
+    ] {
+        calls.push(get(name, &[]));
+    }
+    calls.push(conditional("has_post_thumbnail", Vec::new()));
+    calls.push(print("bloginfo", &["admin_email"]));
+    calls.push(get("get_bloginfo", &["version", "display"]));
+    let count = calls.len();
+    let answers = on_page(&site, "/?p=3", (true, true), calls).await;
+    assert_eq!(answers, vec![unserved.clone(); count]);
+    // A theme without `comments.php` gets core's compat template, not ported.
+    let plain = site_on(&hyscribe_testkit::fixture_database(), options).await;
+    let template = vec![print("comments_template", &[])];
+    let answers = on_page(&plain, "/?p=1", (false, true), template.clone()).await;
+    assert_eq!(answers, [unserved]);
+    assert_eq!(
+        on_page(&plain, "/?p=1", (true, true), template).await,
+        [b""]
+    );
+    // `wp_reset_postdata()` makes the main query's first post global again.
+    let content = site_on(&with_content().await, options).await;
+    let id = || get("get_the_ID", &[]);
+    let calls = vec![
+        ThemeCall::ThePost,
+        ThemeCall::ThePost,
+        id(),
+        ThemeCall::ResetPostdata,
+        id(),
+    ];
+    let answers = on_page(&content, "/", (true, true), calls).await;
+    assert_eq!((&answers[2][..], &answers[4][..]), (&b"964"[..], &b"1"[..]));
+}
+
+/// `get_pagenum_link()` under pretty permalinks keeps the query and drops
+/// `index.php`; under `index.php` permalinks it is not ported.
+#[tokio::test(flavor = "multi_thread")]
+async fn page_links_follow_pretty_permalinks() {
+    let config = hyscribe_testkit::fixture_database();
+    let previous = || print("previous_posts_link", &["p"]);
+    let request = |uri: &str| Request {
+        uri: uri.as_bytes().to_vec(),
+        paged: 3,
+        max_pages: 5,
+        ..Request::default()
+    };
+    let options =
+        "template=hello-elementor&stylesheet=hello-elementor&permalink_structure=%2F%25postname%25";
+    let site = site_on(&config, options).await;
+    let answers = on_request(
+        &site,
+        request("/index.php/page/3?s=a&paged=3"),
+        (true, true),
+        vec![previous(), print("next_posts_link", &["n"])],
+    )
+    .await;
+    assert_eq!(
+        answers,
+        [
+            b"<a href=\"http://127.0.0.1:8081/page/2?s=a\" >p</a>".to_vec(),
+            b"<a href=\"http://127.0.0.1:8081/page/4?s=a\" >n</a>".to_vec(),
+        ]
+    );
+    let answers = on_request(
+        &site,
+        request("/category/x/page/3/"),
+        (true, true),
+        vec![previous()],
+    )
+    .await;
+    let path = "http://127.0.0.1:8081/category/x/page/2";
+    assert_eq!(answers, [format!("<a href=\"{path}\" >p</a>").into_bytes()]);
+    // On the last page but one the next link is still printed, and on the
+    // last page it is not (`$nextpage <= $max_page`).
+    let near = |paged| Request {
+        uri: format!("/index.php/page/{paged}").into_bytes(),
+        paged,
+        max_pages: 5,
+        ..Request::default()
+    };
+    let next = || print("next_posts_link", &["n"]);
+    let answers = on_request(&site, near(4), (true, true), vec![next()]).await;
+    let href = "http://127.0.0.1:8081/page/5";
+    let link = format!("<a href=\"{href}\" >n</a>").into_bytes();
+    assert_eq!(answers, [link]);
+    let answers = on_request(&site, near(5), (true, true), vec![next()]).await;
+    assert_eq!(answers, [Vec::<u8>::new()]);
+    let options = "template=hello-elementor&stylesheet=hello-elementor&permalink_structure=%2Findex.php%2F%25postname%25%2F";
+    let site = site_on(&config, options).await;
+    let next = print("next_posts_link", &["n"]);
+    let answers = on_request(&site, request("/"), (true, true), vec![previous(), next]).await;
+    let unserved = format!("{:?}", Err::<Value, String>(UNSERVED.into())).into_bytes();
+    assert_eq!(answers, [unserved.clone(), unserved]);
+}
+
+/// `get_bloginfo( $show, $filter )` runs the display filters only for
+/// `'display'`, and `get_search_query( $escaped )` escapes unless its
+/// argument is falsy.
+#[tokio::test(flavor = "multi_thread")]
+async fn filters_and_escaping_follow_their_arguments() {
+    let config = hyscribe_testkit::fixture_database();
+    let options = "template=hello-elementor&stylesheet=hello-elementor&blogname=A%20%26%20B";
+    let site = site_on(&config, options).await;
+    let calls = vec![
+        get("get_bloginfo", &["name"]),
+        get("get_bloginfo", &["name", "display"]),
+        get("get_bloginfo", &["name", "raw"]),
+    ];
+    let answers = on_page(&site, "/?p=1", (true, true), calls).await;
+    let (raw, display) = (b"A & B".to_vec(), b"A &#038; B".to_vec());
+    assert_eq!(answers, [raw.clone(), display, raw]);
+    let request = Request {
+        search_query: b"a\"b<c & d".to_vec(),
+        ..Request::default()
+    };
+    let search = |escaped: Option<bool>| {
+        let args = escaped.map(Value::Bool).into_iter().collect();
+        ThemeCall::Get("get_search_query".into(), args)
+    };
+    let calls = vec![search(None), search(Some(true)), search(Some(false))];
+    let answers = on_request(&site, request, (true, true), calls).await;
+    let escaped = b"a&quot;b&lt;c &amp; d".to_vec();
+    assert_eq!(answers, [escaped.clone(), escaped, b"a\"b<c & d".to_vec()]);
 }

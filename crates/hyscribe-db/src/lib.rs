@@ -19,8 +19,8 @@ use std::fmt;
 use hyscribe_config::{Database, Prefix};
 use hyscribe_model::{
     COMMENT_ORDERBY, CalendarMonth, Comment, Credentials, DateCount, OrderBy, Period, Post,
-    PostQuery, Term, TermOrder, TermQuery, TimeCondition, USER_ORDERBY, USER_SEARCH_COLUMNS, User,
-    UserField,
+    PostQuery, StatusFilter, Term, TermOrder, TermQuery, TimeCondition, USER_ORDERBY,
+    USER_SEARCH_COLUMNS, User, UserField,
 };
 use sqlx::Row as _;
 
@@ -331,14 +331,17 @@ impl Db {
         self.select(sql).await.map(|posts| posts.into_iter().next())
     }
 
-    /// The attachment named `name`, of any status, the latest first as a
-    /// single post query takes it.
-    pub async fn attachment_by_name(&self, name: &str) -> Result<Option<Post>, DbError> {
+    /// The post of `post_type` named `name`, of any status, the latest
+    /// first as a single post query takes it.
+    pub async fn newest_by_name(
+        &self,
+        name: &str,
+        post_type: &str,
+    ) -> Result<Option<Post>, DbError> {
         let mut sql = select_posts(" FROM {prefix}posts WHERE ");
-        sql.push(
-            "post_name = ? AND post_type = 'attachment' ORDER BY post_date DESC, ID DESC LIMIT 1",
-        );
+        sql.push("post_name = ? AND post_type = ? ORDER BY post_date DESC, ID DESC LIMIT 1");
         sql.bind(Bind::Text(name.to_string()));
+        sql.bind(Bind::Text(post_type.to_string()));
         self.select(sql).await.map(|posts| posts.into_iter().next())
     }
 
@@ -557,14 +560,15 @@ impl Db {
         rows.iter().map(term).collect()
     }
 
-    /// `get_adjacent_post()` for a visitor; see [`adjacent_sql`].
+    /// `get_adjacent_post()`: see [`adjacent_sql`].
     pub async fn adjacent_post(
         &self,
         post: &Post,
         previous: bool,
         terms: Option<(&str, &[u64])>,
+        statuses: &[StatusFilter],
     ) -> Result<Option<Post>, DbError> {
-        let row = adjacent_sql(post, previous, terms)
+        let row = adjacent_sql(post, previous, terms, statuses)
             .query(&self.prefix)
             .fetch_optional(&self.pool)
             .await
@@ -1819,9 +1823,14 @@ impl Db {
     }
 }
 
-/// The statement [`Db::adjacent_post`] runs: `get_adjacent_post()`'s, for
-/// a visitor, selecting the whole row.
-fn adjacent_sql(post: &Post, previous: bool, terms: Option<(&str, &[u64])>) -> Sql {
+/// The statement [`Db::adjacent_post`] runs: `get_adjacent_post()`'s of the
+/// posts of `statuses`, selecting the whole row.
+fn adjacent_sql(
+    post: &Post,
+    previous: bool,
+    terms: Option<(&str, &[u64])>,
+    statuses: &[StatusFilter],
+) -> Sql {
     let mut sql = select_posts(" FROM {prefix}posts AS p");
     if terms.is_some() {
         sql.push(
@@ -1843,12 +1852,40 @@ fn adjacent_sql(post: &Post, previous: bool, terms: Option<(&str, &[u64])>) -> S
         sql.bind(Bind::Text(taxonomy.to_string()));
         list(&mut sql, ids_or_none(ids));
     }
+    sql.push(" AND ");
+    status_criteria(&mut sql, statuses);
     sql.push(if previous {
-        " AND p.post_status = 'publish' ORDER BY p.post_date DESC, p.ID DESC LIMIT 1"
+        " ORDER BY p.post_date DESC, p.ID DESC LIMIT 1"
     } else {
-        " AND p.post_status = 'publish' ORDER BY p.post_date ASC, p.ID ASC LIMIT 1"
+        " ORDER BY p.post_date ASC, p.ID ASC LIMIT 1"
     });
     sql
+}
+
+/// Posts of one of `statuses`, each of its type and author when it names
+/// them; published ones when there are none.
+fn status_criteria(sql: &mut Sql, statuses: &[StatusFilter]) {
+    if statuses.is_empty() {
+        sql.push("post_status = 'publish'");
+        return;
+    }
+    sql.push("(");
+    for (i, filter) in statuses.iter().enumerate() {
+        if i > 0 {
+            sql.push(" OR ");
+        }
+        if let Some(post_type) = &filter.post_type {
+            sql.push("post_type = ? AND ");
+            sql.bind(Bind::Text(post_type.clone()));
+        }
+        if let Some(author) = filter.author {
+            sql.push("post_author = ? AND ");
+            sql.bind(Bind::Int(author));
+        }
+        sql.push("post_status = ?");
+        sql.bind(Bind::Text(filter.status.clone()));
+    }
+    sql.push(")");
 }
 
 /// The statement [`Db::posts`] runs for `query`.
@@ -1992,23 +2029,7 @@ fn relevance(sql: &mut Sql, query: &PostQuery) {
 /// types (any, if none), authors in or out, parents, terms, formats, inclusions,
 /// search and date.
 fn post_criteria(sql: &mut Sql, query: &PostQuery) {
-    if query.statuses.is_empty() {
-        sql.push("post_status = 'publish'");
-    } else {
-        sql.push("(");
-        for (i, filter) in query.statuses.iter().enumerate() {
-            if i > 0 {
-                sql.push(" OR ");
-            }
-            if let Some(author) = filter.author {
-                sql.push("post_author = ? AND ");
-                sql.bind(Bind::Int(author));
-            }
-            sql.push("post_status = ?");
-            sql.bind(Bind::Text(filter.status.clone()));
-        }
-        sql.push(")");
-    }
+    status_criteria(sql, &query.statuses);
     if !query.post_types.is_empty() {
         sql.push(" AND post_type IN (");
         list(sql, query.post_types.iter().map(|t| Bind::Text(t.clone())));

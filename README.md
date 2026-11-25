@@ -16,7 +16,7 @@ Point the `hyscribe` binary at an existing WordPress database and `wp-content` f
 > [!WARNING]
 > **Not yet production ready.** HyScribe is an early release in active development: it has had no external security audit, parts of hs-admin and the REST API still answer `501 Not Implemented`, and behaviour may change between releases. Try it on a copy of a site, not on a live one, and keep backups. See [PROGRESS.md](PROGRESS.md) for where it stands.
 
-## Checkpoint (2026-11-23, first release)
+## Checkpoint (2026-11-23)
 
 The MVP is met: on the default WordPress install, HyScribe drops in against the same database, serves it from the release archive, writes to it through hs-admin and the REST API with the same checks as PHP, and hands it back to PHP WordPress with no check failing. The acceptance runs are recorded in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md). Since then, the built-in block themes and theme switching have landed, and the extension runtime and signed packages are under way.
 

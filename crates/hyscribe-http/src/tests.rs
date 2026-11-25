@@ -265,8 +265,7 @@ async fn database_errors_show_no_details() {
         writer: None,
         defined: Vec::new(),
         public_users: true,
-        // On, so the author archive's queries run.
-        author_archives: true,
+        author_archives: false,
         proxies: None,
         time_limit: crate::DEFAULT_TIME_LIMIT,
         constants: hyscribe_config::Constants::default(),
@@ -288,7 +287,6 @@ async fn database_errors_show_no_details() {
         "/?p=1",
         "/?cat=1",
         "/?author=1",
-        "/?author_name=admin",
         "/?feed=rss2",
         "/?feed=rss2&cat=1",
         "/?feed=comments-rss2",
@@ -343,6 +341,13 @@ async fn database_errors_show_no_details() {
             .await
             .is_err()
     );
+    // With author archives on, the author archive's own queries fail first.
+    let site = Arc::new(Arc::into_inner(site).unwrap().with_author_archives(true));
+    for uri in ["/?author=1", "/?author_name=admin"] {
+        let reply = request(&site, "GET", uri).await;
+        assert_eq!(reply.status, StatusCode::INTERNAL_SERVER_ERROR, "{uri}");
+        assert!(!reply.body.contains("missing_"));
+    }
 }
 
 #[tokio::test]

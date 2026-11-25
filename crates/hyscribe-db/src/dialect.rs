@@ -114,6 +114,22 @@ const INSTALL_SESSION: &str = concat!(sql_mode!(), "; SET SESSION lock_wait_time
 /// transaction (the write oracle).
 pub type Connection = sqlx::MySqlConnection;
 
+/// Turns MariaDB's snapshot isolation off for a writer's session where the
+/// server has it, so an action writes over a row another client committed
+/// since the action's first read, as PHP's statements do, instead of failing
+/// with error 1020 (ADR 0012 amendment: the last save wins).
+pub(crate) async fn last_save_wins(conn: &mut Connection) -> Result<(), sqlx::Error> {
+    let show = "SHOW SESSION VARIABLES LIKE 'innodb_snapshot_isolation'";
+    match conn.fetch_optional(show).await {
+        Ok(Some(_)) => conn
+            .execute("SET SESSION innodb_snapshot_isolation = OFF")
+            .await
+            .map(|_| ()),
+        // MySQL and MariaDB before 10.6.18 have no such check.
+        found => found.map(|_| ()),
+    }
+}
+
 /// MySQL and MariaDB.
 pub(crate) struct MySql;
 
@@ -145,13 +161,16 @@ impl Dialect for MySql {
             .after_connect(move |conn, _| {
                 Box::pin(async move {
                     // `raw_sql()`, which takes the install session's two statements.
-                    conn.execute(sqlx::raw_sql(match access {
+                    let set = conn.execute(sqlx::raw_sql(match access {
                         Access::Read => "SET SESSION TRANSACTION READ ONLY",
                         Access::Write => WORDPRESS_SQL_MODE,
                         Access::Install => INSTALL_SESSION,
-                    }))
-                    .await
-                    .map(|_| ())
+                    }));
+                    let set = set.await;
+                    match (set, access) {
+                        (Ok(_), Access::Write) => last_save_wins(conn).await,
+                        (set, _) => set.map(|_| ()),
+                    }
                 })
             })
             .connect_with(options)

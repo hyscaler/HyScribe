@@ -1697,6 +1697,55 @@ async fn a_deadlocked_action_runs_nothing_after() {
     assert_eq!(state, (0, 1));
 }
 
+/// Issue 19: an option another client (PHP WordPress) changes and commits
+/// between the action's read and its write is written over, the last save
+/// winning as in PHP, instead of failing with error 1020 under the snapshot
+/// isolation the fixture's MariaDB has on.
+#[tokio::test]
+async fn a_row_changed_by_another_client_is_written_over() {
+    let _one = ONE_AT_A_TIME.lock().await;
+    let db = Database {
+        name: "wordpress_saves".into(),
+        ..fixture_config()
+    };
+    hyscribe_testkit::writes::load_default_install(&db)
+        .await
+        .unwrap();
+    let writer = Writer::open(&db, Mode::Primary).await.unwrap().unwrap();
+    let settings: (String, i64, i64) = sqlx::query_as(
+        "SELECT @@transaction_isolation, @@GLOBAL.innodb_snapshot_isolation, \
+         @@SESSION.innodb_snapshot_isolation",
+    )
+    .fetch_one(&writer.pool)
+    .await
+    .unwrap();
+    assert_eq!(settings, ("REPEATABLE-READ".into(), 1, 0));
+    let mut write = writer.begin().await.unwrap();
+    let cron = write.option_value("cron").await.unwrap();
+    let set = "UPDATE wp_options SET option_value = 'other' WHERE option_name = 'cron'";
+    sqlx::query(set).execute(&writer.pool).await.unwrap();
+    // The action still reads what it read, then its save wins.
+    assert_eq!(write.option_value("cron").await.unwrap(), cron);
+    write.update_option("cron", b"action").await.unwrap();
+    write.commit().await.unwrap();
+    assert_eq!(saved_option(&writer, "cron").await, "action");
+}
+
+/// A writer's connection that fails to set its session reports the error.
+#[tokio::test]
+async fn a_lost_connection_fails_the_session_setting() {
+    let writer = writer().await;
+    let mut conn = writer.pool.acquire().await.unwrap();
+    let id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()")
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap();
+    let kill = sqlx::query("KILL ?").bind(id);
+    kill.execute(&writer.pool).await.unwrap();
+    assert!(crate::dialect::last_save_wins(&mut conn).await.is_err());
+    conn.detach();
+}
+
 /// Each statement fails once the budget a test sets is spent.
 #[tokio::test]
 async fn a_spent_budget_fails_every_statement() {

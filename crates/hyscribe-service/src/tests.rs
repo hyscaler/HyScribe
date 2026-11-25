@@ -243,7 +243,7 @@ fn a_starting_server_has_no_pid_yet() {
 
 /// A server that holds the lock but never listens is reported with its
 /// log and stopped, and `stop` stops one while it starts. The wait leaves a
-/// loaded hosts time to start the fake server and log `ready`.
+/// loaded machine time to start the fake server and log `ready`.
 #[test]
 fn a_server_that_never_listens_times_out() {
     let home = tempfile::tempdir().unwrap();

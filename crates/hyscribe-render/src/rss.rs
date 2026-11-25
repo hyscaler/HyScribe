@@ -2,8 +2,8 @@
 
 //! `core/rss`: `render_block_core_rss()` over `fetch_feed()`, which reads
 //! the feed through the outbound client only from hosts on the site's
-//! allowlist (`RSS_ALLOWED_HOSTS`, empty by default, the decision
-//! of 2026-11-10); any other host, and every host while fetches are off,
+//! allowlist (`RSS_ALLOWED_HOSTS`, empty by default, decided
+//! 2026-11-10); any other host, and every host while fetches are off,
 //! renders as PHP renders a feed it cannot reach. The feed is cached as
 //! SimplePie's transient cache keeps it, in primary mode only.
 //!

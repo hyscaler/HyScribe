@@ -545,9 +545,22 @@ impl Site {
         .filter(|&id| id != 0)
     }
 
-    /// The site title, as `wp_get_document_title()` prints it.
+    /// The site title, as `get_bloginfo( 'name', 'display' )` returns it.
     fn name(&self) -> String {
-        esc_html(self.option("blogname").as_bytes())
+        self.bloginfo_display("blogname")
+    }
+
+    /// The site's tagline, as `get_bloginfo( 'description', 'display' )`
+    /// returns it.
+    fn tagline(&self) -> String {
+        self.bloginfo_display("blogdescription")
+    }
+
+    /// An option through the `bloginfo` filters: `wptexturize()`,
+    /// `convert_chars()` and `esc_html()`.
+    fn bloginfo_display(&self, option: &str) -> String {
+        let text = wptexturize(self.option(option).as_bytes(), &CORE_SHORTCODE_TAGS);
+        esc_html(&convert_chars(&text))
     }
 
     /// `get_permalink( $post )`; see [`Site::links`].
@@ -2233,6 +2246,14 @@ fn single_post_title(post: &Post) -> String {
     lossy(&strip_tags(&wptexturize(&post.title, &CORE_SHORTCODE_TAGS)))
 }
 
+/// `single_term_title()`: a category's or a tag's name through the
+/// `single_cat_title` and `single_tag_title` filters (`wptexturize()` and
+/// `strip_tags()`). A post format's name has no filter, and is a plain word
+/// they leave as it is.
+fn term_title(name: &[u8]) -> String {
+    lossy(&strip_tags(&wptexturize(name, &CORE_SHORTCODE_TAGS)))
+}
+
 /// `wp_get_document_title()`: the parts that are not empty, joined by
 /// dashes, through the `document_title` filters.
 fn document_title(parts: [Option<String>; 3]) -> String {
@@ -2364,8 +2385,7 @@ fn single_page(site: &Site, post: Post, paging: Paging) -> Page {
     Page {
         status: StatusCode::OK,
         title: if front {
-            let tagline = site.option("blogdescription");
-            let tagline = Some(esc_html(tagline.as_bytes())).filter(|t| !t.is_empty());
+            let tagline = Some(site.tagline()).filter(|t| !t.is_empty());
             document_title([Some(site.name()), paging.title(), tagline])
         } else {
             document_title([
@@ -2675,7 +2695,12 @@ async fn list(
                 .map_or_else(String::new, |user| esc_html(&user.display_name)),
         )
     } else if term_archive.is_some() {
-        Some(term.map_or_else(String::new, |term| esc_html(&term.name)))
+        Some(
+            term_archive
+                .as_ref()
+                .and_then(Archive::term)
+                .map_or_else(String::new, |(_, term)| term_title(&term.name)),
+        )
     } else {
         // A week's or a time's archive has no title of its own.
         dated.then(|| {
@@ -2689,7 +2714,6 @@ async fn list(
             })
         })
     };
-    let tagline = site.option("blogdescription");
     let front = site.posts_on_front();
     let title = match heading {
         // A term or date archive without a title has the site's name alone.
@@ -2704,7 +2728,7 @@ async fn list(
         None => document_title([
             Some(site.name()),
             paging.title(),
-            Some(esc_html(tagline.as_bytes())).filter(|t| !t.is_empty()),
+            Some(site.tagline()).filter(|t| !t.is_empty()),
         ]),
     };
     let mut candidates = list_templates(
@@ -3214,7 +3238,7 @@ fn not_found(site: &Site, feed: bool) -> Page {
         title: if feed {
             site.name()
         } else {
-            format!("Page not found &#8211; {}", site.name())
+            document_title([Some("Page not found".into()), None, Some(site.name())])
         },
         candidates: vec!["404".into(), "index".into()],
         request,

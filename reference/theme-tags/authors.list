@@ -1,0 +1,11 @@
+	/?author=1
+	/?author=750
+	/?author=751
+	/?author=752
+	/?author=-1
+	/?author=1,
+	/?author=999
+posts_per_page=2	/?author=750
+posts_per_page=2	/?author=750&paged=2
+permalink_structure=%2F%25postname%25%2F	/author/jane-doe/
+permalink_structure=%2F%25postname%25%2F	/author/quiet/

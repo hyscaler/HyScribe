@@ -46,6 +46,9 @@ pub struct Classic {
     current: Option<usize>,
     /// The global `$post`: the main query's post at this place.
     global: usize,
+    /// Whether `setup_postdata()` has run, which makes `$authordata` the
+    /// global post's author rather than the queried one.
+    set_up: bool,
     in_the_loop: bool,
     loading: Loading,
     printed: Printed,
@@ -62,6 +65,7 @@ impl Classic {
             theme: (template.into(), stylesheet.into()),
             current: None,
             global: 0,
+            set_up: false,
             in_the_loop: false,
             loading: Loading::default(),
             printed: Printed::default(),
@@ -87,11 +91,14 @@ impl Classic {
         let current = self.current.map_or(0, |current| current + 1);
         self.current = Some(current);
         self.global = current;
+        self.set_up = true;
     }
 
-    /// `wp_reset_postdata()`: the global post is the main query's again.
-    pub fn reset_postdata(&mut self) {
+    /// `wp_reset_postdata()`: the global post is the main query's again,
+    /// set up when there is one.
+    pub fn reset_postdata(&mut self, request: &Request) {
         self.global = 0;
+        self.set_up |= !request.posts.is_empty();
     }
 
     /// `rewind_posts()`.
@@ -150,8 +157,16 @@ impl Classic {
             "is_page_template" => kind.is_some() && page_template(site, request, args.first()),
             "in_the_loop" => self.in_the_loop,
             "has_custom_logo" => logo(site, &self.theme.1).is_some(),
+            // On an author's archive, naming an author is not ported.
+            "is_author" => match request.archive {
+                Some(Archive::Author(..)) if args.first().is_some_and(|a| !a.is_empty()) => {
+                    return Err(Unserved);
+                }
+                Some(Archive::Author(..)) => true,
+                _ => false,
+            },
             // The front end, in English.
-            "is_author" | "is_rtl" => false,
+            "is_rtl" => false,
             _ => return self.is_post(site, request, name, args),
         })
     }

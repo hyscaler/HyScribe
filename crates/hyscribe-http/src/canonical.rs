@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::http::Uri;
-use hyscribe_phpser::{add_query_values, parse_str, rawurlencode_deep, remove_query_arg};
+use hyscribe_model::PostQuery;
+use hyscribe_phpser::{Value, add_query_values, parse_str, rawurlencode_deep, remove_query_arg};
 use hyscribe_render::permalinks;
 use hyscribe_render::site::{Archive, Taxonomy};
 
@@ -159,6 +160,28 @@ pub(crate) async fn pretty(
         if !parts.is_empty() {
             target = links.date_link(&site.home, year, link);
             strip.extend(parts);
+        }
+    } else if let Some(Archive::Author(_, Some(user))) = &request.archive
+        && matches!(get.get_str("author"), Some(Value::String(id)) if id != b"0" && !id.is_empty() && id.iter().all(u8::is_ascii_digit))
+        && vars.get("paged").is_none_or(|paged| absint(paged) == 0)
+    {
+        // `?author=N` of an author with a published post of any type; a
+        // page past the first stays, as PHP's guard against a chain of
+        // redirects turns it down.
+        let published = PostQuery {
+            authors: vec![user.id],
+            limit: 1,
+            ..PostQuery::default()
+        };
+        if !site
+            .db
+            .posts(&published)
+            .await
+            .unwrap_or_default()
+            .is_empty()
+        {
+            target = links.author_link(&site.home, &lossy(&user.nicename));
+            strip.push("author");
         }
     } else if let Some(Archive::Term(taxonomy, Some(term))) = &request.archive
         && parsed.is_empty()

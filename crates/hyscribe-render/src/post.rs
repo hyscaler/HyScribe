@@ -338,6 +338,19 @@ pub fn body_classes(
             );
             push(format!("{prefix}-{}", term.id).as_bytes());
         }
+    } else if let Some(Archive::Author(_, user)) = &request.archive {
+        push(b"author");
+        if let Some(user) = user {
+            let id = user.id.to_string();
+            push(
+                &[
+                    b"author-",
+                    &sanitize_html_class(&user.nicename, id.as_bytes())[..],
+                ]
+                .concat(),
+            );
+            push(format!("author-{id}").as_bytes());
+        }
     }
     if site.viewer().user != 0 {
         push(b"logged-in");
@@ -363,6 +376,7 @@ pub fn body_classes(
                 archive_class(*taxonomy)
             }
             _ if request.date => "date",
+            (None, Some(Archive::Author(..))) => "author",
             _ if request.search.is_some() => "search",
             _ => "",
         };

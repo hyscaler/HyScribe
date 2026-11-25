@@ -16,7 +16,7 @@ use hyscribe_render::theme::Theme;
 
 use crate::admin_bar::{BarSite, Browser, admin_bar};
 use crate::assets::{Assets, Urls, cookie_path, site_icon_tags};
-use crate::look::{bar_style, editor_icon_style, mark_icon};
+use crate::look::{bar_style, editor_icon_style, mark_icon, porting_mailto, welcome_style};
 use crate::menu::{Look, Screen, admin_menu, clean_links, commands};
 
 /// `wp_removable_query_args()`: what the canonical admin URL leaves out.
@@ -555,6 +555,9 @@ fn enqueue(
     if block_editor {
         bar.push(editor_icon_style(&|path| Urls::admin_url(site, path)));
     }
+    if page.id == "dashboard" {
+        bar.push(welcome_style(&|path| Urls::admin_url(site, path)));
+    }
     assets.set_style_data("admin-bar", "after", list(bar));
     assets.set_style_data("wp-emoji-styles", "after", list(vec![EMOJI_STYLES.into()]));
     if scheme.stylesheet {
@@ -869,10 +872,13 @@ fn screen_meta(page: &Page) -> String {
 /// HyScribe's version (ADR 0008).
 fn footer(site: &dyn PageSite, (page, extras): (&Page, &Extras), assets: &mut Assets) -> String {
     let urls: &dyn Urls = site;
-    let thanks = "<span id=\"footer-thankyou\">Thank you for creating with HyScribe. HyScribe is developed and supported by <a href=\"https://hyscaler.com\">HyScaler</a>.</span>";
+    let thanks = format!(
+        "<span id=\"footer-thankyou\">Thank you for creating with HyScribe. HyScribe is developed and supported by <a href=\"https://hyscaler.com\">HyScaler</a>. Need help porting your site or plugins? <a href=\"{}\">Contact us</a>.</span>",
+        porting_mailto(&BarSite::home_url(site), env!("CARGO_PKG_VERSION"))
+    );
     let mut out = format!(
         "\n<div class=\"clear\"></div></div><!-- wpbody-content -->\n<div class=\"clear\"></div></div><!-- wpbody -->\n<div class=\"clear\"></div></div><!-- wpcontent -->\n\n<div id=\"wpfooter\" role=\"contentinfo\">\n\t\t<p id=\"footer-left\" class=\"alignleft\">\n\t\t{}\t</p>\n\t<p id=\"footer-upgrade\" class=\"alignright\">\n\t\t{}\t</p>\n\t<div class=\"clear\"></div>\n</div>\n",
-        apply_filters("admin_footer_text", thanks.to_string(), &[]),
+        apply_filters("admin_footer_text", thanks, &[]),
         apply_filters(
             "update_footer",
             format!("HyScribe {}", env!("CARGO_PKG_VERSION")),

@@ -7,8 +7,8 @@
 //! include a post object crosses to no extension yet.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url};
-use hyscribe_model::Post;
 use hyscribe_model::hooks::{apply_filters, do_action};
+use hyscribe_model::{Post, User};
 use hyscribe_phpser::{Key, Value, is_empty_string, remove_query_arg};
 
 use super::{Classic, Scope, Unserved};
@@ -35,6 +35,20 @@ impl Classic {
     /// one is not ported.
     fn needs_post<'r>(&self, request: &'r Request) -> Result<&'r Post, Unserved> {
         self.post(request).ok_or(Unserved)
+    }
+
+    /// `$authordata`: the global post's author once `setup_postdata()` has
+    /// run, else `queried`, the author archive's user.
+    fn authordata(
+        &self,
+        site: &dyn Site,
+        request: &Request,
+        queried: &Option<User>,
+    ) -> Option<User> {
+        match self.post(request).filter(|_| self.set_up) {
+            Some(post) => site.user(post.author),
+            None => queried.clone(),
+        }
     }
 
     /// The page's image counts, in the main loop while it runs.
@@ -260,10 +274,23 @@ impl Classic {
                 .concat()
             }
             ("the_archive_description", 0..=2) => {
-                // Only an archive of a term without a description is ported.
+                // Of a term, only one without a description is ported; an
+                // author's is `$authordata`'s, as is.
                 match &request.archive {
                     Some(Archive::Term(_, Some(term))) if !term.description.is_empty() => {
                         return Err(Unserved);
+                    }
+                    Some(Archive::Author(_, queried)) => {
+                        let user = self.authordata(site, request, queried);
+                        match user.filter(|user| !user.description.is_empty()) {
+                            Some(user) => [
+                                text(0).unwrap_or_default(),
+                                user.description,
+                                text(1).unwrap_or_default(),
+                            ]
+                            .concat(),
+                            None => Vec::new(),
+                        }
                     }
                     _ => Vec::new(),
                 }
@@ -356,6 +383,14 @@ impl Classic {
             return b"Archives".to_vec();
         };
         let site = scope.site;
+        let author;
+        let archive = match archive {
+            Archive::Author(id, queried) => {
+                author = Archive::Author(*id, self.authordata(site, request, queried));
+                &author
+            }
+            _ => archive,
+        };
         let date_format = site.option("date_format").unwrap_or_default();
         let posted = request.posts.first().map_or("", |post| post.date.as_str());
         let post = Post::default();

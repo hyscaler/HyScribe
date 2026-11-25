@@ -124,8 +124,8 @@ impl Theme {
                 classic.rewind_posts();
                 Ok(Value::Null)
             }),
-            ThemeCall::ResetPostdata => self.on_page(&|classic, _, _| {
-                classic.reset_postdata();
+            ThemeCall::ResetPostdata => self.on_page(&|classic, _, shared| {
+                classic.reset_postdata(&shared.request);
                 Ok(Value::Null)
             }),
             ThemeCall::InTheLoop => {

@@ -370,8 +370,8 @@ fn told_answer(answer: Result<Value, String>) -> Vec<u8> {
 /// Hello's template tags answer on each page of
 /// `reference/pages/default.list` as PHP answers them where its template
 /// loader has picked the template, over the default install and with a
-/// custom logo and menus; author archives, which HyScribe answers 404,
-/// are left out.
+/// custom logo and menus, and on the author archives of
+/// `reference/theme-tags/authors.list` with author archives on.
 #[tokio::test(flavor = "multi_thread")]
 async fn hello_s_tags_answer_as_php() {
     let _saves = crate::admin::tests::SAVES.lock().await;
@@ -393,7 +393,7 @@ async fn hello_s_tags_answer_as_php() {
             expected.push((name.to_string(), value));
         }
         let path = String::from_utf8(hyscribe_testkit::unhex(fields[1])).unwrap();
-        if expected.is_empty() || path.contains("author=") {
+        if expected.is_empty() {
             continue;
         }
         let site = match sites.get(fields[0]) {
@@ -401,6 +401,9 @@ async fn hello_s_tags_answer_as_php() {
             None => {
                 let config = if fields[0].starts_with("_tags=content") {
                     content.clone()
+                } else if fields[0].starts_with("_tags=authors") {
+                    // The scratch database again, its content's pages done.
+                    content_db(include_str!("../../../../../reference/pages/authors.sql")).await
                 } else {
                     hyscribe_testkit::fixture_database()
                 };
@@ -440,7 +443,7 @@ async fn hello_s_tags_answer_as_php() {
         assert_eq!(expected.len(), got.len(), "{path}");
         pages += 1;
     }
-    assert_eq!(pages, 132);
+    assert_eq!(pages, 143);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
@@ -1032,6 +1035,35 @@ async fn on_request(
     })
     .await
     .unwrap()
+}
+
+/// `is_author()` naming an author is not ported on an author's archive,
+/// and elsewhere is false.
+#[tokio::test(flavor = "multi_thread")]
+async fn is_author_naming_an_author_is_refused() {
+    let options = "template=hello-elementor&stylesheet=hello-elementor";
+    let site = site_on(&hyscribe_testkit::fixture_database(), options).await;
+    let unserved = format!("{:?}", Err::<Value, String>(UNSERVED.into())).into_bytes();
+    let named = || ThemeCall::Conditional("is_author".into(), vec![text("admin")]);
+    let answers = on_page(&site, "/?author=1", (true, false), vec![named()]).await;
+    assert_eq!(answers, [unserved]);
+    let answers = on_page(&site, "/?cat=1", (true, false), vec![named()]).await;
+    assert_eq!(answers, [b"false".to_vec()]);
+    // `$authordata` is the queried author's, none for ID 0, until
+    // `wp_reset_postdata()` sets the first post up, as after the loop in
+    // `pages-authors.tsv`'s `/?author=1,`.
+    let title = || print("the_archive_title", &[]);
+    let calls = vec![title(), ThemeCall::ResetPostdata, title()];
+    let answers = on_page(&site, "/?author=1,", (true, false), calls).await;
+    let reset = &b"Ok(Null)"[..];
+    assert_eq!(
+        answers,
+        [
+            &b"Author: <span></span>"[..],
+            reset,
+            b"Author: <span>admin</span>"
+        ]
+    );
 }
 
 /// The tags' arguments and the states the pages of `tags.php` do not

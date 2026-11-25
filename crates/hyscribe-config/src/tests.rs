@@ -56,6 +56,7 @@ fn defaults_are_safe() {
             site_url: None,
             salts: Vec::new(),
             rest_public_users: true,
+            author_archives: false,
             http_outbound: false,
             trusted_proxies: crate::proxies::default_list(),
             request_time_limit: 30,
@@ -275,6 +276,7 @@ fn reads_every_key() {
         ("AUTH_KEY", "a"),
         ("NONCE_SALT", "z"),
         ("REST_PUBLIC_USERS", "off"),
+        ("AUTHOR_ARCHIVES", "on"),
         ("HTTP_OUTBOUND", "on"),
         (
             "RSS_ALLOWED_HOSTS",
@@ -320,6 +322,7 @@ fn reads_every_key() {
         ]
     );
     assert!(!config.rest_public_users);
+    assert!(config.author_archives);
     assert!(config.http_outbound);
     assert_eq!(config.rss_allowed_hosts, ["feeds.example.org", "news.test"]);
     assert_eq!(config.constants.empty_trash_days, 0);
@@ -507,6 +510,7 @@ fn rejects_bad_values() {
         ),
         ("REST_PUBLIC_USERS", "public", "must be true or false"),
         ("HTTP_OUTBOUND", "enabled", "must be true or false"),
+        ("AUTHOR_ARCHIVES", "public", "must be true or false"),
         (
             "EXTENSION_REGISTRY",
             "http://mirror.example/",
@@ -618,6 +622,7 @@ fn every_boolean_key_takes_the_same_values() {
             "BEHIND_PROXY" => config.server.behind_proxy,
             "REST_PUBLIC_USERS" => config.rest_public_users,
             "HTTP_OUTBOUND" => config.http_outbound,
+            "AUTHOR_ARCHIVES" => config.author_archives,
             "EXTENSION_UPDATE_CHECK" => config.extension_update_check,
             "DISALLOW_UNFILTERED_HTML" => config.constants.disallow_unfiltered_html,
             _ => config.constants.allow_unfiltered_uploads,
@@ -627,6 +632,7 @@ fn every_boolean_key_takes_the_same_values() {
         ("BEHIND_PROXY", false),
         ("REST_PUBLIC_USERS", true),
         ("HTTP_OUTBOUND", false),
+        ("AUTHOR_ARCHIVES", false),
         ("EXTENSION_UPDATE_CHECK", false),
         ("DISALLOW_UNFILTERED_HTML", true),
         ("ALLOW_UNFILTERED_UPLOADS", false),

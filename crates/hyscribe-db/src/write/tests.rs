@@ -1697,7 +1697,7 @@ async fn a_deadlocked_action_runs_nothing_after() {
     assert_eq!(state, (0, 1));
 }
 
-/// Issue 19: an option another client (PHP WordPress) changes and commits
+/// An option another client (PHP WordPress) changes and commits
 /// between the action's read and its write is written over, the last save
 /// winning as in PHP, instead of failing with error 1020 under the snapshot
 /// isolation the fixture's MariaDB has on.

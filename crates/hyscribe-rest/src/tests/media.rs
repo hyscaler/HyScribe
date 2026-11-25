@@ -116,46 +116,6 @@ fn image_sizes_are_registered() {
     );
 }
 
-/// Embedding a featured image that is not ported, a video player, answers
-/// 501, enveloped or not, and a list with the post too; a visitor, who may
-/// not see the trashed video, gets the post.
-#[test]
-fn embedding_what_is_not_ported() {
-    let oracle = oracle(false);
-    let get = |who: &str, route: &str, query: &str| {
-        let get = hyscribe_phpser::parse_str(query.as_bytes());
-        let user = u64::from(who == "administrator");
-        let request = crate::Request {
-            method: "GET",
-            route: route.as_bytes(),
-            uri: b"/",
-            get: get.as_array().unwrap_or_default(),
-            post: &[],
-            cookie_user: user,
-            origin: None,
-            nonce: (user != 0).then_some(b"%nonce%"),
-            remote_addr: b"",
-            postpass: false,
-            user_agent: None,
-            method_override: None,
-            content_type: None,
-            body: b"",
-            host: None,
-            now: 0,
-        };
-        crate::serve(&oracle, &request).status
-    };
-    let requests = [
-        ("/wp/v2/posts/9101", "_embed"),
-        ("/wp/v2/posts/9101", "_embed=wp:featuredmedia&_envelope"),
-        ("/wp/v2/posts", "author=702&_embed"),
-    ];
-    for (route, query) in requests {
-        assert_eq!(get("administrator", route, query), 501, "{route} {query}");
-    }
-    assert_eq!(get("visitor", "/wp/v2/posts/9101", "_embed"), 200);
-}
-
 /// Only the post routes' own regexes are theirs.
 #[test]
 fn revisions_routes_are_their_own() {
@@ -163,15 +123,9 @@ fn revisions_routes_are_their_own() {
     assert!(crate::revisions::endpoints("/wp/v2/users").is_none());
 }
 
-/// What only those who may edit them see and is not ported: a video
-/// player, a file size missing from the metadata, and a revision with a
-/// gallery shortcode.
-const UNPORTED: [(&str, &str); 15] = [
-    ("administrator", "/?rest_route=/wp/v2/media/9140"),
-    (
-        "administrator",
-        "/?rest_route=/wp/v2/media/9140&_fields=caption",
-    ),
+/// What only those who may edit them see and is not ported: a file size
+/// missing from the metadata, and a revision with a gallery shortcode.
+const UNPORTED: [(&str, &str); 11] = [
     ("administrator", "/?rest_route=/wp/v2/media/9141"),
     (
         "administrator",
@@ -183,8 +137,6 @@ const UNPORTED: [(&str, &str); 15] = [
     ),
     ("administrator", "/?rest_route=/wp/v2/media/9157"),
     ("administrator", "/?rest_route=/wp/v2/posts/9106/revisions"),
-    ("editor", "/?rest_route=/wp/v2/media/9140"),
-    ("editor", "/?rest_route=/wp/v2/media/9140&_fields=caption"),
     ("editor", "/?rest_route=/wp/v2/media/9141"),
     ("editor", "/?rest_route=/wp/v2/media/9152&_fields=filesize"),
     ("editor", "/?rest_route=/wp/v2/media/9153&_fields=filesize"),
@@ -199,7 +151,7 @@ fn media_match_php() {
     replay(
         include_str!("../../tests/golden/media.tsv"),
         (false, true),
-        6 * 149,
+        6 * 152,
         &UNPORTED,
     );
 }

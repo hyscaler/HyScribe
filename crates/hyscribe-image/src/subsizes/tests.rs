@@ -198,7 +198,7 @@ fn makes_the_sizes_and_metadata_php_makes() {
             let palette =
                 file.ends_with(".gif") || ["indexed", "large"].iter().any(|n| file.starts_with(n));
             // A palette of 64 colours in a 300 by 30 size of a scaled copy
-            // comes to 0.949 (reported with 6.3's bounds).
+            // comes to 0.949 (to be confirmed, reported with 6.3's bounds).
             let bound = match (palette, file.starts_with("big-indexed")) {
                 (_, true) => 0.94,
                 (true, _) => 0.95,

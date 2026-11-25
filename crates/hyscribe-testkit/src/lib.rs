@@ -230,7 +230,7 @@ fn admin_paths(page: &str, from: &str, to: &str) -> String {
 }
 
 /// The PHP oracle's page under hs-admin's URLs, without the update notice
-/// hs-admin leaves out for now: `wp-admin/<file>.php` is
+/// hs-admin leaves out until decided: `wp-admin/<file>.php` is
 /// `hs-admin/<file>`, plain, JSON-escaped and URL-encoded, and relative
 /// links name the file without `.php` (ADR 0008).
 pub fn hs_admin_page(page: &str) -> String {

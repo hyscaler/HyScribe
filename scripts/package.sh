@@ -22,7 +22,7 @@ case "$target" in
     # cross-links them with Rust's bundled musl.
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld
     # wasmtime's C helpers include the C library's headers: musl's own for
-    # arm64 (Debian's musl-dev:arm64), not the hosts's glibc ones.
+    # arm64 (Debian's musl-dev:arm64), not the host's glibc ones.
     musl=/usr/include/aarch64-linux-musl
     if [ -z "${CFLAGS_aarch64_unknown_linux_musl:-}" ] && [ -d "$musl" ]; then
       export CFLAGS_aarch64_unknown_linux_musl="-nostdinc -isystem $musl -isystem $(clang -print-resource-dir)/include"
@@ -42,7 +42,7 @@ fi
 
 version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$root/Cargo.toml" | head -n 1)"
 export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git -C "$root" log -1 --format=%ct)}"
-# Keep hosts paths out of the binary.
+# Keep host paths out of the binary.
 export RUSTFLAGS="--remap-path-prefix=$root=/hyscribe --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
 
 cargo build --manifest-path "$root/Cargo.toml" --release --locked -p hyscribe --target "$target"

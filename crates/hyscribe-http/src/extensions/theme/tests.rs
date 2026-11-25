@@ -1049,6 +1049,21 @@ async fn is_author_naming_an_author_is_refused() {
     assert_eq!(answers, [unserved]);
     let answers = on_page(&site, "/?cat=1", (true, false), vec![named()]).await;
     assert_eq!(answers, [b"false".to_vec()]);
+    // `$authordata` is the queried author's, none for ID 0, until
+    // `wp_reset_postdata()` sets the first post up, as after the loop in
+    // `pages-authors.tsv`'s `/?author=1,`.
+    let title = || print("the_archive_title", &[]);
+    let calls = vec![title(), ThemeCall::ResetPostdata, title()];
+    let answers = on_page(&site, "/?author=1,", (true, false), calls).await;
+    let reset = &b"Ok(Null)"[..];
+    assert_eq!(
+        answers,
+        [
+            &b"Author: <span></span>"[..],
+            reset,
+            b"Author: <span>admin</span>"
+        ]
+    );
 }
 
 /// The tags' arguments and the states the pages of `tags.php` do not

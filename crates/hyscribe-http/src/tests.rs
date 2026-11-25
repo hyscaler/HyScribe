@@ -3165,8 +3165,8 @@ async fn assert_listed_pages(
             };
             let db = Db::connect(&config).await.unwrap();
             let oracle = Some("http://127.0.0.1:8081".to_string());
-            let mut site = Site::load(db, oracle.clone(), oracle).await.unwrap();
-            site.author_archives = true;
+            let site = Site::load(db, oracle.clone(), oracle).await.unwrap();
+            let mut site = site.with_author_archives(true);
             // Names from `_` are the golden script's, not options.
             let options = named.split('&').filter_map(|o| o.split_once('='));
             for (name, value) in options.filter(|(name, _)| !name.starts_with('_')) {
@@ -3819,7 +3819,7 @@ async fn author_pages_match_php() {
     let golden = include_str!("../tests/golden/pages-authors.tsv");
     let known = include_str!("../tests/golden/pages-authors-known.tsv");
     assert_listed_pages("wordpress_saves", golden, None, known).await;
-    assert_eq!(golden.lines().count(), 72);
+    assert_eq!(golden.lines().count(), 73);
 }
 
 /// Every case of `reference/term-template/golden.sh` over the Theme Test

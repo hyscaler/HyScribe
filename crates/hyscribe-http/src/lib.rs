@@ -2456,14 +2456,14 @@ async fn author_archive(
     if !excluded.is_empty() {
         included.clear();
     }
-    // `(int) get_query_var( 'author' )`, and whether it is one number.
+    // `(int) get_query_var( 'author' )`, and whether it is one number:
+    // `author_name` makes it the ID of the user it names, or 0.
     let mut id = authors.ids.first().copied().unwrap_or_default();
-    let mut numeric = authors.ids.len() == 1 && id > 0;
+    let mut numeric = authors.ids.len() == 1;
     let mut matched = Some(included);
     if let Some(name) = &authors.name {
         let asked = hyscribe_model::UserQuery {
             nicenames: vec![name.clone()],
-            limit: Some(1),
             ..hyscribe_model::UserQuery::default()
         };
         let user = site.db.user_query(&asked).await?.into_iter().next();
@@ -2471,11 +2471,12 @@ async fn author_archive(
         matched = matched.filter(|ids| ids.is_empty() || ids.contains(&user_id));
         matched = matched.map(|_| vec![user_id]);
         id = i64::try_from(user_id).unwrap_or_default();
-        numeric = user_id > 0;
+        numeric = true;
     }
+    // A user exists only for a positive ID.
     let user = match u64::try_from(id) {
-        Ok(id) if id > 0 => site.db.user(id).await?,
-        _ => None,
+        Ok(id) => site.db.user(id).await?,
+        Err(_) => None,
     };
     resolved.author_exists = numeric && user.is_some();
     resolved.archive = Some(Archive::Author(id, user));

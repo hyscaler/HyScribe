@@ -14,3 +14,19 @@ INSERT INTO wp_posts (ID, post_author, post_date, post_date_gmt, post_content, p
    '2026-11-10 10:00:00', '2026-11-10 10:00:00', '', 0, 'http://127.0.0.1:8081/?page_id=703', 0, 'page', '', 0),
   (704, 1, '2026-11-10 11:00:00', '2026-11-10 11:00:00', 'Posts page', 'The "blog" - wp', '', 'publish', 'closed', 'closed', '', 'blog', '', '',
    '2026-11-10 11:00:00', '2026-11-10 11:00:00', '', 0, 'http://127.0.0.1:8081/?page_id=704', 0, 'page', '', 0);
+
+-- Terms with names that wptexturize changes (quotes, an apostrophe, dashes, an
+-- ellipsis, an ampersand), as WordPress stores them (a name keeps its quotes
+-- and apostrophes, and an ampersand is an entity), each on post 702, and a
+-- post format term.
+INSERT INTO wp_terms (term_id, name, slug, term_group) VALUES
+  (721, 'Arts &amp; "Culture"', 'arts-culture', 0), (722, 'Rock ''n'' roll -- 2020 --- wait...', 'rock-n-roll', 0),
+  (723, 'sigma "quoted"', 'sigma', 0), (724, 'It''s 5 x 5 (c) - done', 'its', 0),
+  (725, 'Aside "quoted"', 'post-format-aside', 0);
+INSERT INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES
+  (721, 721, 'category', '', 0, 1), (722, 722, 'category', '', 0, 1),
+  (723, 723, 'post_tag', '', 0, 1), (724, 724, 'post_tag', '', 0, 1),
+  (725, 725, 'post_format', '', 0, 1);
+INSERT INTO wp_term_relationships (object_id, term_taxonomy_id, term_order) VALUES
+  (702, 721, 0), (702, 722, 0), (702, 723, 0), (702, 724, 0), (702, 725, 0);
+DELETE FROM wp_options WHERE option_name = 'category_children';

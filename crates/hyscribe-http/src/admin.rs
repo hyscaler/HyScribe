@@ -50,6 +50,7 @@ use hyscribe_phpser::{
 };
 use hyscribe_render::comment_author_of;
 use hyscribe_render::date::Zone;
+use hyscribe_render::permalinks::home_path;
 use hyscribe_render::site::{Archive, Site as RenderSite, Taxonomy};
 use tokio::runtime::Handle;
 
@@ -86,11 +87,19 @@ pub(crate) async fn respond(
 ) -> Response {
     let site = Arc::clone(site);
     let (now, handle) = (now(), Handle::current());
+    // `$_SERVER['REQUEST_URI']` has the site's folder, which `uri` lacks.
+    let siteurl = site.option("siteurl");
+    let folder = home_path(&siteurl).trim_end_matches('/');
+    let request_uri = format!(
+        "{folder}{}",
+        uri.path_and_query().map_or("", |p| p.as_str())
+    );
     joined(
         tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
             let ip = crate::comment_post::client_addr(&site, &headers, peer);
             let asked = Asking {
                 uri: &uri,
+                request_uri: &request_uri,
                 headers: &headers,
                 post,
                 form: form.as_ref(),
@@ -105,7 +114,10 @@ pub(crate) async fn respond(
 
 /// An admin request as read.
 struct Asking<'a> {
+    /// The path below the site's folder and the query: what routes.
     uri: &'a Uri,
+    /// `$_SERVER['REQUEST_URI']`: `uri` under the site's folder.
+    request_uri: &'a str,
     headers: &'a HeaderMap,
     post: bool,
     form: Option<&'a Value>,
@@ -1898,11 +1910,7 @@ fn ajax_answer(
     let expiration = valid.and_then(hyscribe_auth::cookie::parse_auth_cookie);
     let expiration = expiration.map_or(0, |c| Value::String(c.expiration.to_vec()).to_int());
     let get = parse_str(asking.uri.query().unwrap_or_default().as_bytes());
-    let uri = asking
-        .uri
-        .path_and_query()
-        .map_or("", |p| p.as_str())
-        .as_bytes();
+    let uri = asking.request_uri.as_bytes();
     let id = user.as_ref().map_or(0, |(id, _)| *id);
     let asked = action_request(site, asking, &get, uri, (id, reads.now));
     let checked = match user {
@@ -1974,7 +1982,7 @@ fn answer(site: &Site, asking: &Asking, now: i64, handle: Handle) -> Response {
         .get(header::HOST)
         .map_or(&b""[..], HeaderValue::as_bytes);
     // `wp_magic_quotes()` slashes `$_SERVER['REQUEST_URI']` too.
-    let raw_uri = uri.path_and_query().map_or("", |p| p.as_str());
+    let raw_uri = asking.request_uri;
     let requested = addslashes(raw_uri.as_bytes());
     let requested = String::from_utf8_lossy(&requested).into_owned();
     let here = [host, requested.as_bytes()].concat();

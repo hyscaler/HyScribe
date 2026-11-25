@@ -66,7 +66,7 @@ fn matches_getid3() {
 }
 
 /// How many golden files are read.
-const READ: usize = 659;
+const READ: usize = 673;
 
 /// A WAVE file of `size` bytes of 8 bit mono samples.
 fn wave(size: usize) -> Vec<u8> {

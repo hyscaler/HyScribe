@@ -82,12 +82,11 @@ fn zero(n: Option<Num>) -> bool {
     n.is_none_or(|n| n.float() == 0.0)
 }
 
-/// A number of the audio array.
-fn number(value: &Value) -> Option<Num> {
+/// A number of the audio array, which holds no other values where read.
+fn number(value: &Value) -> Num {
     match value {
-        Value::Int(n) => Some(Num::Int(*n)),
-        Value::Float(f) => Some(Num::Float(f.to_f64())),
-        _ => None,
+        Value::Float(f) => Num::Float(f.to_f64()),
+        value => Num::Int(value.to_int()),
     }
 }
 
@@ -242,15 +241,14 @@ impl Movie<'_> {
             .0
             .iter()
             .find(|(k, _)| *k == key(name))
-            .and_then(|(_, v)| number(v))
+            .map(|(_, v)| number(v))
     }
 
     fn audio_empty(&self, name: &str) -> bool {
         let found = self.audio.0.iter().find(|(k, _)| *k == key(name));
         found.is_none_or(|(_, value)| match value {
             Value::String(s) => is_empty_string(s),
-            Value::Bool(b) => !b,
-            value => zero(number(value)),
+            value => zero(Some(number(value))),
         })
     }
 
@@ -686,12 +684,11 @@ impl Movie<'_> {
     /// `ChannelsBitratePlaytimeCalculations()`,
     /// `CalculateCompressionRatioAudio()` and `CleanUp()` of the audio.
     fn sums(&mut self) {
-        if self.audio_empty("channelmode") {
-            match self.audio_number("channels") {
-                Some(Num::Int(1)) => self.audio.set("channelmode", text("mono")),
-                Some(Num::Int(2)) => self.audio.set("channelmode", text("stereo")),
-                _ => {}
-            }
+        // No channel mode is set before.
+        match self.audio_number("channels") {
+            Some(Num::Int(1)) => self.audio.set("channelmode", text("mono")),
+            Some(Num::Int(2)) => self.audio.set("channelmode", text("stereo")),
+            _ => {}
         }
         let audio_bitrate = self.audio_number("bitrate");
         let video_bitrate = self.video.as_ref().and_then(|video| video.bitrate);

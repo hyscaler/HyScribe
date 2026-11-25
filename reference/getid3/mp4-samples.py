@@ -248,7 +248,8 @@ put('mov-no-ftyp.mov', moov(MOV_VIDEO) + mdat())
 put('mov-wide-first.mov', atom(b'wide') + mdat() + moov(MOV_VIDEO))
 
 # Codecs of the sample description.
-for fourcc in (b'hvc1', b'hev1', b'mp4v', b'jpeg', b'SVQ3', b'SVQ1', b'v210', b'2vuY', b'rle ', b'h263', b'raw ', b'cvid', b'xvid', b'divx', b'3iv2', b'mp4s', b'zzzz'):
+for fourcc in (b'hvc1', b'hev1', b'mp4v', b'jpeg', b'SVQ3', b'SVQ1', b'v210', b'2vuY', b'rle ', b'h263', b'raw ', b'cvid', b'xvid', b'divx', b'3iv2', b'mp4s', b'zzzz',
+               b'dvc ', b'dvcp', b'gif ', b'kpcd', b'mjpa', b'mjpb', b'png ', b'rpza', b'smc ', b'tiff', b'yuv2'):
     put('codec-%s.mp4' % fourcc.decode().strip(), movie(video(entry=visual(fourcc))))
 put('codec-mp4v-audio.mp4', movie(video(entry=visual(b'mp4v')), A))
 put('codec-mp4s-vendor.mov', movie(video(entry=visual(b'mp4s', vendor=b'FFMP')), brand=QT))
@@ -263,6 +264,7 @@ put('codec-no-bits.m4a', movie(audio(1, sound(bits=0))))
 put('codec-odd-rate.m4a', movie(audio(1, sound(rate=22050.5))))
 put('codec-two-entries.mp4', movie(video(entry=stsd(visual(), visual(b'hvc1', 320, 240)))))
 put('codec-no-entries.mp4', movie(video(entry=stsd())))
+put('codec-short-zero-vendor.mp4', movie(video(entry=stsd(be32(28) + b'avc1' + bytes(6) + be16(1) + bytes(12)))))
 put('codec-short-entry.mp4', movie(video(entry=stsd(be32(12) + b'avc1' + bytes(4)))))
 put('codec-entries-overclaim.mp4', movie(video(entry=stsd(visual(), count=3))))
 put('codec-entries-huge.mp4', movie(video(entry=stsd(visual(), count=0x01000001))))
@@ -285,6 +287,7 @@ put('esds-outside.mp4', movie(V, extra=atom(b'esds', esds()[8:])))
 for name, scale, duration in (('exact', 1000, 3000), ('fraction', 1000, 2345), ('long', 600, 600 * 3725),
                               ('zero', 1000, 0), ('half', 1000, 1500), ('tiny', 90000, 1)):
     put('mvhd-%s.mp4' % name, movie(V, A, head=mvhd(scale, duration)))
+put('mvhd-one-second.mp4', movie(V, audio(entry=sound(children=esds(1000))), head=mvhd(1000, 1000)))
 put('mvhd-zero-scale.mp4', movie(V, head=mvhd(0, 1000)))
 put('mvhd-v1.mp4', movie(V, head=atom(b'mvhd', full(1), struct.pack('>QQIQ', 0, 0, 1000, 2000), bytes(80))))
 put('mvhd-short.mp4', movie(V, head=atom(b'mvhd', full(), be32(0), be32(0), be32(1000))))
@@ -385,12 +388,14 @@ whole = movie(V, A)
 put('size-cut-mdat.mp4', (ftyp() + mdat() + moov(V, A))[:len(ftyp()) + 700])
 put('size-cut-moov.mp4', whole[:-40])
 put('size-cut-first.mp4', movie(V, A, first=True)[:-100])
+put('size-cut-mpeg4.mp4', movie(video(entry=visual(b'mp4v')), A, first=True)[:-100])
 put('size-past-end.mp4', ftyp() + mdat() + moov(V)[:4] + b'moox' + moov(V)[8:] + be32(0x7fffffff) + b'free')
 put('size-sub-zero.mp4', ftyp() + mdat() + atom(b'moov', mvhd(), bytes(4), V))
 put('size-sub-zero-end.mp4', ftyp() + mdat() + atom(b'moov', mvhd(), V, bytes(4)))
 put('size-sub-tiny.mp4', ftyp() + mdat() + atom(b'moov', mvhd(), be32(4) + b'free', V))
 put('size-sub-past.mp4', ftyp() + mdat() + atom(b'moov', mvhd(), V, be32(400) + b'free' + bytes(20)))
 put('size-moov-four-zeros.mp4', ftyp() + mdat() + atom(b'moov', bytes(4)))
+put('size-moov-eight-zeros.mp4', ftyp() + mdat() + atom(b'moov', bytes(8)))
 put('size-moov-empty.mp4', ftyp() + mdat() + atom(b'moov'))
 
 # Media data: the shapes getID3 reads as chapter titles or an MPEG stream.

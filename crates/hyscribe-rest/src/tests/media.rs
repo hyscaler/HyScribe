@@ -116,6 +116,62 @@ fn image_sizes_are_registered() {
     );
 }
 
+/// Embedding what is not ported answers 501, enveloped or not, and a list
+/// with the post too: a private featured image whose caption renders a
+/// login link. A visitor, who may not see it, gets the post.
+#[test]
+fn embedding_what_is_not_ported() {
+    let sql = include_str!("../../../../reference/rest/media.sql").replace(
+        "(9151,9101,'_thumbnail_id','9140')",
+        "(9151,9101,'_thumbnail_id','9157')",
+    );
+    let mut rows = site::default_install().rows.clone();
+    rows.extend(hyscribe_testkit::Dump::parse(sql.as_bytes()).unwrap().rows);
+    let state = Box::leak(Box::new(hyscribe_testkit::Dump { rows }));
+    let oracle = Oracle {
+        role: "administrator",
+        fixture: site::Fixture {
+            ttd: false,
+            pretty: false,
+            extra: false,
+            state: Some(state),
+        },
+        deny: &[],
+    };
+    let get = |who: &str, route: &str, query: &str| {
+        let get = hyscribe_phpser::parse_str(query.as_bytes());
+        let user = u64::from(who == "administrator");
+        let request = crate::Request {
+            method: "GET",
+            route: route.as_bytes(),
+            uri: b"/",
+            get: get.as_array().unwrap_or_default(),
+            post: &[],
+            cookie_user: user,
+            origin: None,
+            nonce: (user != 0).then_some(b"%nonce%"),
+            remote_addr: b"",
+            postpass: false,
+            user_agent: None,
+            method_override: None,
+            content_type: None,
+            body: b"",
+            host: None,
+            now: 0,
+        };
+        crate::serve(&oracle, &request).status
+    };
+    let requests = [
+        ("/wp/v2/posts/9101", "_embed"),
+        ("/wp/v2/posts/9101", "_embed=wp:featuredmedia&_envelope"),
+        ("/wp/v2/posts", "author=702&_embed"),
+    ];
+    for (route, query) in requests {
+        assert_eq!(get("administrator", route, query), 501, "{route} {query}");
+    }
+    assert_eq!(get("visitor", "/wp/v2/posts/9101", "_embed"), 200);
+}
+
 /// Only the post routes' own regexes are theirs.
 #[test]
 fn revisions_routes_are_their_own() {

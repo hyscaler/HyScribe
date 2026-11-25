@@ -1,7 +1,7 @@
 # Reviewed gitleaks findings that are not secrets. One fingerprint per line.
 # .env.example: the empty DB_PASSWORD= line, matched together with the next line.
 7f86623609eded185cf93c5749a85871e88e0b7d:.env.example:generic-api-key:9
-# Reviewed 2026-11-19 (CI): the keys of the confirm-action and
+# Reviewed 2026-11-19: the keys of the confirm-action and
 # lost-password cases and goldens and of two login tests are made-up test values,
 # crates/hyscribe-fetch/tests/tls/leaf-key.pem is a throwaway test key, and
 # .env.example holds an empty password.

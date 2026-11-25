@@ -114,24 +114,19 @@ pub(crate) fn release_url(version: &str) -> String {
     format!("https://github.com/hyscaler/HyScribe/releases/tag/v{version}")
 }
 
-/// The host and port of a URL, as `wp_parse_url()` finds them.
-fn domain(url: &str) -> &str {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    authority.rsplit('@').next().unwrap_or_default()
-}
-
 /// The `mailto:` link asking for porting help, as an escaped attribute: the
 /// subject names the site's domain, the body its home URL and HyScribe's
 /// version (RFC 6068, line breaks as `%0D%0A`).
 pub(crate) fn porting_mailto(home_url: &str, version: &str) -> String {
     let encode = |text: &str| String::from_utf8_lossy(&rawurlencode(text.as_bytes())).into_owned();
+    let domain = hyscribe_render::link::host(home_url.as_bytes());
+    let domain = String::from_utf8_lossy(&domain);
     let body = format!(
         "Site: {home_url}\r\nHyScribe version: {version}\r\n\r\nWhat I need help with:\r\n"
     );
     format!(
         "mailto:{CONTACT}?subject={}&amp;body={}",
-        encode(&format!("Porting help for {}", domain(home_url))),
+        encode(&format!("Porting help for {domain}")),
         encode(&body)
     )
 }
@@ -234,14 +229,18 @@ mod tests {
 
     #[test]
     fn the_domain_is_the_host_alone() {
-        for (url, domain) in [
-            ("https://user:pw@example.com/a?b#c", "example.com"),
-            ("https://example.com?x=1", "example.com"),
-            ("example.com/x", "example.com"),
-            ("https://b\u{fc}cher.example/", "b\u{fc}cher.example"),
-            ("", ""),
+        // A URL with no scheme has no host, as to `wp_parse_url()`.
+        for (url, subject) in [
+            (
+                "https://user:pw@example.com/a?b#c",
+                "for%20example.com&amp;",
+            ),
+            ("https://example.com?x=1", "for%20example.com&amp;"),
+            ("example.com/x", "for%20&amp;"),
+            ("", "for%20&amp;"),
         ] {
-            assert_eq!(super::domain(url), domain, "{url}");
+            let link = porting_mailto(url, "0.1.0");
+            assert!(link.contains(subject), "{url}: {link}");
         }
         let link = porting_mailto("https://b\u{fc}cher.example/a&b c", "0.1.0");
         assert!(link.contains("for%20b%C3%BCcher.example&amp;body="));

@@ -2302,12 +2302,12 @@ impl Paging {
 
 /// `single_post_title()`: the title through its filters.
 fn single_post_title(post: &Post) -> String {
-    lossy(&strip_tags(&wptexturize(&post.title, &CORE_SHORTCODE_TAGS)))
+    term_title(&post.title)
 }
 
 /// `single_term_title()`: a category's or a tag's name through the
 /// `single_cat_title` and `single_tag_title` filters (`wptexturize()` and
-/// `strip_tags()`). A post format's name has no filter, and is a plain word
+/// `strip_tags()`), the filters `single_post_title` has too. A post format's name has no filter, and is a plain word
 /// they leave as it is.
 fn term_title(name: &[u8]) -> String {
     lossy(&strip_tags(&wptexturize(name, &CORE_SHORTCODE_TAGS)))

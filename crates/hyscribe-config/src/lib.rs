@@ -270,8 +270,8 @@ pub struct Config {
     /// answers 503 and rolls back its write. Default 30.
     pub request_time_limit: u32,
     /// `RSS_ALLOWED_HOSTS`: the hosts the RSS block may fetch feeds from,
-    /// comma separated, lower case; none by default (the decision
-    /// of 2026-11-10).
+    /// comma separated, lower case; none by default (decided
+    /// 2026-11-10).
     pub rss_allowed_hosts: Vec<String>,
     /// `EMBED_ALLOWED_HOSTS`: where embeds may fetch from.
     pub embed_allowed: EmbedAllowed,

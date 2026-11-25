@@ -3,7 +3,7 @@ Copyright (c) 2026 HyScaler and the HyScribe contributors.
 
 HyScribe is developed and supported by HyScaler (https://hyscaler.com).
 
-HyScaler is a registered trademark of NetTantra Technologies (India) Private Limited, licensed to JABASU Inc. HyScaler is the name under which NetTantra Technologies (India) Private Limited does business in India and JABASU Inc. does business in the United States. HyScribe is a trademark of HyScaler. In this notice and throughout HyScribe's files, "HyScaler" refers to NetTantra Technologies (India) Private Limited.
+HyScaler is a registered trademark of NetTantra Technologies (India) Private Limited, and the name under which it does business. HyScribe is a trademark of HyScaler. In this notice and throughout HyScribe's files, "HyScaler" refers to NetTantra Technologies (India) Private Limited.
 
 HyScribe is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version (see LICENSE). SPDX-License-Identifier: AGPL-3.0-or-later. The extension SDK crates are licensed Apache-2.0 OR MIT (see their own licence files). HyScribe is distributed WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 

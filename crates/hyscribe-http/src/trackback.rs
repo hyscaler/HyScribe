@@ -33,7 +33,7 @@ pub(crate) async fn outcome(
     uri: &Uri,
     query: &HashMap<String, String>,
 ) -> Result<Outcome, DbError> {
-    let (singular, status) = match route(site, "/", uri.query(), query).await? {
+    let (singular, status) = match route(site, "/", uri.query(), query, None).await? {
         Outcome::Page(page) | Outcome::Feed(page, _) => (singular(&page.request), page.status),
         _ => (None, StatusCode::NOT_FOUND),
     };

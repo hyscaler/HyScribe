@@ -432,8 +432,10 @@ fn replacing_nothing_keeps_the_subject() {
 fn sites_without_user_data_have_no_users() {
     assert_eq!(DefaultInstall.user(1), None);
     let post = hyscribe_model::Post::default();
-    assert_eq!(DefaultInstall.adjacent_post(&post, true, None), None);
+    assert_eq!(DefaultInstall.adjacent_post(&post, true, None, &[]), None);
     assert!(DefaultInstall.comments(1).is_empty());
+    // Nor anyone who may read what is not public.
+    assert!(!DefaultInstall.can_read_post(1));
 }
 
 /// Every case of `reference/details/golden.sh`: images of a details block

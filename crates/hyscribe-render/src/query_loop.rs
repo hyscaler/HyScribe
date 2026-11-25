@@ -230,6 +230,9 @@ pub(crate) fn query_vars(context: &Context<'_>, query: &Value, page: i64) -> Pos
         )) as u32,
         ..PostQuery::default()
     };
+    let viewer = site.viewer();
+    vars.statuses = viewer.statuses(&vars.post_types);
+    vars.logged_in = viewer.user != 0;
     let sticky = || sticky_posts(&site.option("sticky_posts").unwrap_or_default());
     let ignore_sticky = match field("sticky")
         .filter(|v| !v.is_empty())

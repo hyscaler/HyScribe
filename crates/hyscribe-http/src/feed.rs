@@ -179,12 +179,13 @@ async fn listed(site: &Site, of: Option<CommentsOf>) -> Result<Option<Comments>,
     })
 }
 
-/// The feed of `page`, or 304 when the client's copy is current.
+/// The feed of `page` as `viewer`, the logged in user, reads it, or 304
+/// when the client's copy is current.
 pub(crate) async fn respond(
     site: Arc<Site>,
     page: Page,
     feed: Feed,
-    headers: &HeaderMap,
+    (headers, viewer): (&HeaderMap, Option<Arc<crate::viewer::Viewer>>),
 ) -> Response {
     let changed = match &feed.comments {
         Some(comments) => feed.last_post.clone().max(comments.last.clone()),
@@ -218,7 +219,8 @@ pub(crate) async fn respond(
     let rendering = Arc::clone(&site);
     let Page { request, title, .. } = page;
     let body = tokio::task::spawn_blocking(hyscribe_model::hooks::carry(move || {
-        let reads = Reads::new(&rendering, tokio::runtime::Handle::current());
+        let mut reads = Reads::new(&rendering, tokio::runtime::Handle::current());
+        reads.read_as(viewer);
         let last = feed.last_post.as_deref();
         let (theme, title) = (&rendering.theme, title.as_bytes());
         // RDF and RSS 0.92 list the query's posts, comment feed or not.

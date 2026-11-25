@@ -12,7 +12,7 @@ use std::future::Future;
 
 use hyscribe_db::DbError;
 use hyscribe_model::{
-    CalendarMonth, Comment, DateCount, Period, Post, PostQuery, Term, TermQuery, User,
+    CalendarMonth, Comment, DateCount, Period, Post, PostQuery, StatusFilter, Term, TermQuery, User,
 };
 use hyscribe_phpser::Value;
 use hyscribe_render::outbound::{Get, Response};
@@ -39,6 +39,8 @@ pub(crate) struct Reads<'a> {
     term: ByPost<Option<Term>>,
     meta: ByPost<Option<Vec<u8>>>,
     date_counts: RefCell<HashMap<Period, Vec<DateCount>>>,
+    /// The logged in user the page is for, none for a visitor.
+    viewer: Option<std::sync::Arc<crate::viewer::Viewer>>,
 }
 
 impl<'a> Reads<'a> {
@@ -56,7 +58,13 @@ impl<'a> Reads<'a> {
             term: RefCell::default(),
             meta: RefCell::default(),
             date_counts: RefCell::default(),
+            viewer: None,
         }
+    }
+
+    /// Reads as `viewer`, for capability checks.
+    pub(crate) fn read_as(&mut self, viewer: Option<std::sync::Arc<crate::viewer::Viewer>>) {
+        self.viewer = viewer;
     }
 
     /// The first database error a read met, if any.
@@ -179,6 +187,18 @@ impl RenderSite for Reads<'_> {
         self.memo(&self.posts, id, || self.wait(self.site.db.post(id)))
     }
 
+    fn viewer(&self) -> hyscribe_model::Viewer {
+        let seen = |viewer: &crate::viewer::Viewer| viewer.seen.clone();
+        self.viewer.as_deref().map(seen).unwrap_or_default()
+    }
+
+    fn can_read_post(&self, id: u64) -> bool {
+        let can = |viewer: &crate::viewer::Viewer| {
+            viewer.can_now(self.site, self.handle.clone(), "read_post", id)
+        };
+        self.viewer.as_deref().is_some_and(can)
+    }
+
     fn post_terms(&self, post_id: u64, taxonomy: &str) -> Vec<Term> {
         self.memo(&self.terms, (post_id, taxonomy.to_string()), || {
             self.wait(self.site.db.post_terms(post_id, taxonomy))
@@ -208,8 +228,9 @@ impl RenderSite for Reads<'_> {
         post: &Post,
         previous: bool,
         terms: Option<(&str, &[u64])>,
+        statuses: &[StatusFilter],
     ) -> Option<Post> {
-        self.wait(self.site.db.adjacent_post(post, previous, terms))
+        self.wait(self.site.db.adjacent_post(post, previous, terms, statuses))
     }
 
     fn comments(&self, post_id: u64) -> Vec<Comment> {

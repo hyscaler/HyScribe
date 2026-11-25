@@ -577,7 +577,7 @@ async fn every_query() -> Vec<DbError> {
         db.older_comments(1, "").await.unwrap_err(),
         db.held_comments(1, b"e", None).await.unwrap_err(),
         db.comment(1).await.unwrap_err(),
-        db.adjacent_post(&Post::default(), true, None)
+        db.adjacent_post(&Post::default(), true, None, &[])
             .await
             .unwrap_err(),
         db.feed_comments(None, 1).await.unwrap_err(),
@@ -726,6 +726,28 @@ fn order_follows_the_query() {
         ..PostQuery::default()
     };
     assert!(!posts_sql(&logged_in).text.contains("post_password = ''"));
+    // A status of one type, and of one author.
+    let typed = StatusFilter {
+        status: "private".into(),
+        author: Some(7),
+        post_type: Some("page".into()),
+    };
+    let sql = posts_sql(&PostQuery {
+        statuses: vec![typed.clone()],
+        ..PostQuery::default()
+    });
+    assert!(
+        sql.text.starts_with(
+            &select_posts(
+                " FROM {prefix}posts WHERE (post_type = ? AND post_author = ? AND post_status = ?) "
+            )
+            .text
+        )
+    );
+    let adjacent = adjacent_sql(&Post::default(), true, None, &[typed]);
+    assert!(adjacent.text.contains(
+        "AND p.post_type = ? AND (post_type = ? AND post_author = ? AND post_status = ?) ORDER BY"
+    ));
     assert!(
         !posts_sql(&PostQuery::default())
             .text
@@ -1048,54 +1070,55 @@ async fn adjacent_posts() {
     let later = at("2099-01-01 00:00:00", 999, "post");
     let earlier = at("2000-01-01 00:00:00", 999, "post");
     assert_eq!(
-        title(db.adjacent_post(&later, true, None).await.unwrap()).as_deref(),
+        title(db.adjacent_post(&later, true, None, &[]).await.unwrap()).as_deref(),
         Some("Hello world!")
     );
     assert_eq!(
-        title(db.adjacent_post(&later, false, None).await.unwrap()),
+        title(db.adjacent_post(&later, false, None, &[]).await.unwrap()),
         None
     );
     assert_eq!(
-        title(db.adjacent_post(&earlier, false, None).await.unwrap()).as_deref(),
+        title(db.adjacent_post(&earlier, false, None, &[]).await.unwrap()).as_deref(),
         Some("Hello world!")
     );
     assert_eq!(
-        title(db.adjacent_post(&earlier, true, None).await.unwrap()),
+        title(db.adjacent_post(&earlier, true, None, &[]).await.unwrap()),
         None
     );
     // The same date breaks ties by ID.
     let same_date = |id| at(&hello.date, id, "post");
     assert!(
-        db.adjacent_post(&same_date(2), true, None)
+        db.adjacent_post(&same_date(2), true, None, &[])
             .await
             .unwrap()
             .is_some()
     );
     assert!(
-        db.adjacent_post(&same_date(1), true, None)
+        db.adjacent_post(&same_date(1), true, None, &[])
             .await
             .unwrap()
             .is_none()
     );
     assert!(
-        db.adjacent_post(&same_date(0), false, None)
+        db.adjacent_post(&same_date(0), false, None, &[])
             .await
             .unwrap()
             .is_some()
     );
     // Only the post's type, published, sharing a term when asked.
     assert_eq!(
-        db.adjacent_post(&at("2099-01-01 00:00:00", 999, "page"), true, None)
+        db.adjacent_post(&at("2099-01-01 00:00:00", 999, "page"), true, None, &[])
             .await
             .unwrap()
             .map(|p| p.id),
         Some(2)
     );
-    let in_terms = |ids: &'static [u64]| db.adjacent_post(&later, true, Some(("category", ids)));
+    let in_terms =
+        |ids: &'static [u64]| db.adjacent_post(&later, true, Some(("category", ids)), &[]);
     assert!(in_terms(&[1]).await.unwrap().is_some());
     assert!(in_terms(&[99]).await.unwrap().is_none());
     assert!(
-        db.adjacent_post(&later, true, Some(("post_tag", &[1])))
+        db.adjacent_post(&later, true, Some(("post_tag", &[1])), &[])
             .await
             .unwrap()
             .is_none()
@@ -1381,15 +1404,26 @@ async fn sticky_posts_come_first_and_formats_filter() {
 #[tokio::test]
 async fn attachments_by_name() {
     let db = named("wordpress_ttd").await;
-    let found = db.attachment_by_name("canola2").await.unwrap().unwrap();
+    let found = db
+        .newest_by_name("canola2", "attachment")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!((found.id, found.post_type.as_str()), (611, "attachment"));
     assert!(
-        db.attachment_by_name("hello-world")
+        db.newest_by_name("hello-world", "attachment")
             .await
             .unwrap()
             .is_none()
     );
-    assert!(db.attachment_by_name("no-such").await.unwrap().is_none());
+    assert!(
+        db.newest_by_name("no-such", "attachment")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let post = db.newest_by_name("hello-world", "post").await.unwrap();
+    assert_eq!(post.map(|p| p.id), Some(1));
 }
 
 #[tokio::test]
@@ -1850,6 +1884,7 @@ async fn posts_list_reads() {
             .map(|status| StatusFilter {
                 status: (*status).into(),
                 author: None,
+                post_type: None,
             })
             .collect(),
         limit: 100,
@@ -1861,6 +1896,7 @@ async fn posts_list_reads() {
         statuses: vec![StatusFilter {
             status: "draft".into(),
             author,
+            post_type: None,
         }],
         limit: 5,
         ..PostQuery::default()
@@ -1973,6 +2009,7 @@ async fn attachments_by_type_and_file() {
             statuses: vec![StatusFilter {
                 status: "inherit".into(),
                 author: None,
+                post_type: None,
             }],
             mime_types: mime_types.iter().map(|t| t.to_string()).collect(),
             search: search.iter().map(|t| t.to_string()).collect(),
@@ -2000,6 +2037,7 @@ async fn rest_post_filters() {
     let status = |name: &str| StatusFilter {
         status: name.into(),
         author: None,
+        post_type: None,
     };
     let pages = || PostQuery {
         post_types: vec!["page".into()],

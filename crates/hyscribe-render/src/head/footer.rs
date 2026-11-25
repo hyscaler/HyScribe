@@ -168,9 +168,10 @@ pub(crate) fn mediaelement_scripts(siteurl: &str, scripts: &[String]) -> Vec<u8>
 }
 
 /// `wp_print_speculation_rules()`: conservative prefetching of the site's
-/// own pages, which WordPress turns on only under pretty permalinks.
+/// own pages, which WordPress turns on only under pretty permalinks and
+/// for a visitor.
 fn speculation_rules(site: &dyn Site, siteurl: &str) -> Vec<u8> {
-    if !crate::permalinks::Permalinks::of(site).pretty() {
+    if !crate::permalinks::Permalinks::of(site).pretty() || site.viewer().user != 0 {
         return Vec::new();
     }
     let path = |url: &str| escape_pattern(crate::permalinks::home_path(url));

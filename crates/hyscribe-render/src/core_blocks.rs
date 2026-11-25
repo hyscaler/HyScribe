@@ -5,7 +5,7 @@
 //! `prepare_attributes_for_render()` leaves them.
 
 use hyscribe_kses::{esc_attr, esc_html, esc_url, esc_url_protocols, url_host, url_scheme};
-use hyscribe_model::{Comment, Post, User};
+use hyscribe_model::{Comment, Post, StatusFilter, User};
 use hyscribe_phpser::{Key, Value, add_query_arg, is_empty_string, isset, php_trim, urlencode};
 
 use crate::autop::wpautop;
@@ -211,14 +211,24 @@ impl Block<'_> {
 }
 
 impl Context<'_> {
-    /// The post in the `postId` context.
+    /// The post in the `postId` context: outside a query block, the main
+    /// query's own post object, which a preview changes.
     pub(crate) fn post(&self) -> Option<Post> {
-        self.post_id.and_then(|id| self.site.post(id))
+        let id = self.post_id?;
+        let held = self.held(id).filter(|_| self.query.is_none());
+        held.or_else(|| self.site.post(id))
     }
 
     /// The global post: the main query's.
     pub(crate) fn global_post(&self) -> Option<Post> {
-        self.request.post.and_then(|id| self.site.post(id))
+        let id = self.request.post?;
+        self.held(id).or_else(|| self.site.post(id))
+    }
+
+    /// The singular main query's post object, if it is post `id`.
+    fn held(&self, id: u64) -> Option<Post> {
+        let main = self.request.posts.first().filter(|_| self.request.singular);
+        main.filter(|post| post.id == id).cloned()
     }
 
     /// `get_permalink( $post )`.
@@ -954,7 +964,9 @@ fn adjacent_post(
     taxonomy: Option<&[u8]>,
 ) -> Option<Post> {
     let Some(taxonomy) = taxonomy else {
-        return context.site.adjacent_post(post, previous, None);
+        return context
+            .site
+            .adjacent_post(post, previous, None, &readable(context, post));
     };
     let taxonomy = String::from_utf8_lossy(taxonomy);
     // taxonomy_exists() and is_object_in_taxonomy()
@@ -991,9 +1003,21 @@ fn same_terms(context: &Context<'_>, post: &Post, previous: bool, taxonomy: &str
     if ids.is_empty() {
         return None;
     }
+    context.site.adjacent_post(
+        post,
+        previous,
+        Some((taxonomy, &ids)),
+        &readable(context, post),
+    )
+}
+
+/// The statuses `get_adjacent_post()` looks in for the current user: the
+/// published posts of `post`'s type, and its private ones they may read.
+fn readable(context: &Context<'_>, post: &Post) -> Vec<StatusFilter> {
     context
         .site
-        .adjacent_post(post, previous, Some((taxonomy, &ids)))
+        .viewer()
+        .statuses(std::slice::from_ref(&post.post_type))
 }
 
 /// `render_block_core_post_terms()`: the post's terms in a taxonomy that
@@ -1247,11 +1271,13 @@ fn post_title(context: &Context<'_>, block: &Block<'_>) -> Vec<u8> {
     )
 }
 
-/// The post, if public and without a password, as a visitor may read it:
+/// The post, if public or the user may read it, and without a password:
 /// an attachment is as public as its parent (`get_post_status()`).
 pub(crate) fn public(site: &dyn Site, post: Option<Post>) -> Option<Post> {
     post.filter(|post| {
-        post.password.is_empty() && crate::attachment::post_status(site, post) == "publish"
+        post.password.is_empty()
+            && (crate::attachment::post_status(site, post) == "publish"
+                || site.can_read_post(post.id))
     })
 }
 

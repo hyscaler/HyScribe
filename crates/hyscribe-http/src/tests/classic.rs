@@ -77,7 +77,7 @@ pub(crate) async fn page_of(
         return None;
     }
     let (asked, query) = pretty_request(site, uri.clone(), query).await.unwrap();
-    let Ok((Outcome::Page(page), _)) = outcome(site, (&asked, &uri), &query).await else {
+    let Ok((Outcome::Page(page), _)) = outcome(site, (&asked, &uri), &query, None).await else {
         return None;
     };
     // The query vars and the request as the front end sets them.

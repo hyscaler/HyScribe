@@ -427,6 +427,7 @@ fn statuses(params: &Params) -> Vec<StatusFilter> {
     let status = |name: &str| StatusFilter {
         status: name.into(),
         author: None,
+        post_type: None,
     };
     if asked.iter().any(|name| name == b"any") {
         return STATUSES

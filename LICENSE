@@ -1,47 +1,4 @@
-HyScribe - a drop-in replacement for WordPress, written in Rust
-
-Copyright 2026 HyScaler and the HyScribe contributors
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-The attribution HyScribe asks copies to keep, the trademark notice and
-the third-party notices are in the NOTICE file.
-
-This program incorporates work covered by the following copyright and
-permission notices:
-
-  WordPress - Web publishing software
-
-  Copyright 2011-2026 by the contributors
-
-  WordPress is released under the GPL
-
-and
-
-  b2 is (c) 2001, 2002 Michel Valdrighi - Cafelog
-
-  Wherever third party code has been used, credit has been given in the code's
-  comments.
-
-  b2 is released under the GPL
-
-and
-
-  WordPress - Web publishing software
-
-  Copyright 2003-2010 by the contributors
-
-  WordPress is released under the GPL
-
-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+Copyright (c) 2026 HyScaler and the HyScribe contributors. HyScribe is licensed under the GNU Affero General Public License below, version 3 or (at your option) any later version; see the NOTICE file for the attribution, trademark and third-party notices.
 
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007

@@ -3027,6 +3027,7 @@ async fn the_site_health_info_tab() {
 
 mod clean_urls;
 mod comment_saves;
+mod folder;
 mod list_search;
 mod passwords;
 mod revisions;

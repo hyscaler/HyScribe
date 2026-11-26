@@ -2,6 +2,14 @@
 
 Dated log of project events and decisions, newest first. Add an entry whenever a decision is made, a milestone changes state, or direction shifts. Link ADRs where they exist.
 
+
+## 2026-11-26: v0.1.0, the first release
+
+- The repository is public and `v0.1.0` is tagged on `main`. The tag's CI run passed all six jobs (checks, package, coverage, the switch-back suite, the screenshot comparison and a short run of all 64 fuzz targets), and the release run built the x86_64 and arm64 archives reproducibly, attested them and published the release with its checksums and SBOM
+- The install commands of the README were run against the published release: the download, the checksum and `gh attestation verify` all pass
+- The licence file carries one line above the licence text, naming the project and pointing to `NOTICE`; `NOTICE` says whose trademarks HyScaler and HyScribe are. `AGENTS.md` now holds the project instructions, with `CLAUDE.md` and `GEMINI.md` as links to it
+- Next for the workflows: chain the CI jobs, and make the release wait for CI
+
 ## 2026-11-25: The open findings of the writes' security review closed (S-12 to S-15)
 
 - The five findings docs/SECURITY_MODEL.md still listed as open were checked again against the code as it is now. Two had changed under their own wording: the extension runtime the first waited for exists, and the claim of the fourth, that no value a request controls reaches a REST header, did not hold

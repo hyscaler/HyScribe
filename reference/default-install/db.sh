@@ -29,7 +29,7 @@ case "${1:-}" in
     version="${2:-7.1.3}"
     dump="$ROOT/fixtures/default-install/$version/database.sql"
     test -f "$dump" || { echo "no fixture for $version" >&2; exit 1; }
-    "$DOCKER" rm -f "$NAME" >/dev/null 2>&1 || true
+    "$DOCKER" rm -fv "$NAME" >/dev/null 2>&1 || true
     "$DOCKER" network inspect "$NETWORK" >/dev/null 2>&1 || "$DOCKER" network create "$NETWORK" >/dev/null
     # The server's Unix socket, for the tests of a socket DB_HOST.
     mkdir -p "$SOCKETS"
@@ -80,7 +80,7 @@ case "${1:-}" in
     echo "default install $version on 127.0.0.1:$PORT (databases wordpress and wordpress_terms$([ -f "$ttd" ] && echo ' and wordpress_ttd'), user wordpress)"
     ;;
   down)
-    "$DOCKER" rm -f "$NAME" >/dev/null
+    "$DOCKER" rm -fv "$NAME" >/dev/null
     "$DOCKER" network rm "$NETWORK" >/dev/null 2>&1 || true
     ;;
   *)

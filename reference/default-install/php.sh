@@ -50,7 +50,7 @@ done
 
 case "${1:-}" in
   up)
-    "$DOCKER" rm -f "$NAME" >/dev/null 2>&1 || true
+    "$DOCKER" rm -fv "$NAME" >/dev/null 2>&1 || true
     "$DOCKER" run -d --name "$NAME" --network "$NETWORK" ${ALIAS[@]+"${ALIAS[@]}"} -p "127.0.0.1:$PORT:80" ${UPLOADS[@]+"${UPLOADS[@]}"} \
       -e WORDPRESS_DB_HOST=db -e WORDPRESS_DB_NAME="$DB_NAME" \
       -e WORDPRESS_DB_USER=wordpress -e WORDPRESS_DB_PASSWORD=reference-only \
@@ -62,7 +62,7 @@ case "${1:-}" in
     echo "PHP WordPress on http://127.0.0.1:$PORT"
     ;;
   down)
-    "$DOCKER" rm -f "$NAME" >/dev/null
+    "$DOCKER" rm -fv "$NAME" >/dev/null
     ;;
   *)
     echo "usage: $0 up | down" >&2

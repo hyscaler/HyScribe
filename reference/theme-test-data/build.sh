@@ -33,7 +33,7 @@ DB_PASSWORD="reference-only"
 WORK=$(mktemp -d)
 
 cleanup() {
-  "$DOCKER" rm -f "$NAME-db" "$NAME-cli" >/dev/null 2>&1 || true
+  "$DOCKER" rm -fv "$NAME-db" "$NAME-cli" >/dev/null 2>&1 || true
   "$DOCKER" network rm "$NAME" >/dev/null 2>&1 || true
   rm -rf "$WORK"
 }

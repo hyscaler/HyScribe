@@ -21,7 +21,7 @@ NAME="hyscribe-ref-$$"
 DB_PASSWORD="reference-only"
 
 cleanup() {
-  "$DOCKER" rm -f "$NAME-db" >/dev/null 2>&1 || true
+  "$DOCKER" rm -fv "$NAME-db" >/dev/null 2>&1 || true
   "$DOCKER" network rm "$NAME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT

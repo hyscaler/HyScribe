@@ -62,7 +62,7 @@ fresh() {
   "$DOCKER" exec -i "$DB" mariadb -uroot -preference-only wordpress < "$HERE/seed.sql"
 }
 cleanup() {
-  "$DOCKER" rm -f "$PHP_NAME" "$HS_NAME" >/dev/null 2>&1 || true
+  "$DOCKER" rm -fv "$PHP_NAME" "$HS_NAME" >/dev/null 2>&1 || true
   "$DB_SH" down >/dev/null 2>&1 || true
   "$DB_SH" up >/dev/null
 }
@@ -108,7 +108,7 @@ if [ -z "$KEEP_PHP" ]; then
   wait_for PHP
   browser /shots/capture.py php "$URL" /shots/screens.list /out/php
   posts php
-  "$DOCKER" rm -f "$PHP_NAME" >/dev/null
+  "$DOCKER" rm -fv "$PHP_NAME" >/dev/null
 fi
 
 echo "HyScribe"
@@ -133,7 +133,7 @@ browser /shots/capture.py hyscribe "$URL" /shots/screens.list /out/hyscribe
 posts hyscribe
 "$DOCKER" logs "$HS_NAME" > "$OUT/hyscribe.log" 2>&1 || true
 "$DOCKER" exec "$HS_NAME" sh -c 'cat /run/hyscribe/logs/hyscribe.log 2>/dev/null' >> "$OUT/hyscribe.log" || true
-"$DOCKER" rm -f "$HS_NAME" >/dev/null
+"$DOCKER" rm -fv "$HS_NAME" >/dev/null
 rm -rf "$OUT/hyscribe-home"
 
 echo "Comparison (report: $OUT/report.html)"

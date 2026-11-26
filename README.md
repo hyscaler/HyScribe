@@ -66,61 +66,6 @@ Legend: ✅ working today, 🚧 in progress, 🔜 coming up, ❌ not supported.
 | Release archives | ✅ | Reproducible static builds for Linux x86_64 and arm64, with checksums, an SBOM and build provenance |
 
 
-### In progress
-
-| Area | Status | Where it stands |
-| --- | --- | --- |
-| Classic themes | 🚧 | The host side is under way (the template hierarchy, the first template tags, the head and footer); the first port, Hello Elementor, is being built as a separate package |
-| Plugins on the extension runtime | 🚧 | Plugins run as sandboxed WebAssembly packages: installing a signed local package, activating and deactivating work; the SDK is at 0.4, with admin pages and the settings API, and no popular plugin is ported yet |
-| Signed packages and the hosted registry | 🚧 | Signing, install by name and the update check are built ([ADR 0024](docs/adr/0024-registry-and-package-signing.md)); they start working once the registry has its keys and address |
-| The rest of hs-admin and the REST API | 🚧 | What is not ported answers `501 Not Implemented` and still works in PHP WordPress on the same database: [docs/operators/not-supported.md](docs/operators/not-supported.md) |
-
-### Not supported
-
-| Area | Status | Note |
-| --- | --- | --- |
-| WordPress's PHP plugins | ❌ | They never run: HyScribe has no PHP runtime. A plugin needs a port to the extension runtime |
-| Multisite | ❌ | Refused at start; planned (M9) |
-| XML-RPC | ❌ | Planned (M9) |
-| Database TLS | ❌ | Not supported yet |
-
-## Roadmap
-
-No dates: each step ships when its checks against PHP WordPress pass. The plan is in [docs/MVP.md](docs/MVP.md) (phases) and [docs/ROADMAP.md](docs/ROADMAP.md) (milestones, with what is done and left in each).
-
-### Coming up
-
-| Order | What | Status |
-| --- | --- | --- |
-| 1 | Classic themes: Hello Elementor, then Twenty Twenty-One with nav menus, widget areas, theme mods and the Customizer | 🚧 |
-| 2 | Installing themes | 🔜 |
-| 3 | The rest of the plugin SDK: uploads, rewrite rules, plugins' own tables (admin pages and the settings API are in SDK 0.4) | 🚧 |
-| 4 | Ports of three reference plugins: Contact Form 7, Yoast SEO, Elementor (its front end, then its editor) | 🔜 |
-| 5 | A security review of the extension runtime, and the MVP's checks rerun with each theme and plugin | 🔜 |
-| 6 | The hosted registry's keys and address, so install by name and update checks work | 🔜 |
-| 7 | The compatibility scanner, `hyscribe doctor` and the new site installer | 🔜 |
-| 8 | Agent porting of WordPress plugins and themes, with a public registry of ports | 🔜 |
-| 9 | Multisite, XML-RPC, translations and caching | 🔜 |
-| 10 | 1.0: an external security audit, long fuzzing, benchmarks against PHP WordPress, more platforms and the upgrade path | 🔜 |
-
-### Milestones
-
-| Milestone | Status | Note |
-| --- | --- | --- |
-| MVP: a drop-in replacement for a default install | ✅ | Met 2026-11-20, [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) |
-| M1 Foundations | 🚧 | The gates, configuration, service and release pipeline are done |
-| M2 Setup wizard and compatibility scanner | 🚧 | The wizard for an existing site is done |
-| M3 Read-only front end | 🚧 | The default install matches PHP |
-| M4 Authentication and users | 🚧 | Login, sessions, roles and capabilities are done |
-| M5 Write path (REST API, admin, media) | 🚧 | Most writes are done |
-| M6 Extension SDK and runtime | 🚧 | The runtime, SDK 0.4 and signed packages are built |
-| M7 Theme system | 🚧 | Block themes are done; classic themes are under way |
-| M8 Agent porting pipeline | 🔜 | Not started |
-| M9 Breadth | 🚧 | Cron runs in the service |
-| M10 1.0 hardening and release | 🔜 | Not started |
-
-The live checklist is [PROGRESS.md](PROGRESS.md).
-
 ## Quickstart
 
 Linux, x86_64 or arm64. You need an existing WordPress 7.0 or 7.1 site's database (MariaDB or MySQL) and its `wp-content` folder; try it on a copy.
@@ -142,6 +87,63 @@ The operator documentation, also shipped in the archive as `hyscribe/docs/`, cov
 - **Your plugins:** PHP plugins do not run, because there is no PHP. A plugin needs a port to the extension runtime, and no popular plugin is ported yet.
 - **Need a custom theme or plugin ported?** Write to [contact@hyscribe.com](mailto:contact@hyscribe.com).
 - **Changed your mind?** Stop HyScribe and start PHP WordPress on the same database. [Switching a site over and back](docs/operators/switching.md) has the steps.
+
+## Status and roadmap
+
+### In progress
+
+| Area | Status | Where it stands |
+| --- | --- | --- |
+| Classic themes | 🚧 | The host side is under way (the template hierarchy, the first template tags, the head and footer); the first port, Hello Elementor, is being built as a separate package |
+| Plugins on the extension runtime | 🚧 | Plugins run as sandboxed WebAssembly packages: installing a signed local package, activating and deactivating work; the SDK is at 0.4, with admin pages and the settings API, and no popular plugin is ported yet |
+| Signed packages and the hosted registry | 🚧 | Signing, install by name and the update check are built ([ADR 0024](docs/adr/0024-registry-and-package-signing.md)); they start working once the registry has its keys and address |
+| The rest of hs-admin and the REST API | 🚧 | What is not ported answers `501 Not Implemented` and still works in PHP WordPress on the same database: [docs/operators/not-supported.md](docs/operators/not-supported.md) |
+
+### Not supported
+
+| Area | Status | Note |
+| --- | --- | --- |
+| WordPress's PHP plugins | ❌ | They never run: HyScribe has no PHP runtime. A plugin needs a port to the extension runtime |
+| Multisite | ❌ | Refused at start; planned (M9) |
+| XML-RPC | ❌ | Planned (M9) |
+| Database TLS | ❌ | Not supported yet |
+
+### Roadmap
+
+No dates: each step ships when its checks against PHP WordPress pass. The plan is in [docs/MVP.md](docs/MVP.md) (phases) and [docs/ROADMAP.md](docs/ROADMAP.md) (milestones, with what is done and left in each).
+
+#### Coming up
+
+| Order | What | Status |
+| --- | --- | --- |
+| 1 | Classic themes: Hello Elementor, then Twenty Twenty-One with nav menus, widget areas, theme mods and the Customizer | 🚧 |
+| 2 | Installing themes | 🔜 |
+| 3 | The rest of the plugin SDK: uploads, rewrite rules, plugins' own tables (admin pages and the settings API are in SDK 0.4) | 🚧 |
+| 4 | Ports of three reference plugins: Contact Form 7, Yoast SEO, Elementor (its front end, then its editor) | 🔜 |
+| 5 | A security review of the extension runtime, and the MVP's checks rerun with each theme and plugin | 🔜 |
+| 6 | The hosted registry's keys and address, so install by name and update checks work | 🔜 |
+| 7 | The compatibility scanner, `hyscribe doctor` and the new site installer | 🔜 |
+| 8 | Agent porting of WordPress plugins and themes, with a public registry of ports | 🔜 |
+| 9 | Multisite, XML-RPC, translations and caching | 🔜 |
+| 10 | 1.0: an external security audit, long fuzzing, benchmarks against PHP WordPress, more platforms and the upgrade path | 🔜 |
+
+#### Milestones
+
+| Milestone | Status | Note |
+| --- | --- | --- |
+| MVP: a drop-in replacement for a default install | ✅ | Met 2026-11-20, [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md) |
+| M1 Foundations | 🚧 | The gates, configuration, service and release pipeline are done |
+| M2 Setup wizard and compatibility scanner | 🚧 | The wizard for an existing site is done |
+| M3 Read-only front end | 🚧 | The default install matches PHP |
+| M4 Authentication and users | 🚧 | Login, sessions, roles and capabilities are done |
+| M5 Write path (REST API, admin, media) | 🚧 | Most writes are done |
+| M6 Extension SDK and runtime | 🚧 | The runtime, SDK 0.4 and signed packages are built |
+| M7 Theme system | 🚧 | Block themes are done; classic themes are under way |
+| M8 Agent porting pipeline | 🔜 | Not started |
+| M9 Breadth | 🚧 | Cron runs in the service |
+| M10 1.0 hardening and release | 🔜 | Not started |
+
+The live checklist is [PROGRESS.md](PROGRESS.md).
 
 ## FAQ
 

@@ -63,6 +63,11 @@ fn program(path: &str, args: &[&str]) -> Spawn {
     }
 }
 
+/// A program that exits at once: `true`, wherever the system keeps it.
+fn exits_at_once() -> Spawn {
+    program("/bin/sh", &["-c", "true"])
+}
+
 /// Locks the pid file the way a server would, with `contents` in it.
 fn fake_lock(paths: &Paths, contents: &str) -> File {
     std::fs::create_dir_all(paths.run_dir()).unwrap();
@@ -232,7 +237,7 @@ fn a_starting_server_has_no_pid_yet() {
     assert!(matches!(hold(&paths), Err(Error::AlreadyRunning(None))));
     assert!(matches!(stop(&paths, SHORT), Err(Error::Starting)));
     assert_eq!(
-        start(&paths, &program("/bin/true", &[]), SHORT).unwrap(),
+        start(&paths, &exits_at_once(), SHORT).unwrap(),
         Started::Already(Status::Starting(None))
     );
     // A second line other than `listening` is still starting.
@@ -298,7 +303,7 @@ fn stop_reports_a_lock_holder_that_never_exits() {
     let paths = Paths::new(home.path());
     // The pid of a process that has exited, so the signals find nobody,
     // while this test keeps the lock.
-    let mut child = Command::new("/bin/true").spawn().unwrap();
+    let mut child = Command::new("true").spawn().unwrap();
     let gone = child.id();
     child.wait().unwrap();
     let _lock = fake_lock(&paths, &format!("{gone}\n"));
@@ -364,12 +369,12 @@ fn start_reports_unusable_folders() {
     let home = tempfile::tempdir().unwrap();
     let paths = Paths::new(home.path());
     std::fs::write(paths.logs_dir(), "").unwrap();
-    let err = start(&paths, &program("/bin/true", &[]), SHORT).unwrap_err();
+    let err = start(&paths, &exits_at_once(), SHORT).unwrap_err();
     assert!(err.to_string().starts_with("cannot create "), "{err}");
 
     std::fs::remove_file(paths.logs_dir()).unwrap();
     std::fs::create_dir_all(paths.log_file()).unwrap();
-    let err = start(&paths, &program("/bin/true", &[]), SHORT).unwrap_err();
+    let err = start(&paths, &exits_at_once(), SHORT).unwrap_err();
     assert!(err.to_string().starts_with("cannot open "), "{err}");
 
     std::fs::remove_dir(paths.log_file()).unwrap();
@@ -558,7 +563,7 @@ fn start_and_stop_report_an_unreadable_pid_file() {
     std::fs::write(paths.pid_file(), "").unwrap();
     chmod(&paths.pid_file(), 0o000);
     assert_starts(
-        start(&paths, &program("/bin/true", &[]), SHORT).unwrap_err(),
+        start(&paths, &exits_at_once(), SHORT).unwrap_err(),
         "cannot open ",
     );
     assert_starts(stop(&paths, SHORT).unwrap_err(), "cannot open ");
@@ -570,7 +575,7 @@ fn start_reports_an_unreadable_logs_folder() {
     let paths = Paths::new(home.path());
     std::fs::create_dir_all(paths.logs_dir()).unwrap();
     chmod(&paths.logs_dir(), 0o000);
-    let err = start(&paths, &program("/bin/true", &[]), SHORT).unwrap_err();
+    let err = start(&paths, &exits_at_once(), SHORT).unwrap_err();
     chmod(&paths.logs_dir(), 0o700);
     assert_starts(err, "cannot check ");
 }
@@ -606,7 +611,7 @@ fn start_reports_problems_while_waiting() {
 fn stop_reports_problems_while_waiting() {
     let home = tempfile::tempdir().unwrap();
     let paths = Paths::new(home.path());
-    let mut child = Command::new("/bin/true").spawn().unwrap();
+    let mut child = Command::new("true").spawn().unwrap();
     let gone = child.id();
     child.wait().unwrap();
     let _lock = fake_lock(&paths, &format!("{gone}\n"));

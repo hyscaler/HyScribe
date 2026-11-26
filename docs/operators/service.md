@@ -41,6 +41,8 @@ HyScribe does not install itself into the init system. Either:
 - add `@reboot /path/to/hyscribe/hyscribe service start` to the service user's crontab, or
 - have a process supervisor run `/path/to/hyscribe/hyscribe start` in the foreground as the service user, with the `hyscribe/` folder as working directory, stopped with SIGTERM
 
+On macOS the supervisor is launchd; HyScribe ships no launchd job yet.
+
 ## Behind a reverse proxy
 
 - Keep `BIND_HOST=127.0.0.1` and point the proxy at `http://127.0.0.1:8080`

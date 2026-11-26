@@ -29,7 +29,11 @@ Verify this download
 --------------------
 
   sha256sum -c SHA256SUMS.txt --ignore-missing
-  gh attestation verify hyscribe_<version>_linux_<arch>.tar.gz --repo hyscaler/HyScribe
+  gh attestation verify hyscribe_<version>_<os>_<arch>.tar.gz --repo hyscaler/HyScribe
+
+On macOS, shasum -a 256 -c does what sha256sum -c does. The macOS binary
+is not signed or notarised by Apple yet: docs/install.md, "On macOS", says
+what that means for a downloaded copy.
 
 License: AGPL-3.0-or-later (see LICENSE and NOTICE). Source: https://github.com/hyscaler/HyScribe
 HyScribe is developed and supported by HyScaler (https://hyscaler.com).

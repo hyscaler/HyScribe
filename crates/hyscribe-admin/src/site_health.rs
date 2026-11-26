@@ -34,7 +34,12 @@ const SIDEBAR: &str = "<p><strong>For more information:</strong></p><p><a href=\
 const SYSTEM: &str = "unknown-linux-musl";
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 const SYSTEM: &str = "unknown-linux-gnu";
-#[cfg(not(all(target_os = "linux", any(target_env = "musl", target_env = "gnu"))))]
+#[cfg(target_os = "macos")]
+const SYSTEM: &str = "apple-darwin";
+#[cfg(not(any(
+    all(target_os = "linux", any(target_env = "musl", target_env = "gnu")),
+    target_os = "macos"
+)))]
 const SYSTEM: &str = std::env::consts::OS;
 
 /// The installation as `.env` sets it up (ADR 0005).

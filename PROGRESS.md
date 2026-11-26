@@ -1,6 +1,6 @@
 # Progress
 
-Last updated: 2026-11-25
+Last updated: 2026-11-26
 
 ## Current phase
 
@@ -69,6 +69,7 @@ Details and exit criteria: [docs/ROADMAP.md](docs/ROADMAP.md).
 - [x] `hyscribe-testkit`: fixture loader and `mysqldump` reader
 - [x] `hyscribe-service` and service commands (`start`, `service start|status|log|restart|stop`): pid file lock decides "running", refuses root, log rotation, `log -f`
 - [x] Release pipeline (`.github/workflows/release.yml`, `scripts/package.sh`): static musl archives for amd64 and arm64, reproducible (checked by rebuilding), `SHA256SUMS.txt`, CycloneDX SBOM, signed build provenance; CI installs the archive and runs the service on pull requests, pushes to `main` and nightly (`scripts/smoke-test.sh`). Not yet run on GitHub: first run on the first `v*` tag
+- [x] macOS release archives (2026-11-26, ADR 0005 amendment): `scripts/package.sh` builds `darwin_arm64` and `darwin_amd64` archives on macOS, and the release workflow builds, rebuilds and compares, and smoke-tests both on a GitHub-hosted macOS runner (the Intel one under Rosetta, the fixture in a MariaDB on the runner); CI builds and lints both targets there and runs the tests that need no database. Not signed or notarised by Apple, no boot autostart, and the full suite stays Linux only. CI's Linux jobs run as two chains on two runners, and the release is called by CI after its gates
 - [x] `hyscribe-db` first part: read only pool (sqlx, ADR 0001 stack), validated prefix as the only SQL ever built, options and posts read as bytes; tested against the default install in MariaDB (`reference/default-install/db.sh`)
 - [ ] `hyscribe-db`: the remaining core tables (meta, terms, users, comments, links)
 - [ ] Read every row of the default install fixture from a live database (rest of the M1 exit)

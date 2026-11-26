@@ -14,6 +14,7 @@ dir=${CARGO_TARGET_DIR:-$(pwd)/../../../target}/ext-guest
 env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
   ${RUSTUP_HOME:+RUSTUP_HOME="$RUSTUP_HOME"} ${CARGO_HOME:+CARGO_HOME="$CARGO_HOME"} \
   ${RUSTUP_TOOLCHAIN:+RUSTUP_TOOLCHAIN="$RUSTUP_TOOLCHAIN"} \
+  ${CARGO_BUILD_JOBS:+CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS"} \
   cargo build --quiet --release --target wasm32-wasip2 --locked --target-dir "$dir" \
   -p "$(echo "$package" | tr _ -)" >&2
 echo "$dir/wasm32-wasip2/release/$package.wasm"

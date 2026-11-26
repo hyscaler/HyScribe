@@ -2,24 +2,36 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Writes THIRD-PARTY-NOTICES for the release archive (scripts/package.sh):
-#   scripts/third-party-notices.sh <out-file>
+#   scripts/third-party-notices.sh <out-file> [linux|darwin]
 # Part 1 is WordPress and the themes the binary embeds: where their source is
 # (the versions and SHA-256 values the build pins), each theme's copyright
 # section, its fonts' licence files and WordPress's license.txt (a copy in
 # packaging/, named for the version wordpress/VERSION pins). Part 2 is
-# every crate the hyscribe binary links on the release targets (its normal
-# dependencies, from Cargo.lock), with the licence files each crate ships,
+# every crate the hyscribe binary links on the release targets of that
+# system, Linux by default (its normal dependencies, from Cargo.lock, which
+# differ between the two), with the licence files each crate ships,
 # identical texts printed once. Its inputs are the repository and the
 # checksummed crate sources of Cargo.lock, so the output is the same on
 # every machine. A crate that ships no licence file takes its licence text
 # from packaging/licenses/<expression>.txt; with none there, the script fails.
-# Needs cargo, jq and sha256sum.
+# Needs cargo, jq and sha256sum (or shasum, as macOS has it). It keeps to
+# what GNU and BSD tools share and to bash 3.2, so it also runs on macOS.
 set -euo pipefail
 export LC_ALL=C
 
 out=${1:?out-file}
 root="$(cd "$(dirname "$0")/.." && pwd)"
-targets=(x86_64-unknown-linux-musl aarch64-unknown-linux-musl)
+case "${2:-linux}" in
+  linux)
+    targets=(x86_64-unknown-linux-musl aarch64-unknown-linux-musl)
+    library="library and, on these musl targets, the musl C library into it; their"
+    ;;
+  darwin)
+    targets=(aarch64-apple-darwin x86_64-apple-darwin)
+    library="library into it, and none of the system's own libraries; its"
+    ;;
+  *) echo "usage: $0 <out-file> [linux|darwin]" >&2; exit 2 ;;
+esac
 repo=https://github.com/hyscaler/HyScribe
 
 wp_version="$(tr -d '[:space:]' < "$root/wordpress/VERSION")"
@@ -28,6 +40,14 @@ test -n "$wp_sha"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+
+if command -v sha256sum > /dev/null; then
+  sha256() { sha256sum; }
+else
+  sha256() { shasum -a 256; }
+fi
+# The files under a folder, as paths inside it (find's -printf is GNU only).
+files_in() { (cd "$1" && shift && find . -type f "$@") | sed 's|^\./||' | sort; }
 
 rule() { printf '%s\n' "$1" "$(printf '%*s' "${#1}" '' | tr ' ' "$2")"; }
 
@@ -80,7 +100,7 @@ rule() { printf '%s\n' "$1" "$(printf '%*s' "${#1}" '' | tr ' ' "$2")"; }
     rule "Theme $slug" "-"
     echo
     tr -d '\r' < "$dir/readme.txt" | sed -n '/^== Copyright ==$/,$p'
-    find "$dir" -type f \( -iname 'license*' -o -iname 'copying*' \) -printf '%P\n' | sort |
+    files_in "$dir" \( -iname 'license*' -o -iname 'copying*' \) |
       while read -r file; do
         echo
         rule "themes/$slug/$file" "."
@@ -97,7 +117,7 @@ rule() { printf '%s\n' "$1" "$(printf '%*s' "${#1}" '' | tr ' ' "$2")"; }
   rule "Part 2: Rust crates" "="
   echo
   echo "The binary is built with the Rust toolchain, which links Rust's standard"
-  echo "library and, on these musl targets, the musl C library into it; their"
+  echo "$library"
   echo "notices are in the toolchain's share/doc/rust/COPYRIGHT-library.html."
   echo "The crates it links follow, with the licence each declares, then the"
   echo "licence files they ship."
@@ -125,12 +145,11 @@ while IFS=$'\t' read -r name version license license_file dir; do
   files=()
   while read -r entry; do
     if [ -d "$dir/$entry" ]; then
-      while read -r f; do files+=("$entry/$f"); done < <(find "$dir/$entry" -type f -printf '%P\n' | sort)
+      while read -r f; do files+=("$entry/$f"); done < <(files_in "$dir/$entry")
     else
       files+=("$entry")
     fi
-  done < <(find "$dir" -mindepth 1 -maxdepth 1 -regextype posix-extended \
-             -iregex '.*/(licen[cs]e|copying|copyright|notice|unlicense)[^/]*' -printf '%f\n' | sort)
+  done < <(ls -A "$dir" | grep -iE '^(licen[cs]e|copying|copyright|notice|unlicense)' | sort)
   if [ "$license_file" != - ] && [ -f "$dir/$license_file" ] && ! printf '%s\n' "${files[@]+"${files[@]}"}" | grep -qxF "$license_file"; then
     files+=("$license_file")
   fi
@@ -140,10 +159,10 @@ while IFS=$'\t' read -r name version license license_file dir; do
       echo "$name $version ships no licence file and $fallback is missing" >&2
       exit 1
     fi
-    printf '%s\t%s\t%s\t%s\n' "$(tr -d '\r' < "$fallback" | sha256sum | cut -c1-64)" "$name $version" "LICENSE" "$fallback" >> "$work/texts.tsv"
+    printf '%s\t%s\t%s\t%s\n' "$(tr -d '\r' < "$fallback" | sha256 | cut -c1-64)" "$name $version" "LICENSE" "$fallback" >> "$work/texts.tsv"
   else
     for f in "${files[@]}"; do
-      printf '%s\t%s\t%s\t%s\n' "$(tr -d '\r' < "$dir/$f" | sha256sum | cut -c1-64)" "$name $version" "$f" "$dir/$f" >> "$work/texts.tsv"
+      printf '%s\t%s\t%s\t%s\n' "$(tr -d '\r' < "$dir/$f" | sha256 | cut -c1-64)" "$name $version" "$f" "$dir/$f" >> "$work/texts.tsv"
     done
   fi
 done < "$work/crates.tsv"

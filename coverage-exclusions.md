@@ -11,6 +11,7 @@ None so far.
 
 - `crates/*/tests/`: integration test files. Their only unexecuted code is failure reporting, which runs when a test fails
 - `fuzz/`: fuzz targets, run by the fuzzer rather than the test suite
+- Code compiled only for macOS: the coverage gate runs on Linux, so it never sees it. The only such item is the constant `SYSTEM` for `target_os = "macos"` in `crates/hyscribe-admin/src/site_health.rs` (the build target's name on Site Health), which holds no code to run; the macOS job of CI compiles it for both architectures. New macOS-only code needs a reason here and a test on the macOS runner
 
 ## Mutants excluded
 

@@ -19,6 +19,16 @@ fn roots_come_from_the_bundle_else_the_folders() {
     assert_eq!(host_certificates().len(), host_roots().len());
 }
 
+/// macOS has no bundle where the probe looks, so its own is the fallback.
+#[test]
+fn the_bundle_is_the_probes_else_the_fallback_file() {
+    let (ca, leaf) = (tls().join("ca.pem"), tls().join("leaf.pem"));
+    assert_eq!(bundle(Some(ca.clone()), &leaf), Some(ca.clone()));
+    assert_eq!(bundle(None, &ca), Some(ca));
+    assert_eq!(bundle(None, &tls().join("missing.pem")), None);
+    assert_eq!(bundle(None, &tls()), None);
+}
+
 #[test]
 fn a_certificate_that_is_no_trust_anchor_is_left_out() {
     let dir = std::env::temp_dir().join(format!("hyscribe-fetch-roots-{}", std::process::id()));

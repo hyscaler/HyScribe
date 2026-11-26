@@ -4,9 +4,11 @@
 # Installs a release archive the way DEPLOYMENT.md describes, points it at
 # the default install fixture (reference/default-install/db.sh up) and checks
 # the service commands and a page: scripts/smoke-test.sh <archive>
+# On a machine without Docker, reference/default-install/db-native.sh up
+# gives the same fixture. Runs on Linux and macOS.
 set -euo pipefail
 
-archive="$(realpath "${1:?archive}")"
+archive="$(cd "$(dirname "${1:?archive}")" && pwd)/$(basename "$1")"
 work="$(mktemp -d)"
 trap 'cd /; "$work/hyscribe/hyscribe" service stop >/dev/null 2>&1 || true; rm -rf "$work"' EXIT
 cd "$work"

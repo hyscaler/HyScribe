@@ -172,7 +172,7 @@ GOALS S8 asks for rendered pixels as well as markup: CSS, scripts and assets mat
 - **Masks:** what legitimately differs is painted over on both sides, named per screen in `screens.list` (the maximum upload size, the generated password, the Post via email strings, the server's time)
 - **Tolerance:** a pixel differs when a colour channel is more than 16 of 255 apart; a screen matches at the same size with at most 0.01 percent of its pixels different and the same requests (status, method, path and query, the prefix and nonces normalized)
 - **Report:** `target/screenshots/report.tsv` and `report.html`, a `diff-<screen>.png` for each difference (red over the dimmed PHP picture). Exit 0 when every screen matches or differs as listed in `expected.list` (screen and reason); a listed screen that matches is stale and fails
-- **In CI:** the self-hosted runner needs Docker and the release binary (`HYSCRIBE_BIN`); one run takes about 15 minutes. It is not a workspace test: the lists are the contract
+- **In CI:** the self-hosted runners need Docker and the release binary (`HYSCRIBE_BIN`); one run takes about 15 minutes. It is not a workspace test: the lists are the contract
 
 ## HTML normalization
 
@@ -181,6 +181,16 @@ Differential tests normalize before comparing: attribute order, whitespace betwe
 ## CI gates
 
 - `cargo fmt --check`, `cargo clippy -D warnings`, unit, property, golden and integration tests before every merge, and in CI for every release tag and when run by hand
+- CI's Linux jobs run on two self-hosted runners as two chains, coverage, switch-back and screenshots on one and checks, package and fuzz on the other, so no more than two are ever ready at once. For a release tag the release workflow is called from CI once every job has passed (`.github/workflows/ci.yml`, its `release` job); run by hand with `release_dry_run`, the same call is a rehearsal that publishes nothing
 - Coverage gate (100% lines and regions, no decrease anywhere) and mutation testing of changed code on every pull request
 - Differential and write-compatibility suites on every pull request to `development`
 - Full matrix (all WordPress versions in range, MySQL and MariaDB) nightly
+
+### What runs on macOS
+
+The macOS jobs run on a GitHub-hosted macOS runner, which has no Docker and so no PHP oracle and no fixture containers.
+
+- **CI (`macos` job):** `cargo clippy --workspace --all-targets -- -D warnings` and a build of the binary for `aarch64-apple-darwin` and `x86_64-apple-darwin`, and the tests of the crates that need neither the fixture database nor the Theme Test Data: `hyscribe-assets`, `hyscribe-auth`, `hyscribe-config`, `hyscribe-ext`, `hyscribe-fetch`, `hyscribe-html`, `hyscribe-image`, `hyscribe-kses`, `hyscribe-mail`, `hyscribe-model`, `hyscribe-phpser`, `hyscribe-registry`, `hyscribe-sdk`, `hyscribe-service` and `hyscribe-theme-json`, run natively for Apple Silicon and, for the Intel build, under Rosetta
+- **Release (`build-macos` job):** each archive is built twice and compared, then installed and run by `scripts/smoke-test.sh` against the default install fixture in a MariaDB installed on the runner (`reference/default-install/db-native.sh`): `service start`, `status`, a page, `stop`. The Intel archive runs under Rosetta
+- **Linux only:** the tests of `hyscribe`, `hyscribe-db`, `hyscribe-http`, `hyscribe-testkit` and `hyscribe-write` (the fixture database) and of `hyscribe-admin`, `hyscribe-render` and `hyscribe-rest` (the Theme Test Data), every PHP and MariaDB oracle, the coverage gate, mutation testing, the switch-back suite, the screenshot comparison and fuzzing
+- Code that compiles only for macOS cannot count towards the coverage gate, which runs on Linux. There is one such item, a constant ([coverage-exclusions.md](../coverage-exclusions.md)); what macOS needs otherwise goes through code that Linux runs and covers too

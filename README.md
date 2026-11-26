@@ -63,21 +63,24 @@ Legend: ✅ working today, 🚧 in progress, 🔜 coming up, ❌ not supported.
 | Comments | ✅ | Posting and moderating |
 | Mail | ✅ | Through an SMTP relay you configure |
 | Scheduled jobs | ✅ | WordPress's six core jobs run in the service |
-| Release archives | ✅ | Reproducible static builds for Linux x86_64 and arm64, with checksums, an SBOM and build provenance |
+| Release archives | ✅ | Reproducible static builds for Linux x86_64 and arm64, and, from the release after v0.1.0, builds for macOS (Apple Silicon and Intel, not yet signed by Apple), with checksums, SBOMs and build provenance |
 
 
 ## Quickstart
 
-Linux, x86_64 or arm64. You need an existing WordPress 7.0 or 7.1 site's database (MariaDB or MySQL) and its `wp-content` folder; try it on a copy.
+Linux (x86_64 or arm64), or macOS 11 and later (Apple Silicon or Intel) from the release after v0.1.0. You need an existing WordPress 7.0 or 7.1 site's database (MariaDB or MySQL) and its `wp-content` folder; try it on a copy.
 
 ```bash
-curl -fLO https://github.com/hyscaler/HyScribe/releases/latest/download/hyscribe-latest-linux-amd64.tar.gz   # or -arm64
+# Linux: linux-amd64 or linux-arm64. macOS: darwin-arm64 (Apple Silicon) or darwin-amd64 (Intel)
+curl -fLO https://github.com/hyscaler/HyScribe/releases/latest/download/hyscribe-latest-linux-amd64.tar.gz
 curl -fLO https://github.com/hyscaler/HyScribe/releases/latest/download/SHA256SUMS.txt
-sha256sum -c SHA256SUMS.txt --ignore-missing
+sha256sum -c SHA256SUMS.txt --ignore-missing    # macOS: shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 gh attestation verify hyscribe-latest-linux-amd64.tar.gz --repo hyscaler/HyScribe
 tar -xzf hyscribe-latest-linux-amd64.tar.gz && cd hyscribe
 ./hyscribe service start      # then finish setup in the browser
 ```
+
+On macOS the binary is not signed by Apple yet, and the platform is tested less than Linux: read [On macOS](docs/operators/install.md#on-macos) first.
 
 The operator documentation, also shipped in the archive as `hyscribe/docs/`, covers installing, configuration, running the service, switching a site over and back, backups, upgrades, security and what is not supported yet: [docs/operators/](docs/operators/README.md). The design behind it is in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
@@ -230,7 +233,7 @@ cargo llvm-cov --workspace --ignore-filename-regex '/tests/' \
 cargo mutants --workspace              # mutation testing
 cargo deny check                       # licenses, advisories, sources
 reference/default-install/build.sh     # rebuild the default install fixture
-scripts/package.sh x86_64-unknown-linux-musl dist   # release archive
+scripts/package.sh x86_64-unknown-linux-musl dist   # release archive (on a Mac: aarch64-apple-darwin)
 scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz   # install it and run the service
 ```
 

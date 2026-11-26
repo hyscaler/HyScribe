@@ -18,7 +18,7 @@ HyScribe's defaults are safe for someone who never reads this page. This page sa
 
 - Only `http` and `https` URLs, and only to public addresses. Every address a host resolves to is checked, on every redirect, and the connection goes to the checked address, so DNS rebinding cannot reach loopback, private, link local or cloud metadata addresses. The site's own host is not exempt
 - At most 30 seconds, 4 MiB and 5 redirects per fetch; compressed answers are not decoded
-- TLS is verified against the host's certificate store, never skipped. Without a store, the log says `outbound fetches on over HTTP only: no certificate store was found` and HTTPS fetches fail
+- TLS is verified against the host's certificate store (on macOS the bundle in `/etc/ssl/cert.pem`, not the Keychain), never skipped. Without a store, the log says `outbound fetches on over HTTP only: no certificate store was found` and HTTPS fetches fail
 - Only `Host`, `User-Agent`, `Accept-Encoding` and `Connection` headers are sent
 - There is no general list of allowed hosts: any public address can be fetched. Firewall the server's outbound traffic if it must reach fewer
 - The RSS block fetches only from the hosts in `RSS_ALLOWED_HOSTS`, empty by default

@@ -10,6 +10,8 @@ tar -xzf hyscribe-latest-linux-amd64.tar.gz && cd hyscribe
 ./hyscribe service start      # asks: browser wizard or terminal wizard
 ```
 
+On arm64 take `hyscribe-latest-linux-arm64.tar.gz`; on macOS, from the release after v0.1.0, `hyscribe-latest-darwin-arm64.tar.gz` (Apple Silicon) or `hyscribe-latest-darwin-amd64.tar.gz` (Intel), and read [macOS](#macos) first.
+
 With the browser wizard, the binary prints a URL and a one-time access secret. Open the URL, enter the secret, and follow the steps. When setup finishes the same process starts serving the site.
 
 ### A new site
@@ -28,14 +30,26 @@ With no WordPress site to take over, the wizard can make one. Create an empty da
 | `hyscribe_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows) | `hyscribe/` folder with the binary, `LICENSE`, `THIRD-PARTY-NOTICES`, `README.txt`, `.env.example` and the operator documentation in `docs/` |
 | `hyscribe-latest-<os>-<arch>.tar.gz` | Stable alias of the newest release, the equivalent of WordPress `latest.tar.gz` |
 | `SHA256SUMS.txt` | Checksums for every archive |
+| `hyscribe-sbom.cdx.json`, `hyscribe-sbom-darwin.cdx.json` | CycloneDX SBOMs of the Linux and the macOS binaries, which link a few different crates |
 | Container image (optional) | Same binary on a minimal base, for operators who prefer Docker |
 
 `LICENSE` ships in every archive because the AGPL requires a copy of the license to accompany each distribution. `THIRD-PARTY-NOTICES`, written by `scripts/third-party-notices.sh` when the archive is built, holds the licences of what the binary embeds: WordPress's files and its themes, with where their source is, and every Rust crate it links, with the licence files each ships.
 
 ### Platforms
 
-- 1.0: Linux amd64 and arm64, statically linked with musl so it runs on any distribution
-- Later: macOS (Intel, Apple Silicon) and Windows amd64
+- Linux amd64 and arm64 (`linux_amd64`, `linux_arm64`), statically linked with musl so it runs on any distribution
+- macOS 11 or later, Apple Silicon and Intel (`darwin_arm64`, `darwin_amd64`), from the release after v0.1.0: see below
+- Later: Windows amd64
+
+### macOS
+
+The macOS archives hold the same files as the Linux ones: the plain binary in a `tar.gz`, with no installer, disk image or app bundle. They are built on macOS for each release, never cross-compiled, and each is installed and started by the release's smoke test before it is published.
+
+- **Not signed by Apple.** The binaries carry no Developer ID signature and are not notarised yet; the linker's ad hoc signature is all they have. A copy fetched with `curl`, as in the quickstart, is not marked as downloaded and starts like any other program. A copy downloaded with a browser is quarantined, and `tar` passes that mark on to the files it unpacks; macOS then refuses to start the binary, saying it cannot verify it. Remove the mark with `xattr -d com.apple.quarantine hyscribe/hyscribe`, or try to start it once and then allow it under System Settings, Privacy & Security ("Open Anyway"). Verify the download first with `SHA256SUMS.txt` and `gh attestation verify`: until the binaries are signed, that is what says the file is the project's
+- **Linked against the system.** A macOS binary cannot be fully static: it uses two libraries every macOS has (`libSystem` and `libiconv`) and nothing that has to be installed
+- **Certificates.** Outbound HTTPS and the mail relay's TLS are checked against the bundle macOS ships in `/etc/ssl/cert.pem`. Certificates added to the Keychain are not read
+- **Starting at boot.** As on Linux the service does not start at boot by itself. macOS's own way is a launchd job, which HyScribe neither writes nor documents yet
+- **What is tested.** The release's smoke test (install, `service start`, `status`, a page of the default install, `stop`) runs for both architectures on macOS 15, the Intel binary under Rosetta on an Apple Silicon machine, and CI runs the tests that need no database there, for both architectures the same way. The full suite (the PHP and MariaDB oracle, coverage, the switch-back suite, screenshots, fuzzing) runs on Linux only, and no macOS release older than 15 is tested, so treat macOS as a platform for trying HyScribe and for development rather than for hosting
 
 ## What is inside the binary
 
@@ -153,7 +167,7 @@ Planned, not in the binary yet:
 - `logs/hyscribe.log` is rotated at `service start` once it reaches 10 MiB, keeping `hyscribe.log.1` to `hyscribe.log.5`; `log -f` follows until the server stops
 - `run/`, `logs/` and `sessions/` are created with mode `0700`, the pid file, logs and session files with `0600`
 
-The service does not start at boot by itself. Add `@reboot /path/to/hyscribe service start` to the crontab, or use the container image. A generated systemd unit is under consideration.
+The service does not start at boot by itself. Add `@reboot /path/to/hyscribe service start` to the crontab, or use the container image. A generated systemd unit is under consideration. On macOS nothing is provided either; a launchd job is the system's way.
 
 ## Setup modes
 

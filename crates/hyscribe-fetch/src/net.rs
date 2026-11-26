@@ -5,7 +5,7 @@
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use rustls::RootCertStore;
@@ -38,6 +38,9 @@ impl Net for System {
     }
 }
 
+/// The bundle macOS ships, which the probe does not know.
+const MACOS_BUNDLE: &str = "/etc/ssl/cert.pem";
+
 /// The host's certificate store, where OpenSSL finds it: its bundle file,
 /// else each file in its certificate directories. Empty without one.
 pub fn host_roots() -> RootCertStore {
@@ -50,7 +53,13 @@ pub fn host_roots() -> RootCertStore {
 /// client of its own, the mail transport's (ADR 0016).
 pub fn host_certificates() -> Vec<CertificateDer<'static>> {
     let probe = openssl_probe::probe();
-    roots(probe.cert_file, probe.cert_dir)
+    let file = bundle(probe.cert_file, Path::new(MACOS_BUNDLE));
+    roots(file, probe.cert_dir)
+}
+
+/// The bundle the probe found, else `fallback` when it is a file.
+fn bundle(found: Option<PathBuf>, fallback: &Path) -> Option<PathBuf> {
+    found.or_else(|| fallback.is_file().then(|| fallback.to_path_buf()))
 }
 
 /// The certificates of `file`, else of each file in `dirs`, that are

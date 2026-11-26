@@ -7,6 +7,7 @@ HyScribe is not yet production ready: it is an early release that has had no ext
 ## Requirements
 
 - Linux on amd64 or arm64. The binary is static, so any distribution works
+- Or macOS 11 or later, on Apple Silicon or Intel: see [On macOS](#on-macos) below
 - A MySQL or MariaDB database holding a WordPress 7.0 or 7.1 site (`db_version` 61833). Older sites: upgrade with PHP WordPress first
 - An unprivileged user account to run it: HyScribe refuses to run as root
 - A reverse proxy (nginx, Caddy, Traefik) for HTTPS. HyScribe serves plain HTTP
@@ -15,9 +16,9 @@ HyScribe is not yet production ready: it is an early release that has had no ext
 
 Each release on GitHub (`hyscaler/HyScribe`) has:
 
-- `hyscribe_<version>_linux_<arch>.tar.gz`, `<arch>` being `amd64` or `arm64`
-- `hyscribe-latest-linux-<arch>.tar.gz`, the same archive under a name that stays the same
-- `SHA256SUMS.txt`, an SBOM (`hyscribe-sbom.cdx.json`) and signed build provenance
+- `hyscribe_<version>_<os>_<arch>.tar.gz`, `<os>` being `linux` or `darwin` (macOS) and `<arch>` being `amd64` or `arm64` (Apple Silicon is `arm64`)
+- `hyscribe-latest-<os>-<arch>.tar.gz`, the same archive under a name that stays the same
+- `SHA256SUMS.txt`, an SBOM for each system (`hyscribe-sbom.cdx.json` for Linux, `hyscribe-sbom-darwin.cdx.json` for macOS) and signed build provenance
 
 The latest release's archives download from fixed addresses:
 
@@ -139,5 +140,17 @@ The log's first lines say the version, the mode and the address:
 hyscribe 0.1.0 running (pid 12345) in shadow (read only) mode, listening on http://127.0.0.1:8080
 outbound fetches off
 ```
+
+## On macOS
+
+The steps above are the same on macOS, with these differences:
+
+- Take `hyscribe-latest-darwin-arm64.tar.gz` on Apple Silicon and `hyscribe-latest-darwin-amd64.tar.gz` on an Intel Mac
+- Check the download with `shasum -a 256 -c SHA256SUMS.txt --ignore-missing` where there is no `sha256sum`; `gh attestation verify` works as on Linux
+- The binary is not signed or notarised by Apple yet. Fetched with `curl` as above, it starts normally. Downloaded with a browser, the archive is quarantined and `tar` passes that on to the binary, which macOS then refuses to start, saying it cannot verify it. After checking the download as above, remove the mark with `xattr -d com.apple.quarantine hyscribe/hyscribe`, or try to start it once and then choose "Open Anyway" under System Settings, Privacy & Security
+- Outbound HTTPS and the mail relay are checked against the certificates macOS ships in `/etc/ssl/cert.pem`, not against the Keychain
+- Nothing starts HyScribe at boot: [service.md](service.md) describes cron and process supervisors, and a launchd job is not provided
+- macOS is tested less than Linux: each release's archive is installed, started and stopped on macOS 15, but the full test suite runs on Linux only. Use it to try HyScribe or to develop, and host sites on Linux
+- To build the archive from source, on a Mac: `scripts/package.sh aarch64-apple-darwin dist` (or `x86_64-apple-darwin`), with Xcode's command line tools, the Rust target and GNU tar (`brew install gnu-tar`)
 
 Next: [service.md](service.md) to keep it running, [switching.md](switching.md) to move a site over.

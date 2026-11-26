@@ -6,7 +6,7 @@ The work between today and the minimum viable product, a drop-in replacement for
 
 Security is the first priority ([ADR 0006](adr/0006-security-first.md)). Every milestone exit additionally requires: an updated threat model, a security review of the milestone's code, all parsers added in the milestone fuzzed in CI, and no open critical or high findings. It also requires full test coverage of the milestone's code with no surviving mutants ([ADR 0007](adr/0007-full-test-coverage.md)).
 
-## Checkpoint (2026-11-23, first release)
+## v0.1.0 (2026-11-26)
 
 The MVP of [MVP.md](MVP.md) is met (2026-11-20, [ACCEPTANCE.md](ACCEPTANCE.md)): on the default WordPress install, HyScribe drops in against the same database, serves it from the release archive, writes to it with the same checks as PHP, and hands it back to PHP WordPress with no check failing. Work since then is phases 10 (themes) and 11 (plugins). The live checklist is [PROGRESS.md](../PROGRESS.md); what still answers 501 is in [operators/not-supported.md](operators/not-supported.md).
 

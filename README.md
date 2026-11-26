@@ -1,28 +1,52 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="brand/hyscribe-logo-reversed.svg">
-    <img src="brand/hyscribe-logo.svg" alt="HyScribe" width="360">
-  </picture>
+  <img src="https://brand.hyscribe.com/assets/png/og-image-1200x630.png" alt="HyScribe: a drop-in replacement for WordPress, written in Rust" width="820">
 </p>
 
-# HyScribe
+<h1 align="center">HyScribe</h1>
 
-A drop-in replacement for WordPress, written in Rust.
+<p align="center"><b>A drop-in replacement for WordPress, written in Rust.</b></p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-003364" alt="License: AGPL-3.0"></a>
+  <a href="https://github.com/hyscaler/HyScribe/releases/latest"><img src="https://img.shields.io/github/v/release/hyscaler/HyScribe?color=003364" alt="Latest release"></a>
+  <a href="https://docs.hyscribe.com"><img src="https://img.shields.io/badge/docs-docs.hyscribe.com-003364" alt="Documentation"></a>
+</p>
+
+<p align="center">
+  <a href="https://hyscribe.com"><b>Website</b></a> ·
+  <a href="https://docs.hyscribe.com"><b>Docs</b></a> ·
+  <a href="#quickstart"><b>Install</b></a> ·
+  <a href="https://github.com/hyscaler/HyScribe/releases/latest"><b>Latest release</b></a> ·
+  <a href="mailto:contact@hyscribe.com"><b>Porting help</b></a>
+</p>
+
+Point the `hyscribe` binary at an existing WordPress database and `wp-content` folder, answer a short setup wizard, and the site is served by a single native process. No PHP runtime, no schema migration, and the database stays readable by PHP WordPress, so you can switch back at any time.
 
 PHP2Shell (October 2026) showed that every WordPress site can be compromised through the PHP runtime itself, with no plugin at fault. HyScribe keeps WordPress's data, URLs and ecosystem, and replaces the runtime with memory-safe Rust and sandboxed plugins. See [docs/VISION.md](docs/VISION.md).
-
-Point the `hyscribe` binary at an existing WordPress database and `wp-content` folder, answer a short setup wizard, and the site is served by a single native process. No PHP runtime, no schema migration, and the database stays readable by PHP WordPress so you can switch back at any time.
 
 > [!WARNING]
 > **Not yet production ready.** HyScribe is an early release in active development: it has had no external security audit, parts of hs-admin and the REST API still answer `501 Not Implemented`, and behaviour may change between releases. Try it on a copy of a site, not on a live one, and keep backups. See [PROGRESS.md](PROGRESS.md) for where it stands.
 
-## v0.1.0 (2026-11-26)
+<p align="center">
+  <img src=".github/readme/dashboard.png" alt="The hs-admin dashboard of a HyScribe site, with the welcome banner and the familiar WordPress widgets" width="820">
+</p>
 
-[v0.1.0](https://github.com/hyscaler/HyScribe/releases/tag/v0.1.0) is the current release. It meets the MVP: on the default WordPress install, HyScribe drops in against the same database, serves it from the release archive, writes to it through hs-admin and the REST API with the same checks as PHP, and hands it back to PHP WordPress with no check failing. The acceptance runs are recorded in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md). Beyond the MVP, v0.1.0 has the built-in block themes with theme switching, document, audio and video uploads, and the extension runtime with signed local packages (SDK 0.4). Classic themes and installing plugins by name from a registry are under way.
+## Why HyScribe
+
+| | |
+| --- | --- |
+| **Your site, unchanged** | The same database, the same URLs, the same content and users. Nothing is migrated and no table is altered |
+| **No PHP to attack** | A memory-safe Rust core with secure defaults. No PHP file is ever run, and every parser of untrusted input is fuzzed ([docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md)) |
+| **Plugins in a sandbox** | Extensions run as WebAssembly packages with declared permissions, time and memory limits, instead of code with the run of the server |
+| **One binary** | A static build with no runtime dependency but the database. Unpack, start, finish setup in the browser |
+| **Checked against WordPress** | PHP WordPress is the test oracle: pages, REST answers and database writes are compared with what PHP produces |
+| **A way back** | PHP WordPress can read everything HyScribe wrote. A test suite proves it on every release |
+
+## What it can do
+
+[v0.1.0](https://github.com/hyscaler/HyScribe/releases/tag/v0.1.0) (2026-11-26) is the current release. On the default WordPress install it drops in against the same database, serves it, writes to it through hs-admin and the REST API with the same checks as PHP, and hands it back to PHP WordPress with no check failing. The acceptance runs are recorded in [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
 
 Legend: ✅ working today, 🚧 in progress, 🔜 coming up, ❌ not supported.
-
-### What is working
 
 | Area | Status | What you get |
 | --- | --- | --- |
@@ -40,6 +64,7 @@ Legend: ✅ working today, 🚧 in progress, 🔜 coming up, ❌ not supported.
 | Mail | ✅ | Through an SMTP relay you configure |
 | Scheduled jobs | ✅ | WordPress's six core jobs run in the service |
 | Release archives | ✅ | Reproducible static builds for Linux x86_64 and arm64, with checksums, an SBOM and build provenance |
+
 
 ### In progress
 
@@ -96,16 +121,9 @@ No dates: each step ships when its checks against PHP WordPress pass. The plan i
 
 The live checklist is [PROGRESS.md](PROGRESS.md).
 
-## What it aims to do
+## Quickstart
 
-- **Put security first**: memory-safe core, sandboxed plugins, secure defaults ([docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md))
-- Run as one binary with a first-run wizard for database connection details
-- Detect what works on an existing site and report missing plugins and themes
-- Support plugins and themes written as Rust packages
-- Port WordPress plugins and themes to Rust with AI agents
-- Stay 100% backwards compatible with WordPress databases and static content
-
-## Install
+Linux, x86_64 or arm64. You need an existing WordPress 7.0 or 7.1 site's database (MariaDB or MySQL) and its `wp-content` folder; try it on a copy.
 
 ```bash
 curl -fLO https://github.com/hyscaler/HyScribe/releases/latest/download/hyscribe-latest-linux-amd64.tar.gz   # or -arm64
@@ -118,7 +136,76 @@ tar -xzf hyscribe-latest-linux-amd64.tar.gz && cd hyscribe
 
 The operator documentation, also shipped in the archive as `hyscribe/docs/`, covers installing, configuration, running the service, switching a site over and back, backups, upgrades, security and what is not supported yet: [docs/operators/](docs/operators/README.md). The design behind it is in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-## Try it against the default install
+## Coming from WordPress
+
+- **Your themes:** the block themes Twenty Twenty-Two to Twenty Twenty-Five are built in. A site on another theme is served with Twenty Twenty-Five for now; classic themes are under way.
+- **Your plugins:** PHP plugins do not run, because there is no PHP. A plugin needs a port to the extension runtime, and no popular plugin is ported yet.
+- **Need a custom theme or plugin ported?** Write to [contact@hyscribe.com](mailto:contact@hyscribe.com).
+- **Changed your mind?** Stop HyScribe and start PHP WordPress on the same database. [Switching a site over and back](docs/operators/switching.md) has the steps.
+
+## FAQ
+
+<details>
+<summary><b>Is it ready for my live site?</b></summary>
+<br>
+
+Not yet. v0.1.0 is an early release with no external security audit, and parts of the admin and the REST API still answer `501 Not Implemented`. Run it on a copy of a site and keep backups.
+
+</details>
+
+<details>
+<summary><b>Does it change my database?</b></summary>
+<br>
+
+No table is altered and nothing is migrated. HyScribe writes only what PHP WordPress would write, which is checked against PHP for every kind of write.
+
+</details>
+
+<details>
+<summary><b>Can I go back to PHP WordPress?</b></summary>
+<br>
+
+Yes, at any time. The database stays readable by PHP WordPress, and a switch-back test suite runs on every release.
+
+</details>
+
+<details>
+<summary><b>Will my plugins work?</b></summary>
+<br>
+
+Not as they are. WordPress's PHP plugins never run on HyScribe. Plugins are ported to sandboxed WebAssembly packages on HyScribe's extension SDK; the runtime and SDK 0.4 are in this release, and the first ports are on the roadmap. For help porting your own, write to [contact@hyscribe.com](mailto:contact@hyscribe.com).
+
+</details>
+
+<details>
+<summary><b>Which WordPress versions and themes?</b></summary>
+<br>
+
+Sites on WordPress 7.0 or 7.1. The block themes Twenty Twenty-Two to Twenty Twenty-Five are built in; classic themes are in progress.
+
+</details>
+
+<details>
+<summary><b>What does it cost?</b></summary>
+<br>
+
+Nothing. HyScribe is open source under the AGPL-3.0-or-later licence.
+
+</details>
+
+## Built with
+
+Rust throughout: one static binary serves the site, hs-admin and the REST API over MariaDB or MySQL. Extensions run on a WebAssembly component runtime. PHP WordPress is used only as the test oracle.
+
+## Going further
+
+- [docs.hyscribe.com](https://docs.hyscribe.com) and [docs/operators](docs/operators): installing, configuration, running the service, switching a site over and back, backups, upgrades and security.
+- [What is not supported](docs/operators/not-supported.md): the full list of what still answers `501` or differs from WordPress.
+- [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md): the security rules and the compatibility contract.
+- [docs/EXTENSIONS.md](docs/EXTENSIONS.md): writing plugins for the extension runtime.
+- [docs/ROADMAP.md](docs/ROADMAP.md) and [PROGRESS.md](PROGRESS.md): the plan and the live checklist.
+
+## Build from source
 
 ```
 reference/default-install/db.sh up        # MariaDB with a fresh WordPress 7.1 install

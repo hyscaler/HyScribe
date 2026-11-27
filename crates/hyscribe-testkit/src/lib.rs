@@ -488,6 +488,10 @@ mod tests {
              Learn more about the 2.0.0-rc.1 version. body=HyScribe%20version%3A%202.0.0-rc.1%0D%0A \
              Learn more about the"
         );
+        assert_eq!(
+            hyscribe_version("Learn more about the 0.1.0", "%version%"),
+            "Learn more about the 0.1.0"
+        );
         let page = "x <a href=\"mailto:a&#064;b\">a&#64;b&#9999;&#x41;&#</a> value=\"pagegen_timestamp\" value=\"1\" y";
         assert_eq!(
             settled_page(&page.replace("value=\"pagegen", "name=\"pagegen")),

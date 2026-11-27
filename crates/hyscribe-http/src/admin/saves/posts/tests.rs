@@ -458,7 +458,7 @@ async fn the_lists_actions_answer_as_php() {
         if status == "200" {
             let php = String::from_utf8(hyscribe_testkit::unhex(php_body)).unwrap();
             let php = hyscribe_testkit::hs_admin_page(&php);
-            let php = undated(&unnonced(&hyscribe_testkit::footer_version(
+            let php = undated(&unnonced(&hyscribe_testkit::hyscribe_version(
                 &php,
                 "%version%",
             )));

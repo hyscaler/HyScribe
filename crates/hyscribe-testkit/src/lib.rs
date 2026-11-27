@@ -294,7 +294,7 @@ fn between(page: &str, before: &str, after: &str, with: &str) -> String {
 
 /// `page` with the HyScribe version of its admin footer as `version`, so a
 /// page the oracle recorded under an earlier version still compares.
-pub fn footer_version(page: &str, version: &str) -> String {
+fn footer_version(page: &str, version: &str) -> String {
     const LINE: &str = "<p id=\"footer-upgrade\" class=\"alignright\">\n\t\tHyScribe ";
     match page.split_once(LINE) {
         Some((head, tail)) => {

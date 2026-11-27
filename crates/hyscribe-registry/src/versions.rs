@@ -104,7 +104,9 @@ pub fn release(text: &str) -> Option<[u64; 3]> {
 /// pre-release label (`0.2.0-rc.1` is held to `0.2.0`), or `0.0.0` if it
 /// does not read.
 pub fn own(version: &str) -> [u64; 3] {
-    let numbers = version.split_once('-').map_or(version, |(numbers, _)| numbers);
+    let numbers = version
+        .split_once('-')
+        .map_or(version, |(numbers, _)| numbers);
     release(numbers).unwrap_or_default()
 }
 

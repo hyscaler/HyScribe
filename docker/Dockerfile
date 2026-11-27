@@ -9,7 +9,7 @@
 #   docker buildx build --platform linux/amd64,linux/arm64 \
 #     --build-arg VERSION=0.1.0 --build-arg SHA256_AMD64=<sum> --build-arg SHA256_ARM64=<sum> \
 #     --build-arg REVISION=<commit> --build-arg CREATED=<date> -f docker/Dockerfile docker
-# Every RUN runs on the build machine's own platform, and the target's stage
+# Every RUN runs on the build host's own platform, and the target's stage
 # only copies, so the arm64 image is assembled on amd64 without emulation.
 
 # Debian trixie-slim, pinned by its multi-architecture index.

@@ -46,7 +46,7 @@ SOURCE_DATE_EPOCH=$(git log -1 --format=%ct v0.2.0) docker buildx build \
   --output type=oci,dest=hyscribe-0.2.0.tar,rewrite-timestamp=true -f docker/Dockerfile docker
 ```
 
-The base images are pinned by digest and the timestamps are the release commit's, so the rebuild gives the published digest as long as Debian's `ca-certificates` package is the same one; after a Debian update of that package the CA bundle, and so the digest, differ while the HyScribe binary stays the same bytes. Every build step runs on the build machine's own platform, so an amd64 machine builds the arm64 image without emulation.
+The base images are pinned by digest and the timestamps are the release commit's, so the rebuild gives the published digest as long as Debian's `ca-certificates` package is the same one; after a Debian update of that package the CA bundle, and so the digest, differ while the HyScribe binary stays the same bytes. Every build step runs on the build host's own platform, so an amd64 machine builds the arm64 image without emulation.
 
 ## Try it with Compose
 

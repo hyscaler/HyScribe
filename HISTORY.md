@@ -3,6 +3,11 @@
 Dated log of project events and decisions, newest first. Add an entry whenever a decision is made, a milestone changes state, or direction shifts. Link ADRs where they exist.
 
 
+## 2026-11-27: v0.2.0-rc.1, the first release candidate
+
+- Tagged from `main` with the work since v0.1.0: the Windows archive, the container image per published release (Debian slim, amd64 and arm64), extension REST routes (SDK 0.5) and three closer matches with PHP. A version with a hyphen is drafted as a pre-release, so it is never GitHub's latest release and its image gets only its own tag.
+- Found while preparing it: the plugin installer read a pre-release HyScribe as 0.0.0 and refused every plugin; it now holds `0.2.0-rc.1` to `0.2.0`. The recorded admin pages mask every HyScribe version the admin's look prints, not only the footer's, so a new version no longer changes them.
+
 ## 2026-11-27: Windows archive
 
 - Decision ([ADR 0005](docs/adr/0005-single-binary-distribution.md), amendment of 2026-11-27): Windows amd64 is a release platform from the release after v0.1.0, as `hyscribe_<version>_windows_amd64.zip` with its `hyscribe-latest-windows-amd64.zip` alias: the same files as the other archives, the binary being `hyscribe.exe`, with no installer or MSI. Built on a GitHub-hosted Windows runner (`windows-2025`) with Visual Studio's toolchain and the C runtime linked in, never cross-compiled; unsigned for now; arm64 Windows not built

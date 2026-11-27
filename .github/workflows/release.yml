@@ -324,7 +324,11 @@ jobs:
         run: |
           if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
             echo "set=true" >> "$GITHUB_OUTPUT"
-            echo "Docker Hub secrets are set"
+            # A login checks the token on every run, so a dry run finds a
+            # wrong or expired token before a tag does; nothing is pushed.
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+            docker logout docker.io >/dev/null
+            echo "Docker Hub secrets are set and the token logs in"
           else
             echo "set=false" >> "$GITHUB_OUTPUT"
             echo "::notice title=Docker Hub::DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is not set: the image goes to GitHub Container Registry only"

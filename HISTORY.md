@@ -3,6 +3,11 @@
 Dated log of project events and decisions, newest first. Add an entry whenever a decision is made, a milestone changes state, or direction shifts. Link ADRs where they exist.
 
 
+## 2026-11-27: Extension REST routes served (SDK 0.5)
+
+- Decision ([ADR 0022](docs/adr/0022-extension-host.md), amendment): an extension's `register_rest_route()` routes are served through hyscribe-rest after core's routes, so no extension can shadow a core route, and core namespaces are refused at registration; a permission callback is required and allows only on `true`; an answer may set only a listed set of headers; a fault inside a route gives PHP's fatal error answer and counts as any callback's fault. SDK 0.5 (WIT `@0.5.0`; 0.1 to 0.4 still link) adds `rest::response` and `rest::error`.
+- Tested against PHP: `reference/rest/extension.list` with the plugin the test extension stands in for, 240 cases (40 requests as a visitor and five roles), all matching but PHP's JSON fatal error body, which also carries the PHP error and stack. Not served yet: batches to an extension route (501), route schemas, `_embed` of extension links, request headers beyond the content type.
+
 ## 2026-11-27: Three small differences from PHP closed: slash runs, X-Redirect-By, and pagination arithmetic
 
 - Slash runs in the path under plain permalinks: `redirect_canonical()` collapses `//` in the path for every request, and HyScribe did so only under pretty permalinks. `//` answered 200 where PHP redirects 301 to `/`, `//index.php` redirected to `//`, and `/blog//` on a site in a folder answered 200. The plain path now strips a trailing `/index.php`, replaces an inner `/index.php/`, adds the front page's slash and collapses runs of slashes in that order, as PHP does, and a request such as `//blog/` outside a site's folder is redirected into it. `reference/pages/default.list` and `folder.list` gained 55 cases (plain, `/%postname%/` and a date structure, root and folder sites, with and without query strings) recorded from PHP.

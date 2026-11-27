@@ -100,6 +100,14 @@ pub fn release(text: &str) -> Option<[u64; 3]> {
     numbers.collect::<Option<Vec<u64>>>()?.try_into().ok()
 }
 
+/// This binary's own version as a release number: the numbers before a
+/// pre-release label (`0.2.0-rc.1` is held to `0.2.0`), or `0.0.0` if it
+/// does not read.
+pub fn own(version: &str) -> [u64; 3] {
+    let numbers = version.split_once('-').map_or(version, |(numbers, _)| numbers);
+    release(numbers).unwrap_or_default()
+}
+
 /// A path under the base URL: letters, digits and `-._~/`, relative, no
 /// empty or `..` segment.
 fn path(text: &str) -> bool {

@@ -17,7 +17,7 @@ use crate::index::Index;
 use crate::keys::{KeyList, package_key};
 use crate::remote::Remote;
 use crate::revoke::revoke;
-use crate::versions::{Version, Versions, release};
+use crate::versions::{Version, Versions, own};
 
 /// The site the commands work on.
 pub struct Site<'a> {
@@ -307,7 +307,7 @@ fn choose<'v>(
     asked: Option<&str>,
 ) -> Result<&'v Version, String> {
     let id = &versions.id;
-    let binary = release(env!("CARGO_PKG_VERSION")).unwrap_or_default();
+    let binary = own(env!("CARGO_PKG_VERSION"));
     let why = |v: &Version| {
         let revoked = v.revoked.as_deref();
         let revoked = revoked.or_else(|| index.revoked(id, &v.version, &v.sha256));

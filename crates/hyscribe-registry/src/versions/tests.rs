@@ -145,3 +145,14 @@ fn a_page_is_a_path_under_the_base() {
     }
     assert!(!path(&format!("{long}a")));
 }
+
+#[test]
+fn this_binary_s_own_version_keeps_its_numbers_before_a_pre_release_label() {
+    // A release candidate is held to the release it leads to, so a
+    // plugin needing an older HyScribe installs on it.
+    assert_eq!(own("0.2.0-rc.1"), [0, 2, 0]);
+    assert_eq!(own("0.1.0"), [0, 1, 0]);
+    assert_eq!(own("1.10.3-beta"), [1, 10, 3]);
+    assert_eq!(own("not.a.version"), [0, 0, 0]);
+    assert_eq!(release("0.2.0-rc.1"), None);
+}

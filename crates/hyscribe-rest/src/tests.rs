@@ -18,6 +18,7 @@ mod embed;
 mod index;
 mod media;
 mod oembed;
+mod pagination;
 mod people;
 mod plugins;
 mod posts;

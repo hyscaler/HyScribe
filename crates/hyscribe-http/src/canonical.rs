@@ -273,7 +273,7 @@ async fn in_category(site: &Arc<Site>, post_id: u64, path: Option<&String>) -> b
 
 /// `preg_replace( '|/index.php/*?$|', '/' )`: a path ending in `/index.php`
 /// and slashes ends in a slash.
-fn strip_index(path: &str) -> Option<String> {
+pub(crate) fn strip_index(path: &str) -> Option<String> {
     let head = path.trim_end_matches('/').strip_suffix("/index.php")?;
     Some(format!("{head}/"))
 }

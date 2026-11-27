@@ -720,10 +720,7 @@ pub(crate) fn redirected(
     location: String,
 ) -> (StatusCode, Vec<u8>) {
     headers.push((header::LOCATION, location));
-    headers.push((
-        header::HeaderName::from_static("x-redirect-by"),
-        "WordPress".into(),
-    ));
+    headers.push(crate::redirect_by());
     (StatusCode::FOUND, Vec::new())
 }
 

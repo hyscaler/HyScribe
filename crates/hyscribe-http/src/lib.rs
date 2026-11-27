@@ -1148,7 +1148,7 @@ async fn page(
         _ if post => StatusCode::METHOD_NOT_ALLOWED.into_response(),
         Outcome::Redirect(location) => (
             StatusCode::MOVED_PERMANENTLY,
-            [(header::LOCATION, sent_location(&location))],
+            [(header::LOCATION, sent_location(&location)), redirect_by()],
         )
             .into_response(),
         Outcome::Feed(page, feed) => {
@@ -1168,7 +1168,7 @@ async fn page(
                 "{}/wp-includes/images/w-logo-gray-white-bg.png",
                 site.option("siteurl")
             );
-            (StatusCode::FOUND, [(header::LOCATION, icon)]).into_response()
+            (StatusCode::FOUND, [(header::LOCATION, icon), redirect_by()]).into_response()
         }
         Outcome::Page(mut page) => {
             let embed = embeds(&query, &uri, page.request.singular);
@@ -1569,6 +1569,15 @@ fn clean_location(location: &str, tidy: impl Fn(&str) -> String) -> String {
     )
 }
 
+/// `X-Redirect-By`, which `wp_redirect()` sends with the `x_redirect_by`
+/// filter's value, `WordPress` by default.
+pub(crate) fn redirect_by() -> (header::HeaderName, String) {
+    (
+        header::HeaderName::from_static("x-redirect-by"),
+        "WordPress".into(),
+    )
+}
+
 /// A redirect's `Location` as `wp_redirect()` sends it, through
 /// `wp_sanitize_redirect()`, which leaves only bytes a header carries.
 fn sent_location(location: &str) -> String {
@@ -1789,9 +1798,9 @@ fn now() -> i64 {
 }
 
 /// The canonical form of `path` with plain permalinks, as
-/// `redirect_canonical()` gives it: `/index.php` goes to `/`, a
-/// `/index.php/` inside it to `/`, and other paths gain a trailing slash
-/// on the front page. `None` when `path` is canonical.
+/// `redirect_canonical()` gives it: a trailing `/index.php` goes to `/`, an
+/// `/index.php/` inside it to `/`, the front page takes a trailing slash,
+/// and a run of slashes becomes one. `None` when `path` is canonical.
 fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<String> {
     let query = raw_query.map(|q| format!("?{q}")).unwrap_or_default();
     // A requested path already starts with the home URL's folder.
@@ -1799,18 +1808,15 @@ fn canonical_path(site: &Site, path: &str, raw_query: Option<&str>) -> Option<St
         .home
         .strip_suffix(home_path(&site.home))
         .unwrap_or(&site.home);
-    if path.contains("/index.php/") {
-        return Some(format!(
-            "{origin}{}{query}",
-            path.replace("/index.php/", "/")
-        ));
-    }
-    if let Some(folder) = path.strip_suffix("index.php").filter(|f| f.ends_with('/')) {
-        return Some(format!("{origin}{folder}{query}"));
-    }
+    let stripped = canonical::strip_index(path).unwrap_or_else(|| path.to_string());
+    let mut canonical = stripped.replace("/index.php/", "/");
     // The home page these paths show takes it only as `is_front_page()`.
     let front = site.posts_on_front() || site.front_page().is_some_and(|id| id != 0);
-    (front && !path.ends_with('/')).then(|| format!("{origin}{path}/{query}"))
+    if front && !canonical.ends_with('/') {
+        canonical.push('/');
+    }
+    let canonical = permalinks::collapse_slashes(&canonical);
+    (canonical != path).then(|| format!("{origin}{canonical}{query}"))
 }
 
 /// HyScribe's admin and login URLs have no `.php` (ADR 0008):

@@ -130,7 +130,10 @@ pub(crate) async fn respond(
     match post {
         Ok(Some(post)) if viewable(&post, &["post", "page"]) => (
             StatusCode::FOUND,
-            [(header::LOCATION, site.permalink(&post).await)],
+            [
+                (header::LOCATION, site.permalink(&post).await),
+                crate::redirect_by(),
+            ],
         )
             .into_response(),
         // `wp_redirect()` of no link sends nothing.

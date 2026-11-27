@@ -238,6 +238,15 @@ pub(super) fn default_install_more() -> &'static Content {
     })
 }
 
+/// The default install with `reference/rest/pagination.sql`'s tags and
+/// comments.
+pub(super) fn default_install_paged() -> &'static Content {
+    static CONTENT: OnceLock<Content> = OnceLock::new();
+    CONTENT.get_or_init(|| {
+        default_install_with(include_str!("../../../../reference/rest/pagination.sql"))
+    })
+}
+
 /// The Theme Test Data fixture, built by `reference/theme-test-data/build.sh`.
 pub(super) fn theme_test_data() -> &'static Content {
     static CONTENT: OnceLock<Content> = OnceLock::new();

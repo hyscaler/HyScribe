@@ -87,6 +87,8 @@ pub struct Response {
     pub data: Value,
     /// The links and their relations.
     links: Vec<(String, Value)>,
+    /// Whether the totals were set as strings, as the comments' are.
+    string_totals: bool,
 }
 
 impl Response {
@@ -97,7 +99,19 @@ impl Response {
             headers: Vec::new(),
             data,
             links: Vec::new(),
+            string_totals: false,
         }
+    }
+
+    /// The totals' headers as strings, which a data array holds as such
+    /// (`(string) $total_comments`).
+    pub(crate) fn totals_as_strings(&mut self) {
+        self.string_totals = true;
+    }
+
+    /// Whether [`Response::totals_as_strings`] was called.
+    pub(crate) fn totals_are_strings(&self) -> bool {
+        self.string_totals
     }
 
     /// `header( $key, $value )`.
@@ -203,16 +217,32 @@ pub fn paginate(
     query: &[(Key, Value)],
     collection: &str,
 ) {
-    let prev = page.saturating_sub(1).min(pages);
+    paginate_at(response, (total, pages, to_i64(page)), query, collection);
+}
+
+/// [`paginate`] for a page PHP holds in an integer, which is negative where
+/// an offset's page overflowed.
+pub fn paginate_at(
+    response: &mut Response,
+    (total, pages, page): (u64, u64, i64),
+    query: &[(Key, Value)],
+    collection: &str,
+) {
+    let prev = page.saturating_sub(1).min(to_i64(pages));
     pages_linked(response, (total, pages, page), prev, query, collection);
 }
 
-/// [`paginate`] with `prev` as the page before, which the search route
+/// A PHP integer of a count or page, at most the largest integer.
+pub(crate) fn to_i64(n: u64) -> i64 {
+    i64::try_from(n).unwrap_or(i64::MAX)
+}
+
+/// [`paginate_at`] with `prev` as the page before, which the search route
 /// does not hold to the last page.
 pub(crate) fn pages_linked(
     response: &mut Response,
-    (total, pages, page): (u64, u64, u64),
-    prev: u64,
+    (total, pages, page): (u64, u64, i64),
+    prev: i64,
     query: &[(Key, Value)],
     collection: &str,
 ) {
@@ -220,15 +250,19 @@ pub(crate) fn pages_linked(
     response.header("X-WP-TotalPages", &pages.to_string());
     let query = urlencode_deep(Value::Array(query.to_vec()));
     let base = add_query_values(query.as_array().unwrap_or_default(), collection.as_bytes());
-    let links: Vec<String> = [("prev", prev, page > 1), ("next", page + 1, page < pages)]
-        .into_iter()
-        .filter(|(_, _, shown)| *shown)
-        .map(|(rel, to, _)| {
-            let to = to.to_string();
-            let link = add_query_arg(&[(b"page", Some(to.as_bytes()))], &base);
-            format!("<{}>; rel=\"{rel}\"", String::from_utf8_lossy(&link))
-        })
-        .collect();
+    let last = to_i64(pages);
+    let links: Vec<String> = [
+        ("prev", prev, page > 1),
+        ("next", page.saturating_add(1), page < last),
+    ]
+    .into_iter()
+    .filter(|(_, _, shown)| *shown)
+    .map(|(rel, to, _)| {
+        let to = to.to_string();
+        let link = add_query_arg(&[(b"page", Some(to.as_bytes()))], &base);
+        format!("<{}>; rel=\"{rel}\"", String::from_utf8_lossy(&link))
+    })
+    .collect();
     // `link_header()` joins a response's links in one header.
     if !links.is_empty() {
         response.header("Link", &links.join(", "));

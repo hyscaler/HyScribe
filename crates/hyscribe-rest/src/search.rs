@@ -10,7 +10,7 @@ use hyscribe_render::post::{POST_FORMATS, admin_title};
 
 use crate::fields::{Properties, fields_for_response, item_response, links_wanted};
 use crate::request::{Params, Sanitize, arg, collection_args, typed};
-use crate::response::{Response, RestError, int, list, pages_linked, text};
+use crate::response::{Response, RestError, int, list, pages_linked, text, to_i64};
 use crate::schema::{Checked, Refusal, parse_list, parse_slug_list, sanitize_value_from_schema};
 use crate::terms::ids;
 use crate::{Context, Endpoint};
@@ -151,11 +151,11 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
         .collect();
     let mut response = Response::new(list(data), 200);
     let collection = context.rest_url(ROUTE);
-    let totals = (total, pages, page);
+    let totals = (total, pages, to_i64(page));
     pages_linked(
         &mut response,
         totals,
-        page.saturating_sub(1),
+        to_i64(page.saturating_sub(1)),
         &params.get,
         &collection,
     );

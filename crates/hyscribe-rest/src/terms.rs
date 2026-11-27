@@ -9,7 +9,7 @@ use hyscribe_render::formatting::{sanitize_title, sanitize_title_for_query};
 
 use crate::fields::{Properties, fields_for_response, item_response, links_wanted};
 use crate::request::{Arg, Params, collection_args, typed};
-use crate::response::{Response, RestError, int, list, paginate, text};
+use crate::response::{Response, RestError, int, list, paginate_at, text};
 use crate::schema::parse_list;
 use crate::taxonomies::{field, shown};
 use crate::types::{context_arg, items_route};
@@ -405,9 +405,9 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
         Response::new(list(data), 200)
     };
     let pages = total.div_ceil(per_page);
-    let page = offset / per_page + 1 + u64::from(offset % per_page != 0);
+    let page = crate::request::page_of_offset(offset, per_page);
     let route = items_route_of(&query.taxonomy);
-    paginate(
+    paginate_at(
         &mut response,
         (total, pages, page),
         &params.get,

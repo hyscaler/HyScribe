@@ -7,7 +7,7 @@
 // hashes instead, of the page under hs-admin's URLs (as hs_admin_page() of
 // hyscribe-testkit put it before ADR 0008's 2026-11-17 amendment, keeping
 // relative form actions' `.php`; the oracle shows no update notice) with every
-// nonce as %nonce% and the footer's HyScribe version as %version%: sha256
+// nonce as %nonce% and each HyScribe version it prints as %version%: sha256
 // of its screen meta and content, a tab, and
 // sha256 of all of it. A list sorted
 // by author or parent, or the search for jpg (its results tie on their dates),
@@ -55,8 +55,13 @@ foreach ( array( "href='", 'href="', '"url":"' ) as $prefix ) {
 	$page = $out . $page;
 }
 $page = preg_replace( '/%nonce:[^%]*%/', '%nonce%', $page );
-// The footer's HyScribe version, so a release leaves the hashes as they are.
+// Every HyScribe version the admin's look prints (the footer, the welcome
+// panel's release notes link and text, the porting mail's body), so a release
+// leaves the hashes as they are.
 $page = preg_replace( '/(<p id="footer-upgrade" class="alignright">\n\t\tHyScribe )[^\t]*/', '$1%version%', $page );
+$page = preg_replace( '#(https://github\.com/hyscaler/HyScribe/releases/tag/v)[^"]*#', '$1%version%', $page );
+$page = preg_replace( '/(Learn more about the ).*?( version\.)/', '$1%version%$2', $page );
+$page = preg_replace( '/(HyScribe%20version%3A%20).*?(%0D)/', '$1%version%$2', $page );
 if ( preg_match( '/orderby=(author|parent)|s=jpg/', $argv[4] ) ) {
 	$start = strpos( $page, '<tbody id="the-list"' );
 	$page  = substr( $page, 0, $start ) . substr( $page, strpos( $page, "\t</tbody>" ) );

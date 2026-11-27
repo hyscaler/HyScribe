@@ -253,7 +253,43 @@ pub fn hs_admin_page(page: &str) -> String {
     for prefix in ["href='", "href=\"", "action='", "action=\"", "\"url\":\""] {
         page = admin_paths(&page, prefix, prefix);
     }
-    footer_version(&page, env!("CARGO_PKG_VERSION"))
+    hyscribe_version(&page, env!("CARGO_PKG_VERSION"))
+}
+
+/// `page` with every HyScribe version the admin's own look prints (the
+/// footer, the welcome panel's release notes link and text, and the porting
+/// mail's body) as `version`, so a page the oracle recorded under an
+/// earlier version still compares.
+pub fn hyscribe_version(page: &str, version: &str) -> String {
+    let mut page = footer_version(page, version);
+    for (before, after) in [
+        ("https://github.com/hyscaler/HyScribe/releases/tag/v", "\""),
+        ("Learn more about the ", " version."),
+        ("HyScribe%20version%3A%20", "%0D"),
+    ] {
+        page = between(&page, before, after, version);
+    }
+    page
+}
+
+/// `page` with what stands between each `before` and the next `after` as
+/// `with`.
+fn between(page: &str, before: &str, after: &str, with: &str) -> String {
+    let mut out = String::new();
+    let mut rest = page;
+    while let Some((head, tail)) = rest.split_once(before) {
+        out.push_str(head);
+        out.push_str(before);
+        match tail.find(after) {
+            Some(end) => {
+                out.push_str(with);
+                rest = tail.get(end..).unwrap_or_default();
+            }
+            None => rest = tail,
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// `page` with the HyScribe version of its admin footer as `version`, so a
@@ -440,6 +476,17 @@ mod tests {
         assert_eq!(
             footer_version(&format!("a{footer}1.2"), "%version%"),
             format!("a{footer}%version%")
+        );
+        assert_eq!(
+            hyscribe_version(
+                "<a href=\"https://github.com/hyscaler/HyScribe/releases/tag/v0.1.0\">\
+                 Learn more about the 0.1.0 version. body=HyScribe%20version%3A%200.1.0%0D%0A \
+                 Learn more about the",
+                "2.0.0-rc.1"
+            ),
+            "<a href=\"https://github.com/hyscaler/HyScribe/releases/tag/v2.0.0-rc.1\">\
+             Learn more about the 2.0.0-rc.1 version. body=HyScribe%20version%3A%202.0.0-rc.1%0D%0A \
+             Learn more about the"
         );
         let page = "x <a href=\"mailto:a&#064;b\">a&#64;b&#9999;&#x41;&#</a> value=\"pagegen_timestamp\" value=\"1\" y";
         assert_eq!(

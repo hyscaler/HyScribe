@@ -10,7 +10,8 @@
 # empty volume, the browser wizard answered with curl into the empty
 # wordpress_saves database, the home page, and the site again after a
 # restart from what the volume kept. Both run as the image's own user, on a
-# read only root filesystem, with the installation on a named volume.
+# read only root filesystem, with the installation on a named volume. The
+# image comes from scripts/docker-image.sh <version> load <image>.
 # The pages are fetched through a published port on 127.0.0.1, or, with
 # SMOKE_VIA_NETWORK=1 (a CI job container on the same network), from the
 # container by name. Containers and volumes are named after SMOKE_NAME and
@@ -71,7 +72,10 @@ stopped() {
 }
 
 "$DOCKER" run --rm "$image" version | grep -q 'AGPL-3.0-or-later'
+# The image's user, which a container runs as, and the CA bundle the binary reads.
 test "$("$DOCKER" image inspect -f '{{.Config.User}}' "$image")" = 65532:65532
+test "$("$DOCKER" run --rm --entrypoint id "$image")" = 'uid=65532(nonroot) gid=65532(nonroot) groups=65532(nonroot)'
+test "$("$DOCKER" run --rm --entrypoint grep "$image" -c 'BEGIN CERTIFICATE' /etc/ssl/certs/ca-certificates.crt)" -gt 100
 
 # The existing site, configured by the environment alone.
 site="$name-site"
@@ -90,7 +94,7 @@ new="$name-new"
 run "$new"
 logged "$new" 'No .env: setup mode'
 url="$(base "$new")"
-# The secret is only in the volume, which `docker cp` reads without a shell.
+# The secret is only in the volume; `docker cp` reads it as the docs say.
 "$DOCKER" cp "$new:/hyscribe/logs/setup-secret" - | tar -xO > "$work/secret"
 secret="$(sed 's/.* //' "$work/secret")"
 test "${#secret}" -eq 32

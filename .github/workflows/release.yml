@@ -16,12 +16,24 @@
 # workflow started by the tag or by ci.yml's completion: the release then
 # waits for the gates through an ordinary `needs`, in one run, with the
 # tag as its ref, so the version check and the provenance still name the tag.
+#
+# The container image (ADR 0005, amendment of 2026-11-27) is assembled from
+# the two Linux archives by scripts/docker-image.sh, never compiled again:
+# the amd64 build job runs it against the fixture, the publish job builds it
+# for both architectures twice, checks the bytes and the binaries, and only
+# for a tag pushes it to GitHub Container Registry and copies the same
+# manifest to Docker Hub, when that registry's secrets are set.
 name: Release
 
 on:
   # Called by ci.yml: for a pushed v* tag it publishes; from a manual CI run
   # it is a rehearsal that publishes nothing.
   workflow_call:
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: false
   # A manual run builds, tests and packages everything and prepares the
   # release assets, but publishes nothing (no release, upload or
   # attestation), whatever dry_run says: only a pushed v* tag publishes.
@@ -65,6 +77,7 @@ jobs:
       HYSCRIBE_DB_PORT: "28993"
       HYSCRIBE_TEST_DB_PORT: "28993"
       HYSCRIBE_PHP_PORT: "8093"
+      HYSCRIBE_IMAGE: ci-release-image:${{ github.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools
@@ -98,6 +111,11 @@ jobs:
           reference/default-install/db.sh up
           scripts/ci-as-user.sh prepare
           scripts/ci-as-user.sh scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
+      - name: Container image from the archive, run against the fixture
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          scripts/docker-image.sh dist load "$HYSCRIBE_IMAGE"
+          SMOKE_VIA_NETWORK=1 SMOKE_NAME="ci-release-image-${{ github.run_id }}" scripts/docker-smoke-test.sh "$HYSCRIBE_IMAGE"
       - name: Docker for the tests' SQL steps (they run as the ordinary user)
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: scripts/ci-docker-proxy.sh
@@ -123,6 +141,7 @@ jobs:
       - name: Remove the fixture containers
         if: always() && matrix.target == 'x86_64-unknown-linux-musl'
         run: |
+          docker image rm "$HYSCRIBE_IMAGE" >/dev/null 2>&1 || true
           reference/default-install/php.sh down || true
           reference/default-install/db.sh down || true
           scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
@@ -227,6 +246,12 @@ jobs:
       contents: write
       id-token: write
       attestations: write
+      # The image's pushes to GitHub Container Registry, for a tag only.
+      packages: write
+    env:
+      GHCR_IMAGE: ghcr.io/hyscaler/hyscribe
+      HUB_IMAGE: docker.io/hyscribe/hyscribe
+      IS_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools
@@ -271,3 +296,92 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --title "HyScribe $GITHUB_REF_NAME" --generate-notes --draft
+      - name: Container image, built twice from the Linux archives
+        id: image
+        run: |
+          docker version --format 'client {{.Client.Version}}, server {{.Server.Version}}'
+          docker buildx version
+          docker info --format 'image store: {{.DriverStatus}}'
+          scripts/docker-image.sh dist oci "$RUNNER_TEMP/image.tar" | tee "$RUNNER_TEMP/first.txt"
+          HYSCRIBE_IMAGE_NO_CACHE=1 scripts/docker-image.sh dist oci "$RUNNER_TEMP/image.tar" | tee "$RUNNER_TEMP/second.txt"
+          cmp "$RUNNER_TEMP/first.txt" "$RUNNER_TEMP/second.txt"
+          echo "digest=$(tail -n 1 "$RUNNER_TEMP/first.txt")" >> "$GITHUB_OUTPUT"
+          rm "$RUNNER_TEMP/image.tar"
+      - name: The image's tags
+        id: tags
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          tags="$version"
+          # A pre-release (1.2.0-rc.1) is not the newest release line.
+          case "$version" in *-*) ;; *) tags="$tags ${version%.*} latest" ;; esac
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "Tags: $tags"
+      - name: Docker Hub credentials
+        id: hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "set=true" >> "$GITHUB_OUTPUT"
+            echo "Docker Hub secrets are set"
+          else
+            echo "set=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Docker Hub::DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is not set: the image goes to GitHub Container Registry only"
+          fi
+          if [ "$IS_TAG" != true ]; then
+            echo "::notice title=Container image::Not a tag: the image ${{ steps.image.outputs.digest }} was built and checked, and nothing is pushed"
+          fi
+      - name: Push the image to GitHub Container Registry
+        id: ghcr
+        if: env.IS_TAG == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAGS: ${{ steps.tags.outputs.tags }}
+          BUILT: ${{ steps.image.outputs.digest }}
+        run: |
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          names=()
+          for tag in $TAGS; do names+=("$GHCR_IMAGE:$tag"); done
+          digest=$(scripts/docker-image.sh dist push "${names[@]}" | tail -n 1)
+          # What was pushed is what was built and checked above.
+          test "$digest" = "$BUILT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - if: env.IS_TAG == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/hyscaler/hyscribe
+          subject-digest: ${{ steps.ghcr.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Copy the same manifest to Docker Hub
+        if: env.IS_TAG == 'true' && steps.hub.outputs.set == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          TAGS: ${{ steps.tags.outputs.tags }}
+          DIGEST: ${{ steps.ghcr.outputs.digest }}
+        run: |
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          args=()
+          for tag in $TAGS; do args+=(--tag "$HUB_IMAGE:$tag"); done
+          docker buildx imagetools create "${args[@]}" "$GHCR_IMAGE@$DIGEST"
+          # Both registries serve the same digest.
+          for tag in $TAGS; do
+            test "$(docker buildx imagetools inspect "$HUB_IMAGE:$tag" --format '{{json .Manifest.Digest}}')" = "\"$DIGEST\""
+          done
+      - if: env.IS_TAG == 'true' && steps.hub.outputs.set == 'true'
+        # The image is published by now; a registry that refuses the
+        # attestation must not stop the release.
+        continue-on-error: true
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: index.docker.io/hyscribe/hyscribe
+          subject-digest: ${{ steps.ghcr.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Log out of the registries
+        if: always()
+        run: |
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          docker logout docker.io >/dev/null 2>&1 || true

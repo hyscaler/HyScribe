@@ -37,6 +37,8 @@
 #
 # For a release tag, the release workflow is called once every job here has
 # passed, so nothing is built for publishing before the gates are green.
+# The package job also builds the container image from its archive and runs
+# it against the fixture (scripts/docker-smoke-test.sh).
 name: CI
 
 on:
@@ -231,6 +233,7 @@ jobs:
       HYSCRIBE_DB_CONTAINER: ci-package-db-${{ github.run_id }}
       HYSCRIBE_REF_NETWORK: ci-package-ref-${{ github.run_id }}
       HYSCRIBE_DB_PORT: "28992"
+      HYSCRIBE_IMAGE: ci-package-image:${{ github.run_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Tools (system packages, cargo tools from the cache volume)
@@ -247,9 +250,16 @@ jobs:
           scripts/package.sh x86_64-unknown-linux-musl dist
           scripts/ci-as-user.sh prepare
           scripts/ci-as-user.sh scripts/smoke-test.sh dist/hyscribe_*_linux_amd64.tar.gz
+      - name: Container image from the archive, run as docs/operators/docker.md says
+        run: |
+          docker version --format 'client {{.Client.Version}}, server {{.Server.Version}}'
+          docker buildx version
+          scripts/docker-image.sh dist load "$HYSCRIBE_IMAGE"
+          SMOKE_VIA_NETWORK=1 SMOKE_NAME="ci-image-${{ github.run_id }}" scripts/docker-smoke-test.sh "$HYSCRIBE_IMAGE"
       - name: Remove the fixture containers
         if: always()
         run: |
+          docker image rm "$HYSCRIBE_IMAGE" >/dev/null 2>&1 || true
           reference/default-install/db.sh down || true
           scripts/ci-net.sh down "$HYSCRIBE_REF_NETWORK"
 
@@ -497,8 +507,15 @@ jobs:
       && !contains(needs.*.result, 'cancelled')
       && !contains(needs.*.result, 'skipped')
       && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.release_dry_run) }}
+    # A called workflow's jobs get no more than this: packages for the image
+    # pushes of its publish job, and the Docker Hub secrets, which only a
+    # tag's run uses.
     permissions:
       contents: write
       id-token: write
       attestations: write
+      packages: write
     uses: ./.github/workflows/release.yml
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

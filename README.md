@@ -82,6 +82,19 @@ tar -xzf hyscribe-latest-linux-amd64.tar.gz && cd hyscribe
 
 On macOS the binary is not signed by Apple yet, and the platform is tested less than Linux: read [On macOS](docs/operators/install.md#on-macos) first.
 
+### Try it with Docker
+
+On Linux, macOS or Windows with Docker, from the release after v0.1.0: the same binary in an image for amd64 and arm64, with a MariaDB beside it.
+
+```bash
+curl -fLO https://raw.githubusercontent.com/hyscaler/HyScribe/main/docker/compose.yaml
+printf 'DB_PASSWORD=%s\n' "$(openssl rand -hex 24)" > .env
+docker compose up -d
+docker compose cp hyscribe:/hyscribe/logs/setup-secret . && cat setup-secret
+```
+
+Open `http://127.0.0.1:8080/`, enter the secret and tick "This is a new site" (database host `db`, name and user `wordpress`, the password from `.env`). The image is `docker.io/hyscribe/hyscribe`, also on GitHub Container Registry as `ghcr.io/hyscaler/hyscribe`. [Docker](docs/operators/docker.md) covers a copy of an existing site, upgrades, backups and security.
+
 The operator documentation, also shipped in the archive as `hyscribe/docs/`, covers installing, configuration, running the service, switching a site over and back, backups, upgrades, security and what is not supported yet: [docs/operators/](docs/operators/README.md). The design behind it is in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Coming from WordPress

@@ -2,7 +2,7 @@
 
 //! HyScribe configuration (ADR 0005).
 //!
-//! Settings come from `.env` in the binary's folder, and real environment
+//! Settings come from `.env` in the installation's folder (the binary's, or `HYSCRIBE_HOME`), and real environment
 //! variables always win over it. No `.env` and no `DB_NAME` in the
 //! environment means the site is not set up yet, and the binary starts in
 //! setup mode.

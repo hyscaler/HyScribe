@@ -31,7 +31,7 @@ With no WordPress site to take over, the wizard can make one. Create an empty da
 | `hyscribe-latest-<os>-<arch>.tar.gz` | Stable alias of the newest release, the equivalent of WordPress `latest.tar.gz` |
 | `SHA256SUMS.txt` | Checksums for every archive |
 | `hyscribe-sbom.cdx.json`, `hyscribe-sbom-darwin.cdx.json` | CycloneDX SBOMs of the Linux and the macOS binaries, which link a few different crates |
-| Container image (optional) | Same binary on a minimal base, for operators who prefer Docker |
+| Container image (optional) | `docker.io/hyscribe/hyscribe` and `ghcr.io/hyscaler/hyscribe`, tags `<version>`, `<major>.<minor>` and `latest`, for `linux/amd64` and `linux/arm64`: the Linux archives' binary on a minimal base, see [Container image](#container-image) |
 
 `LICENSE` ships in every archive because the AGPL requires a copy of the license to accompany each distribution. `THIRD-PARTY-NOTICES`, written by `scripts/third-party-notices.sh` when the archive is built, holds the licences of what the binary embeds: WordPress's files and its themes, with where their source is, and every Rust crate it links, with the licence files each ships.
 
@@ -40,6 +40,16 @@ With no WordPress site to take over, the wizard can make one. Create an empty da
 - Linux amd64 and arm64 (`linux_amd64`, `linux_arm64`), statically linked with musl so it runs on any distribution
 - macOS 11 or later, Apple Silicon and Intel (`darwin_arm64`, `darwin_amd64`), from the release after v0.1.0: see below
 - Later: Windows amd64
+
+### Container image
+
+An optional, secondary distribution, for trying HyScribe with Docker on Linux, macOS and Windows ([docs/operators/docker.md](operators/docker.md); [ADR 0005](adr/0005-single-binary-distribution.md), amendment of 2026-11-27). Nothing in HyScribe needs Docker.
+
+- **Built from the archives.** `scripts/docker-image.sh` copies the binary, the licences and the docs out of the two Linux release archives into distroless's `static-debian13` base, pinned by digest (CA certificates, the `nonroot` user, no shell). The Dockerfile (`docker/Dockerfile`) has no `RUN`, so the arm64 image is assembled on an amd64 machine without emulation, and the image's binary is the archive's byte for byte, which the release checks for both architectures
+- **Reproducible.** The timestamps come from the commit (`SOURCE_DATE_EPOCH`, BuildKit's `rewrite-timestamp`) and BuildKit's provenance, which records the build's own time, is left out: the release builds the image twice, the second time without cache, and compares the digests, then checks that the pushed digest is the one it built
+- **The installation's folder** is the volume `/hyscribe`, named by `HYSCRIBE_HOME`; the binary is `/usr/local/bin/hyscribe`, outside it, so a new image upgrades the binary and keeps the data
+- **Published** by the release workflow's publish job for a `v*` tag only, after every gate: pushed to GitHub Container Registry with the workflow's own token, attested with `actions/attest-build-provenance`, then the same manifest copied to Docker Hub when its secrets are set (`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`; without them the job says so and goes on), so both registries serve the same digests. A manual run builds and checks the image and pushes nothing
+- **Tested** in CI's package job and the release's amd64 build job: built from the freshly made archive and run against the default install fixture as its own user, on a read only root filesystem with the data on a named volume (`scripts/docker-smoke-test.sh`): an existing site from the environment, then a new site through the browser wizard, a restart, and clean stops. The arm64 image is built and its contents checked, but not run: the runners have no arm64 machine and no emulation registered for containers
 
 ### macOS
 
@@ -167,7 +177,7 @@ Planned, not in the binary yet:
 - `logs/hyscribe.log` is rotated at `service start` once it reaches 10 MiB, keeping `hyscribe.log.1` to `hyscribe.log.5`; `log -f` follows until the server stops
 - `run/`, `logs/` and `sessions/` are created with mode `0700`, the pid file, logs and session files with `0600`
 
-The service does not start at boot by itself. Add `@reboot /path/to/hyscribe service start` to the crontab, or use the container image. A generated systemd unit is under consideration. On macOS nothing is provided either; a launchd job is the system's way.
+The service does not start at boot by itself. Add `@reboot /path/to/hyscribe service start` to the crontab, or use the container image with a restart policy. A generated systemd unit is under consideration. On macOS nothing is provided either; a launchd job is the system's way.
 
 ## Setup modes
 

@@ -175,6 +175,41 @@ fn config_check_reads_dir_option() {
     assert!(output.out.contains("Uploads: /srv/uploads\n"));
 }
 
+/// `HYSCRIBE_HOME` moves the installation out of the binary's folder, as
+/// the container image does; anything but an absolute folder is refused.
+#[test]
+fn hyscribe_home_names_the_installation() {
+    let binary = tempfile::tempdir().unwrap();
+    let data = tempfile::tempdir().unwrap();
+    let file = data.path().join("file");
+    std::fs::write(&file, "").unwrap();
+    let check = |home: &str| {
+        let env = [("HYSCRIBE_HOME", home)];
+        run_with(&["config", "check"], &env, binary.path())
+    };
+    let setup = |dir: &std::path::Path| {
+        format!(
+            "No configuration in {}: HyScribe will start in setup mode.\n",
+            dir.display()
+        )
+    };
+    let output = check(data.path().to_str().unwrap());
+    let data_dir = std::fs::canonicalize(data.path()).unwrap();
+    assert_eq!((output.code, output.out), (0, setup(&data_dir)));
+    let output = check("");
+    assert_eq!(output.out, setup(binary.path()));
+    for refused in [".", "/nonexistent-hyscribe-home", file.to_str().unwrap()] {
+        let output = check(refused);
+        assert_eq!(output.code, 1);
+        let reason = "it must be the absolute path of an existing folder";
+        assert_eq!(
+            output.err,
+            format!("error: HYSCRIBE_HOME is {refused}: {reason}\n")
+        );
+        assert_eq!(output.out, "");
+    }
+}
+
 #[test]
 fn config_check_reports_errors() {
     let home = tempfile::tempdir().unwrap();

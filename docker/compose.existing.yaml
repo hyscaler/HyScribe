@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# A copy of an existing site, over compose.yaml (docs/operators/docker.md):
+#   docker compose -f compose.yaml -f compose.existing.yaml up -d
+# Use a copy, never the live site's files or database. .env beside
+# compose.yaml names them:
+#   DB_PASSWORD=<a new password for the copy's database>
+#   SITE_DUMP=/path/to/copy/site.sql           a plain SQL dump (mysqldump, wp db export)
+#   SITE_WP_CONTENT=/path/to/copy/wp-content   the copy's wp-content folder
+#   DB_PREFIX=wp_                               the site's $table_prefix, if not wp_
+# The dump is loaded only when the database volume is new. HyScribe is set
+# up by the environment, no wizard, in shadow mode (read only) unless MODE
+# says primary; the keys and salts of wp-config.php, if you copy them into
+# .env, keep the site's own.
+services:
+  db:
+    volumes:
+      - ${SITE_DUMP:?set SITE_DUMP in .env}:/docker-entrypoint-initdb.d/site.sql:ro
+
+  hyscribe:
+    volumes:
+      - ${SITE_WP_CONTENT:?set SITE_WP_CONTENT in .env}:/wordpress/wp-content
+    environment:
+      DB_HOST: db
+      DB_NAME: ${DB_NAME:-wordpress}
+      DB_USER: ${DB_USER:-wordpress}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_PREFIX: ${DB_PREFIX:-wp_}
+      MODE: ${MODE:-shadow}
+      UPLOADS_DIR: /wordpress/wp-content/uploads
+      WP_HOME: ${WP_HOME:-}
+      WP_SITEURL: ${WP_SITEURL:-}
+      AUTH_KEY: ${AUTH_KEY:-}
+      SECURE_AUTH_KEY: ${SECURE_AUTH_KEY:-}
+      LOGGED_IN_KEY: ${LOGGED_IN_KEY:-}
+      NONCE_KEY: ${NONCE_KEY:-}
+      AUTH_SALT: ${AUTH_SALT:-}
+      SECURE_AUTH_SALT: ${SECURE_AUTH_SALT:-}
+      LOGGED_IN_SALT: ${LOGGED_IN_SALT:-}
+      NONCE_SALT: ${NONCE_SALT:-}

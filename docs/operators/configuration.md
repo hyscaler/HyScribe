@@ -7,6 +7,7 @@ HyScribe reads its settings from `.env` in the `hyscribe/` folder, next to the b
 - One `KEY=value` per line; `#` starts a comment. Values may be double quoted, as the wizard writes them
 - `.env` must be readable by its owner only (`chmod 600 .env`). Any group or other permission bit stops the start
 - Real environment variables override `.env`, key by key, so a container or a supervisor can inject a setting
+- `HYSCRIBE_HOME`, from the environment only, names another folder as the installation's, where `.env`, `logs/` and the rest live instead of the binary's folder: an absolute path to an existing folder, or the start stops with an error. The container image sets it to `/hyscribe` ([docker.md](docker.md))
 - No `.env` and no `DB_NAME` in the environment means the site is not set up: the binary starts the setup wizard instead of the site
 - A key set to an empty value counts as not set
 - Every yes or no key (`BEHIND_PROXY`, `REST_PUBLIC_USERS`, `AUTHOR_ARCHIVES`, `HTTP_OUTBOUND`, `EXTENSION_UPDATE_CHECK` and the WordPress constants below) takes `true`, `yes`, `on` or `1`, and `false`, `no`, `off` or `0`, in any case

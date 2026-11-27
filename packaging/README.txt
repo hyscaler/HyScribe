@@ -25,6 +25,9 @@ with docs/README.md.
 HyScribe refuses to run as root. By default it listens on 127.0.0.1:8080
 and runs in shadow mode (read only).
 
+The same binary also comes as a container image, docker.io/hyscribe/hyscribe
+(or ghcr.io/hyscaler/hyscribe): docs/docker.md.
+
 Verify this download
 --------------------
 

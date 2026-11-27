@@ -13,6 +13,7 @@ HyScribe is not finished. Read [not-supported.md](not-supported.md) before movin
 - [maintenance.md](maintenance.md): backups and upgrades
 - [security.md](security.md): defaults, outbound fetches, uploads, login limits and sessions
 - [not-supported.md](not-supported.md): everything that answers 501, and the other gaps
+- [docker.md](docker.md): the container image and a Compose file for trying HyScribe on Linux, macOS or Windows
 
 ## In one minute
 

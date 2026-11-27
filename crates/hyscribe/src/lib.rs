@@ -154,7 +154,7 @@ enum CronCommand {
 enum ConfigCommand {
     /// Load .env and the environment, and report problems without starting.
     Check {
-        /// Folder holding .env. Defaults to the binary's folder.
+        /// Folder holding .env. Defaults to the installation's folder.
         #[arg(long)]
         dir: Option<PathBuf>,
     },
@@ -188,7 +188,8 @@ pub struct Context<'a> {
     pub args: Vec<OsString>,
     /// Environment variables that are valid UTF-8.
     pub env: HashMap<String, String>,
-    /// The folder holding the binary.
+    /// The folder holding the binary, the installation's unless
+    /// `HYSCRIBE_HOME` names another.
     pub home: PathBuf,
     /// The effective user id.
     pub euid: u32,
@@ -230,6 +231,13 @@ pub fn run(ctx: Context<'_>) -> u8 {
             // Nothing useful can be done if the terminal is gone.
             let _ = write!(stream, "{}", err.render());
             return u8::try_from(err.exit_code()).unwrap_or(2);
+        }
+    };
+    let home = match installation(&env, home) {
+        Ok(home) => home,
+        Err(message) => {
+            let _ = writeln!(err_out, "error: {message}");
+            return 1;
         }
     };
     let site = Site {
@@ -306,6 +314,23 @@ pub fn run(ctx: Context<'_>) -> u8 {
             let _ = writeln!(err_out, "error: {message}");
             1
         }
+    }
+}
+
+/// The installation's folder: `HYSCRIBE_HOME` when it is set, as the
+/// container image sets it, else the binary's own (ADR 0005).
+fn installation(env: &HashMap<String, String>, binary: PathBuf) -> Result<PathBuf, String> {
+    let Some(dir) = env.get("HYSCRIBE_HOME").filter(|dir| !dir.is_empty()) else {
+        return Ok(binary);
+    };
+    let found = Path::new(dir)
+        .is_absolute()
+        .then(|| std::fs::canonicalize(dir));
+    match found {
+        Some(Ok(path)) if path.is_dir() => Ok(path),
+        _ => Err(format!(
+            "HYSCRIBE_HOME is {dir}: it must be the absolute path of an existing folder"
+        )),
     }
 }
 

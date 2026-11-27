@@ -18,7 +18,7 @@ cd hyscribe
 test -x hyscribe && test -f LICENSE && test -f NOTICE && test -f README.txt && test -f .env.example
 grep -q '^Part 1: WordPress and its themes$' THIRD-PARTY-NOTICES
 grep -q '^Part 2: Rust crates$' THIRD-PARTY-NOTICES
-for page in README install configuration service switching maintenance security not-supported; do
+for page in README install configuration service switching maintenance security not-supported docker; do
   test -s "docs/$page.md"
 done
 

@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# HyScribe and a MariaDB, for trying HyScribe (docs/operators/docker.md).
+# A new site: put DB_PASSWORD in a .env file beside this one, then
+#   docker compose up -d
+# and answer the setup wizard at http://127.0.0.1:8080/ with database host
+# db, name wordpress, user wordpress and that password. For a copy of an
+# existing site, add compose.existing.yaml (see its header).
+name: hyscribe
+
+services:
+  db:
+    # MariaDB 11.8, the release the fixtures and CI use, pinned by digest.
+    image: mariadb:11.8@sha256:e1d5495f445654134f226f55a41ce0da227116f6f27f283101f405c794d841fc
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${DB_NAME:-wordpress}
+      MARIADB_USER: ${DB_USER:-wordpress}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env beside compose.yaml}
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  hyscribe:
+    image: ${HYSCRIBE_IMAGE:-docker.io/hyscribe/hyscribe:latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Only this machine can open the site until you choose otherwise.
+    ports:
+      - "${HYSCRIBE_ADDRESS:-127.0.0.1}:${HYSCRIBE_PORT:-8080}:8080"
+    volumes:
+      - hyscribe:/hyscribe
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  db:
+  hyscribe:

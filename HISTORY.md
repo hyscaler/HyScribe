@@ -3,6 +3,10 @@
 Dated log of project events and decisions, newest first. Add an entry whenever a decision is made, a milestone changes state, or direction shifts. Link ADRs where they exist.
 
 
+## 2026-11-28: v0.2.0-rc.2 in place of rc.1
+
+- The `v0.2.0-rc.1` tag's CI stopped at the format check (one line of the registry's version reader), before any build or release; nothing was published from it. The tag is kept and the candidate is tagged again as `v0.2.0-rc.2` from the fixed `main`, with no other change.
+
 ## 2026-11-27: v0.2.0-rc.1, the first release candidate
 
 - Tagged from `main` with the work since v0.1.0: the Windows archive, the container image per published release (Debian slim, amd64 and arm64), extension REST routes (SDK 0.5) and three closer matches with PHP. A version with a hyphen is drafted as a pre-release, so it is never GitHub's latest release and its image gets only its own tag.

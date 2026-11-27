@@ -8,6 +8,7 @@
 use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Read, Write as _};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
@@ -181,7 +182,9 @@ pub fn read(folder: &Path) -> Option<Record> {
 pub fn write(folder: &Path, record: &Record) -> std::io::Result<()> {
     let new = folder.join(NEW);
     let mut options = OpenOptions::new();
-    options.write(true).create(true).truncate(true).mode(0o600);
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
     let written = options.open(&new).and_then(|mut file| {
         let text = file.write_all(record.text().as_bytes());
         text.and_then(|()| file.sync_all())

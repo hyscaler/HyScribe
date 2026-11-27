@@ -16,6 +16,10 @@ fn main() -> ExitCode {
         .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
         .collect();
     let stdin = std::io::stdin();
+    #[cfg(unix)]
+    let terminal = std::os::fd::AsFd::as_fd(&stdin);
+    #[cfg(windows)]
+    let terminal = std::os::windows::io::AsHandle::as_handle(&stdin);
     ExitCode::from(hyscribe::run(hyscribe::Context {
         args: std::env::args_os().collect(),
         env,
@@ -23,7 +27,7 @@ fn main() -> ExitCode {
         euid: hyscribe_service::effective_uid(),
         server: (exe, vec!["start".into()]),
         input: &mut stdin.lock(),
-        terminal: Some(std::os::fd::AsFd::as_fd(&stdin)),
+        terminal: Some(terminal),
         screen: std::io::IsTerminal::is_terminal(&std::io::stdout()),
         out: &mut std::io::stdout(),
         err: &mut std::io::stderr(),

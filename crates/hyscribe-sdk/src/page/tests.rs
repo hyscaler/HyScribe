@@ -199,6 +199,7 @@ fn template_tags_print_markup() {
 }
 
 /// A folder of its own under the system's temporary folder, with `files`.
+#[cfg(unix)]
 fn port(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
     let root =
         std::env::temp_dir().join(format!("hyscribe-sdk-port-{name}-{}", std::process::id()));
@@ -211,6 +212,7 @@ fn port(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
     root
 }
 
+#[cfg(unix)]
 #[test]
 fn a_port_may_not_print_unescaped() {
     let clean = [

@@ -9,12 +9,18 @@
 //! left behind by a crash is never mistaken for a live server, and signals
 //! only go to the pid written by the lock holder, so a recycled pid is never
 //! signalled.
+//!
+//! Windows has no signals, and its locks also refuse reads: there the lock
+//! is on `run/hyscribe.lock` beside the pid file, and the signals are
+//! requests through a named pipe of the server's (`windows.rs`).
 
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -23,6 +29,10 @@ use std::time::{Duration, Instant};
 
 /// The pid file name inside `run/`.
 pub const PID_FILE: &str = "hyscribe.pid";
+/// The lock's own file inside `run/` on Windows, where a locked file cannot
+/// be read; on Unix the pid file is locked itself.
+#[cfg(windows)]
+pub const LOCK_FILE: &str = "hyscribe.lock";
 /// The log file name inside `logs/`.
 pub const LOG_FILE: &str = "hyscribe.log";
 /// The log is rotated at `service start` once it reaches this size.
@@ -65,6 +75,18 @@ impl Paths {
     /// `run/hyscribe.pid`.
     pub fn pid_file(&self) -> PathBuf {
         self.run_dir().join(PID_FILE)
+    }
+
+    /// The file whose lock says a server runs: the pid file itself.
+    #[cfg(unix)]
+    pub fn lock_file(&self) -> PathBuf {
+        self.pid_file()
+    }
+
+    /// The file whose lock says a server runs: `run/hyscribe.lock`.
+    #[cfg(windows)]
+    pub fn lock_file(&self) -> PathBuf {
+        self.run_dir().join(LOCK_FILE)
     }
 
     /// `logs/hyscribe.log`.
@@ -127,7 +149,7 @@ impl fmt::Display for Error {
                 "the server was not listening in time and was stopped".to_string(),
                 tail,
             ),
-            Error::StillRunning(pid) => format!("pid {pid} is still running after SIGKILL"),
+            Error::StillRunning(pid) => format!("pid {pid} is still running after {KILL}"),
             Error::Io { action, source } => format!("cannot {action}: {source}"),
         };
         f.write_str(&text)
@@ -181,7 +203,7 @@ const LISTENING: &str = "listening";
 
 /// Reads the service state from the pid file lock.
 pub fn status(paths: &Paths) -> Result<Status, Error> {
-    let path = paths.pid_file();
+    let path = paths.lock_file();
     let mut file = match File::open(&path) {
         Ok(file) => file,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Status::Stopped),
@@ -194,9 +216,10 @@ pub fn status(paths: &Paths) -> Result<Status, Error> {
     }
     // Any other locking error also counts as running, but without a pid, so
     // nothing is ever signalled on the strength of an unlocked file.
-    let mut text = String::new();
-    file.read_to_string(&mut text)
-        .map_err(io_error(format_args!("read {}", path.display())))?;
+    let text = read_pid(&mut file, paths).map_err(io_error(format_args!(
+        "read {}",
+        paths.pid_file().display()
+    )))?;
     let mut lines = text.lines();
     let pid = lines
         .next()
@@ -206,6 +229,23 @@ pub fn status(paths: &Paths) -> Result<Status, Error> {
         (Some(pid), Some(LISTENING)) => Status::Running(pid),
         (pid, _) => Status::Starting(pid),
     })
+}
+
+/// The pid file's text, read through its lock on Unix.
+#[cfg(unix)]
+fn read_pid(locked: &mut File, _paths: &Paths) -> io::Result<String> {
+    let mut text = String::new();
+    locked.read_to_string(&mut text).map(|_| text)
+}
+
+/// The pid file's text, beside the lock on Windows: empty while the server
+/// has taken the lock and not yet made the pid file.
+#[cfg(windows)]
+fn read_pid(_lock: &mut File, paths: &Paths) -> io::Result<String> {
+    match std::fs::read_to_string(paths.pid_file()) {
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(String::new()),
+        read => read,
+    }
 }
 
 /// Whether a lock attempt failed because someone else holds the lock.
@@ -218,16 +258,18 @@ fn is_held(lock: &io::Result<()>) -> bool {
 #[derive(Debug)]
 pub struct PidLock {
     file: File,
+    /// The lock, a file of its own on Windows.
+    #[cfg(windows)]
+    _lock: File,
 }
 
 impl PidLock {
     /// Marks the server as listening, which `service start` waits for. A
     /// failed write leaves it starting, which that wait reports.
     pub fn listening(&self) {
-        use std::os::unix::fs::FileExt;
         let text = format!("{}\n{LISTENING}\n", std::process::id());
         // The pid line is rewritten as it was, so no reader sees it missing.
-        let _ = self.file.write_all_at(text.as_bytes(), 0);
+        let _ = write_at_start(&self.file, text.as_bytes());
     }
 }
 
@@ -239,52 +281,95 @@ impl Drop for PidLock {
     }
 }
 
+/// Writes `bytes` at the start of `file`.
+#[cfg(unix)]
+fn write_at_start(file: &File, bytes: &[u8]) -> io::Result<()> {
+    std::os::unix::fs::FileExt::write_all_at(file, bytes, 0)
+}
+
+/// Writes `bytes` at the start of `file`.
+#[cfg(windows)]
+fn write_at_start(file: &File, bytes: &[u8]) -> io::Result<()> {
+    let written = std::os::windows::fs::FileExt::seek_write(file, bytes, 0)?;
+    (written == bytes.len())
+        .then_some(())
+        .ok_or_else(|| io::ErrorKind::WriteZero.into())
+}
+
 /// Takes the pid file for this process. Fails if another server has it.
 pub fn hold(paths: &Paths) -> Result<PidLock, Error> {
     let path = paths.pid_file();
     create_private_dir(&paths.run_dir())?;
-    let mut file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
+    let lock_path = paths.lock_file();
+    let mut lock = private(OpenOptions::new().read(true).write(true).create(true))
         .truncate(false)
-        .mode(0o600)
-        .open(&path)
-        .map_err(io_error(format_args!("open {}", path.display())))?;
+        .open(&lock_path)
+        .map_err(io_error(format_args!("open {}", lock_path.display())))?;
     let deadline = Instant::now() + LOCK_WAIT;
-    while file.try_lock().is_err() {
+    while lock.try_lock().is_err() {
         if Instant::now() >= deadline {
             // Held by another server; any other locking error also refuses
             // to start, which is the safe side. The pid is only reported,
             // never signalled.
-            let mut text = String::new();
-            let _ = file.read_to_string(&mut text);
+            let text = read_pid(&mut lock, paths).unwrap_or_default();
             let pid = text.lines().next().and_then(|line| line.parse().ok());
             return Err(Error::AlreadyRunning(pid));
         }
         sleep(Duration::from_millis(10));
     }
-    let written = file
-        .set_len(0)
-        .and_then(|()| writeln!(file, "{}", std::process::id()))
-        .and_then(|()| file.sync_data());
-    written
-        .map(|()| PidLock { file })
-        .map_err(io_error(format_args!("write {}", path.display())))
+    let written = pid_lock(lock, paths).and_then(|mut held| {
+        let file = &mut held.file;
+        file.set_len(0)
+            .and_then(|()| writeln!(file, "{}", std::process::id()))
+            .and_then(|()| file.sync_data())
+            .map(|()| held)
+    });
+    written.map_err(io_error(format_args!("write {}", path.display())))
 }
 
-/// Creates `dir` readable by its owner only.
+/// The held lock on Unix, where it is the pid file.
+#[cfg(unix)]
+fn pid_lock(lock: File, _paths: &Paths) -> io::Result<PidLock> {
+    Ok(PidLock { file: lock })
+}
+
+/// The held lock on Windows, with the pid file beside it.
+#[cfg(windows)]
+fn pid_lock(lock: File, paths: &Paths) -> io::Result<PidLock> {
+    let file = private(OpenOptions::new().write(true).create(true))
+        .truncate(false)
+        .open(paths.pid_file())?;
+    Ok(PidLock { file, _lock: lock })
+}
+
+/// `options` for a file its owner alone may use: mode 0600 on Unix; on
+/// Windows the file takes its folder's permissions (docs/SECURITY_MODEL.md).
+fn private(options: &mut OpenOptions) -> &mut OpenOptions {
+    #[cfg(unix)]
+    options.mode(0o600);
+    options
+}
+
+/// Creates `dir` readable by its owner only: mode 0700 on Unix; on Windows
+/// it takes its parent's permissions.
 fn create_private_dir(dir: &Path) -> Result<(), Error> {
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    builder.mode(0o700);
+    builder
         .create(dir)
         .map_err(io_error(format_args!("create {}", dir.display())))
 }
 
-/// Catches SIGTERM and SIGINT so the server can shut down cleanly.
+/// Catches SIGTERM and SIGINT so the server can shut down cleanly; on
+/// Windows, `service stop`'s request (as SIGTERM) and Ctrl-C at its console
+/// (as SIGINT).
 pub struct Shutdown {
+    #[cfg(unix)]
     signals: signal_hook::iterator::Signals,
+    #[cfg(windows)]
+    requests: std::sync::mpsc::Receiver<i32>,
 }
 
 impl fmt::Debug for Shutdown {
@@ -295,11 +380,21 @@ impl fmt::Debug for Shutdown {
 
 /// Starts catching shutdown signals. Call before [`hold`], so a stop sent
 /// as soon as the pid is visible is caught rather than killing the process.
+#[cfg(unix)]
 pub fn listen() -> Result<Shutdown, Error> {
     use signal_hook::consts::{SIGINT, SIGTERM};
     signal_hook::iterator::Signals::new([SIGTERM, SIGINT])
         .map(|signals| Shutdown { signals })
         .map_err(io_error("catch shutdown signals"))
+}
+
+/// Starts taking stop requests. Call before [`hold`], so a stop sent as
+/// soon as the pid is visible finds the pipe.
+#[cfg(windows)]
+pub fn listen() -> Result<Shutdown, Error> {
+    windows::listen()
+        .map(|requests| Shutdown { requests })
+        .map_err(io_error("take stop requests"))
 }
 
 /// [`listen`] then [`hold`]: what a server does first.
@@ -309,9 +404,16 @@ pub fn claim(paths: &Paths) -> Result<(Shutdown, PidLock), Error> {
 
 impl Shutdown {
     /// Blocks until the next shutdown signal and returns its number.
+    #[cfg(unix)]
     pub fn wait(&mut self) -> i32 {
         // `forever` only ends when the handle is closed, which nothing does.
         self.signals.forever().next().unwrap_or(0)
+    }
+
+    /// Blocks until the next stop request and returns its signal's number.
+    #[cfg(windows)]
+    pub fn wait(&mut self) -> i32 {
+        self.requests.recv().unwrap_or(0)
     }
 }
 
@@ -354,23 +456,20 @@ pub fn start(paths: &Paths, spawn: &Spawn, timeout: Duration) -> Result<Started,
     let log_path = paths.log_file();
     create_private_dir(&paths.logs_dir())?;
     rotate(&log_path, MAX_LOG_BYTES, KEEP_LOGS)?;
-    let (log, log_err) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
+    let (log, log_err) = private(OpenOptions::new().create(true).append(true))
         .open(&log_path)
         .and_then(|log| log.try_clone().map(|err| (log, err)))
         .map_err(io_error(format_args!("open {}", log_path.display())))?;
-    let mut child = Command::new(&spawn.program)
+    let mut command = Command::new(&spawn.program);
+    command
         .args(&spawn.args)
         .env_clear()
         .envs(spawn.env.iter().map(|(k, v)| (k, v)))
         .current_dir(paths.home())
         .stdin(Stdio::null())
         .stdout(log)
-        .stderr(log_err)
-        // Its own process group, so Ctrl-C in this terminal does not reach it.
-        .process_group(0)
+        .stderr(log_err);
+    let mut child = background(&mut command)
         .spawn()
         .map_err(io_error(format_args!("run {}", spawn.program.display())))?;
     let outcome = wait_for_server(paths, &mut child, &log_path, timeout);
@@ -380,6 +479,22 @@ pub fn start(paths: &Paths, spawn: &Spawn, timeout: Duration) -> Result<Started,
         let _ = child.wait();
     }
     outcome
+}
+
+/// Its own process group, so Ctrl-C in this terminal does not reach it.
+#[cfg(unix)]
+fn background(command: &mut Command) -> &mut Command {
+    command.process_group(0)
+}
+
+/// No console and its own process group, so neither Ctrl-C in this
+/// terminal nor closing it reaches the server.
+#[cfg(windows)]
+fn background(command: &mut Command) -> &mut Command {
+    use std::os::windows::process::CommandExt as _;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
 }
 
 fn wait_for_server(
@@ -426,46 +541,70 @@ impl fmt::Display for Stopped {
         match self {
             Stopped::NotRunning => f.write_str("not running"),
             Stopped::Stopped(pid) => write!(f, "stopped (pid {pid})"),
-            Stopped::Killed(pid) => write!(f, "killed (pid {pid}) after it ignored SIGTERM"),
+            Stopped::Killed(pid) => write!(f, "killed (pid {pid}) after it ignored {TERM}"),
         }
     }
 }
 
-/// Sends SIGTERM, waits up to `grace`, then sends SIGKILL.
+/// What a server is told to stop with.
+#[cfg(unix)]
+const TERM: &str = "SIGTERM";
+/// What ends a server that would not stop.
+#[cfg(unix)]
+const KILL: &str = "SIGKILL";
+/// What a server is told to stop with.
+#[cfg(windows)]
+const TERM: &str = "the stop request";
+/// What ends a server that would not stop.
+#[cfg(windows)]
+const KILL: &str = "the kill request";
+
+/// Sends SIGTERM, waits up to `grace`, then sends SIGKILL; on Windows, the
+/// stop request and then the kill request.
 pub fn stop(paths: &Paths, grace: Duration) -> Result<Stopped, Error> {
     let pid = match status(paths)? {
         Status::Stopped => return Ok(Stopped::NotRunning),
         Status::Starting(None) => return Err(Error::Starting),
         Status::Starting(Some(pid)) | Status::Running(pid) => pid,
     };
-    let target = i32::try_from(pid)
-        .ok()
-        .and_then(rustix::process::Pid::from_raw)
-        .ok_or_else(|| Error::Io {
+    let signal = signaller(pid).map_err(|source| Error::Io {
+        action: format!("signal pid {pid}"),
+        source,
+    })?;
+    for (kill, outcome) in [(false, Stopped::Stopped(pid)), (true, Stopped::Killed(pid))] {
+        signal(kill).map_err(|source| Error::Io {
             action: format!("signal pid {pid}"),
-            source: io::Error::from(io::ErrorKind::InvalidData),
+            source,
         })?;
-    let signal = |sig| {
-        match rustix::process::kill_process(target, sig) {
-            // Already gone.
-            Err(rustix::io::Errno::SRCH) => Ok(()),
-            other => other.map_err(|err| Error::Io {
-                action: format!("signal pid {pid}"),
-                source: err.into(),
-            }),
-        }
-    };
-    let steps = [
-        (rustix::process::Signal::TERM, Stopped::Stopped(pid)),
-        (rustix::process::Signal::KILL, Stopped::Killed(pid)),
-    ];
-    for (sig, outcome) in steps {
-        signal(sig)?;
         if wait_until_stopped(paths, grace)? {
             return Ok(outcome);
         }
     }
     Err(Error::StillRunning(pid))
+}
+
+/// Signals `pid`: SIGKILL when `kill`, else SIGTERM. One already gone is
+/// no error.
+#[cfg(unix)]
+fn signaller(pid: u32) -> io::Result<impl Fn(bool) -> io::Result<()>> {
+    use rustix::process::Signal;
+    let target = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
+    Ok(move |kill| {
+        let sig = if kill { Signal::KILL } else { Signal::TERM };
+        match rustix::process::kill_process(target, sig) {
+            Err(rustix::io::Errno::SRCH) => Ok(()),
+            other => other.map_err(io::Error::from),
+        }
+    })
+}
+
+/// Asks `pid` through its pipe to exit at once when `kill`, else to stop.
+#[cfg(windows)]
+fn signaller(pid: u32) -> io::Result<impl Fn(bool) -> io::Result<()>> {
+    Ok(move |kill| windows::request(pid, if kill { windows::KILL } else { windows::STOP }))
 }
 
 fn wait_until_stopped(paths: &Paths, timeout: Duration) -> Result<bool, Error> {
@@ -564,16 +703,34 @@ pub fn rotate(log: &Path, max_bytes: u64, keep: u32) -> Result<(), Error> {
 }
 
 /// The effective user id of this process.
+#[cfg(unix)]
 pub fn effective_uid() -> u32 {
     rustix::process::geteuid().as_raw()
 }
 
+/// Windows has no user ids, and an administrator cannot be told apart
+/// without code outside the safe subset: never root (docs/SECURITY_MODEL.md).
+#[cfg(windows)]
+pub fn effective_uid() -> u32 {
+    u32::MAX
+}
+
 /// The bytes free for this user on the file system holding `path`, as
 /// PHP's `disk_free_space()` counts them; `None` when it cannot be read.
+#[cfg(unix)]
 pub fn disk_free(path: &Path) -> Option<u64> {
     let stat = rustix::fs::statvfs(path).ok()?;
     Some(stat.f_bavail.saturating_mul(stat.f_frsize))
 }
+
+/// Not read on Windows, which has no call for it in the safe subset.
+#[cfg(windows)]
+pub fn disk_free(_path: &Path) -> Option<u64> {
+    None
+}
+
+#[cfg(windows)]
+mod windows;
 
 #[cfg(test)]
 mod tests;

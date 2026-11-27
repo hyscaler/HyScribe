@@ -9,6 +9,7 @@
 //! a case that writes. What is not ported (see [`UNPORTED`]) answers 501
 //! once the checks before it pass.
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -18,6 +19,7 @@ use sqlx::Connection as _;
 
 use super::writes::{fresh, now_masked, planned, saves_site, uploading};
 use super::*;
+#[cfg(unix)]
 use crate::Uploads;
 
 /// The identities of the golden: who, login and user ID.
@@ -536,10 +538,13 @@ async fn uploads_and_forms_are_read_from_posts_only() {
 
 /// Hooks that lock `0`, the folder of the month, once an attachment is
 /// inserted, so its sizes cannot be written.
+#[cfg(unix)]
 struct Locks(std::path::PathBuf);
 
+#[cfg(unix)]
 impl hyscribe_image::hooks::Hooks for Locks {}
 
+#[cfg(unix)]
 impl crate::uploads::UploadHooks for Locks {
     fn add_attachment(&self, _id: u64) {
         std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o500)).unwrap();
@@ -563,6 +568,7 @@ async fn run(sql: &str) {
 }
 
 /// The status and body `site` answers the case `line` by `login`.
+#[cfg(unix)]
 async fn sent_case(site: &Arc<Site>, line: &str, login: &Login) -> (StatusCode, String) {
     let response = router(Arc::clone(site))
         .oneshot(request(line, Some(login)))
@@ -576,6 +582,7 @@ async fn sent_case(site: &Arc<Site>, line: &str, login: &Login) -> (StatusCode, 
 /// refused; a write or a size that fails answers the error page and leaves
 /// no upload without its attachment; and the author's name is their
 /// nickname where their display name is empty.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn uploads_stop_short() {
     let _saves = crate::admin::tests::SAVES.lock().await;

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Writes THIRD-PARTY-NOTICES for the release archive (scripts/package.sh):
-#   scripts/third-party-notices.sh <out-file> [linux|darwin]
+#   scripts/third-party-notices.sh <out-file> [linux|darwin|windows]
 # Part 1 is WordPress and the themes the binary embeds: where their source is
 # (the versions and SHA-256 values the build pins), each theme's copyright
 # section, its fonts' licence files and WordPress's license.txt (a copy in
@@ -15,7 +15,8 @@
 # every machine. A crate that ships no licence file takes its licence text
 # from packaging/licenses/<expression>.txt; with none there, the script fails.
 # Needs cargo, jq and sha256sum (or shasum, as macOS has it). It keeps to
-# what GNU and BSD tools share and to bash 3.2, so it also runs on macOS.
+# what GNU and BSD tools share and to bash 3.2, so it also runs on macOS,
+# and in Git for Windows's bash.
 set -euo pipefail
 export LC_ALL=C
 
@@ -30,7 +31,11 @@ case "${2:-linux}" in
     targets=(aarch64-apple-darwin x86_64-apple-darwin)
     library="library into it, and none of the system's own libraries; its"
     ;;
-  *) echo "usage: $0 <out-file> [linux|darwin]" >&2; exit 2 ;;
+  windows)
+    targets=(x86_64-pc-windows-msvc)
+    library="library and Microsoft's static C runtime into it; Rust's"
+    ;;
+  *) echo "usage: $0 <out-file> [linux|darwin|windows]" >&2; exit 2 ;;
 esac
 repo=https://github.com/hyscaler/HyScribe
 
@@ -128,6 +133,7 @@ rule() { printf '%s\n' "$1" "$(printf '%*s' "${#1}" '' | tr ' ' "$2")"; }
 filters=()
 for t in "${targets[@]}"; do filters+=(--filter-platform "$t"); done
 cargo metadata --manifest-path "$root/Cargo.toml" --format-version 1 --locked "${filters[@]}" > "$work/meta.json"
+# jq on Windows ends its lines with CR LF, which tr takes out.
 jq -r '
   (.resolve.nodes | map({key: .id, value: [.deps[] | select(any(.dep_kinds[]; .kind == null)) | .pkg]}) | from_entries) as $g
   | (.packages | map(select(.name == "hyscribe" and .source == null)) | .[0].id) as $root
@@ -136,8 +142,8 @@ jq -r '
          | reduce $g[$n][] as $d (.; if .seen[$d] then . else .seen[$d] = true | .todo += [$d] end))
      | .seen) as $linked
   | .packages[] | select($linked[.id] and .source != null)
-  | [.name, .version, (.license // "none declared"), (.license_file // "-"),(.manifest_path | rtrimstr("/Cargo.toml"))]
-  | @tsv' "$work/meta.json" | sort -t$'\t' -k1,1 -k2,2V > "$work/crates.tsv"
+  | [.name, .version, (.license // "none declared"), (.license_file // "-"),(.manifest_path | gsub("\\\\"; "/") | rtrimstr("/Cargo.toml"))]
+  | @tsv' "$work/meta.json" | tr -d '\r' | sort -t$'\t' -k1,1 -k2,2V > "$work/crates.tsv"
 
 : > "$work/texts.tsv"
 # No field is empty: read would merge two tabs into one.

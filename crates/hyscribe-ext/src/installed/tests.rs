@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use hyscribe_testkit::hyx::zip;
@@ -34,10 +35,12 @@ fn installs_lists_and_approves() {
     assert_eq!(fs::read(folder.join("public/css/a.css")).unwrap(), b"a {}");
     assert_eq!(fs::read(folder.join(COMPONENT)).unwrap(), component());
     assert!(packages.join("hyscribe-test-0.1.0.hyx").is_file());
+    #[cfg(unix)]
     let mode = fs::metadata(folder.join(manifest::FILE))
         .unwrap()
         .permissions()
         .mode();
+    #[cfg(unix)]
     assert_eq!(mode & 0o777, 0o644);
     let installed = list(&plugins);
     assert_eq!(installed.len(), 1);
@@ -255,6 +258,7 @@ fn checks_the_id_before_building_a_path() {
     assert!(plugins.join("hyscribe-test").is_dir());
 }
 
+#[cfg(unix)]
 #[test]
 fn removes_links_and_never_follows_them() {
     let dir = tempfile::tempdir().unwrap();
@@ -280,6 +284,7 @@ fn removes_links_and_never_follows_them() {
     assert_eq!(fs::read(outside.join("keep")).unwrap(), b"x");
 }
 
+#[cfg(unix)]
 #[test]
 fn finishes_what_a_crash_left_and_reports_a_failure() {
     let dir = tempfile::tempdir().unwrap();

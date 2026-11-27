@@ -474,6 +474,7 @@ async fn reports_each_step_that_fails() {
     );
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_revocation_it_cannot_write_stops_the_command() {
     let test = Test::new(&[release("0.1.0")], &[]);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use hyscribe_testkit::minisign::{Key, key_list, sign_keys};
@@ -74,6 +75,7 @@ fn keeps_the_highest_serials() {
     assert_eq!(kept_state(folder), "keys 4\nindex 5\n");
 }
 
+#[cfg(unix)]
 #[test]
 fn reads_the_same_serial_without_writing() {
     let folder = tempfile::tempdir().unwrap();
@@ -88,6 +90,7 @@ fn reads_the_same_serial_without_writing() {
     assert!(again.0.unwrap().is_some() && again.1.unwrap().is_some());
 }
 
+#[cfg(unix)]
 fn writable(path: &Path) {
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
 }
@@ -118,6 +121,7 @@ fn shows_the_kept_index_without_writing() {
     assert_eq!(kept_state(folder), "keys 2\nindex 4\n");
 }
 
+#[cfg(unix)]
 #[test]
 fn refuses_what_does_not_verify_or_read() {
     let folder = tempfile::tempdir().unwrap();
@@ -207,6 +211,7 @@ fn reads_and_writes_the_state() {
     assert_eq!(padded, Some(State { keys: 1, index: 2 }));
 }
 
+#[cfg(unix)]
 #[test]
 fn keeps_what_was_fetched_unless_it_goes_back() {
     let folder = tempfile::tempdir().unwrap();

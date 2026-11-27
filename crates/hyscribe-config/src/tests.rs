@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::*;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -20,9 +21,11 @@ fn with(extra: &[(&str, &str)]) -> HashMap<String, String> {
     values
 }
 
+#[cfg_attr(windows, allow(unused_variables))]
 fn write_env(dir: &Path, contents: &str, mode: u32) -> PathBuf {
     let path = dir.join(ENV_FILE);
     std::fs::write(&path, contents).unwrap();
+    #[cfg(unix)]
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
     path
 }
@@ -388,7 +391,26 @@ fn embed_hosts_have_forms() {
     }
 }
 
+/// Windows refuses a socket, which its database driver cannot reach.
+#[cfg(windows)]
+#[test]
+fn refuses_a_socket_host() {
+    let err = from_map(&with(&[("DB_HOST", "localhost:/run/mysqld/mysqld.sock")])).unwrap_err();
+    assert_eq!(
+        err,
+        ConfigError::Invalid {
+            key: "DB_HOST",
+            reason: "a socket cannot be used on Windows; give host or host:port".into(),
+        }
+    );
+    assert_eq!(
+        from_map(&with(&[("DB_HOST", "db")])).unwrap().database.host,
+        "db"
+    );
+}
+
 /// A socket as `wp-config.php` gives one in `DB_HOST`, only for `localhost`.
+#[cfg(unix)]
 #[test]
 fn reads_a_socket_host() {
     let database = |host| from_map(&with(&[("DB_HOST", host), ("DB_PORT", "3307")]));
@@ -680,6 +702,7 @@ fn environment_overrides_file() {
     assert_eq!(config.server.port, 9100);
 }
 
+#[cfg(unix)]
 #[test]
 fn refuses_readable_env_file() {
     let dir = tempfile::tempdir().unwrap();
@@ -710,6 +733,7 @@ fn reports_unparsable_env_file() {
     assert!(err.to_string().starts_with("cannot read "));
 }
 
+#[cfg(unix)]
 #[test]
 fn reports_unreadable_env_file() {
     let dir = tempfile::tempdir().unwrap();

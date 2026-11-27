@@ -4,6 +4,7 @@
 //! existing site's `wp-config.php` gives, and `.env` itself.
 
 use std::io::Write as _;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -175,23 +176,22 @@ pub fn render(values: &[(&str, String)]) -> Option<String> {
     Some(text)
 }
 
-/// Writes `text` to `dir/.env` with mode 0600, through a new file renamed
-/// into place so no reader sees half of it. An existing `.env` is replaced
-/// only when `replace` is true.
+/// Writes `text` to `dir/.env` with mode 0600 (on Windows with the folder's
+/// permissions), through a new file renamed into place so no reader sees
+/// half of it. An existing `.env` is replaced only when `replace` is true.
 pub fn write(dir: &Path, text: &str, replace: bool) -> std::io::Result<PathBuf> {
     let path = dir.join(ENV_FILE);
     let new = dir.join(format!("{ENV_FILE}.new"));
     // Left by an interrupted run; if it cannot go, creating it fails.
     let _ = std::fs::remove_file(&new);
-    let written = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&new)
-        .and_then(|mut file| {
-            file.write_all(text.as_bytes())
-                .and_then(|()| file.sync_all())
-        });
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let written = options.open(&new).and_then(|mut file| {
+        file.write_all(text.as_bytes())
+            .and_then(|()| file.sync_all())
+    });
     // A hard link fails if `.env` exists, so nothing is replaced unasked.
     let placed = written.and_then(|()| {
         if replace {

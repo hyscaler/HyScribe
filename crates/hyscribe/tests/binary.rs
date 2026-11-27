@@ -50,6 +50,7 @@ fn config_check_uses_the_environment() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn non_utf8_environment_is_ignored() {
     use std::ffi::OsStr;
@@ -82,6 +83,7 @@ fn errors_set_the_exit_code() {
 
 #[test]
 fn service_runs_from_an_extracted_folder() {
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     // An installation as the release archive lays it out.
     let root = tempfile::tempdir().unwrap();
@@ -105,6 +107,7 @@ fn service_runs_from_an_extracted_folder() {
         ),
     )
     .unwrap();
+    #[cfg(unix)]
     std::fs::set_permissions(&env_file, std::fs::Permissions::from_mode(0o600)).unwrap();
 
     let hyscribe = |args: &[&str]| {

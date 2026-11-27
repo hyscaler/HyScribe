@@ -6,7 +6,7 @@ HyScribe's defaults are safe for someone who never reads this page. This page sa
 
 - Listens on `127.0.0.1` only, so nothing is reachable from outside until a proxy is in front or `BIND_HOST` changes
 - Starts in shadow mode: read only, no writer at all
-- Refuses to run as root, and refuses an `.env` that group or others can read
+- Refuses to run as root, and refuses an `.env` that group or others can read (neither on Windows: see below)
 - No PHP. Nothing from disk runs but the extension packages an operator installs with `./hyscribe plugin install`, compiled in memory and run sandboxed, each call within time and memory limits ([ADR 0022](https://github.com/hyscaler/HyScribe/blob/main/docs/adr/0022-extension-host.md))
 - `DISALLOW_UNFILTERED_HTML=true`: no one, administrators included, saves unfiltered HTML. WordPress lets administrators and editors; set `false` only if they need to embed scripts
 - Author archives (`?author=N`, `?author_name=`, `/author/<nicename>/`) answer 404, so they do not give away login names. `AUTHOR_ARCHIVES=on` serves them as WordPress does: `?author=N` then redirects to `/author/<nicename>/` under pretty permalinks, and the nicename, which WordPress derives from the login name, is shown to anyone who counts up the IDs. Themes link every post's author name to the archive, so with the key off those links lead to a 404. Turn it on only if you accept that the login names of authors with posts can be found; the login rate limits still apply to guesses at their passwords
@@ -18,7 +18,7 @@ HyScribe's defaults are safe for someone who never reads this page. This page sa
 
 - Only `http` and `https` URLs, and only to public addresses. Every address a host resolves to is checked, on every redirect, and the connection goes to the checked address, so DNS rebinding cannot reach loopback, private, link local or cloud metadata addresses. The site's own host is not exempt
 - At most 30 seconds, 4 MiB and 5 redirects per fetch; compressed answers are not decoded
-- TLS is verified against the host's certificate store (on macOS the bundle in `/etc/ssl/cert.pem`, not the Keychain), never skipped. Without a store, the log says `outbound fetches on over HTTP only: no certificate store was found` and HTTPS fetches fail
+- TLS is verified against the host's certificate store (on macOS the bundle in `/etc/ssl/cert.pem`, not the Keychain; on Windows only the PEM bundle `SSL_CERT_FILE` names, not Windows's own store), never skipped. Without a store, the log says `outbound fetches on over HTTP only: no certificate store was found` and HTTPS fetches fail
 - Only `Host`, `User-Agent`, `Accept-Encoding` and `Connection` headers are sent
 - There is no general list of allowed hosts: any public address can be fetched. Firewall the server's outbound traffic if it must reach fewer
 - The RSS block fetches only from the hosts in `RSS_ALLOWED_HOSTS`, empty by default
@@ -68,4 +68,5 @@ PHP stops a request at `max_execution_time`; HyScribe stops one at `REQUEST_TIME
 
 - `.env` holds the database password and the keys: mode `0600`, owned by the service user. Its permissions are checked at start only
 - `logs/`, `run/` and `sessions/` are `0700`, their files `0600`
+- On Windows there are no modes and HyScribe neither sets nor reads access lists: every file takes the permissions of the `hyscribe` folder, and an `.env` others can read is not refused. Keep the folder in the account's profile folder or restrict it with `icacls` ([install.md](install.md), "On Windows"). Nor does HyScribe refuse an administrator account there: run it from an ordinary one
 - Run HyScribe as its own unprivileged user, and give the database user only what PHP WordPress's user needs; better, add a `DB_READ_USER` with only `SELECT`

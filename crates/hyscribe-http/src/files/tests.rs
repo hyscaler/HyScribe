@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_dir as symlink;
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -100,7 +104,7 @@ async fn installed_themes_serve_their_public_files() {
     }
     std::fs::write(themes.path().join("classic/extension.wasm"), b"\0asm").unwrap();
     std::fs::write(outside.path().join("secret.css"), b"secret").unwrap();
-    std::os::unix::fs::symlink(outside.path(), public.join("out")).unwrap();
+    symlink(outside.path(), public.join("out")).unwrap();
     let site = Arc::into_inner(crate::tests::oracle_site().await).unwrap();
     let site = Arc::new(site.with_extensions(plugins.path(), themes.path()));
     let get = |path: &str, etag: Option<&str>| {

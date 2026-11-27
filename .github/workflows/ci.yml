@@ -32,6 +32,9 @@
 # The macos job runs on a GitHub-hosted macOS runner, which has no Docker:
 # clippy and a build of the binary for both macOS targets, and the tests of
 # the crates that need neither the fixture database nor the Theme Test Data.
+# The windows job does the same on a GitHub-hosted Windows runner, in Git
+# for Windows's bash, for x86_64-pc-windows-msvc, and also runs the Windows
+# test of hyscribe-http, whose other tests need the database.
 # The full suite (the PHP and MariaDB oracle, coverage, the switch-back
 # suite, the screenshots, fuzzing) runs on Linux only.
 #
@@ -487,10 +490,52 @@ jobs:
               -p hyscribe-sdk -p hyscribe-service -p hyscribe-theme-json
           done
 
+  windows:
+    # What runs on Windows without Docker; the header says what does not.
+    runs-on: windows-2025
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      RUSTUP_TOOLCHAIN: "1.100.0" # the Rust of the Linux jobs' image
+      # No compile cache on the hosted runner.
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust, with the Windows target and the test extension's
+        run: |
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component clippy \
+            --target x86_64-pc-windows-msvc --target wasm32-wasip2
+          rustc --version
+          bash --version | head -n 1
+          git config --get core.autocrlf || true
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked --keep-going --target x86_64-pc-windows-msvc -- -D warnings
+      - name: The binary builds
+        run: cargo build --locked -p hyscribe --target x86_64-pc-windows-msvc
+      - name: Tests of the crates that need no database and no Theme Test Data
+        timeout-minutes: 30
+        run: |
+          # Windows's own store is not read: the TLS tests take the PEM
+          # bundle Git for Windows ships, as docs/operators/install.md says.
+          for bundle in /mingw64/etc/ssl/certs/ca-bundle.crt /mingw64/ssl/certs/ca-bundle.crt \
+            /usr/ssl/certs/ca-bundle.crt /etc/ssl/certs/ca-bundle.crt; do
+            if [ -s "$bundle" ]; then export SSL_CERT_FILE="$(cygpath -w "$bundle")"; break; fi
+          done
+          echo "SSL_CERT_FILE=${SSL_CERT_FILE:?no certificate bundle in Git for Windows}"
+          cargo test --locked --target x86_64-pc-windows-msvc --no-fail-fast \
+            -p hyscribe-assets -p hyscribe-auth -p hyscribe-config -p hyscribe-ext \
+            -p hyscribe-fetch -p hyscribe-html -p hyscribe-image -p hyscribe-kses \
+            -p hyscribe-mail -p hyscribe-model -p hyscribe-phpser -p hyscribe-registry \
+            -p hyscribe-sdk -p hyscribe-service -p hyscribe-theme-json
+      - name: The Windows test of a crate whose other tests need the database
+        run: cargo test --locked --target x86_64-pc-windows-msvc -p hyscribe-http --lib -- windows_names
+
   release:
     # The release build and, for a tag, the publication: only once every gate
     # above has passed. By hand it is a rehearsal that publishes nothing.
-    needs: [checks, coverage, package, switch-back, screenshots, fuzz, macos]
+    needs: [checks, coverage, package, switch-back, screenshots, fuzz, macos, windows]
     if: >-
       ${{ !cancelled()
       && !contains(needs.*.result, 'failure')

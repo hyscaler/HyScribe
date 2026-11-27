@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
@@ -127,7 +128,9 @@ fn reads_writes_and_clears_its_file() -> std::io::Result<()> {
     record.count(fault(7, Kind::Trap, "the_content"));
     write(folder.path(), &record)?;
     assert_eq!(read(folder.path()), Some(record.clone()));
+    #[cfg(unix)]
     let mode = fs::metadata(folder.path().join(FILE))?.permissions().mode();
+    #[cfg(unix)]
     assert_eq!(mode & 0o777, 0o600);
     assert!(!folder.path().join(NEW).exists());
     record.count(fault(8, Kind::Memory, "the_content"));
@@ -157,6 +160,8 @@ fn fails_closed_on_what_it_cannot_read_or_write() -> std::io::Result<()> {
     assert!(write(&missing, &Record::default()).is_err());
     let plain = folder.path().join("plain");
     fs::write(&plain, "")?;
+    // Windows reports a path through a file as missing, not as an error.
+    #[cfg(unix)]
     assert_eq!(read(&plain), None);
     Ok(())
 }

@@ -36,9 +36,12 @@ const SYSTEM: &str = "unknown-linux-musl";
 const SYSTEM: &str = "unknown-linux-gnu";
 #[cfg(target_os = "macos")]
 const SYSTEM: &str = "apple-darwin";
+#[cfg(all(target_os = "windows", target_env = "msvc"))]
+const SYSTEM: &str = "pc-windows-msvc";
 #[cfg(not(any(
     all(target_os = "linux", any(target_env = "musl", target_env = "gnu")),
-    target_os = "macos"
+    target_os = "macos",
+    all(target_os = "windows", target_env = "msvc")
 )))]
 const SYSTEM: &str = std::env::consts::OS;
 

@@ -160,6 +160,7 @@ struct Server {
 impl Server {
     /// Started with the `.env` lines `extra` besides the database's.
     fn start(extra: &str) -> Server {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("hyscribe");
@@ -188,6 +189,7 @@ impl Server {
         }
         let env_file = home.join(".env");
         std::fs::write(&env_file, env).unwrap();
+        #[cfg(unix)]
         std::fs::set_permissions(&env_file, std::fs::Permissions::from_mode(0o600)).unwrap();
         let server = Server {
             home,

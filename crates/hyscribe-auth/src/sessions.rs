@@ -6,6 +6,7 @@
 
 use std::fs::{DirBuilder, OpenOptions};
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -110,18 +111,19 @@ impl Sessions {
             };
         }
         let temporary = self.dir.join(format!("{user}.new"));
-        DirBuilder::new()
+        // Mode 0700 and 0600; on Windows the folder's permissions.
+        let mut folder = DirBuilder::new();
+        let mut options = OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            folder.mode(0o700);
+            options.mode(0o600);
+        }
+        folder
             .recursive(true)
-            .mode(0o700)
             .create(&self.dir)
-            .and_then(|()| {
-                OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .mode(0o600)
-                    .open(&temporary)
-            })
+            .and_then(|()| options.open(&temporary))
             .and_then(|mut file| {
                 file.write_all(&encode(&Value::Array(sessions)))
                     .and_then(|()| file.sync_all())

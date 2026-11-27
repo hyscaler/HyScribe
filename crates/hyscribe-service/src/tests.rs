@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use super::*;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::sync::mpsc;
 
@@ -55,6 +56,7 @@ fn fake_spawn(home: &Path, ignore: u32) -> Spawn {
     }
 }
 
+#[cfg(unix)]
 fn program(path: &str, args: &[&str]) -> Spawn {
     Spawn {
         program: PathBuf::from(path),
@@ -64,15 +66,58 @@ fn program(path: &str, args: &[&str]) -> Spawn {
 }
 
 /// A program that exits at once: `true`, wherever the system keeps it.
+#[cfg(unix)]
 fn exits_at_once() -> Spawn {
     program("/bin/sh", &["-c", "true"])
+}
+
+/// A program that exits at once: this test binary, running no test.
+#[cfg(windows)]
+fn exits_at_once() -> Spawn {
+    Spawn {
+        program: std::env::current_exe().unwrap(),
+        args: ["--exact", "no::such::test"].map(OsString::from).to_vec(),
+        env: Vec::new(),
+    }
+}
+
+/// The pid of a process that has exited.
+fn gone_pid() -> u32 {
+    let spawn = exits_at_once();
+    let mut child = Command::new(&spawn.program)
+        .args(&spawn.args)
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    let gone = child.id();
+    child.wait().unwrap();
+    gone
+}
+
+/// What `service stop` sends first, by hand.
+#[cfg(unix)]
+fn send_stop(pid: u32) {
+    let target = rustix::process::Pid::from_raw(i32::try_from(pid).unwrap()).unwrap();
+    rustix::process::kill_process(target, rustix::process::Signal::TERM).unwrap();
+}
+
+/// What `service stop` sends first, by hand.
+#[cfg(windows)]
+fn send_stop(pid: u32) {
+    windows::request(pid, windows::STOP).unwrap();
 }
 
 /// Locks the pid file the way a server would, with `contents` in it.
 fn fake_lock(paths: &Paths, contents: &str) -> File {
     std::fs::create_dir_all(paths.run_dir()).unwrap();
     std::fs::write(paths.pid_file(), contents).unwrap();
-    let file = File::open(paths.pid_file()).unwrap();
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(paths.lock_file())
+        .unwrap();
     file.try_lock().unwrap();
     file
 }
@@ -99,6 +144,7 @@ fn wait_for_stopped(paths: &Paths) {
     }
 }
 
+#[cfg(unix)]
 fn chmod(path: &Path, mode: u32) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
 }
@@ -171,11 +217,17 @@ fn lifecycle() {
     // The pid file is emptied on a clean exit.
     assert_eq!(std::fs::read_to_string(paths.pid_file()).unwrap(), "");
 
+    #[cfg(unix)]
     let modes = |path: PathBuf| std::fs::metadata(path).unwrap().mode() & 0o777;
-    assert_eq!(modes(paths.run_dir()), 0o700);
-    assert_eq!(modes(paths.logs_dir()), 0o700);
-    assert_eq!(modes(paths.pid_file()), 0o600);
-    assert_eq!(modes(paths.log_file()), 0o600);
+    #[cfg(unix)]
+    for (path, mode) in [
+        (paths.run_dir(), 0o700),
+        (paths.logs_dir(), 0o700),
+        (paths.pid_file(), 0o600),
+        (paths.log_file(), 0o600),
+    ] {
+        assert_eq!(modes(path), mode);
+    }
 }
 
 #[test]
@@ -185,9 +237,9 @@ fn a_server_that_ignores_one_signal_stops_on_the_next() {
     let Started::Now(pid) = start(&paths, &fake_spawn(home.path(), 1), LONG).unwrap() else {
         panic!("not started");
     };
-    let target = rustix::process::Pid::from_raw(i32::try_from(pid).unwrap()).unwrap();
-    rustix::process::kill_process(target, rustix::process::Signal::TERM).unwrap();
-    wait_for_log(&paths, &format!("ignored {}", signal_hook::consts::SIGTERM));
+    wait_for_log(&paths, "ready");
+    send_stop(pid);
+    wait_for_log(&paths, "ignored 15");
     assert_eq!(stop(&paths, LONG).unwrap(), Stopped::Stopped(pid));
 }
 
@@ -288,6 +340,7 @@ fn a_server_that_never_listens_times_out() {
     spawned.wait().unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn stop_refuses_an_impossible_pid() {
     let home = tempfile::tempdir().unwrap();
@@ -303,18 +356,17 @@ fn stop_reports_a_lock_holder_that_never_exits() {
     let paths = Paths::new(home.path());
     // The pid of a process that has exited, so the signals find nobody,
     // while this test keeps the lock.
-    let mut child = Command::new("true").spawn().unwrap();
-    let gone = child.id();
-    child.wait().unwrap();
+    let gone = gone_pid();
     let _lock = fake_lock(&paths, &format!("{gone}\n"));
     let err = stop(&paths, SHORT).unwrap_err();
     assert!(matches!(err, Error::StillRunning(p) if p == gone));
     assert_eq!(
         err.to_string(),
-        format!("pid {gone} is still running after SIGKILL")
+        format!("pid {gone} is still running after {KILL}")
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn stop_reports_signal_errors() {
     // As root this would signal init; the binary refuses root anyway.
@@ -329,6 +381,7 @@ fn stop_reports_signal_errors() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn start_reports_servers_that_fail() {
     let home = tempfile::tempdir().unwrap();
@@ -386,6 +439,7 @@ fn start_reports_unusable_folders() {
     assert!(err.to_string().starts_with("cannot rotate "), "{err}");
 }
 
+#[cfg(unix)]
 #[test]
 fn status_and_hold_report_unreadable_files() {
     let home = tempfile::tempdir().unwrap();
@@ -412,6 +466,7 @@ fn status_and_hold_report_unreadable_files() {
     assert!(err.to_string().starts_with("cannot create "), "{err}");
 }
 
+#[cfg(unix)]
 #[test]
 fn tail_returns_the_last_lines() {
     let dir = tempfile::tempdir().unwrap();
@@ -475,6 +530,7 @@ fn rotate_keeps_numbered_copies() {
     assert_eq!(read("hyscribe.log.3"), "dropped");
 }
 
+#[cfg(unix)]
 #[test]
 fn rotate_reports_errors() {
     let dir = tempfile::tempdir().unwrap();
@@ -512,7 +568,7 @@ fn messages_read_well() {
     assert_eq!(Stopped::Stopped(7).to_string(), "stopped (pid 7)");
     assert_eq!(
         Stopped::Killed(7).to_string(),
-        "killed (pid 7) after it ignored SIGTERM"
+        format!("killed (pid 7) after it ignored {TERM}")
     );
     assert_eq!(
         Error::AlreadyRunning(Some(7)).to_string(),
@@ -528,9 +584,40 @@ fn messages_read_well() {
     );
     let err: Box<dyn std::error::Error> = Box::new(Error::Timeout { tail: Vec::new() });
     assert!(err.source().is_none());
+    // A process makes one pipe on Windows, in the test below.
+    #[cfg(unix)]
     assert_eq!(format!("{:?}", listen().unwrap()), "Shutdown");
 }
 
+/// Unix's names, which Windows's stand-ins replace.
+#[cfg(unix)]
+#[test]
+fn signals_are_named() {
+    assert_eq!((TERM, KILL), ("SIGTERM", "SIGKILL"));
+}
+
+/// Only a byte written asks for anything, and a server with no pipe is
+/// gone already.
+#[cfg(windows)]
+#[test]
+fn stop_requests_come_through_the_pipe() {
+    let mut shutdown = listen().unwrap();
+    assert_eq!(format!("{shutdown:?}"), "Shutdown");
+    let pid = std::process::id();
+    let name = format!(r"\\.\pipe\hyscribe-{pid}");
+    drop(OpenOptions::new().read(true).open(&name).unwrap());
+    windows::request(pid, windows::STOP).unwrap();
+    assert_eq!(shutdown.wait(), 15);
+    windows::request(gone_pid(), windows::STOP).unwrap();
+    assert_eq!(effective_uid(), u32::MAX);
+    assert_eq!(disk_free(Path::new(".")), None);
+    assert_eq!(
+        Paths::new("h").lock_file(),
+        Path::new("h/run/hyscribe.lock")
+    );
+}
+
+#[cfg(unix)]
 #[test]
 fn effective_uid_is_this_user() {
     let dir = tempfile::tempdir().unwrap();
@@ -540,10 +627,12 @@ fn effective_uid_is_this_user() {
     );
 }
 
+#[cfg(unix)]
 fn assert_starts(err: Error, prefix: &str) {
     assert!(err.to_string().starts_with(prefix), "{err}");
 }
 
+#[cfg(unix)]
 #[test]
 fn status_reports_an_unreadable_holder() {
     let home = tempfile::tempdir().unwrap();
@@ -555,6 +644,7 @@ fn status_reports_an_unreadable_holder() {
     assert_starts(status(&paths).unwrap_err(), "cannot read ");
 }
 
+#[cfg(unix)]
 #[test]
 fn start_and_stop_report_an_unreadable_pid_file() {
     let home = tempfile::tempdir().unwrap();
@@ -569,6 +659,7 @@ fn start_and_stop_report_an_unreadable_pid_file() {
     assert_starts(stop(&paths, SHORT).unwrap_err(), "cannot open ");
 }
 
+#[cfg(unix)]
 #[test]
 fn start_reports_an_unreadable_logs_folder() {
     let home = tempfile::tempdir().unwrap();
@@ -580,6 +671,7 @@ fn start_reports_an_unreadable_logs_folder() {
     assert_starts(err, "cannot check ");
 }
 
+#[cfg(unix)]
 #[test]
 fn start_reports_problems_while_waiting() {
     let home = tempfile::tempdir().unwrap();
@@ -607,13 +699,12 @@ fn start_reports_problems_while_waiting() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn stop_reports_problems_while_waiting() {
     let home = tempfile::tempdir().unwrap();
     let paths = Paths::new(home.path());
-    let mut child = Command::new("true").spawn().unwrap();
-    let gone = child.id();
-    child.wait().unwrap();
+    let gone = gone_pid();
     let _lock = fake_lock(&paths, &format!("{gone}\n"));
     let pid_file = paths.pid_file();
     let hider = std::thread::spawn(move || {
@@ -624,6 +715,7 @@ fn stop_reports_problems_while_waiting() {
     hider.join().unwrap();
 }
 
+#[cfg(unix)]
 #[test]
 fn follow_reports_problems_while_following() {
     let home = tempfile::tempdir().unwrap();
@@ -674,6 +766,7 @@ fn hold_waits_out_a_brief_reader() {
 
 /// Free space is whole blocks of the file system, and an absent path has
 /// none to report.
+#[cfg(unix)]
 #[test]
 fn free_disk_space_is_counted_in_blocks() {
     let home = tempfile::tempdir().unwrap();

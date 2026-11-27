@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::{BufRead, Write};
-use std::os::fd::BorrowedFd;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -182,6 +181,13 @@ enum ServiceCommand {
     },
 }
 
+/// Standard input's terminal: its file descriptor.
+#[cfg(unix)]
+pub type Tty<'a> = std::os::fd::BorrowedFd<'a>;
+/// Standard input's console: its handle.
+#[cfg(windows)]
+pub type Tty<'a> = std::os::windows::io::BorrowedHandle<'a>;
+
 /// What the process needs from the outside world.
 pub struct Context<'a> {
     /// Command line arguments, including the program name.
@@ -200,7 +206,7 @@ pub struct Context<'a> {
     pub input: &'a mut dyn BufRead,
     /// Standard input's terminal, if it is one: the wizard turns its echo
     /// off for passwords.
-    pub terminal: Option<BorrowedFd<'a>>,
+    pub terminal: Option<Tty<'a>>,
     /// Whether standard output is a terminal, which may be shown the setup
     /// secret.
     pub screen: bool,
@@ -884,4 +890,5 @@ pub mod fuzzing {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests;

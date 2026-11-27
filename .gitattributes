@@ -1,0 +1,5 @@
+# Every file is checked out as it is stored, line endings included, on
+# every system: templates, goldens and the files the binary embeds are
+# compared and served byte for byte, so Git on Windows must not turn LF
+# into CRLF.
+* -text

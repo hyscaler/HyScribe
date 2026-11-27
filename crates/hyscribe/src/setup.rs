@@ -8,8 +8,7 @@
 //! or salt.
 
 use std::collections::HashMap;
-use std::io::{BufRead, Read as _, Write};
-use std::os::fd::BorrowedFd;
+use std::io::{BufRead, IsTerminal as _, Read as _, Write};
 use std::path::{Path, PathBuf};
 
 use hyscribe_config::setup::{self, Setting};
@@ -17,9 +16,8 @@ use hyscribe_config::wpconfig::{self, Value};
 use hyscribe_config::{Config, Database, ENV_FILE, Mode, SALT_KEYS};
 use hyscribe_db::{DB_VERSIONS, Db, DbError};
 use hyscribe_write::install::{Answers, Installed, Plan};
-use rustix::termios::{LocalModes, OptionalActions, isatty, tcgetattr, tcsetattr};
 
-use crate::failed;
+use crate::{Tty, failed};
 
 pub(crate) mod web;
 
@@ -30,7 +28,7 @@ pub(crate) struct Terminal<'a> {
     /// The questions and what was found.
     pub out: &'a mut dyn Write,
     /// The input's terminal, if it is one, whose echo is off for passwords.
-    pub tty: Option<BorrowedFd<'a>>,
+    pub tty: Option<Tty<'a>>,
 }
 
 impl Terminal<'_> {
@@ -71,17 +69,10 @@ impl Terminal<'_> {
     fn secret(&mut self, question: &str) -> Result<String, String> {
         self.say(&format!("? {question}: "))?;
         // The terminal's settings, when it is one and took echo off.
-        let saved = self
-            .tty
-            .and_then(|fd| tcgetattr(fd).ok().map(|termios| (fd, termios)))
-            .filter(|(fd, termios)| {
-                let mut quiet = termios.clone();
-                quiet.local_modes.remove(LocalModes::ECHO);
-                tcsetattr(fd, OptionalActions::Now, &quiet).is_ok()
-            });
+        let saved = self.tty.and_then(echo_off);
         let answer = self.line();
-        if let Some((fd, termios)) = saved {
-            let _ = tcsetattr(fd, OptionalActions::Now, &termios);
+        if let Some(saved) = saved {
+            restore(saved);
             // The Enter that ended the answer was not echoed either.
             self.say("\n")?;
         }
@@ -107,7 +98,7 @@ impl Terminal<'_> {
 
     /// Whether someone answers at a terminal.
     pub(crate) fn interactive(&self) -> bool {
-        self.tty.is_some_and(isatty)
+        self.tty.is_some_and(|tty| tty.is_terminal())
     }
 
     /// Asks where to set up, three times at most: true for the terminal.
@@ -123,6 +114,44 @@ impl Terminal<'_> {
         }
         Err("setup stopped: neither browser nor terminal was chosen".into())
     }
+}
+
+/// The terminal's settings, after turning its echo off; none when it is no
+/// terminal or kept its echo.
+#[cfg(unix)]
+fn echo_off(fd: Tty<'_>) -> Option<(Tty<'_>, rustix::termios::Termios)> {
+    use rustix::termios::{LocalModes, OptionalActions, tcgetattr, tcsetattr};
+    let termios = tcgetattr(fd).ok().filter(|termios| {
+        let mut quiet = termios.clone();
+        quiet.local_modes.remove(LocalModes::ECHO);
+        tcsetattr(fd, OptionalActions::Now, &quiet).is_ok()
+    });
+    termios.map(|termios| (fd, termios))
+}
+
+/// The terminal's settings back as [`echo_off`] found them.
+#[cfg(unix)]
+fn restore((fd, termios): (Tty<'_>, rustix::termios::Termios)) {
+    use rustix::termios::{OptionalActions, tcsetattr};
+    let _ = tcsetattr(fd, OptionalActions::Now, &termios);
+}
+
+/// The console's mode, after turning its echo off; none when it is no
+/// console or kept its echo.
+#[cfg(windows)]
+fn echo_off(handle: Tty<'_>) -> Option<(std::fs::File, u32)> {
+    use winapi_util::console::{mode, set_mode};
+    const ENABLE_ECHO_INPUT: u32 = 0x0004;
+    let console = std::fs::File::from(handle.try_clone_to_owned().ok()?);
+    let found = mode(&console).ok()?;
+    set_mode(&console, found & !ENABLE_ECHO_INPUT).ok()?;
+    Some((console, found))
+}
+
+/// The console's mode back as [`echo_off`] found it.
+#[cfg(windows)]
+fn restore((console, found): (std::fs::File, u32)) {
+    let _ = winapi_util::console::set_mode(&console, found);
 }
 
 /// What the wizard read about an existing site.
@@ -734,4 +763,5 @@ async fn check(config: &Config) -> Result<String, String> {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 pub(crate) mod tests;

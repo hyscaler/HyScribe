@@ -1,6 +1,6 @@
 # Install
 
-HyScribe is one binary in a `tar.gz`. There is no web server, PHP or extension to install. It needs a MySQL or MariaDB server, normally the one your WordPress site already uses.
+HyScribe is one binary in a `tar.gz` (a `.zip` on Windows). There is no web server, PHP or extension to install. It needs a MySQL or MariaDB server, normally the one your WordPress site already uses.
 
 HyScribe is not yet production ready: it is an early release that has had no external security audit, and some screens and routes still answer `501 Not Implemented` ([not-supported.md](not-supported.md)). Install it on a copy of your site first, and keep backups of the database and uploads.
 
@@ -8,6 +8,7 @@ HyScribe is not yet production ready: it is an early release that has had no ext
 
 - Linux on amd64 or arm64. The binary is static, so any distribution works
 - Or macOS 11 or later, on Apple Silicon or Intel: see [On macOS](#on-macos) below
+- Or Windows 10, Windows Server 2016 or later, on amd64: see [On Windows](#on-windows) below
 - A MySQL or MariaDB database holding a WordPress 7.0 or 7.1 site (`db_version` 61833). Older sites: upgrade with PHP WordPress first
 - An unprivileged user account to run it: HyScribe refuses to run as root
 - A reverse proxy (nginx, Caddy, Traefik) for HTTPS. HyScribe serves plain HTTP
@@ -16,9 +17,9 @@ HyScribe is not yet production ready: it is an early release that has had no ext
 
 Each release on GitHub (`hyscaler/HyScribe`) has:
 
-- `hyscribe_<version>_<os>_<arch>.tar.gz`, `<os>` being `linux` or `darwin` (macOS) and `<arch>` being `amd64` or `arm64` (Apple Silicon is `arm64`)
-- `hyscribe-latest-<os>-<arch>.tar.gz`, the same archive under a name that stays the same
-- `SHA256SUMS.txt`, an SBOM for each system (`hyscribe-sbom.cdx.json` for Linux, `hyscribe-sbom-darwin.cdx.json` for macOS) and signed build provenance
+- `hyscribe_<version>_<os>_<arch>.tar.gz`, `<os>` being `linux` or `darwin` (macOS) and `<arch>` being `amd64` or `arm64` (Apple Silicon is `arm64`), and `hyscribe_<version>_windows_amd64.zip`
+- `hyscribe-latest-<os>-<arch>.tar.gz` and `hyscribe-latest-windows-amd64.zip`, the same archives under names that stay the same
+- `SHA256SUMS.txt`, an SBOM for each system (`hyscribe-sbom.cdx.json` for Linux, `hyscribe-sbom-darwin.cdx.json` for macOS, `hyscribe-sbom-windows.cdx.json` for Windows) and signed build provenance
 
 The latest release's archives download from fixed addresses:
 
@@ -152,5 +153,33 @@ The steps above are the same on macOS, with these differences:
 - Nothing starts HyScribe at boot: [service.md](service.md) describes cron and process supervisors, and a launchd job is not provided
 - macOS is tested less than Linux: each release's archive is installed, started and stopped on macOS 15, but the full test suite runs on Linux only. Use it to try HyScribe or to develop, and host sites on Linux
 - To build the archive from source, on a Mac: `scripts/package.sh aarch64-apple-darwin dist` (or `x86_64-apple-darwin`), with Xcode's command line tools, the Rust target and GNU tar (`brew install gnu-tar`)
+
+## On Windows
+
+The binary is `hyscribe.exe` in `hyscribe-latest-windows-amd64.zip`; the rest of this page applies, with these differences. In PowerShell:
+
+```
+cd $HOME
+curl.exe -fLO https://github.com/hyscaler/HyScribe/releases/latest/download/hyscribe-latest-windows-amd64.zip
+curl.exe -fLO https://github.com/hyscaler/HyScribe/releases/latest/download/SHA256SUMS.txt
+(Get-FileHash hyscribe-latest-windows-amd64.zip -Algorithm SHA256).Hash
+Select-String windows-amd64.zip SHA256SUMS.txt
+gh attestation verify hyscribe-latest-windows-amd64.zip --repo hyscaler/HyScribe
+Unblock-File hyscribe-latest-windows-amd64.zip
+Expand-Archive hyscribe-latest-windows-amd64.zip -DestinationPath .
+cd hyscribe
+.\hyscribe.exe version
+.\hyscribe.exe service start
+```
+
+- The two hashes must be the same (letter case aside); `certutil -hashfile hyscribe-latest-windows-amd64.zip SHA256` prints it too. `gh` must find an attestation made by the repository's release workflow
+- The binary is not signed yet. A zip downloaded with a browser is marked as coming from the internet, and Windows SmartScreen may then stop the binary's first start with "Windows protected your PC". After checking the download as above, choose "More info" and then "Run anyway", or run `Unblock-File` on the zip before unzipping it, as above. A copy fetched with `curl.exe` carries no such mark
+- Keep the `hyscribe` folder inside your own profile folder (`C:\Users\<you>`), as above. HyScribe sets and checks no file permissions on Windows: `.env`, the session files and the logs take the folder's, and a profile folder is open only to its user, administrators and the system. Elsewhere, restrict the folder yourself, for example `icacls hyscribe /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F"`
+- HyScribe cannot tell an administrator account on Windows, so it does not refuse one as it refuses root elsewhere: run it from an ordinary account
+- `DB_HOST` is a host or `host:port`: a socket is refused, and named pipes are not supported
+- Windows's own certificate store is not read. For outbound HTTPS and the mail relay's TLS, set `SSL_CERT_FILE` in the environment HyScribe starts in to a PEM bundle of trusted certificates (curl's `cacert.pem`, for example); without it the log says HTTPS fetches are off
+- `service start` runs the server in the background with no window; `service stop` asks it to stop through a named pipe, then ends it after 15 seconds. Nothing starts it at boot: [service.md](service.md) shows a scheduled task
+- Windows is tested less than Linux: each release's archive is unzipped, started and stopped on Windows Server 2025, but the full test suite runs on Linux only. Use it to try HyScribe or to develop, and host sites on Linux
+- To build the archive from source, on Windows: `scripts/package.sh x86_64-pc-windows-msvc dist` in Git for Windows's bash, with Visual Studio's C++ build tools, the Rust target and Python 3
 
 Next: [service.md](service.md) to keep it running, [switching.md](switching.md) to move a site over.

@@ -1376,6 +1376,7 @@ async fn the_site_health_status_tab() {
 
 /// The machine's facts: the `.env` beside the binary, the disk, and the
 /// holder of the pid file.
+#[cfg(unix)]
 #[test]
 fn the_environment_is_read_from_the_folder() {
     use hyscribe_admin::site_health::EnvFile;

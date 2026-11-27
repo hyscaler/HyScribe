@@ -3,7 +3,9 @@
 use super::*;
 use crate::tests::{SAVES, empty_saves, saves_scalar, saves_with};
 use hyscribe_config::{Constants, Secret};
+use rustix::termios::{LocalModes, tcgetattr};
 use std::io::Cursor;
+use std::os::fd::BorrowedFd;
 use std::os::unix::fs::PermissionsExt;
 
 struct Ran {

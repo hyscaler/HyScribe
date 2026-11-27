@@ -981,13 +981,12 @@ impl HealthSite for Admin<'_> {
 /// The `.env` file, the disk and the service of the `hyscribe/` folder the
 /// binary at `binary` is in.
 fn environment(binary: &str) -> Environment {
-    use std::os::unix::fs::PermissionsExt;
     let home = std::path::Path::new(binary)
         .parent()
         .filter(|home| !home.as_os_str().is_empty())
         .unwrap_or(std::path::Path::new("."));
     let env_file = match std::fs::metadata(home.join(".env")) {
-        Ok(file) => EnvFile::Mode(file.permissions().mode() & 0o777),
+        Ok(file) => env_mode(&file),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => EnvFile::Missing,
         Err(_) => EnvFile::Unreadable,
     };
@@ -1003,6 +1002,20 @@ fn environment(binary: &str) -> Environment {
         service_pid,
         pid: std::process::id(),
     }
+}
+
+/// The `.env` file's permission bits.
+#[cfg(unix)]
+fn env_mode(file: &std::fs::Metadata) -> EnvFile {
+    use std::os::unix::fs::PermissionsExt;
+    EnvFile::Mode(file.permissions().mode() & 0o777)
+}
+
+/// Windows has no permission bits, and its access lists are not read
+/// (docs/SECURITY_MODEL.md): they could not be checked.
+#[cfg(windows)]
+fn env_mode(_file: &std::fs::Metadata) -> EnvFile {
+    EnvFile::Unreadable
 }
 
 impl SettingsSite for Admin<'_> {

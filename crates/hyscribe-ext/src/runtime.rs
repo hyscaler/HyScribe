@@ -7,7 +7,6 @@
 //! of them changes.
 
 use std::collections::BTreeMap;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
@@ -62,10 +61,24 @@ impl std::fmt::Debug for Runtime {
     }
 }
 
+#[cfg(unix)]
 fn version(folder: &Path) -> Version {
+    use std::os::unix::fs::MetadataExt;
     let stat = |name: &&str| std::fs::metadata(folder.join(name)).ok();
     let each = FILES.iter().map(stat);
     each.map(|m| m.map(|m| (m.dev(), m.ino(), m.size(), m.mtime(), m.mtime_nsec())))
+        .collect()
+}
+
+/// Windows has no stable call for a file's id: its creation time, size
+/// and last write time stand in for the device, inode, size and time.
+#[cfg(windows)]
+fn version(folder: &Path) -> Version {
+    use std::os::windows::fs::MetadataExt;
+    let stat = |name: &&str| std::fs::metadata(folder.join(name)).ok();
+    let written = |m: &std::fs::Metadata| i64::try_from(m.last_write_time()).unwrap_or(i64::MAX);
+    let each = FILES.iter().map(stat);
+    each.map(|m| m.map(|m| (0, m.creation_time(), m.file_size(), written(&m), 0)))
         .collect()
 }
 

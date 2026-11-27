@@ -29,13 +29,21 @@ hyscribe-phpser.workspace = true
 hyscribe-registry.workspace = true
 hyscribe-service.workspace = true
 hyscribe-write.workspace = true
-rustix = { version = "1.1", default-features = false, features = ["std", "termios"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+
+# The terminal wizard turns echo off for passwords.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1", default-features = false, features = ["std", "termios"] }
+
+[target.'cfg(windows)'.dependencies]
+winapi-util = "0.1"
+
+[target.'cfg(unix)'.dev-dependencies]
+rustix = { version = "1.1", default-features = false, features = ["std", "termios", "pty"] }
 
 [dev-dependencies]
 hyscribe-phpser.workspace = true
 hyscribe-testkit.workspace = true
-rustix = { version = "1.1", default-features = false, features = ["std", "termios", "pty"] }
 sqlx = { version = "0.9", default-features = false, features = ["mysql", "runtime-tokio"] }
 tempfile = "3"
 tower = { version = "0.5", default-features = false, features = ["util"] }

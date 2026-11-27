@@ -15,6 +15,10 @@ use hyscribe_testkit::writes::{check_writes, load_default_install};
 use hyscribe_testkit::{fixture_database, rest_cases};
 use hyscribe_write::terms::Taxonomy::PostTag;
 use sqlx::Connection as _;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_file as symlink;
 
 use super::*;
 
@@ -621,7 +625,7 @@ async fn a_media_delete_removes_its_files_once_it_commits() {
     // The 150 by 150 size is a link to a file outside the uploads.
     std::fs::write(outside.path().join("kept.jpg"), "kept").unwrap();
     let link = folder.join("oracle-one-150x150.jpg");
-    std::os::unix::fs::symlink(outside.path().join("kept.jpg"), &link).unwrap();
+    symlink(outside.path().join("kept.jpg"), &link).unwrap();
     let target = "/?rest_route=/wp/v2/media/9301&force=true";
     // No uploads folder: not ported, and nothing written.
     let plain = saves_site(sessions.path()).await;

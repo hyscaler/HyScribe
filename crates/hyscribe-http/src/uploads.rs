@@ -138,12 +138,13 @@ impl Uploads {
     /// `_wp_attached_file`: `None` for one that leaves the folder, as an
     /// absolute path or `..` would.
     pub(crate) fn path(&self, file: &[u8]) -> Option<PathBuf> {
-        use std::os::unix::ffi::OsStrExt as _;
-        let relative = Path::new(std::ffi::OsStr::from_bytes(file));
-        let inside = relative
-            .components()
-            .all(|part| matches!(part, std::path::Component::Normal(_)));
-        inside.then(|| self.dir.join(relative))
+        let inside = |relative: &&Path| {
+            let mut parts = relative.components();
+            parts.all(|part| matches!(part, std::path::Component::Normal(_)))
+        };
+        relative(file)
+            .filter(inside)
+            .map(|relative| self.dir.join(relative))
     }
 
     /// `wp_filesize()` of `file` when `is_readable()`, else none; `None`
@@ -299,7 +300,49 @@ pub(crate) fn form(
 /// A file name that stays in its folder: not empty, no separator or NUL,
 /// and no leading dot, so never `.`, `..` or a temporary file.
 pub(crate) fn stays(name: &str) -> bool {
-    !name.is_empty() && !name.starts_with('.') && !name.contains(['/', '\\', '\0'])
+    !name.is_empty()
+        && !name.starts_with('.')
+        && !name.contains(['/', '\\', '\0'])
+        && portable(name)
+}
+
+/// Every file name is one on Unix.
+#[cfg(unix)]
+fn portable(_name: &str) -> bool {
+    true
+}
+
+/// A file name Windows keeps as one: no drive or stream colon, no trailing
+/// dot or space (which Windows drops), and no device name (`CON`, `NUL`,
+/// `COM1`, `LPT1` and so on, with an extension too).
+#[cfg(windows)]
+fn portable(name: &str) -> bool {
+    const DEVICES: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    let stem = name.split('.').next().unwrap_or_default().trim_end();
+    let stem = stem.to_ascii_uppercase();
+    let numbered = ["COM", "LPT"].iter().any(|device| {
+        stem.strip_prefix(device)
+            .is_some_and(|n| n.len() == 1 && n.bytes().all(|b| b.is_ascii_digit()))
+    });
+    !name.contains(':')
+        && !name.ends_with(['.', ' '])
+        && !DEVICES.contains(&stem.as_str())
+        && !numbered
+}
+
+/// `file`, an attachment's path in the database, as a path.
+#[cfg(unix)]
+fn relative(file: &[u8]) -> Option<&Path> {
+    use std::os::unix::ffi::OsStrExt as _;
+    Some(Path::new(std::ffi::OsStr::from_bytes(file)))
+}
+
+/// `file` as a path on Windows: UTF-8, each name one Windows keeps.
+#[cfg(windows)]
+fn relative(file: &[u8]) -> Option<&Path> {
+    let text = std::str::from_utf8(file).ok()?;
+    let mut names = text.split(['/', '\\']).filter(|name| !name.is_empty());
+    names.all(portable).then(|| Path::new(text))
 }
 
 /// The names of the files in `folder`.

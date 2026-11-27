@@ -68,7 +68,7 @@ Legend: ✅ working today, 🚧 in progress, 🔜 coming up, ❌ not supported.
 
 ## Quickstart
 
-Linux (x86_64 or arm64), or macOS 11 and later (Apple Silicon or Intel) from the release after v0.1.0. You need an existing WordPress 7.0 or 7.1 site's database (MariaDB or MySQL) and its `wp-content` folder; try it on a copy.
+Linux (x86_64 or arm64), or from the release after v0.1.0 macOS 11 and later (Apple Silicon or Intel) and Windows 10 and later (x86_64). You need an existing WordPress 7.0 or 7.1 site's database (MariaDB or MySQL) and its `wp-content` folder; try it on a copy.
 
 ```bash
 # Linux: linux-amd64 or linux-arm64. macOS: darwin-arm64 (Apple Silicon) or darwin-amd64 (Intel)
@@ -80,7 +80,7 @@ tar -xzf hyscribe-latest-linux-amd64.tar.gz && cd hyscribe
 ./hyscribe service start      # then finish setup in the browser
 ```
 
-On macOS the binary is not signed by Apple yet, and the platform is tested less than Linux: read [On macOS](docs/operators/install.md#on-macos) first.
+On macOS the binary is not signed by Apple yet, and the platform is tested less than Linux: read [On macOS](docs/operators/install.md#on-macos) first. On Windows take `hyscribe-latest-windows-amd64.zip` and run `hyscribe.exe service start`, after reading [On Windows](docs/operators/install.md#on-windows).
 
 ### Try it with Docker
 

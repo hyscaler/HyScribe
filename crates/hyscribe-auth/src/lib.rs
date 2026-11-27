@@ -14,7 +14,7 @@ pub use fast_hash::{wp_fast_hash, wp_verify_fast_hash};
 use blowfish::Blowfish;
 use hyscribe_phpser::{hash_equals, hash_hmac_md5, md5, md5_raw, php_trim};
 use sha2::{Digest, Sha384};
-use std::io::{self, Read};
+use std::io;
 
 /// Longer passwords are refused, as WordPress refuses them.
 const MAX_PASSWORD: usize = 4096;
@@ -48,8 +48,16 @@ pub fn generate_password(length: usize, special_chars: bool) -> io::Result<Strin
 }
 
 /// Fills `buf` from the kernel's random source.
+#[cfg(unix)]
 pub(crate) fn random_bytes(buf: &mut [u8]) -> io::Result<()> {
+    use std::io::Read as _;
     std::fs::File::open("/dev/urandom").and_then(|mut random| random.read_exact(buf))
+}
+
+/// Fills `buf` from Windows's random source, which has no device file.
+#[cfg(windows)]
+pub(crate) fn random_bytes(buf: &mut [u8]) -> io::Result<()> {
+    getrandom::getrandom(buf).map_err(|err| io::Error::other(err.to_string()))
 }
 
 fn hash_from(password: &[u8], salt: io::Result<[u8; 16]>) -> io::Result<String> {

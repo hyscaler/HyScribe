@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use hyscribe_ext::origin::Origin;
@@ -77,6 +78,7 @@ fn marks_what_the_registry_revokes_only() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn needs_the_index_for_a_revoked_version() {
     let dir = tempfile::tempdir().unwrap();

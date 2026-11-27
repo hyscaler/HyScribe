@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use axum::http::{HeaderMap, HeaderValue, Uri, header};
@@ -105,6 +106,7 @@ fn image_sizes_come_from_the_files_in_the_uploads() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn folders_stay_inside_the_uploads() {
     let dir = tempfile::tempdir().unwrap();
@@ -139,6 +141,7 @@ fn sent(name: &str, bytes: Bytes) -> Sent {
     Sent::new(name.as_bytes().to_vec(), Vec::new(), bytes, 1 << 20)
 }
 
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn uploads_are_refused_as_php_refuses_them() {
     let dir = tempfile::tempdir().unwrap();
@@ -290,6 +293,7 @@ async fn metadata_not_ported_stops_an_upload() {
     assert!(matches!(Refused::from(random), Refused::Failed(_)));
 }
 
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn sizes_are_made_on_the_pool_and_written_beside_the_upload() {
     let dir = tempfile::tempdir().unwrap();
@@ -339,6 +343,7 @@ async fn bodies_are_refused_past_their_limits() {
 /// An attachment's files are read and deleted only inside the uploads
 /// folder, each below its own folder, as `wp_delete_file_from_directory()`
 /// resolves them; a link is deleted, not what it points to.
+#[cfg(unix)]
 #[test]
 fn files_stay_inside_the_folder() {
     let dir = tempfile::tempdir().unwrap();
@@ -380,4 +385,50 @@ fn add_attachment_reaches_the_extensions() {
         vec![Value::Int(5)],
     );
     assert_eq!(fired, [expected]);
+}
+
+/// Device names, streams and names Windows trims are files elsewhere, as
+/// PHP keeps them.
+#[cfg(unix)]
+#[test]
+fn every_name_windows_would_misread_is_a_file_on_unix() {
+    for name in ["CON", "nul.jpg", "COM1.png", "a:b.jpg", "a.jpg.", "a.jpg "] {
+        assert!(stays(name), "{name:?}");
+    }
+    let uploads = uploads(Path::new("u"));
+    assert_eq!(
+        uploads.path(b"2026/11/CON.jpg"),
+        Some(Path::new("u/2026/11/CON.jpg").to_path_buf())
+    );
+}
+
+/// Names Windows would read as devices or streams, or trim, never reach
+/// its file system.
+#[cfg(windows)]
+#[test]
+fn windows_names_stay_files() {
+    for name in [
+        "CON", "con.jpg", "Nul", "COM1.png", "lpt9", "AUX .txt", "a:b.jpg", "a.jpg.", "a.jpg ",
+    ] {
+        assert!(!stays(name), "{name:?}");
+    }
+    for name in [
+        "CONSOLE.jpg",
+        "COM10.png",
+        "icon.png",
+        "a.b.jpg",
+        "null.jpg",
+    ] {
+        assert!(stays(name), "{name:?}");
+    }
+    let uploads = uploads(Path::new("u"));
+    assert_eq!(uploads.path(b"2026/11/CON.jpg"), None);
+    assert_eq!(uploads.path(b"2026/11/a:b.jpg"), None);
+    assert_eq!(uploads.path(b"2026/11/\xff.jpg"), None);
+    assert_eq!(uploads.path(b"C:/a.jpg"), None);
+    assert_eq!(uploads.path(b"2026/../a.jpg"), None);
+    assert_eq!(
+        uploads.path(b"2026/11/a.jpg"),
+        Some(Path::new("u/2026/11/a.jpg").to_path_buf())
+    );
 }

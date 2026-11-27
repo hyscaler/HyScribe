@@ -668,6 +668,7 @@ pub fn server(values: &HashMap<String, String>) -> Result<Server, ConfigError> {
 
 /// `DB_HOST` and its socket: `localhost:/path/to/socket` connects through the
 /// socket, as `wpdb` splits it; as for `mysqli`, only `localhost` takes one.
+#[cfg(unix)]
 fn db_host(value: &str) -> Result<(String, Option<PathBuf>), ConfigError> {
     match value.split_once(":/") {
         None => Ok((value.to_string(), None)),
@@ -675,6 +676,20 @@ fn db_host(value: &str) -> Result<(String, Option<PathBuf>), ConfigError> {
         Some(_) => Err(invalid(
             "DB_HOST",
             "a socket is given as localhost:/path/to/socket",
+        )),
+    }
+}
+
+/// `DB_HOST` on Windows, where the database driver connects over TCP only:
+/// it has no named pipes, Windows's local connections, so a socket is
+/// refused.
+#[cfg(windows)]
+fn db_host(value: &str) -> Result<(String, Option<PathBuf>), ConfigError> {
+    match value.split_once(":/") {
+        None => Ok((value.to_string(), None)),
+        Some(_) => Err(invalid(
+            "DB_HOST",
+            "a socket cannot be used on Windows; give host or host:port",
         )),
     }
 }
@@ -837,6 +852,7 @@ fn boolean(value: Option<&str>, key: &'static str, default: bool) -> Result<bool
 
 /// `.env` holds the database password and salts: refuse it if group or
 /// others can access it.
+#[cfg(unix)]
 fn check_permissions(path: &Path) -> Result<(), ConfigError> {
     use std::os::unix::fs::PermissionsExt;
     let metadata = std::fs::metadata(path).map_err(|err| ConfigError::Read {
@@ -852,6 +868,19 @@ fn check_permissions(path: &Path) -> Result<(), ConfigError> {
             mode,
         })
     }
+}
+
+/// Windows has no mode bits, and its access lists cannot be read without
+/// code outside the safe subset: `.env` keeps its folder's, unchecked
+/// (docs/SECURITY_MODEL.md), once it can be read at all.
+#[cfg(windows)]
+fn check_permissions(path: &Path) -> Result<(), ConfigError> {
+    std::fs::metadata(path)
+        .map(drop)
+        .map_err(|err| ConfigError::Read {
+            path: path.to_path_buf(),
+            message: err.to_string(),
+        })
 }
 
 #[cfg(test)]

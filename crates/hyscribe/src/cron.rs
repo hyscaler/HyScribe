@@ -147,4 +147,5 @@ pub(crate) fn run(config: &Config, home: &Path, out: &mut dyn Write) -> Result<S
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests;

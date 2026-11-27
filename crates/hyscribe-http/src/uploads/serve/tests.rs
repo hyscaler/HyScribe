@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
+#[cfg(windows)]
+use std::os::windows::fs::symlink_dir as symlink;
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -52,7 +56,7 @@ async fn uploads_are_served_never_run() {
         std::fs::write(dir.path().join(name), bytes).unwrap();
     }
     std::fs::write(outside.path().join("secret.jpg"), b"secret").unwrap();
-    std::os::unix::fs::symlink(outside.path(), dir.path().join("out")).unwrap();
+    symlink(outside.path(), dir.path().join("out")).unwrap();
     let site = serving(dir.path()).await;
     let shown = get(&site, "/wp-content/uploads/2026/11/a%20b+c.jpg", None).await;
     assert_eq!(shown.status(), StatusCode::OK);

@@ -165,19 +165,21 @@ struct SecretFile<'a>(&'a Path);
 
 impl<'a> SecretFile<'a> {
     fn write(path: &'a Path, text: &str) -> Result<SecretFile<'a>, String> {
-        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
         let parent = path.parent().unwrap_or(Path::new("."));
-        std::fs::DirBuilder::new()
+        // Mode 0700 and 0600; on Windows the folder's permissions.
+        let mut folder = std::fs::DirBuilder::new();
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+            folder.mode(0o700);
+            options.mode(0o600);
+        }
+        folder
             .recursive(true)
-            .mode(0o700)
             .create(parent)
-            .and_then(|()| {
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o600)
-                    .open(path)
-            })
+            .and_then(|()| options.open(path))
             .and_then(|mut file| {
                 let kept = SecretFile(path);
                 file.write_all(text.as_bytes()).map(|()| kept)
@@ -762,4 +764,5 @@ fn page(status: StatusCode, title: &str, body: &str) -> Response {
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests;

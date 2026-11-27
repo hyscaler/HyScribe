@@ -34,6 +34,16 @@ Exit codes: 0 on success, 1 on an error (printed as `error: ...`), 2 for a comma
 - Environment variables set when `service start` runs are passed on to the server, and override `.env`
 - A server stopped by a signal logs `stopped on signal N` as its last line
 
+## On Windows
+
+The commands are the same, run as `.\hyscribe.exe` from the `hyscribe` folder. Windows has no signals, so:
+
+- `service start` starts the server as a background process with no console window: closing the terminal does not stop it. It is not a Windows service
+- The lock is held on `run\hyscribe.lock`, beside `run\hyscribe.pid`, since Windows refuses reads of a locked file; a stale pid file still never blocks a start
+- `service stop` asks the server to stop through its named pipe (`\\.\pipe\hyscribe-<pid>`), which only the server's own user, administrators and the system can write to, and logs `stopped on signal 15` as SIGTERM would; after 15 seconds it tells the server to exit at once, as SIGKILL would. `service stop` prints `killed (pid N) after it ignored the stop request` then
+- Ctrl-C at a foreground `hyscribe.exe start` stops it as SIGINT does (`stopped on signal 2`)
+- Administrators are not refused, as Windows gives HyScribe no way to tell them without code outside its safe subset: run it from an ordinary account
+
 ## Starting at boot
 
 HyScribe does not install itself into the init system. Either:
@@ -41,7 +51,7 @@ HyScribe does not install itself into the init system. Either:
 - add `@reboot /path/to/hyscribe/hyscribe service start` to the service user's crontab, or
 - have a process supervisor run `/path/to/hyscribe/hyscribe start` in the foreground as the service user, with the `hyscribe/` folder as working directory, stopped with SIGTERM
 
-On macOS the supervisor is launchd; HyScribe ships no launchd job yet.
+On macOS the supervisor is launchd; HyScribe ships no launchd job yet. On Windows a scheduled task does it, for example, in PowerShell, `Register-ScheduledTask hyscribe -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Action (New-ScheduledTaskAction -Execute "$HOME\hyscribe\hyscribe.exe" -Argument "service start" -WorkingDirectory "$HOME\hyscribe")`; HyScribe does not install itself as a Windows service.
 
 ## Behind a reverse proxy
 

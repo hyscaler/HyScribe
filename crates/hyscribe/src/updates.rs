@@ -103,4 +103,5 @@ pub(crate) async fn task(
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests;

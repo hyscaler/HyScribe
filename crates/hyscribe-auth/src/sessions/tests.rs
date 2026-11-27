@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
@@ -61,9 +62,12 @@ fn files_are_private_and_hold_what_session_tokens_holds() {
     let dir = tempfile::tempdir().unwrap();
     let sessions = Sessions::new(dir.path().join("sessions"));
     let token = sessions.create(7, NOW + 60, &origin()).unwrap();
+    #[cfg(unix)]
     let mode =
         |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    #[cfg(unix)]
     assert_eq!(mode(&dir.path().join("sessions")), 0o700);
+    #[cfg(unix)]
     assert_eq!(mode(&dir.path().join("sessions/7")), 0o600);
     let file = std::fs::read(dir.path().join("sessions/7")).unwrap();
     let hash = bin2hex(&Sha256::digest(token.as_bytes()));

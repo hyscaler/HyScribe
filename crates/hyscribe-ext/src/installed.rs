@@ -6,6 +6,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -137,9 +138,12 @@ pub fn replace(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .and_then(|()| fs::rename(&new, path))
 }
 
-/// Opens `path` for writing with `options`, mode 0644, and writes `bytes`.
+/// Opens `path` for writing with `options`, mode 0644 (on Windows the
+/// folder's permissions), and writes `bytes`.
 fn write_with(options: &mut OpenOptions, path: &Path, bytes: &[u8]) -> std::io::Result<fs::File> {
-    let opened = options.write(true).mode(0o644).open(path);
+    #[cfg(unix)]
+    options.mode(0o644);
+    let opened = options.write(true).open(path);
     opened.and_then(|mut file| file.write_all(bytes).map(|()| file))
 }
 

@@ -3,6 +3,7 @@
 use super::*;
 use crate::wpconfig::parse;
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 fn php(body: &str) -> WpConfig {
@@ -169,19 +170,22 @@ fn db_host_is_split_as_wordpress_splits_it() {
         host("db:3307:/run/mysqld/mysqld.sock"),
         (pairs(&[("DB_HOST", "db"), ("DB_PORT", "3307")]), false)
     );
-    // What is copied is what `.env` reads.
-    let values = import(&php("define('DB_NAME', 'n'); define('DB_USER', 'u'); \
-        define('DB_HOST', ':/run/mysqld/mysqld.sock');"))
-    .values;
-    let map = values
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.clone()))
-        .collect();
-    let database = crate::from_map(&map).unwrap().database;
-    assert_eq!(
-        database.socket.as_deref(),
-        Some(std::path::Path::new("/run/mysqld/mysqld.sock"))
-    );
+    // What is copied is what `.env` reads, where a socket can be used.
+    #[cfg(unix)]
+    {
+        let values = import(&php("define('DB_NAME', 'n'); define('DB_USER', 'u'); \
+            define('DB_HOST', ':/run/mysqld/mysqld.sock');"))
+        .values;
+        let map = values
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+        let database = crate::from_map(&map).unwrap().database;
+        assert_eq!(
+            database.socket.as_deref(),
+            Some(std::path::Path::new("/run/mysqld/mysqld.sock"))
+        );
+    }
 }
 
 #[test]
@@ -244,6 +248,7 @@ proptest::proptest! {
     }
 }
 
+#[cfg(unix)]
 fn mode(path: &Path) -> u32 {
     std::fs::metadata(path).unwrap().permissions().mode() & 0o777
 }
@@ -261,6 +266,7 @@ fn env_is_written_owner_only_and_round_trips() {
     ]);
     let path = write(dir.path(), &render(&values).unwrap(), false).unwrap();
     assert_eq!(path, dir.path().join(".env"));
+    #[cfg(unix)]
     assert_eq!(mode(&path), 0o600);
     let loaded = crate::load(dir.path(), &HashMap::new()).unwrap().unwrap();
     let map = values
@@ -288,6 +294,7 @@ fn an_existing_env_is_replaced_only_when_asked() {
     std::fs::write(dir.path().join(".env.new"), "STALE=1\n").unwrap();
     write(dir.path(), "NEW=1\n", true).unwrap();
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "NEW=1\n");
+    #[cfg(unix)]
     assert_eq!(mode(&path), 0o600);
     assert!(!dir.path().join(".env.new").exists());
 }

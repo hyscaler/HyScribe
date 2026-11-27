@@ -377,6 +377,7 @@ async fn connections_are_read_only() {
 
 /// A socket `DB_HOST` connects through the socket, whatever the port: the
 /// fixture's MariaDB exposes it on a bind mount.
+#[cfg(unix)]
 #[tokio::test]
 async fn connects_through_a_socket() {
     let config = Database {

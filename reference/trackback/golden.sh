@@ -4,7 +4,7 @@
 # Records how WordPress answers wp-trackback.php and trackback POSTs, with
 # trackbacks closed as HyScribe keeps them, as
 # crates/hyscribe-http/tests/golden/trackback.tsv:
-#   method<TAB>hex(path and query)<TAB>request content type<TAB>hex(form body)<TAB>status<TAB>location<TAB>content type<TAB>hex(body)
+#   method<TAB>hex(path and query)<TAB>request content type<TAB>hex(form body)<TAB>status<TAB>location<TAB>content type<TAB>hex(body)<TAB>x-redirect-by
 # A must-use plugin closes pings for the run, so no trackback is stored.
 # Needs the default install oracle running (db.sh up, then php.sh up).
 set -euo pipefail
@@ -37,8 +37,9 @@ record() {
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
   location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)
   ctype=$(grep -i '^content-type:' "$HEADERS" | cut -d ' ' -f 2- | tr -d '\r' || true)
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$method" "$(printf '%s' "$path" | xxd -p | tr -d '\n')" "$type" \
-    "$(printf '%s' "$form" | xxd -p | tr -d '\n')" "$status" "$location" "$ctype" "$(xxd -p "$TMP" | tr -d '\n')" >> "$OUT"
+  redirect_by=$(grep -i '^x-redirect-by:' "$HEADERS" | cut -d ' ' -f 2- | tr -d '\r' || true)
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$method" "$(printf '%s' "$path" | xxd -p | tr -d '\n')" "$type" \
+    "$(printf '%s' "$form" | xxd -p | tr -d '\n')" "$status" "$location" "$ctype" "$(xxd -p "$TMP" | tr -d '\n')" "$redirect_by" >> "$OUT"
 }
 
 : > "$OUT"

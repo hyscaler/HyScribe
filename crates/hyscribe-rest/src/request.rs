@@ -370,6 +370,24 @@ pub(crate) fn page_offset(page: u64, per_page: u64) -> u64 {
     }
 }
 
+/// `(int) ceil( ( $offset / $per_page ) + 1 )`, the page an offset falls on:
+/// PHP's `/` gives an integer for an even division and a float otherwise,
+/// the sum is a float where it overflows, and `ceil()` takes it as one, so
+/// the page loses digits past 2^53 and wraps to a negative number past the
+/// largest integer.
+pub(crate) fn page_of_offset(offset: u64, per_page: u64) -> i64 {
+    let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+    let per_page = i64::try_from(per_page).unwrap_or(i64::MAX);
+    let sum = if offset % per_page == 0 {
+        let whole = offset / per_page;
+        // Only the largest integer overflows, and as a float it absorbs the 1.
+        whole.checked_add(1).map_or(whole as f64, |sum| sum as f64)
+    } else {
+        offset as f64 / per_page as f64 + 1.0
+    };
+    Value::Float(hyscribe_phpser::Float::from_f64(sum.ceil())).to_int()
+}
+
 /// `get_collection_params()`: the context, the page, its size and the
 /// search.
 pub(crate) fn collection_args() -> Vec<Arg> {

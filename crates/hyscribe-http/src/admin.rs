@@ -171,10 +171,7 @@ fn not_ported() -> Response {
 fn redirect(mut headers: Vec<(header::HeaderName, String)>, location: &[u8]) -> Response {
     let location = wp_sanitize_redirect(location);
     let location = hyscribe_admin::menu::clean_links(&String::from_utf8_lossy(&location));
-    headers.push((
-        header::HeaderName::from_static("x-redirect-by"),
-        "WordPress".into(),
-    ));
+    headers.push(crate::redirect_by());
     headers.push((header::LOCATION, location));
     response(StatusCode::FOUND, headers, Vec::new())
 }

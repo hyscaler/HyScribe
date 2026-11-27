@@ -5,7 +5,7 @@
 # (default, ttd, or one of a bundled theme, default-tt4, ttd-tt4, ...,
 # which reference/pages/theme-list.sh builds) as
 # crates/hyscribe-http/tests/golden/pages-<list>.tsv:
-#   options<TAB>hex(path and query)<TAB>status<TAB>location<TAB>body
+#   options<TAB>hex(path and query)<TAB>status<TAB>location<TAB>body<TAB>x-redirect-by
 # where options are the list's (reference/pages/options.php, installed as a
 # must-use plugin for the run and removed after) and the body is hex, or
 # over the Theme Test Data, whose content is not ours to commit, and in the
@@ -99,6 +99,7 @@ while IFS= read -r line; do
   curl -g -s -D "$HEADERS" -o "$TMP" -H "X-HyScribe-Options: $options" ${cookie:+-b "$cookie"} "$BASE$path" > /dev/null
   status=$(head -n 1 "$HEADERS" | cut -d ' ' -f 2)
   location=$(grep -i '^location:' "$HEADERS" | cut -d ' ' -f 2 | tr -d '\r' || true)
+  redirect_by=$(grep -i '^x-redirect-by:' "$HEADERS" | cut -d ' ' -f 2- | tr -d '\r' || true)
   key=$(printf '%s' "$path" | xxd -p | tr -d '\n')
   if [ -n "$HASHED" ]; then
     { read -r page; read -r body; } < <(python3 -I "$ROOT/reference/pages/ttd-body.py" "$TMP")
@@ -106,6 +107,6 @@ while IFS= read -r line; do
   else
     body=$(xxd -p "$TMP" | tr -d '\n')
   fi
-  printf '%s\t%s\t%s\t%s\t%s\n' "$options" "$key" "$status" "$location" "$body" >> "$OUT"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$options" "$key" "$status" "$location" "$body" "$redirect_by" >> "$OUT"
 done < "$ROOT/reference/pages/$LIST.list"
 wc -l "$OUT"

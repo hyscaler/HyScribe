@@ -1547,6 +1547,7 @@ async fn trackbacks_match_php() {
             response.status().as_u16().to_string(),
             header("location"),
             (!redirect).then(|| header("content-type")),
+            header("x-redirect-by"),
         );
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1555,6 +1556,7 @@ async fn trackbacks_match_php() {
             fields[4].to_string(),
             fields[5].to_string(),
             (!redirect).then(|| fields[6].to_string()),
+            fields[8].to_string(),
         );
         let php_body = hyscribe_testkit::unhex(fields[7]);
         // HEAD bodies are dropped by the server.
@@ -3290,7 +3292,15 @@ async fn assert_listed_pages(
         } else {
             php(fields[4]) == reply.body
         };
-        let same = same && reply.status.as_str() == fields[2] && location == fields[3];
+        // The sixth column, where a list has it, is `X-Redirect-By`.
+        let redirect_by = reply
+            .headers
+            .get("x-redirect-by")
+            .map_or("", |v| v.to_str().unwrap());
+        let same = same
+            && reply.status.as_str() == fields[2]
+            && location == fields[3]
+            && fields.get(5).is_none_or(|by| *by == redirect_by);
         let listed = known
             .iter()
             .any(|(options, listed)| *options == fields[0] && *listed == path);
@@ -3337,7 +3347,7 @@ async fn listed_pages_match_php() {
     let golden = include_str!("../tests/golden/pages-default.tsv");
     let known = include_str!("../tests/golden/pages-default-known.tsv");
     assert_listed_pages("wordpress", golden, None, known).await;
-    assert_eq!(golden.lines().count(), 101);
+    assert_eq!(golden.lines().count(), 141);
 }
 
 /// The Theme Test Data fixture's requests of `reference/pages/ttd.list`,
@@ -3666,7 +3676,7 @@ async fn folder_pages_match_php() {
         .unwrap();
     let golden = include_str!("../tests/golden/pages-folder.tsv");
     assert_listed_pages("wordpress_saves", golden, None, "").await;
-    assert_eq!(golden.lines().count(), 10);
+    assert_eq!(golden.lines().count(), 25);
     // The canonical address itself is served, as PHP does (its body names
     // the oracle's root content URL, so it is not in the golden).
     let home = "http://127.0.0.1:8180/blog";

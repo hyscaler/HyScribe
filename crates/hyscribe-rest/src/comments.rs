@@ -642,6 +642,7 @@ fn items(context: &Context, params: &Params) -> Result<Response, RestError> {
         &params.get,
         &context.rest_url(ROUTE),
     );
+    response.totals_as_strings();
     Ok(response)
 }
 

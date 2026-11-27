@@ -206,6 +206,7 @@ pub(crate) async fn respond(
         let headers = [
             (header::CONTENT_TYPE, content_type),
             (header::LOCATION, crate::sent_location(&location)),
+            crate::redirect_by(),
         ];
         return (StatusCode::MOVED_PERMANENTLY, headers, cache).into_response();
     }

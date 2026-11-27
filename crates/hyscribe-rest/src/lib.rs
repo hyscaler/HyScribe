@@ -531,10 +531,12 @@ pub fn preload(
 }
 
 /// A response's headers as its data: the collections set their totals as
-/// integers.
+/// integers, the comments' as strings.
 fn header_values(response: &Response) -> Value {
     let header = |name: &String, value: &String| match name.as_str() {
-        "X-WP-Total" | "X-WP-TotalPages" => Value::Int(text(value.clone()).to_int()),
+        "X-WP-Total" | "X-WP-TotalPages" if !response.totals_are_strings() => {
+            Value::Int(text(value.clone()).to_int())
+        }
         _ => text(value.clone()),
     };
     let headers = response.headers.iter();

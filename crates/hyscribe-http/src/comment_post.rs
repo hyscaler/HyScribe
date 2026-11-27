@@ -478,10 +478,7 @@ fn redirect(
         }
     }
     let to = wp_safe_redirect(site, &to, &reads.admin_url(""));
-    headers.push((
-        header::HeaderName::from_static("x-redirect-by"),
-        "WordPress".into(),
-    ));
+    headers.push(crate::redirect_by());
     headers.push((header::LOCATION, to));
     response(StatusCode::FOUND, headers, Vec::new())
 }

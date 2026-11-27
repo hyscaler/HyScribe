@@ -169,3 +169,72 @@ fn a_page_s_icon_is_a_plain_class() {
     }
     assert_eq!(state.registered.pages.len(), 2);
 }
+
+/// A route is refused at registration unless its namespace is granted,
+/// not empty, without a slash at either end and not core's, its route a
+/// regex REST routes use and its arguments' callbacks the extension's by
+/// number; an extension registers at most 256.
+#[test]
+fn routes_are_checked_when_registered() {
+    let engine = wasmtime::Engine::default();
+    let namespaces = ["", "/ext", "ext/", "wp/v2", "ext/v1"];
+    let grants = crate::Grants {
+        rest: namespaces.iter().map(|n| (*n).to_string()).collect(),
+        ..crate::Grants::default()
+    };
+    let (grants, slug) = (Arc::new(grants), Arc::from("ext"));
+    let limit = std::time::Duration::from_millis(50);
+    let mut store = State::store(&engine, (&grants, &slug), Phase::Init, 1 << 20, limit);
+    let state = store.data_mut();
+    let route = |namespace: &str, path: &str, args: &str| RouteIn {
+        namespace: namespace.into(),
+        path: path.into(),
+        methods: vec!["GET".into()],
+        callback: 1,
+        permission: 2,
+        args: args.into(),
+    };
+    let invalid = |why: &str| Err(SdkError::Invalid(why.into()));
+    let slashed = invalid("a namespace neither empty nor starting or ending with /");
+    for namespace in ["", "/ext", "ext/"] {
+        assert_eq!(register_route(state, route(namespace, "/x", "{}")), slashed);
+    }
+    let core = invalid("a namespace of core's");
+    assert_eq!(register_route(state, route("wp/v2", "/x", "{}")), core);
+    let regex = invalid("a route is a regex of the syntax REST routes use");
+    assert_eq!(
+        register_route(state, route("ext/v1", "/(?=x)", "{}")),
+        regex
+    );
+    let args = invalid("args is an object of the arguments' schemas");
+    assert_eq!(register_route(state, route("ext/v1", "/x", "5")), args);
+    let named = invalid("each argument is named, and its schema an object");
+    for given in [r#"["a"]"#, r#"{"0":{}}"#, r#"{"a":"b"}"#] {
+        assert_eq!(
+            register_route(state, route("ext/v1", "/x", given)),
+            named,
+            "{given}"
+        );
+    }
+    let numbered = invalid("an argument's callback is one of the extension's, by number");
+    for given in [
+        r#"{"a":{"validate_callback":"rest_validate_request_arg"}}"#,
+        r#"{"a":{"sanitize_callback":-1}}"#,
+        r#"{"a":{"sanitize_callback":true}}"#,
+    ] {
+        assert_eq!(
+            register_route(state, route("ext/v1", "/x", given)),
+            numbered,
+            "{given}"
+        );
+    }
+    let kept =
+        r#"{"a":{"validate_callback":7,"sanitize_callback":false},"b":{"sanitize_callback":null}}"#;
+    for _ in 0..256 {
+        assert_eq!(register_route(state, route("ext/v1", "/x", kept)), Ok(()));
+    }
+    let many = invalid("an extension registers at most 256 routes");
+    assert_eq!(register_route(state, route("ext/v1", "/y", "{}")), many);
+    let first = state.registered.routes.first().map(|route| route.owns(7));
+    assert_eq!((state.registered.routes.len(), first), (256, Some(true)));
+}

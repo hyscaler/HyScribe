@@ -1378,7 +1378,7 @@ fn plugin_install_signatures() {
     let path = file.to_str().unwrap();
     let minisig = home.join("hyscribe-test-0.1.0.hyx.minisig");
     let claim = format!(
-        "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.4 sha256={sha} signed=1800000000"
+        "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.5 sha256={sha} signed=1800000000"
     );
     let sign = |seed: u8, comment: &str| {
         std::fs::write(&minisig, Key(seed).sign(&package, comment)).unwrap();

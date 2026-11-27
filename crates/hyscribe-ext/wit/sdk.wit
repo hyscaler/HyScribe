@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-/// HyScribe's extension SDK 0.4 (ADR 0022): what a plugin or theme component
+/// HyScribe's extension SDK 0.5 (ADR 0022): what a plugin or theme component
 /// imports from the host and exports to it. Every import is checked against
 /// the extension's manifest on every call; nothing is granted by default.
 /// Each minor version only adds to the one before, whose interfaces the
 /// host links under every later version too: 0.2 added transients, roles
 /// and outbound requests, 0.3 the `theme` world (ADR 0023), 0.4 admin
-/// pages and the settings API.
-package hyscribe:sdk@0.4.0;
+/// pages and the settings API, 0.5 the REST routes served.
+package hyscribe:sdk@0.5.0;
 
 interface types {
     /// The kind of a PHP value.
@@ -147,9 +147,9 @@ interface query {
     get-post: func(id: u64) -> result<option<post>, sdk-error>;
 }
 
-/// `register_rest_route()`. Requests reach `guest.invoke` as one JSON value
-/// (method, route, params, headers, body) and answer one JSON value
-/// (status, headers, data).
+/// `register_rest_route()`, served since 0.5. Requests reach `guest.invoke` as one JSON value
+/// (method, route, params, content type, body); a callback answers a value, an
+/// object of status, headers and data, or of code, message and data (an error).
 interface rest {
     use types.{sdk-error};
 

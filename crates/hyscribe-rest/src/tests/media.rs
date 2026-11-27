@@ -38,6 +38,7 @@ fn context(oracle: &Oracle) -> Context<'_> {
         user_agent: None,
         host: b"",
         now: 0,
+        given: (None, b""),
     }
 }
 

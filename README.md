@@ -98,7 +98,7 @@ The operator documentation, also shipped in the archive as `hyscribe/docs/`, cov
 | Area | Status | Where it stands |
 | --- | --- | --- |
 | Classic themes | 🚧 | The host side is under way (the template hierarchy, the first template tags, the head and footer); the first port, Hello Elementor, is being built as a separate package |
-| Plugins on the extension runtime | 🚧 | Plugins run as sandboxed WebAssembly packages: installing a signed local package, activating and deactivating work; the SDK is at 0.4, with admin pages and the settings API, and no popular plugin is ported yet |
+| Plugins on the extension runtime | 🚧 | Plugins run as sandboxed WebAssembly packages: installing a signed local package, activating and deactivating work; the SDK is at 0.5, with admin pages, the settings API and REST routes, and no popular plugin is ported yet |
 | Signed packages and the hosted registry | 🚧 | Signing, install by name and the update check are built ([ADR 0024](docs/adr/0024-registry-and-package-signing.md)); they start working once the registry has its keys and address |
 | The rest of hs-admin and the REST API | 🚧 | What is not ported answers `501 Not Implemented` and still works in PHP WordPress on the same database: [docs/operators/not-supported.md](docs/operators/not-supported.md) |
 
@@ -121,7 +121,7 @@ No dates: each step ships when its checks against PHP WordPress pass. The plan i
 | --- | --- | --- |
 | 1 | Classic themes: Hello Elementor, then Twenty Twenty-One with nav menus, widget areas, theme mods and the Customizer | 🚧 |
 | 2 | Installing themes | 🔜 |
-| 3 | The rest of the plugin SDK: uploads, rewrite rules, plugins' own tables (admin pages and the settings API are in SDK 0.4) | 🚧 |
+| 3 | The rest of the plugin SDK: uploads, rewrite rules, plugins' own tables (admin pages and the settings API are in SDK 0.4, REST routes in 0.5) | 🚧 |
 | 4 | Ports of three reference plugins: Contact Form 7, Yoast SEO, Elementor (its front end, then its editor) | 🔜 |
 | 5 | A security review of the extension runtime, and the MVP's checks rerun with each theme and plugin | 🔜 |
 | 6 | The hosted registry's keys and address, so install by name and update checks work | 🔜 |
@@ -140,7 +140,7 @@ No dates: each step ships when its checks against PHP WordPress pass. The plan i
 | M3 Read-only front end | 🚧 | The default install matches PHP |
 | M4 Authentication and users | 🚧 | Login, sessions, roles and capabilities are done |
 | M5 Write path (REST API, admin, media) | 🚧 | Most writes are done |
-| M6 Extension SDK and runtime | 🚧 | The runtime, SDK 0.4 and signed packages are built |
+| M6 Extension SDK and runtime | 🚧 | The runtime, SDK 0.5 and signed packages are built |
 | M7 Theme system | 🚧 | Block themes are done; classic themes are under way |
 | M8 Agent porting pipeline | 🔜 | Not started |
 | M9 Breadth | 🚧 | Cron runs in the service |
@@ -178,7 +178,7 @@ Yes, at any time. The database stays readable by PHP WordPress, and a switch-bac
 <summary><b>Will my plugins work?</b></summary>
 <br>
 
-Not as they are. WordPress's PHP plugins never run on HyScribe. Plugins are ported to sandboxed WebAssembly packages on HyScribe's extension SDK; the runtime and SDK 0.4 are in this release, and the first ports are on the roadmap. For help porting your own, write to [contact@hyscribe.com](mailto:contact@hyscribe.com).
+Not as they are. WordPress's PHP plugins never run on HyScribe. Plugins are ported to sandboxed WebAssembly packages on HyScribe's extension SDK; the runtime and SDK 0.5 are in this release, and the first ports are on the roadmap. For help porting your own, write to [contact@hyscribe.com](mailto:contact@hyscribe.com).
 
 </details>
 

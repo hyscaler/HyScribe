@@ -136,6 +136,10 @@ fn parsed(context: &Context, request: &Value) -> Result<Sub, Halt> {
     let get = entries(query.map(|query| parse_str(&query)));
     let post = entries(request.get_str("body").cloned());
     let Some(matched) = routes::match_request(&method, &path) else {
+        // An extension's routes are not batched yet.
+        if crate::plugins::matches(context, &method, &path) {
+            return Err(Halt::NotPorted);
+        }
         let message = "No route was found matching the URL and request method.";
         return Ok(Sub::Failed(RestError::status(
             "rest_no_route",
@@ -197,6 +201,7 @@ fn context_of<'a>(context: &Context<'a>, parameters: bool) -> Context<'a> {
         user_agent: context.user_agent,
         host: context.host,
         now: context.now,
+        given: context.given,
     }
 }
 

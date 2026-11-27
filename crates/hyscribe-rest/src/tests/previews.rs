@@ -74,6 +74,7 @@ fn cached_pages_last_until_their_timeout() {
         parameters: false,
         host: b"",
         now,
+        given: (None, b""),
         remote_addr: b"",
         postpass: false,
         user_agent: None,

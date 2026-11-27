@@ -107,8 +107,29 @@ pub struct Route {
     pub callback: u32,
     /// `permission_callback`, always run first.
     pub permission: u32,
-    /// `args`, decoded.
+    /// `args`, decoded: each argument's schema by its name, a
+    /// `validate_callback` or `sanitize_callback` by number.
     pub args: Value,
+}
+
+impl Route {
+    /// The route `register_rest_route()` registers:
+    /// `/{namespace}/{route}`, the route's own slashes trimmed.
+    pub fn full(&self) -> String {
+        format!("/{}/{}", self.namespace, self.path.trim_matches('/'))
+    }
+
+    /// Whether `callback` is one of the route's: its permission callback,
+    /// its callback, or one an argument names.
+    pub fn owns(&self, callback: u32) -> bool {
+        let args = self.args.as_array().unwrap_or_default();
+        let named = args.iter().any(|(_, schema)| {
+            ["validate_callback", "sanitize_callback"]
+                .iter()
+                .any(|kind| schema.get_str(kind) == Some(&Value::Int(callback.into())))
+        });
+        named || callback == self.permission || callback == self.callback
+    }
 }
 
 /// `register_block_type()` from the package's `block.json`.

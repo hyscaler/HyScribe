@@ -12,7 +12,9 @@
 # over the database php.sh runs on, with the rows of <list name>.sql beside
 # it if there is one (added before, and its statements after a `-- cleanup`
 # line run after) and the must-use plugin <list name>.php beside it if there
-# is one (added for the run and removed after); with HYSCRIBE_THEME=<stylesheet> every request carries
+# is one (added for the run and removed after), with the plugin the test
+# extension stands in for (reference/plugins/hyscribe-test) beside it in a
+# folder of its own, which only such a plugin loads; with HYSCRIBE_THEME=<stylesheet> every request carries
 # X-HyScribe-Theme (reference/rest/theme.php, for theme.list, serves it as that active theme), %theme% in a
 # target is the stylesheet, <list name>-<stylesheet>.list beside the list adds that theme's requests, and the answers
 # are <list name>-<stylesheet>.tsv (start from a fresh db.sh up: the requests are sent once first, as
@@ -68,11 +70,13 @@ cleanup() {
   sed -n '/^-- cleanup$/,$p' "$STATE" | sql
   "$DOCKER" exec "$DB" rm -f /tmp/rest-golden.sql
   "$DOCKER" exec "$NAME" rm -f "$MU/hyscribe-permalinks.php" "$MU/hyscribe-no-cron.php" "$MU/hyscribe-list.php"
+  "$DOCKER" exec "$NAME" rm -rf "$MU/hyscribe-test"
 }
 trap cleanup EXIT
 "$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU && cat > $MU/hyscribe-permalinks.php" < "$ROOT/reference/rewrite/permalinks.php"
 echo '<?php define( "DISABLE_WP_CRON", true ); define( "DISALLOW_UNFILTERED_HTML", true );' | "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-no-cron.php"
 [ -f "$PLUGIN" ] && "$DOCKER" exec -i "$NAME" sh -c "cat > $MU/hyscribe-list.php" < "$PLUGIN"
+"$DOCKER" exec -i "$NAME" sh -c "mkdir -p $MU/hyscribe-test && cat > $MU/hyscribe-test/hyscribe-test.php" < "$ROOT/reference/plugins/hyscribe-test/hyscribe-test.php"
 sql < "$ROOT/reference/rest/users.sql"
 sed '/^-- cleanup$/,$d' "$STATE" | sql
 checksums() { sql -N -e 'CHECKSUM TABLE wp_commentmeta, wp_comments, wp_links, wp_options, wp_postmeta, wp_posts, wp_term_relationships, wp_term_taxonomy, wp_termmeta, wp_terms, wp_usermeta, wp_users' < /dev/null; }

@@ -7,7 +7,7 @@
 kind = "theme"
 id = "hyscribe-theme"
 version = "0.1.0"
-sdk = "0.4"
+sdk = "0.5"
 compatibility = "full"
 license = "Apache-2.0 OR MIT"
 

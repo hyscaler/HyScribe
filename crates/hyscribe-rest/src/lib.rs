@@ -19,6 +19,7 @@ mod index;
 mod media;
 mod navigation;
 mod oembed;
+mod plugins;
 pub(crate) mod posts;
 mod request;
 mod response;
@@ -56,6 +57,7 @@ use request::{Arg, Params, Sanitize, defaults, has_valid_params, sanitize_params
 use response::{Response, RestError, object, text};
 
 pub use comments::write::CommentSave;
+pub use plugins::PluginRoute;
 pub use posts::write::{Outcome, Plan, Save, Upload, Write};
 pub use settings::{Setting, SettingsSave};
 pub use terms::write::TermSave;
@@ -168,6 +170,19 @@ pub trait Site {
     fn wp_hash(&self, data: &[u8]) -> Option<String>;
     /// `wp_generate_password( 10, false )`, an oEmbed answer's secret.
     fn embed_secret(&self) -> String;
+    /// The active extensions' REST routes (ADR 0022), none without any.
+    fn plugins(&self) -> Option<&dyn Plugins> {
+        None
+    }
+}
+
+/// The active extensions' REST routes (ADR 0022).
+pub trait Plugins {
+    /// The routes they registered, in their order.
+    fn routes(&self) -> Vec<PluginRoute>;
+    /// The answer of the extension's callback `callback` of `route` over
+    /// `args`, run as `user`; none where it does not answer.
+    fn call(&self, route: &PluginRoute, callback: u32, args: &[Value], user: u64) -> Option<Value>;
 }
 
 /// A request for the API.
@@ -213,13 +228,16 @@ pub enum Answer {
     Served(Served),
     /// The write the request asks for, its checks passed.
     Write(Box<Pending>),
+    /// A fatal error in an extension's route: the 500 and the headers sent
+    /// before it, for the embedder to add PHP's error page to.
+    Fatal(Served),
 }
 
 impl Answer {
     /// The answer, if nothing is to be written first.
     pub fn served(self) -> Option<Served> {
         match self {
-            Answer::Served(served) => Some(served),
+            Answer::Served(served) | Answer::Fatal(served) => Some(served),
             Answer::Write(_) => None,
         }
     }
@@ -272,6 +290,13 @@ impl Served {
             .retain(|(known, _)| !known.eq_ignore_ascii_case(name));
         self.headers.push((name.into(), collapsed));
     }
+
+    /// `nocache_headers()`.
+    fn no_cache(&mut self) {
+        self.send("Expires", "Wed, 11 Jan 1984 05:00:00 GMT");
+        let never = "no-cache, must-revalidate, max-age=0, no-store, private";
+        self.send("Cache-Control", never);
+    }
 }
 
 /// The request reaches what is not ported.
@@ -283,6 +308,8 @@ enum Halt {
     NotPorted,
     /// A write to make first.
     Write(Box<Pending>),
+    /// An extension did not answer: a fatal error.
+    Fatal,
 }
 
 /// An embedded request, a GET, plans no write.
@@ -312,6 +339,9 @@ pub(crate) struct Context<'a> {
     pub(crate) host: &'a [u8],
     /// `time()`.
     pub(crate) now: i64,
+    /// The `Content-Type` header and the body, which an extension's route
+    /// is given.
+    pub(crate) given: (Option<&'a [u8]>, &'a [u8]),
 }
 
 impl Context<'_> {
@@ -515,6 +545,7 @@ pub fn preload(
         parameters: false,
         host,
         now,
+        given: (None, b""),
         remote_addr: b"",
         postpass: false,
         user_agent: None,
@@ -676,6 +707,7 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
         user_agent: request.user_agent,
         host: request.host.unwrap_or_default(),
         now: request.now,
+        given: (request.content_type, request.body),
     };
     let response = match verified {
         Some(false) => RestError::status("rest_cookie_invalid_nonce", "Cookie check failed", 403)
@@ -698,6 +730,12 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
                 Ok(response) => response,
                 Err(Halt::NotPorted) => return Answer::Served(Served::not_ported()),
                 Err(Halt::Write(pending)) => return Answer::Write(pending),
+                Err(Halt::Fatal) => {
+                    // `wp_die()`'s status and headers.
+                    served.status = 500;
+                    served.no_cache();
+                    return Answer::Fatal(served);
+                }
             }
         }
     };
@@ -720,11 +758,7 @@ fn run(site: &dyn Site, request: &Request, resumed: Option<(Pending, Outcome)>) 
     served.status = response.status;
     let failed = overridden && (400..500).contains(&served.status);
     if user != 0 || verified == Some(false) || failed {
-        served.send("Expires", "Wed, 11 Jan 1984 05:00:00 GMT");
-        served.send(
-            "Cache-Control",
-            "no-cache, must-revalidate, max-age=0, no-store, private",
-        );
+        served.no_cache();
     }
     // The XML is sent before the CORS headers, which come too late for it.
     if xml {
@@ -888,6 +922,9 @@ fn dispatch(
         // `rest_handle_options_request()`: the description of the first
         // route matched, with its URL parameters unchecked.
         let Some(matched) = routes::described(route) else {
+            if let Some(described) = plugins::options(context, route, &params) {
+                return described;
+            }
             let data = fields::filter_fields(Value::Array(Vec::new()), &params);
             return Ok(Response::new(data, 200));
         };
@@ -914,6 +951,10 @@ fn dispatch(
         ));
     }
     let Some(matched) = routes::match_request(method, route) else {
+        // The extensions' routes, after core's (ADR 0022).
+        if let Some(answered) = plugins::dispatch(context, (method, route), (params, refused)) {
+            return answered;
+        }
         let message = "No route was found matching the URL and request method.";
         return Ok(RestError::status("rest_no_route", message, 404).into_response());
     };
@@ -1032,7 +1073,7 @@ pub(crate) fn placed(value: Value, placeholder: &[u8], url: &dyn Fn(&str) -> Str
 }
 
 /// `parse_json_params()`'s `rest_invalid_json`, with PHP's JSON error.
-fn invalid_json(error: JsonError) -> RestError {
+pub(crate) fn invalid_json(error: JsonError) -> RestError {
     RestError {
         data: object([
             ("status", Value::Int(400)),

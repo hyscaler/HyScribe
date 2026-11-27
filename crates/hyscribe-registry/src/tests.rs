@@ -92,15 +92,15 @@ pub(crate) struct Release {
     pub(crate) requires: &'static str,
     pub(crate) revoked: Option<&'static str>,
     /// An option its manifest grants beside the test extension's own, if
-    /// not empty; its manifest names SDK 0.4 whatever `sdk` says.
+    /// not empty; its manifest names SDK 0.5 whatever `sdk` says.
     pub(crate) option: &'static str,
 }
 
-/// A release of SDK 0.4 for any HyScribe.
+/// A release of SDK 0.5 for any HyScribe.
 pub(crate) const fn release(version: &'static str) -> Release {
     Release {
         version,
-        sdk: "0.4",
+        sdk: "0.5",
         requires: "0.1.0",
         revoked: None,
         option: "",

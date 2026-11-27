@@ -128,6 +128,7 @@ fn local_hosts_are_secure_contexts() {
             user_agent: None,
             host,
             now: 0,
+            given: (None, b""),
         };
         let found = crate::index::client_side_media(&context);
         assert_eq!(found, secure, "{}", String::from_utf8_lossy(host));

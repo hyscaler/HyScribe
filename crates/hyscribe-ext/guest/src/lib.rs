@@ -52,7 +52,7 @@ hyscribe_sdk::callbacks! {
         Remove => remove_round,
         Shortcode => shortcode,
         Route => route,
-        Permission => permission,
+        Permission => open,
         Render => render,
         Current => current,
         Seen => seen,
@@ -76,6 +76,13 @@ hyscribe_sdk::callbacks! {
         More => more,
         AdminPage => admin_page,
         Answers => answers,
+        Editor => editor,
+        Closed => closed,
+        Denied => denied,
+        Fail => fail,
+        Upper => upper,
+        Valid => valid,
+        Made => made,
     }
 }
 
@@ -247,18 +254,65 @@ fn route(args: Vec<Value>) -> Answer {
     }
 }
 
-fn permission(args: Vec<Value>) -> Answer {
+/// `__return_true`, the permission callback of a public route.
+fn open(_: Vec<Value>) -> Answer {
+    Ok(Value::Bool(true))
+}
+
+fn editor(_: Vec<Value>) -> Answer {
+    Ok(Value::Bool(auth::can("edit_posts", &[])))
+}
+
+fn closed(_: Vec<Value>) -> Answer {
+    Ok(Value::Bool(false))
+}
+
+fn denied(_: Vec<Value>) -> Answer {
+    Ok(rest::error("ext_denied", "Not for you.", 403))
+}
+
+fn fail(_: Vec<Value>) -> Answer {
+    Ok(rest::error("ext_failed", "It failed.", 409))
+}
+
+/// A `sanitize_callback`: `strtoupper()`.
+fn upper(args: Vec<Value>) -> Answer {
+    text(first(&args).to_ascii_uppercase())
+}
+
+/// A `validate_callback`: `ok` is valid, `no` is not, anything else an error.
+fn valid(args: Vec<Value>) -> Answer {
+    Ok(match first(&args).as_str() {
+        "ok" => Value::Bool(true),
+        "no" => Value::Bool(false),
+        _ => rest::error("ext_code", "The code is not ok.", 400),
+    })
+}
+
+/// The parameter `name` of a request, a string without escapes, as the
+/// test's are: the extension reads the host's JSON without a parser.
+fn param(request: &str, name: &str) -> String {
+    let params = request.split_once("\"params\":").map_or("", |(_, rest)| rest);
+    let key = format!("\"{name}\":\"");
+    let value = params.split_once(key.as_str()).map_or("", |(_, rest)| rest);
+    value.split('"').next().unwrap_or_default().to_string()
+}
+
+/// Saves `ext` through the options API and answers it as saved, with a
+/// status and headers of its own.
+fn made(args: Vec<Value>) -> Answer {
     let request = match args.first() {
-        Some(Value::Json(request)) => request.as_str(),
-        _ => "",
+        Some(Value::Json(request)) => request.clone(),
+        _ => String::new(),
     };
-    if request.contains("allow") {
-        Ok(Value::Bool(true))
-    } else if request.contains("error") {
-        Err("permission failed".into())
-    } else {
-        Ok(Value::Json("{\"code\":\"rest_forbidden\"}".into()))
-    }
+    options::set("ext", &Value::Text(param(&request, "value")), None).map_err(why)?;
+    let saved = match options::get("ext").map_err(why)? {
+        Some(Value::Text(saved)) => saved,
+        _ => String::new(),
+    };
+    let data = json::object(&[("saved", &json::string(&saved))]);
+    let headers = [("Location", "http://example.test/made"), ("X-WP-Total", "2")];
+    Ok(rest::response(201, &headers, &data))
 }
 
 fn render(args: Vec<Value>) -> Answer {
@@ -864,6 +918,34 @@ const FILTERS: [(&str, Cb, i32, u32); 34] = [
 ];
 
 /// The admin pages and settings, as the PHP plugin adds them.
+/// The REST routes (SDK 0.5), as the plugin it stands in for registers
+/// them, in its order.
+fn routes() -> Result<(), SdkError> {
+    let id = r#"{"id":{"type":"integer"}}"#;
+    let items = r#"{"count":{"type":"integer","minimum":1,"maximum":10,"default":3},"kind":{"type":"string","enum":["a","b"]},"flag":{"type":"boolean"}}"#;
+    let (upper, valid) = (u32::from(Cb::Upper), u32::from(Cb::Valid));
+    let need = format!(
+        r#"{{"name":{{"type":"string","required":true}},"title":{{"type":"string","sanitize_callback":{upper}}},"code":{{"validate_callback":{valid}}}}}"#
+    );
+    let value = r#"{"value":{"type":"string"}}"#;
+    let (open, echo) = (Cb::Permission, Cb::Route);
+    let each: [(&str, &[&str], Cb, Cb, &str); 9] = [
+        ("/items", &["GET", "POST"], open, echo, items),
+        ("/items/(?P<id>\\d+)", &["GET"], open, echo, id),
+        ("/items/(?P<id>\\d+)", &["DELETE"], Cb::Editor, echo, id),
+        ("/need", &["POST"], open, echo, &need),
+        ("/closed", &["GET"], Cb::Closed, echo, "{}"),
+        ("/denied", &["GET"], Cb::Denied, echo, "{}"),
+        ("/fail", &["GET"], open, Cb::Fail, "{}"),
+        ("/made", &["POST"], open, Cb::Made, value),
+        ("/trap", &["GET", "POST"], open, Cb::Trap, "{}"),
+    ];
+    for (path, methods, permission, callback, args) in each {
+        rest::route("ext/v1", path, methods, callback, permission, args)?;
+    }
+    Ok(())
+}
+
 fn admin_pages() -> Result<(), SdkError> {
     let top = "hyscribe-test-top";
     admin::add_menu_page("HyScribe Test", "HyScribe Test", "read", top, Cb::TopPage, "", None)?;
@@ -904,15 +986,7 @@ impl Plugin for Guest {
             .map_err(why)?;
         content::register_taxonomy("ext_kind", &["ext_item".into()], "{}").map_err(why)?;
         meta::register(ObjectKind::Post, "ext_item", "_ext", "{\"single\":true}").map_err(why)?;
-        rest::route(
-            "ext/v1",
-            "/items",
-            &["GET", "POST"],
-            Cb::Route,
-            Cb::Permission,
-            "{}",
-        )
-        .map_err(why)?;
+        routes().map_err(why)?;
         shortcodes::register("ext", Cb::Shortcode).map_err(why)?;
         blocks::register("blocks/card", Some(Cb::Render.into())).map_err(why)?;
         blocks::register("blocks/static", None).map_err(why)?;

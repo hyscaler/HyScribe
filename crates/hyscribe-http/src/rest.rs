@@ -69,9 +69,58 @@ struct Rest<'a> {
     /// The user of the logged in cookie, 0 for none.
     user: u64,
     caps: OnceCell<Capabilities>,
+    /// The active extensions' routes, if any are active.
+    plugins: Option<Routes<'a>>,
+}
+
+/// The REST routes of a request's extensions (ADR 0022), whose callbacks
+/// run as the REST API's user, with that user's capabilities.
+struct Routes<'a> {
+    running: &'a crate::extensions::Running,
+    site: Arc<Site>,
+    handle: Handle,
+    now: i64,
+}
+
+impl hyscribe_rest::Plugins for Routes<'_> {
+    fn routes(&self) -> Vec<hyscribe_rest::PluginRoute> {
+        let routes = self.running.request.routes().into_iter();
+        let routes = routes.map(|(place, route)| hyscribe_rest::PluginRoute {
+            place,
+            route: route.full(),
+            namespace: route.namespace,
+            methods: route.methods,
+            permission: route.permission,
+            callback: route.callback,
+            args: route.args,
+        });
+        routes.collect()
+    }
+
+    fn call(
+        &self,
+        route: &hyscribe_rest::PluginRoute,
+        callback: u32,
+        args: &[Value],
+        user: u64,
+    ) -> Option<Value> {
+        let (site, handle, now) = (Arc::clone(&self.site), self.handle.clone(), self.now);
+        let can = move |cap: &str, args: &[Value]| {
+            let reads = LoginReads::new(&site, handle.clone(), now);
+            let caps = Capabilities::load(&reads, site.db.prefix(), user);
+            user != 0 && caps.has_cap(&reads, cap, args)
+        };
+        self.running.viewer.set(user, Arc::new(can));
+        self.running.request.route(route.place, callback, args)
+    }
 }
 
 impl hyscribe_rest::Site for Rest<'_> {
+    fn plugins(&self) -> Option<&dyn hyscribe_rest::Plugins> {
+        let plugins = self.plugins.as_ref();
+        plugins.map(|plugins| plugins as &dyn hyscribe_rest::Plugins)
+    }
+
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         CapabilityData::option(&self.reads, name)
     }
@@ -257,7 +306,8 @@ impl hyscribe_rest::Site for Rest<'_> {
     }
 }
 
-fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
+fn answer(shared: &Arc<Site>, asked: &Asked, now: i64, handle: Handle) -> Response {
+    let site: &Site = shared;
     let header = |name: &str| asked.headers.get(name).map(HeaderValue::as_bytes);
     let cookies = cookies(
         asked
@@ -271,11 +321,18 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     let logged_in = cookie(&cookies, &Names::new(site).logged_in());
     let (user, token) = reads.logged_in_user(logged_in, post).unwrap_or_default();
     reads.act_as(user, token.clone());
+    let plugins = site.running.as_ref().map(|running| Routes {
+        running,
+        site: Arc::clone(shared),
+        handle: handle.clone(),
+        now,
+    });
     let rest = Rest {
         reads,
         site,
         user,
         caps: OnceCell::new(),
+        plugins,
     };
     let entries = |value: Value| value.as_array().unwrap_or_default().to_vec();
     let get = entries(parse_str(asked.uri.query().unwrap_or_default().as_bytes()));
@@ -329,6 +386,7 @@ fn answer(site: &Site, asked: &Asked, now: i64, handle: Handle) -> Response {
     }
     match answered {
         Answer::Served(served) => sent(served),
+        Answer::Fatal(served) => sent(fatal(site, &asked.headers, served)),
         Answer::Write(pending) => match &pending.plan.write {
             hyscribe_rest::Write::Upload(upload) => {
                 let upload = upload.as_ref().clone();
@@ -363,6 +421,7 @@ pub(crate) fn preloads(
         site: admin.site,
         user,
         caps: OnceCell::new(),
+        plugins: None,
     };
     let answered = |method: &str, path: &str| match preload(
         &rest,
@@ -378,6 +437,46 @@ pub(crate) fn preloads(
     let Rest { reads, .. } = rest;
     let finished = reads.reads.finish().is_ok();
     memo.filter(|_| finished)
+}
+
+/// A fatal error in an extension's route, as `WP_Fatal_Error_Handler`
+/// answers one through `wp_die()` after the headers the REST API sent:
+/// JSON for a JSON request, else the error page; the fault is logged with
+/// the request's. PHP's JSON also carries the PHP error, which an
+/// extension has none of.
+fn fatal(site: &Site, headers: &HeaderMap, mut served: Served) -> Served {
+    let key = |name: &str| Key::String(name.as_bytes().to_vec());
+    let (kind, body) = if crate::preview_nonce::json_request(headers) {
+        let status = Value::Array(vec![(key("status"), Value::Int(500))]);
+        let error = Value::Array(vec![
+            (
+                key("code"),
+                Value::String(b"internal_server_error".to_vec()),
+            ),
+            (
+                key("message"),
+                Value::String(crate::CRITICAL.as_bytes().to_vec()),
+            ),
+            (key("data"), status),
+            (key("additional_errors"), Value::Array(Vec::new())),
+        ]);
+        let json = hyscribe_phpser::json_encode(&error).unwrap_or_default();
+        ("application/json", json)
+    } else {
+        let title = "WordPress &rsaquo; Error";
+        (
+            "text/html",
+            hyscribe_admin::die::page(site.public(), title, crate::CRITICAL),
+        )
+    };
+    served
+        .headers
+        .retain(|(name, _)| !name.eq_ignore_ascii_case("content-type"));
+    served
+        .headers
+        .push(("Content-Type".into(), format!("{kind}; charset=UTF-8")));
+    served.body = body;
+    served
 }
 
 /// The answer the API served.

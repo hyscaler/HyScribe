@@ -88,10 +88,41 @@ impl Fields {
     }
 }
 
+/// A user's capabilities, `user_can( $user, $cap, ...$args )`.
+pub(crate) type Can = Arc<dyn Fn(&str, &[Value]) -> bool + Send + Sync>;
+
+/// Who a REST request to an extension's route runs as (SDK 0.5): the user
+/// the REST API authenticated and their capabilities, which the
+/// extension's `auth` calls answer; no one elsewhere.
+#[derive(Default)]
+pub(crate) struct Viewer(std::sync::Mutex<Option<(u64, Can)>>);
+
+impl Viewer {
+    /// The REST request's user and their capabilities.
+    pub(crate) fn set(&self, user: u64, can: Can) {
+        *lock(&self.0) = Some((user, can));
+    }
+
+    fn user(&self) -> u64 {
+        lock(&self.0).as_ref().map_or(0, |(user, _)| *user)
+    }
+
+    fn can(&self, capability: &str, args: &[Value]) -> bool {
+        let can = lock(&self.0).as_ref().map(|(_, can)| can.clone());
+        can.is_some_and(|can| can(capability, args))
+    }
+}
+
 /// The site an extension's host calls reach, once their grants are
 /// checked: where their database calls run, how they fetch, what the
 /// active theme's calls answer from and the admin page's settings fields.
-struct Live(Through, Option<Outbound>, Arc<Theme>, Arc<Fields>);
+struct Live(
+    Through,
+    Option<Outbound>,
+    Arc<Theme>,
+    Arc<Fields>,
+    Arc<Viewer>,
+);
 
 fn failed(err: impl std::fmt::Debug) -> String {
     format!("{err:?}")
@@ -404,13 +435,14 @@ impl hyscribe_ext::Site for Live {
         Err(UNSERVED.into())
     }
 
-    /// Not served yet: no one is logged in, who can do nothing.
+    /// The REST request's user in an extension's route; elsewhere not
+    /// served yet: no one, who can do nothing.
     fn current_user(&self) -> u64 {
-        0
+        self.4.user()
     }
 
-    fn user_can(&self, _: &str, _: &[Value]) -> bool {
-        false
+    fn user_can(&self, capability: &str, args: &[Value]) -> bool {
+        self.4.can(capability, args)
     }
 
     fn create_nonce(&self, _: &str) -> String {
@@ -493,6 +525,8 @@ pub(crate) struct Running {
     pub(crate) theme: Arc<Theme>,
     /// The settings fields of the admin page it serves.
     pub(crate) fields: Arc<Fields>,
+    /// Who a REST request to an extension's route runs as.
+    pub(crate) viewer: Arc<Viewer>,
     /// The themes folder, where the active theme's files are.
     pub(crate) themes: std::path::PathBuf,
 }
@@ -511,11 +545,13 @@ pub(crate) fn request(site: &Site, admin: bool) -> Option<Running> {
         let outbound = Outbound(site.fetch.clone(), site.home.clone(), Handle::current());
         let theme = Arc::new(Theme::new(admin));
         let fields = Arc::new(Fields::default());
+        let viewer = Arc::new(Viewer::default());
         let live = Live(
             Through::Own(site.writer.clone(), Handle::current()),
             Some(outbound),
             theme.clone(),
             fields.clone(),
+            viewer.clone(),
         );
         let stored = site.options.get("active_plugins").map(Vec::as_slice);
         let listed = hyscribe_admin::plugins::option_array(stored).unwrap_or_default();
@@ -530,6 +566,7 @@ pub(crate) fn request(site: &Site, admin: bool) -> Option<Running> {
             request: Arc::new(request),
             theme,
             fields,
+            viewer,
             themes: runtime.themes().to_path_buf(),
         })
     })
@@ -577,6 +614,7 @@ impl Acted {
         let live = Live(
             Through::Action(sender.clone()),
             None,
+            Arc::default(),
             Arc::default(),
             Arc::default(),
         );

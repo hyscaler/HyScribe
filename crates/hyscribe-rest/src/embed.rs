@@ -40,6 +40,7 @@ pub(crate) fn to_data(
         user_agent: context.user_agent,
         host: context.host,
         now: context.now,
+        given: context.given,
     };
     let mut cache = Vec::new();
     let mut embed = |item| embed_links(&inner, item, rels.as_deref(), &mut cache);

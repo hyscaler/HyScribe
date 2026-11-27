@@ -74,6 +74,32 @@ impl Params {
         self.get(key).map(Value::to_php_string).unwrap_or_default()
     }
 
+    /// `get_params()`: each parameter's value as `get_param()` finds it,
+    /// in the order the sources first give them, the defaults first.
+    pub(crate) fn merged(&self) -> Vec<(Key, Value)> {
+        let mut merged: Vec<(Key, Value)> = Vec::new();
+        for (key, value) in self.sources().into_iter().rev().flatten() {
+            match merged.iter_mut().find(|(known, _)| known == key) {
+                Some((_, held)) => *held = value.clone(),
+                None => merged.push((key.clone(), value.clone())),
+            }
+        }
+        merged
+    }
+
+    /// The sources, mutably, in `get_parameter_order()`'s order.
+    pub(crate) fn sources_mut(&mut self) -> [&mut Vec<(Key, Value)>; 5] {
+        let Params {
+            json,
+            post,
+            get,
+            url,
+            defaults,
+            ..
+        } = self;
+        [json, post, get, url, defaults]
+    }
+
     /// `$request['context']`, a string after sanitizing.
     pub(crate) fn context(&self) -> Vec<u8> {
         self.text("context")
@@ -140,20 +166,36 @@ pub(crate) fn defaults(args: &[Arg]) -> Vec<(Key, Value)> {
         .collect()
 }
 
-/// The invalid parameters and the errors each gives, none for a
+/// The invalid parameters, each with its message and the error as
+/// `rest_convert_error_to_response()` gives it, none for a
 /// `validate_callback` that returned false.
 #[derive(Default)]
-struct Invalid(Vec<(String, Option<RestError>)>);
+pub(crate) struct Invalid(Vec<(String, String, Option<Value>)>);
 
 /// `rest_invalid_param` for `name`, as a `validate_callback` returning
 /// false gives it.
 pub(crate) fn invalid_param(name: &str) -> RestError {
-    Invalid(vec![(name.into(), None)]).error()
+    let mut invalid = Invalid::default();
+    invalid.not_valid(name);
+    invalid.error()
 }
 
 impl Invalid {
+    /// `name` refused by a `validate_callback` that returned false.
+    pub(crate) fn not_valid(&mut self, name: &str) {
+        let message = "Invalid parameter.".to_string();
+        self.0.push((name.into(), message, None));
+    }
+
+    /// `name` refused with the error `code`, `message` and `data`.
+    pub(crate) fn refuse(&mut self, name: &str, (code, message): (Value, Value), data: Value) {
+        let said = String::from_utf8_lossy(&message.to_php_string()).into_owned();
+        let detail = object([("code", code), ("message", message), ("data", data)]);
+        self.0.push((name.into(), said, Some(detail)));
+    }
+
     /// `rest_invalid_param` of them all, if any.
-    fn check(self) -> Result<(), RestError> {
+    pub(crate) fn check(self) -> Result<(), RestError> {
         if self.0.is_empty() {
             return Ok(());
         }
@@ -163,37 +205,20 @@ impl Invalid {
     /// `rest_invalid_param` of them all.
     fn error(self) -> RestError {
         let key = |name: &str| Key::String(name.as_bytes().to_vec());
-        let names: Vec<&str> = self.0.iter().map(|(name, _)| name.as_str()).collect();
-        let message = |error: &Option<RestError>| {
-            error
-                .as_ref()
-                .map_or("Invalid parameter.".into(), |error| error.message.clone())
-        };
-        let params = self
-            .0
-            .iter()
-            .map(|(name, error)| (key(name), text(message(error))))
-            .collect();
+        let names: Vec<&str> = self.0.iter().map(|(name, ..)| name.as_str()).collect();
+        let params = self.0.iter();
+        let params = params.map(|(name, message, _)| (key(name), text(message.clone())));
         let details = self
             .0
             .iter()
-            .filter_map(|(name, error)| {
-                let error = error.as_ref()?;
-                let detail = object([
-                    ("code", text(error.code)),
-                    ("message", text(error.message.clone())),
-                    ("data", error.data.clone()),
-                ]);
-                Some((key(name), detail))
-            })
-            .collect();
+            .filter_map(|(name, _, detail)| detail.clone().map(|detail| (key(name), detail)));
         RestError {
             code: "rest_invalid_param",
             message: format!("Invalid parameter(s): {}", names.join(", ")),
             data: object([
                 ("status", Value::Int(400)),
-                ("params", Value::Array(params)),
-                ("details", Value::Array(details)),
+                ("params", Value::Array(params.collect())),
+                ("details", Value::Array(details.collect())),
             ]),
         }
     }
@@ -202,14 +227,45 @@ impl Invalid {
 /// An invalid parameter noted. Ported arguments use only ported keywords
 /// (`tests::arguments_use_ported_keywords`), so a refusal always carries
 /// its error.
-fn refused<T>(result: Result<T, Refusal>, name: &str, invalid: &mut Invalid) -> Option<T> {
+pub(crate) fn refused<T>(
+    result: Result<T, Refusal>,
+    name: &str,
+    invalid: &mut Invalid,
+) -> Option<T> {
     result
         .map_err(|Refusal(error)| {
-            invalid
-                .0
-                .extend(error.map(|error| (name.into(), Some(error))))
+            if let Some(error) = error {
+                let said = (text(error.code), text(error.message));
+                invalid.refuse(name, said, error.data);
+            }
         })
         .ok()
+}
+
+/// `rest_missing_callback_param` for the arguments of `args`, by name and
+/// schema, that are `required` and not set.
+pub(crate) fn missing<'a>(
+    params: &Params,
+    args: impl Iterator<Item = (&'a str, &'a Value)>,
+) -> Result<(), RestError> {
+    let required =
+        args.filter(|(_, schema)| schema.get_str("required") == Some(&Value::Bool(true)));
+    let missing: Vec<&str> = required
+        .filter(|(name, _)| params.get(name).is_none())
+        .map(|(name, _)| name)
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let names = missing.iter().map(|name| text(*name)).collect();
+    Err(RestError {
+        code: "rest_missing_callback_param",
+        message: format!("Missing parameter(s): {}", missing.join(", ")),
+        data: object([
+            ("status", Value::Int(400)),
+            ("params", crate::response::list(names)),
+        ]),
+    })
 }
 
 /// `has_valid_params()`: every required argument is set, and each one set
@@ -219,23 +275,8 @@ pub(crate) fn has_valid_params(
     params: &Params,
     args: &[Arg],
 ) -> Result<(), RestError> {
-    let missing: Vec<&str> = args
-        .iter()
-        .filter(|arg| arg.schema.get_str("required") == Some(&Value::Bool(true)))
-        .filter(|arg| params.get(arg.name).is_none())
-        .map(|arg| arg.name)
-        .collect();
-    if !missing.is_empty() {
-        let names = missing.iter().map(|name| text(*name)).collect();
-        return Err(RestError {
-            code: "rest_missing_callback_param",
-            message: format!("Missing parameter(s): {}", missing.join(", ")),
-            data: object([
-                ("status", Value::Int(400)),
-                ("params", crate::response::list(names)),
-            ]),
-        });
-    }
+    let required = args.iter().map(|arg| (arg.name, &arg.schema));
+    missing(params, required)?;
     let mut invalid = Invalid::default();
     let set = args
         .iter()
@@ -244,7 +285,7 @@ pub(crate) fn has_valid_params(
         let checked = match arg.sanitize {
             Sanitize::IsArray => {
                 if !matches!(value, Value::Array(_)) {
-                    invalid.0.push((arg.name.into(), None));
+                    invalid.not_valid(arg.name);
                 }
                 continue;
             }
@@ -268,14 +309,7 @@ pub(crate) fn sanitize_params(
 ) -> Result<(), RestError> {
     let mut invalid = Invalid::default();
     let given = params.clone();
-    let sources = [
-        &mut params.json,
-        &mut params.post,
-        &mut params.get,
-        &mut params.url,
-        &mut params.defaults,
-    ];
-    for source in sources {
+    for source in params.sources_mut() {
         for (key, value) in source.iter_mut() {
             let name = key.to_php_string();
             let Some(arg) = args.iter().find(|arg| arg.name.as_bytes() == name) else {
@@ -303,7 +337,7 @@ pub(crate) fn sanitize_params(
                 Sanitize::Callback(check) => {
                     let checked = check(context, value);
                     if checked.is_none() {
-                        invalid.0.push((arg.name.into(), None));
+                        invalid.not_valid(arg.name);
                     }
                     checked.ok_or(Refusal(None))
                 }

@@ -183,6 +183,7 @@ fn serve_case(site: &Site, handle: &Handle, case: &RestCase) -> hyscribe_rest::S
         site,
         user,
         caps: OnceCell::new(),
+        plugins: None,
     };
     let as_role = AsRole { rest, role };
     let request = hyscribe_rest::Request {

@@ -225,7 +225,7 @@ impl Asked {
 fn on(site: &dyn Site, asked: &Asked, outcome: Outcome) -> (Option<Plan>, Served) {
     let request = asked.request();
     match answer(site, &request) {
-        Answer::Served(served) => (None, served),
+        Answer::Served(served) | Answer::Fatal(served) => (None, served),
         Answer::Write(pending) => {
             let plan = pending.plan.clone();
             let served = written(site, &request, *pending, outcome).served();

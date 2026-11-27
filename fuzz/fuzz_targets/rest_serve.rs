@@ -3,7 +3,8 @@
 //! The REST API answers any route, query, method, headers and body without
 //! panicking: route matching, the JSON and form bodies, `_fields`,
 //! `_jsonp`, `_envelope`, the arguments' schemas, the routes, a batch's
-//! nested requests and the writes' plans and answers all take input from
+//! nested requests, the writes' plans and answers and an extension's routes
+//! (their regex, arguments and answers) all take input from
 //! the request, and
 //! the site's one template, template part and global styles post, its one
 //! comment and its one user have the input's content.
@@ -21,6 +22,33 @@ use libfuzzer_sys::fuzz_target;
 /// A site whose posts have the fuzzed content.
 struct Fuzzed<'a> {
     content: &'a [u8],
+}
+
+/// An extension's routes (ADR 0022): one of a fuzzed regex and arguments
+/// beside a fixed one, each callback answering the fuzzed content as JSON.
+impl hyscribe_rest::Plugins for Fuzzed<'_> {
+    fn routes(&self) -> Vec<hyscribe_rest::PluginRoute> {
+        let text = String::from_utf8_lossy(self.content);
+        let (route, args) = text.split_once('\n').unwrap_or((&text, "{}"));
+        let made = |route: String, args: &str| hyscribe_rest::PluginRoute {
+            place: (0, 0),
+            namespace: "ext/v1".into(),
+            route,
+            methods: vec!["GET".into(), "POST".into()],
+            permission: 1,
+            callback: 2,
+            args: hyscribe_phpser::json_decode(args.as_bytes()).unwrap_or_default(),
+        };
+        let fixed = r#"{"a":{"type":"integer","required":true},"b":{"validate_callback":3,"sanitize_callback":4}}"#;
+        vec![made(format!("/ext/v1/{route}"), args), made("/ext/v1/x".into(), fixed)]
+    }
+    fn call(&self, _: &hyscribe_rest::PluginRoute, callback: u32, _: &[Value], _: u64) -> Option<Value> {
+        let answer = hyscribe_phpser::json_decode(self.content);
+        match callback {
+            1 => Some(Value::Bool(self.content.len() % 3 != 0)),
+            _ => answer,
+        }
+    }
 }
 
 impl Site for Fuzzed<'_> {
@@ -151,6 +179,9 @@ impl Site for Fuzzed<'_> {
     fn embed_secret(&self) -> String {
         "0123456789".into()
     }
+    fn plugins(&self) -> Option<&dyn hyscribe_rest::Plugins> {
+        Some(self)
+    }
     fn reads(&self) -> &dyn hyscribe_render::site::Site {
         self
     }
@@ -245,7 +276,7 @@ fuzz_target!(|data: &[u8]| {
     let mut answered = answer(&site, &request);
     let served = loop {
         match answered {
-            Answer::Served(served) => break served,
+            Answer::Served(served) | Answer::Fatal(served) => break served,
             Answer::Write(pending) => {
                 answered = written(&site, &request, *pending, outcomes[at].clone());
             }

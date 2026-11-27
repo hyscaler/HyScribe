@@ -130,6 +130,7 @@ pub(super) fn finished(
                     site: fresh,
                     user,
                     caps: OnceCell::new(),
+                    plugins: None,
                 };
                 let answered = hyscribe_rest::written(&rest, request, pending, outcome);
                 let Rest { reads, .. } = rest;
@@ -137,11 +138,12 @@ pub(super) fn finished(
             }
         };
         match answered {
-            Ok(Answer::Served(served)) => return sent(served),
             Ok(Answer::Write(next)) => {
                 pending = *next;
                 outcome = made(site, writer, &pending.plan, now, &handle);
             }
+            // A core write's answer, never an extension's fatal error.
+            Ok(answered) => return sent(answered.served().unwrap_or_else(Served::not_ported)),
             Err(err) => return crate::html(crate::database_error(site, &format!("{err:?}"))),
         }
     }

@@ -26,7 +26,7 @@ fn theme_grants() -> Grants {
 fn package<'a>(kind: Of, wasm: &'a [u8], grants: Grants, folder: &'a Path) -> Package<'a> {
     Package {
         kind,
-        sdk: "0.4",
+        sdk: "0.5",
         slug: "hyscribe-theme",
         wasm,
         grants,
@@ -138,13 +138,13 @@ fn a_component_loads_as_its_own_kind_only() -> Result<(), Fault> {
     };
     assert!(why.starts_with("hyscribe:sdk/"), "{why}");
     assert!(
-        why.ends_with("@0.4.0 is a theme's, not a plugin's"),
+        why.ends_with("@0.5.0 is a theme's, not a plugin's"),
         "{why}"
     );
     let as_theme = package(Of::Theme, guest::component(), grants(), folder.path());
     assert_eq!(
         host.load(as_theme).err(),
-        Some(Fault::Refused("no hyscribe:sdk/theme-guest@0.4.0".into()))
+        Some(Fault::Refused("no hyscribe:sdk/theme-guest@0.5.0".into()))
     );
     assert!(extension::of("hyscribe:sdk/template@0.3.0", "template"));
     assert!(!extension::of("hyscribe:sdk/template@0.3.0", "theme-setup"));

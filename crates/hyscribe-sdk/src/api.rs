@@ -285,16 +285,27 @@ pub mod query {
     }
 }
 
-/// `register_rest_route()`, in `init`.
+/// `register_rest_route()`, in `init`, and the answers of its callbacks
+/// (SDK 0.5): the host serves the route as WordPress serves a plugin's.
 pub mod rest {
+    use alloc::format;
     use alloc::string::String;
+    use alloc::vec::Vec;
 
     use super::SdkError;
+    use crate::Value;
+    use crate::json;
     use crate::sys::rest::{self as wit, Route};
 
-    /// `register_rest_route( $namespace, $route, $args )`: requests reach
-    /// `callback` as one JSON value once `permission` answered `true`. The
-    /// host records the route; it does not serve extension routes yet.
+    /// `register_rest_route( $namespace, $route, $args )`, `$route` a
+    /// regex as WordPress's: each callback gets the request as JSON, its
+    /// `method`, `route`, `params` (as `get_params()` gives them, checked
+    /// and sanitized), `content_type` and `body`. `permission` runs first,
+    /// and `callback` only when it answered `true`; anything else refuses,
+    /// an [`error`] as itself. `args` is each argument's schema by name,
+    /// as JSON; its `validate_callback` and `sanitize_callback` are the
+    /// extension's callbacks by number, given the value, the request and
+    /// the name, as WordPress gives them.
     pub fn route(
         namespace: &str,
         path: &str,
@@ -311,6 +322,39 @@ pub mod rest {
             permission: permission.into(),
             args: args.into(),
         })
+    }
+
+    /// `new WP_REST_Response( $data, $status, $headers )`, `data` as JSON:
+    /// a callback's answer. A callback may answer any value instead, sent
+    /// as data with 200. The host drops the headers an extension may not
+    /// set (ADR 0022).
+    pub fn response(status: u16, headers: &[(&str, &str)], data: &str) -> Value {
+        let headers: Vec<(&str, String)> = headers
+            .iter()
+            .map(|(name, value)| (*name, json::string(value)))
+            .collect();
+        let headers: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(name, value)| (*name, value.as_str()))
+            .collect();
+        let status = format!("{status}");
+        Value::Json(json::object(&[
+            ("status", &status),
+            ("headers", &json::object(&headers)),
+            ("data", data),
+        ]))
+    }
+
+    /// `new WP_Error( $code, $message, array( 'status' => $status ) )`: an
+    /// answer of a callback, a permission callback or an argument's.
+    pub fn error(code: &str, message: &str, status: u16) -> Value {
+        let data = json::object(&[("status", &format!("{status}"))]);
+        let (code, message) = (json::string(code), json::string(message));
+        Value::Json(json::object(&[
+            ("code", &code),
+            ("message", &message),
+            ("data", &data),
+        ]))
     }
 }
 

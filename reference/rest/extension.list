@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The REST routes of the test extension (SDK 0.5) for reference/rest/golden.sh
+# (method, target, flags, body), as the plugin it stands in for,
+# reference/plugins/hyscribe-test, registers them: the namespace index,
+# arguments of each validation kind, URL parameters, permission callbacks
+# that allow, refuse and answer an error, an error answer, a save through
+# the options API with its own status and headers, a fatal error, the
+# methods, OPTIONS and the global parameters, and the core namespace index
+# asked for the extension's namespace and the extension's for core's.
+GET	/?rest_route=/ext/v1
+GET	/?rest_route=/ext/v1&context=help
+OPTIONS	/?rest_route=/ext/v1
+GET	/?rest_route=/ext/v1/items
+GET	/?rest_route=/ext/v1/items&count=7&kind=b&flag=1&extra=x
+GET	/?rest_route=/ext/v1/items&count=11
+GET	/?rest_route=/ext/v1/items&count=abc&kind=c
+GET	/?rest_route=/ext/v1/items&_fields=got.params
+GET	/?rest_route=/ext/v1/items&_envelope
+GET	/?rest_route=/ext/v1/items&_jsonp=cb
+GET	/?rest_route=/ext/v1/items&_method=DELETE
+GET	/?rest_route=/EXT/V1/Items/
+HEAD	/?rest_route=/ext/v1/items
+POST	/?rest_route=/ext/v1/items	form	count=2&kind=a
+POST	/?rest_route=/ext/v1/items	json	{"count":4,"flag":false}
+POST	/?rest_route=/ext/v1/items	json	{"count":
+PUT	/?rest_route=/ext/v1/items
+OPTIONS	/?rest_route=/ext/v1/items
+OPTIONS	/?rest_route=/ext/v1/items/5
+GET	/?rest_route=/ext/v1/items/5
+GET	/?rest_route=/ext/v1/items/x
+DELETE	/?rest_route=/ext/v1/items/5
+POST	/?rest_route=/ext/v1/need
+POST	/?rest_route=/ext/v1/need	form	name=Ann&title=hello&code=ok
+POST	/?rest_route=/ext/v1/need	form	name=Ann&code=no
+POST	/?rest_route=/ext/v1/need	form	name=Ann&code=bad&title=x
+GET	/?rest_route=/ext/v1/need
+GET	/?rest_route=/ext/v1/closed
+GET	/?rest_route=/ext/v1/denied
+GET	/?rest_route=/ext/v1/fail
+POST	/?rest_route=/ext/v1/made	form,restore	value=Saved
+GET	/?rest_route=/ext/v1/trap
+POST	/?rest_route=/ext/v1/trap	json	{}
+GET	/?rest_route=/ext/v1/nope
+GET	/?rest_route=/ext/v2
+GET	/wp-json/ext/v1/items?count=2	pretty
+GET	/wp-json/ext/v1	pretty
+GET	/?rest_route=/wp/v2&namespace=ext/v1
+GET	/?rest_route=/ext/v1&namespace=wp/v2
+GET	/?rest_route=/ext/v1/items	origin

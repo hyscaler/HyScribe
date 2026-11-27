@@ -984,3 +984,121 @@ async fn the_extension_s_admin_pages_are_php_s() {
     assert_eq!(live(&site, asked, &cookies).await.status(), 500);
     crate::admin::media::tests::as_role(&config, "administrator").await;
 }
+
+/// The test extension's REST routes (SDK 0.5) answer as the plugin it
+/// stands in for answers them (`reference/rest/extension.list`), user 1
+/// taking each role in turn: the routes, their arguments, permissions, an
+/// option saved through them and a fatal error's page. PHP's JSON for the
+/// fatal error carries the PHP error too, which an extension has none of;
+/// the requests under pretty permalinks are replayed by `hyscribe-rest`.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_extension_s_rest_routes_are_php_s() {
+    use crate::admin::tests::{SAVES, page_of, session_nonce};
+    let _saves = SAVES.lock().await;
+    let config = hyscribe_config::Database {
+        name: "wordpress_saves".into(),
+        ..fixture_database()
+    };
+    hyscribe_testkit::writes::load_default_install(&config)
+        .await
+        .unwrap();
+    let open = async || {
+        Writer::open(&config, hyscribe_config::Mode::Primary)
+            .await
+            .unwrap()
+    };
+    let writer = open().await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let (site, cookies, plugins) = served("wordpress_saves", open().await, dir.path()).await;
+    let folder = plugins.path().join("hyscribe-test");
+    let nonce = session_nonce(&site, &cookies, &format!("activate-plugin_{FILE}")).await;
+    let uri = format!(
+        "/hs-admin/plugins?action=activate&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=&_wpnonce={nonce}"
+    );
+    assert_eq!(live(&site, &uri, &cookies).await.status(), 302);
+    let rest_nonce = session_nonce(&site, &cookies, "wp_rest").await;
+    let golden = include_str!("../../../../../hyscribe-rest/tests/golden/extension.tsv");
+    let mut seen = 0;
+    for case in hyscribe_testkit::rest_cases(golden) {
+        if case.flag("pretty") {
+            continue;
+        }
+        let visitor = case.who == "visitor";
+        if !visitor {
+            crate::admin::media::tests::as_role(&config, &case.who).await;
+        }
+        let mut request = axum::http::Request::builder()
+            .method(case.method.as_str())
+            .uri(&case.target)
+            .header(axum::http::header::HOST, "127.0.0.1:8081");
+        if !visitor {
+            request = request
+                .header(axum::http::header::COOKIE, &cookies)
+                .header("x-wp-nonce", &rest_nonce);
+        }
+        if case.flag("origin") {
+            request = request.header("origin", "http://example.test");
+        }
+        let kinds = [
+            ("json", "application/json"),
+            ("form", "application/x-www-form-urlencoded"),
+        ];
+        for (flag, kind) in kinds {
+            if case.flag(flag) {
+                request = request.header(axum::http::header::CONTENT_TYPE, kind);
+            }
+        }
+        let body = axum::body::Body::from(case.sent.clone());
+        let response =
+            tower::ServiceExt::oneshot(crate::live(site.clone()), request.body(body).unwrap());
+        let response = response.await.unwrap();
+        let what = format!(
+            "{} {} {} {}",
+            case.who, case.method, case.target, case.flags
+        );
+        assert_eq!(response.status().as_u16(), case.status, "{what}");
+        let headers: Vec<(String, String)> = response
+            .headers()
+            .iter()
+            .map(|(name, value)| {
+                let value = value.to_str().unwrap().replace(&rest_nonce, "%nonce%");
+                (name.to_string(), value)
+            })
+            .collect();
+        let mut php = case.headers.clone();
+        php.sort();
+        assert_eq!(hyscribe_testkit::rest_headers(&headers), php, "{what}");
+        let ours = page_of(response).await;
+        let php = String::from_utf8(case.body.clone()).unwrap();
+        if case.status == 500 && case.flag("json") {
+            let error = r#"{"code":"internal_server_error","message":"<p>There has been a critical error on this website.<\/p><p><a href=\"https:\/\/wordpress.org\/documentation\/article\/faq-troubleshooting\/\">Learn more about troubleshooting WordPress.<\/a><\/p>","data":{"status":500"#;
+            assert!(php.starts_with(error), "{php}");
+            assert_eq!(
+                ours,
+                format!("{error}}},\"additional_errors\":[]}}"),
+                "{what}"
+            );
+        } else {
+            assert_eq!(ours, php, "{what}");
+        }
+        // A trap is counted: activated again, so the extension keeps running.
+        if case.status == 500 {
+            assert!(folder.join(hyscribe_ext::faults::FILE).exists());
+            crate::admin::media::tests::as_role(&config, "administrator").await;
+            for action in ["deactivate", "activate"] {
+                let nonce = format!("{action}-plugin_{FILE}");
+                let nonce = session_nonce(&site, &cookies, &nonce).await;
+                let uri = format!(
+                    "/hs-admin/plugins?action={action}&plugin=hyscribe-test%2Fhyscribe-test.php&plugin_status=all&paged=1&s=&_wpnonce={nonce}"
+                );
+                assert_eq!(live(&site, &uri, &cookies).await.status(), 302);
+            }
+        }
+        seen += 1;
+    }
+    crate::admin::media::tests::as_role(&config, "administrator").await;
+    assert_eq!(seen, 6 * 38);
+    let mut write = writer.begin().await.unwrap();
+    let saved = write.option_value("ext").await.unwrap();
+    assert_eq!(saved.as_deref(), Some(&b"Saved"[..]));
+}

@@ -197,6 +197,7 @@ async fn the_api_signs_and_draws_as_the_site_does() {
             site: &site,
             user: 0,
             caps: OnceCell::new(),
+            plugins: None,
         };
         let signed = RenderSite::wp_hash(&rest.reads.reads, b"x");
         assert!(signed.is_some());
@@ -512,6 +513,7 @@ async fn authors_posts_are_read() {
             site: &site,
             user: 0,
             caps: OnceCell::new(),
+            plugins: None,
         };
         let types = [("post".to_string(), false)];
         assert!(hyscribe_rest::Site::has_posts(&rest, 1, &types));
@@ -548,6 +550,7 @@ async fn posts_are_read_for_the_routes() {
             site: &plain,
             user: 1,
             caps: OnceCell::new(),
+            plugins: None,
         };
         let site: &dyn hyscribe_rest::Site = &rest;
         assert_eq!(site.revisions(1), [105, 104]);
@@ -605,6 +608,7 @@ async fn the_editor_s_preloads_are_answered() {
             site: &site,
             user: 1,
             caps: OnceCell::new(),
+            plugins: None,
         };
         for (id, kind) in [(1, "post"), (2, "page")] {
             let post = Post {

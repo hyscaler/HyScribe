@@ -25,7 +25,7 @@ fn reads_the_test_extensions_manifest() {
     assert_eq!(manifest.kind, Kind::Plugin);
     assert_eq!(manifest.id, "hyscribe-test");
     assert_eq!(manifest.version, "0.1.0");
-    assert_eq!(manifest.sdk, "0.4");
+    assert_eq!(manifest.sdk, "0.5");
     assert_eq!(
         manifest.replaces.as_deref(),
         Some("hyscribe-test/hyscribe-test.php")
@@ -108,7 +108,7 @@ fn refuses_what_the_format_does_not_allow() {
             "version must be a valid",
         ),
         (
-            "[extension]\nkind = 'plugin'\nid = 'd'\nversion = '1'\nsdk = '0.5'\n",
+            "[extension]\nkind = 'plugin'\nid = 'd'\nversion = '1'\nsdk = '0.6'\n",
             "sdk must be",
         ),
     ];

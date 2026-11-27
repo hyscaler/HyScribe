@@ -19,7 +19,9 @@ use crate::extension::{Answered, Args, Done, Rendered};
 use crate::faults::{Counted, Kind};
 use crate::host::{Phase, State, begin, classify};
 use crate::value::{Crossing, Lowered, lift, lower_all};
-use crate::{AdminPage, Extension, Extensions, Fault, Hook, Host, Setting, Site, TemplateFile};
+use crate::{
+    AdminPage, Extension, Extensions, Fault, Hook, Host, Route, Setting, Site, TemplateFile,
+};
 
 /// A fault in a request, for the log and the Plugins screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,17 +34,6 @@ pub struct Report {
     pub callback: Option<u32>,
     /// What went wrong.
     pub fault: Fault,
-}
-
-/// What an extension's REST route answered.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Rest {
-    /// The callback's answer, once the permission callback allowed it.
-    Answered(Value),
-    /// The permission callback's answer, anything but `true`.
-    Forbidden(Value),
-    /// The extension did not answer: a fault, or no such route.
-    Failed,
 }
 
 /// An instance made in the request, and the export it calls.
@@ -206,28 +197,32 @@ impl Request {
             .call(ext, render, &registered.path, &args, Registered::Other)
     }
 
-    /// A REST route of an extension: its permission callback first, and
-    /// its callback only when that answered `true`.
-    pub fn rest(&self, ext: usize, route: usize, request: Value) -> Rest {
-        let found = self.0.extensions.list.get(ext);
-        let Some(route) = found.and_then(|extension| extension.registered.routes.get(route)) else {
-            return Rest::Failed;
-        };
-        let name = format!("{}{}", route.namespace, route.path);
-        let args = [request];
-        match self
-            .0
-            .call(ext, route.permission, &name, &args, Registered::Other)
-        {
-            Some(Value::Bool(true)) => {
-                let answer = self
-                    .0
-                    .call(ext, route.callback, &name, &args, Registered::Other);
-                answer.map_or(Rest::Failed, Rest::Answered)
-            }
-            Some(refused) => Rest::Forbidden(refused),
-            None => Rest::Failed,
-        }
+    /// The REST routes of the request's extensions, but a disabled one's:
+    /// each with its extension's place and its own, in load order, then
+    /// in the order registered.
+    pub fn routes(&self) -> Vec<((usize, usize), Route)> {
+        let list = self.0.extensions.list.iter().enumerate();
+        let running = list.filter(|(_, extension)| !extension.disabled());
+        let routes = running.flat_map(|(ext, extension)| {
+            let each = extension.routes().iter().enumerate();
+            each.map(move |(n, route)| ((ext, n), route.clone()))
+        });
+        routes.collect()
+    }
+
+    /// The callback `callback` of the REST route `route` of extension
+    /// `ext` over `args`, if the route has it: its permission callback,
+    /// its callback or an argument's. None when it did not answer.
+    pub fn route(
+        &self,
+        (ext, route): (usize, usize),
+        callback: u32,
+        args: &[Value],
+    ) -> Option<Value> {
+        let extension = self.0.extensions.list.get(ext)?;
+        let route = extension.routes().get(route).filter(|r| r.owns(callback))?;
+        let name = route.full();
+        self.0.call(ext, callback, &name, args, Registered::Other)
     }
 
     /// The active theme's template files, when a theme component is active.

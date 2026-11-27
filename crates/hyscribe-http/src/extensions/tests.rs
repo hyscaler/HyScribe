@@ -67,6 +67,7 @@ async fn a_page_view_s_calls_commit_each_on_its_own() {
             None,
             Arc::default(),
             Arc::default(),
+            Arc::default(),
         );
         tokio::task::spawn_blocking(move || call(&live))
     };
@@ -135,6 +136,7 @@ async fn transients_meta_and_roles_go_through_wordpress_s_functions() {
     let live = Live(
         Through::Own(writer.map(Arc::new), Handle::current()),
         None,
+        Arc::default(),
         Arc::default(),
         Arc::default(),
     );
@@ -222,6 +224,7 @@ async fn requests_go_through_the_site_s_client() {
         Some(outbound),
         Arc::default(),
         Arc::default(),
+        Arc::default(),
     );
     let request = |url: &str| Outgoing {
         method: "GET".into(),
@@ -239,6 +242,7 @@ async fn requests_go_through_the_site_s_client() {
             None,
             Arc::default(),
             Arc::default(),
+            Arc::default(),
         );
         let off = acting.fetch(&request("http://pages.test/agent"), &|_| true);
         (page, lost, off)
@@ -252,12 +256,39 @@ async fn requests_go_through_the_site_s_client() {
     assert_eq!(off, Err(NO_FETCHES.into()));
 }
 
+/// The auth calls answer for no one until a REST request to an
+/// extension's route sets its user, then for that user.
+#[tokio::test(flavor = "multi_thread")]
+async fn auth_answers_for_the_rest_request_s_user() {
+    let viewer = Arc::new(Viewer::default());
+    let live = Live(
+        Through::Own(None, Handle::current()),
+        None,
+        Arc::default(),
+        Arc::default(),
+        viewer.clone(),
+    );
+    assert_eq!(
+        (live.current_user(), live.user_can("read", &[])),
+        (0, false)
+    );
+    viewer.set(
+        7,
+        Arc::new(|cap: &str, args: &[Value]| cap == "read" && args.is_empty()),
+    );
+    assert_eq!(live.current_user(), 7);
+    assert!(live.user_can("read", &[]));
+    assert!(!live.user_can("read", &[Value::Int(1)]));
+    assert!(!live.user_can("edit_posts", &[]));
+}
+
 /// Without a writer, or over a database it cannot write, a call fails.
 #[tokio::test(flavor = "multi_thread")]
 async fn calls_fail_where_nothing_can_be_written() {
     let read_only = Live(
         Through::Own(None, Handle::current()),
         None,
+        Arc::default(),
         Arc::default(),
         Arc::default(),
     );
@@ -271,6 +302,7 @@ async fn calls_fail_where_nothing_can_be_written() {
     let live = Live(
         Through::Own(writer.map(Arc::new), Handle::current()),
         None,
+        Arc::default(),
         Arc::default(),
         Arc::default(),
     );
@@ -287,6 +319,7 @@ async fn calls_fail_where_nothing_can_be_written() {
         None,
         Arc::default(),
         Arc::default(),
+        Arc::default(),
     );
     let answer = tokio::task::spawn_blocking(move || live.add_option("x", Value::Null, None));
     assert!(answer.await.unwrap().is_err());
@@ -295,6 +328,7 @@ async fn calls_fail_where_nothing_can_be_written() {
     let live = Live(
         Through::Action(sender),
         None,
+        Arc::default(),
         Arc::default(),
         Arc::default(),
     );
@@ -313,6 +347,7 @@ fn what_is_not_served_yet() {
         None,
         Arc::default(),
         fields.clone(),
+        Arc::default(),
     );
     let unserved = Err(UNSERVED.to_string());
     let missing = Err("settings group g is not on this page".to_string());

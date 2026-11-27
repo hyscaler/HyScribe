@@ -226,7 +226,7 @@ async fn refuses_a_package_its_document_does_not_describe() {
     );
     // Signed by key 10, which signs the index only.
     let comment = format!(
-        "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.4 sha256={} signed={NOW}",
+        "hyscribe-package id=hyscribe-test version=0.1.0 sdk=0.5 sha256={} signed={NOW}",
         signature::sha256(&bytes)
     );
     let index_key = hyscribe_testkit::minisign::Key(10);
@@ -341,7 +341,7 @@ async fn updates_check_and_install_the_newest() {
     let check = test.update(Update::Check, allow).await.unwrap();
     assert_eq!(
         check,
-        "hyscribe-test 0.1.0 is installed; 0.2.0 is available (SDK 0.4): `hyscribe plugin update hyscribe-test`\n"
+        "hyscribe-test 0.1.0 is installed; 0.2.0 is available (SDK 0.5): `hyscribe plugin update hyscribe-test`\n"
     );
     let ids = ["hyscribe-test".to_string(), "other".to_string()];
     let updated = test.update(Update::Ids(&ids), allow).await.unwrap_err();
@@ -373,7 +373,7 @@ async fn offers_go_to_the_registry_s_plugins_only() {
     let index = index.unwrap().unwrap();
     let plugins = installed::list(&test.folder.path().join("plugins"));
     let offered = offer(&plugins[0], &index);
-    assert_eq!(offered, Some(&("0.4".to_string(), "0.2.0".to_string())));
+    assert_eq!(offered, Some(&("0.5".to_string(), "0.2.0".to_string())));
     let mut origin = test.origin();
     origin.signer = origin.signer.map(|(_, key)| (Signer::Trusted, key));
     origin::write(&plugins[0].folder, &origin).unwrap();

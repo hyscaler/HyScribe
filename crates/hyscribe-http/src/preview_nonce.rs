@@ -130,6 +130,11 @@ impl Handler {
     }
 }
 
+/// `wp_is_json_request()`: `wp_die()` answers JSON.
+pub(crate) fn json_request(headers: &HeaderMap) -> bool {
+    Handler::pick(headers, Entry::Page) == Handler::Json
+}
+
 /// `$_SERVER['HTTP_ACCEPT']`: the header's values, comma joined.
 fn joined_values(headers: &HeaderMap, name: header::HeaderName) -> Vec<u8> {
     let values = headers.get_all(name).iter().map(HeaderValue::as_bytes);

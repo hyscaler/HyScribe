@@ -822,3 +822,19 @@ fn admin_pages_and_settings() {
     assert_eq!(admin::settings_fields("other"), Ok(Vec::new()));
     assert!(admin::SUBMIT_BUTTON.contains("value=\"Save Changes\"  />"));
 }
+
+/// A route's answers (SDK 0.5): a response of a status, headers and data,
+/// and an error of a code, a message and a status, as the host reads them.
+#[test]
+fn route_answers_are_the_json_the_host_reads() {
+    let response = rest::response(201, &[("Location", "/a\"b")], "{\"x\":1}");
+    let json = "{\"status\":201,\"headers\":{\"Location\":\"/a\\\"b\"},\"data\":{\"x\":1}}";
+    assert_eq!(response, Value::Json(json.into()));
+    assert_eq!(
+        rest::response(200, &[], "null"),
+        Value::Json("{\"status\":200,\"headers\":{},\"data\":null}".into())
+    );
+    let error = rest::error("ext_x", "No \"x\".", 409);
+    let json = "{\"code\":\"ext_x\",\"message\":\"No \\\"x\\\".\",\"data\":{\"status\":409}}";
+    assert_eq!(error, Value::Json(json.into()));
+}

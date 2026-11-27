@@ -19,6 +19,7 @@ mod index;
 mod media;
 mod oembed;
 mod people;
+mod plugins;
 mod posts;
 mod previews;
 mod search;
@@ -39,6 +40,8 @@ struct Oracle {
     public_users: bool,
     trash: bool,
     salts: bool,
+    /// The active extensions' routes, if any.
+    plugins: Option<&'static dyn Plugins>,
 }
 
 impl Oracle {
@@ -57,6 +60,7 @@ impl Oracle {
             public_users: true,
             trash: true,
             salts: true,
+            plugins: None,
         }
     }
 }
@@ -114,6 +118,9 @@ impl CapabilityData for Oracle {
 }
 
 impl Site for Oracle {
+    fn plugins(&self) -> Option<&dyn Plugins> {
+        self.plugins
+    }
     fn option(&self, name: &str) -> Option<Vec<u8>> {
         if self.fixture.pretty && name == "permalink_structure" {
             return Some(b"/%postname%/".to_vec());
@@ -707,6 +714,7 @@ fn links_are_served_as_from_url_reads_them() {
         user_agent: None,
         host: b"",
         now: 0,
+        given: (None, b""),
     };
     let served = |href: &str| crate::embed::serve(&context, href.as_bytes()).ok().unwrap();
     let rest = "http://127.0.0.1:8081/index.php?rest_route=";
@@ -867,6 +875,7 @@ fn self_links_hint_what_their_route_allows() {
         user_agent: None,
         host: b"",
         now: 0,
+        given: (None, b""),
     };
     for route in [
         "/nope",

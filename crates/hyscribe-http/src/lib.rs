@@ -1655,14 +1655,16 @@ fn finished<T, E: std::fmt::Display>(
     }
 }
 
+/// `WP_Fatal_Error_Handler`'s message for a fatal error.
+const CRITICAL: &str = "<p>There has been a critical error on this website.</p><p><a href=\"https://wordpress.org/documentation/article/faq-troubleshooting/\">Learn more about troubleshooting WordPress.</a></p>";
+
 /// `WP_Fatal_Error_Handler::display_default_error_template()` on the front
 /// end, PHP's page for a fatal error, as a theme's fault answers (ADR 0023);
 /// the fault goes to the log. `wp_php_error_message` passes an array and
 /// crosses to no extension.
 fn critical_error(site: &Site, fault: &hyscribe_ext::Fault) -> Rendered {
     eprintln!("the theme failed: {fault:?}");
-    let message = "<p>There has been a critical error on this website.</p><p><a href=\"https://wordpress.org/documentation/article/faq-troubleshooting/\">Learn more about troubleshooting WordPress.</a></p>";
-    let page = hyscribe_admin::die::page(site.public(), "WordPress &rsaquo; Error", message);
+    let page = hyscribe_admin::die::page(site.public(), "WordPress &rsaquo; Error", CRITICAL);
     Rendered {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         document: lossy(&page),

@@ -76,17 +76,38 @@ pub(crate) struct Matched {
 
 /// The URL parameters `route` takes from `path`, if it matches.
 fn captures(route: &Route, path: &[u8]) -> Option<Vec<(Key, Value)>> {
-    route.pattern.as_ref().and_then(|pattern| {
-        let captures = pattern.captures(path)?;
-        let named = pattern.names().iter().filter_map(|(name, group)| {
-            let found = captures.get(*group).copied().flatten();
-            found.map(|(start, end)| {
-                let value = path.get(start..end).unwrap_or_default().to_vec();
-                (Key::String(name.clone().into_bytes()), Value::String(value))
-            })
-        });
-        Some(named.collect())
-    })
+    route
+        .pattern
+        .as_ref()
+        .and_then(|pattern| named(pattern, path))
+}
+
+/// The named groups `pattern` takes from `path`, if it matches.
+pub(crate) fn named(pattern: &Pattern, path: &[u8]) -> Option<Vec<(Key, Value)>> {
+    let captures = pattern.captures(path)?;
+    let named = pattern.names().iter().filter_map(|(name, group)| {
+        let found = captures.get(*group).copied().flatten();
+        found.map(|(start, end)| {
+            let value = path.get(start..end).unwrap_or_default().to_vec();
+            (Key::String(name.clone().into_bytes()), Value::String(value))
+        })
+    });
+    Some(named.collect())
+}
+
+/// `trailingslashit( ltrim( $path, '/' ) )`, which a request's namespaces
+/// start.
+pub(crate) fn start(path: &[u8]) -> Vec<u8> {
+    let trimmed = path.strip_prefix(b"/").unwrap_or(path);
+    [trimmed, b"/"].concat()
+}
+
+/// Whether a core namespace starts `start`.
+pub(crate) fn namespaced(start: &[u8]) -> bool {
+    let namespaces = table().namespaces.iter();
+    namespaces
+        .into_iter()
+        .any(|namespace| start.starts_with(namespace.as_bytes()))
 }
 
 /// `match_request_to_handler()`: the first route of the request's
@@ -94,8 +115,7 @@ fn captures(route: &Route, path: &[u8]) -> Option<Vec<(Key, Value)>> {
 /// an endpoint for the method, HEAD served by GET's.
 pub(crate) fn match_request(method: &str, path: &[u8]) -> Option<Matched> {
     let table = table();
-    let trimmed = path.strip_prefix(b"/").unwrap_or(path);
-    let start = [trimmed, b"/"].concat();
+    let start = start(path);
     let namespaces: Vec<&str> = table
         .namespaces
         .iter()
@@ -110,12 +130,7 @@ pub(crate) fn match_request(method: &str, path: &[u8]) -> Option<Matched> {
         let Some(params) = captures(route, path) else {
             continue;
         };
-        let serves = |methods: &Vec<String>, method: &str| methods.iter().any(|m| m == method);
-        let endpoint = route.endpoints.iter().position(|methods| {
-            let head = method == "HEAD" && !serves(methods, "HEAD");
-            serves(methods, if head { "GET" } else { method })
-        });
-        if let Some(endpoint) = endpoint {
+        if let Some(endpoint) = serving(route.endpoints.iter(), method) {
             return Some(Matched {
                 regex: &route.regex,
                 methods: &route.endpoints,
@@ -125,6 +140,19 @@ pub(crate) fn match_request(method: &str, path: &[u8]) -> Option<Matched> {
         }
     }
     None
+}
+
+/// The first of the endpoints, each by its methods, that serves `method`,
+/// HEAD served by GET's where it has none of its own.
+pub(crate) fn serving<'a>(
+    endpoints: impl Iterator<Item = &'a Vec<String>>,
+    method: &str,
+) -> Option<usize> {
+    let serves = |methods: &Vec<String>, method: &str| methods.iter().any(|m| m == method);
+    endpoints.into_iter().position(|methods| {
+        let head = method == "HEAD" && !serves(methods, "HEAD");
+        serves(methods, if head { "GET" } else { method })
+    })
 }
 
 /// The regexes of the routes registered in `namespace`, in their order, if

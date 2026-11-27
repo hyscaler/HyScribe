@@ -113,7 +113,7 @@ fn a_batch_resumes_write_after_write() {
     let mut writes = 0;
     let served = loop {
         match answered {
-            Answer::Served(served) => break served,
+            Answer::Served(served) | Answer::Fatal(served) => break served,
             Answer::Write(pending) => {
                 writes += 1;
                 let refused = Outcome::Refused("empty_content");

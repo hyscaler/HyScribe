@@ -17,6 +17,8 @@
  *   option `ext_hooks` is `trap` or `refuse`; deactivation deletes it
  * - while `ext_hooks` holds any other text, `body_class` gains two classes
  *   and `admin_footer_text` a span, each counting the request's calls
+ * - the REST routes of the namespace `ext/v1` (SDK 0.5), each callback
+ *   answering what the extension's answers
  */
 
 register_activation_hook(
@@ -162,5 +164,162 @@ add_filter(
 	function ( $text ) use ( $hyscribe_test_calls ) {
 		$calls = $hyscribe_test_calls();
 		return $calls ? $text . "<span id=\"ext-footer\">ext-n$calls</span>" : $text;
+	}
+);
+
+// The REST routes the extension registers (SDK 0.5), in its order. A
+// request is answered as the extension sees it: its method, route,
+// parameters, content type and body.
+$hyscribe_test_echo = function ( WP_REST_Request $request ) {
+	return array(
+		'got' => array(
+			'method'       => $request->get_method(),
+			'route'        => $request->get_route(),
+			'params'       => $request->get_params(),
+			'content_type' => $request->get_header( 'content_type' ),
+			'body'         => $request->get_body(),
+		),
+	);
+};
+
+add_action(
+	'rest_api_init',
+	function () use ( $hyscribe_test_echo ) {
+		register_rest_route(
+			'ext/v1',
+			'/items',
+			array(
+				'methods'             => array( 'GET', 'POST' ),
+				'callback'            => $hyscribe_test_echo,
+				'permission_callback' => '__return_true',
+				'args'                => array(
+					'count' => array(
+						'type'    => 'integer',
+						'minimum' => 1,
+						'maximum' => 10,
+						'default' => 3,
+					),
+					'kind'  => array(
+						'type' => 'string',
+						'enum' => array( 'a', 'b' ),
+					),
+					'flag'  => array( 'type' => 'boolean' ),
+				),
+			)
+		);
+		$id = array( 'id' => array( 'type' => 'integer' ) );
+		register_rest_route(
+			'ext/v1',
+			'/items/(?P<id>\\d+)',
+			array(
+				array(
+					'methods'             => 'GET',
+					'callback'            => $hyscribe_test_echo,
+					'permission_callback' => '__return_true',
+					'args'                => $id,
+				),
+				array(
+					'methods'             => 'DELETE',
+					'callback'            => $hyscribe_test_echo,
+					'permission_callback' => function () {
+						return current_user_can( 'edit_posts' );
+					},
+					'args'                => $id,
+				),
+			)
+		);
+		register_rest_route(
+			'ext/v1',
+			'/need',
+			array(
+				'methods'             => 'POST',
+				'callback'            => $hyscribe_test_echo,
+				'permission_callback' => '__return_true',
+				'args'                => array(
+					'name'  => array(
+						'type'     => 'string',
+						'required' => true,
+					),
+					'title' => array(
+						'type'              => 'string',
+						'sanitize_callback' => function ( $value ) {
+							return strtoupper( (string) $value );
+						},
+					),
+					'code'  => array(
+						'validate_callback' => function ( $value ) {
+							if ( 'ok' === $value ) {
+								return true;
+							}
+							if ( 'no' === $value ) {
+								return false;
+							}
+							return new WP_Error( 'ext_code', 'The code is not ok.', array( 'status' => 400 ) );
+						},
+					),
+				),
+			)
+		);
+		register_rest_route(
+			'ext/v1',
+			'/closed',
+			array(
+				'methods'             => 'GET',
+				'callback'            => $hyscribe_test_echo,
+				'permission_callback' => '__return_false',
+			)
+		);
+		register_rest_route(
+			'ext/v1',
+			'/denied',
+			array(
+				'methods'             => 'GET',
+				'callback'            => $hyscribe_test_echo,
+				'permission_callback' => function () {
+					return new WP_Error( 'ext_denied', 'Not for you.', array( 'status' => 403 ) );
+				},
+			)
+		);
+		register_rest_route(
+			'ext/v1',
+			'/fail',
+			array(
+				'methods'             => 'GET',
+				'callback'            => function () {
+					return new WP_Error( 'ext_failed', 'It failed.', array( 'status' => 409 ) );
+				},
+				'permission_callback' => '__return_true',
+			)
+		);
+		// Saves `ext` through the options API and answers it as saved, with a
+		// status and headers of its own.
+		register_rest_route(
+			'ext/v1',
+			'/made',
+			array(
+				'methods'             => 'POST',
+				'callback'            => function ( WP_REST_Request $request ) {
+					update_option( 'ext', $request['value'] );
+					$response = new WP_REST_Response( array( 'saved' => get_option( 'ext' ) ), 201 );
+					$response->header( 'Location', 'http://example.test/made' );
+					$response->header( 'X-WP-Total', '2' );
+					return $response;
+				},
+				'permission_callback' => '__return_true',
+				'args'                => array( 'value' => array( 'type' => 'string' ) ),
+			)
+		);
+		// The extension traps here: a fatal error.
+		register_rest_route(
+			'ext/v1',
+			'/trap',
+			array(
+				'methods'             => array( 'GET', 'POST' ),
+				'callback'            => function () {
+					hyscribe_no_such_function();
+				},
+				'permission_callback' => '__return_true',
+			)
+		);
 	}
 );

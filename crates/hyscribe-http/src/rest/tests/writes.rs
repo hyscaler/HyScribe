@@ -804,6 +804,7 @@ async fn as_user<T: Send + 'static>(
             site: &site,
             user,
             caps: OnceCell::new(),
+            plugins: None,
         };
         let (path, query) = target.split_once('?').unwrap_or((&target, ""));
         let get = parse_str(query.as_bytes()).as_array().unwrap().to_vec();
@@ -846,7 +847,7 @@ pub(super) async fn planned(
         rest, request,
     ) {
         hyscribe_rest::Answer::Write(pending) => *pending,
-        hyscribe_rest::Answer::Served(served) => {
+        hyscribe_rest::Answer::Served(served) | hyscribe_rest::Answer::Fatal(served) => {
             panic!("{}", String::from_utf8_lossy(&served.body))
         }
     };
@@ -1471,7 +1472,7 @@ async fn user_writes_are_php_s() {
 fn plan_of(rest: &Rest, request: &hyscribe_rest::Request) -> hyscribe_rest::Write {
     match hyscribe_rest::answer(rest, request) {
         hyscribe_rest::Answer::Write(pending) => pending.plan.write,
-        hyscribe_rest::Answer::Served(served) => {
+        hyscribe_rest::Answer::Served(served) | hyscribe_rest::Answer::Fatal(served) => {
             panic!("{}", String::from_utf8_lossy(&served.body))
         }
     }
@@ -1663,7 +1664,9 @@ async fn refused_writes_are_answered_as_php_answers_them() {
         let served = |rest: &Rest, request: &hyscribe_rest::Request| match hyscribe_rest::answer(
             rest, request,
         ) {
-            hyscribe_rest::Answer::Served(served) => String::from_utf8(served.body).unwrap(),
+            hyscribe_rest::Answer::Served(served) | hyscribe_rest::Answer::Fatal(served) => {
+                String::from_utf8(served.body).unwrap()
+            }
             hyscribe_rest::Answer::Write(_) => unreachable!(),
         };
         let body = as_admin(&site, asked, (b"", None), served).await;
@@ -1729,7 +1732,7 @@ async fn refused_writes_are_answered_as_php_answers_them() {
         rest, request,
     ) {
         hyscribe_rest::Answer::Write(pending) => pending.plan.write,
-        hyscribe_rest::Answer::Served(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let write = as_admin(&site, comment, client, plan).await;
     let hyscribe_rest::Write::Comment(save) = write else {

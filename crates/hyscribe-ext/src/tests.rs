@@ -481,7 +481,7 @@ pub(crate) fn load(slugs: &[&str], limits: Limits) -> Result<Loaded, Fault> {
         let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
         list.push(Arc::new(host.load(Package {
             kind: manifest::Kind::Plugin,
-            sdk: "0.4",
+            sdk: "0.5",
             slug,
             wasm: guest::component(),
             grants: grants(),
@@ -581,17 +581,34 @@ fn registers_in_init_only() -> Result<(), Fault> {
             args: single,
         }]
     );
+    let routes = extension.routes();
+    let paths: Vec<String> = routes.iter().map(Route::full).collect();
     assert_eq!(
-        extension.routes(),
-        [Route {
-            namespace: "ext/v1".into(),
-            path: "/items".into(),
-            methods: vec!["GET".into(), "POST".into()],
-            callback: 20,
-            permission: 21,
-            args: Value::Array(Vec::new()),
-        }]
+        paths,
+        [
+            "/ext/v1/items",
+            "/ext/v1/items/(?P<id>\\d+)",
+            "/ext/v1/items/(?P<id>\\d+)",
+            "/ext/v1/need",
+            "/ext/v1/closed",
+            "/ext/v1/denied",
+            "/ext/v1/fail",
+            "/ext/v1/made",
+            "/ext/v1/trap",
+        ]
     );
+    assert_eq!(
+        (
+            routes[0].methods.clone(),
+            routes[0].callback,
+            routes[0].permission
+        ),
+        (vec!["GET".into(), "POST".into()], 20, 21)
+    );
+    // Its own callbacks, and its arguments': none other.
+    let need = &routes[3];
+    let owned: Vec<u32> = (0..60).filter(|n| need.owns(*n)).collect();
+    assert_eq!(owned, [20, 21, 49, 50]);
     assert_eq!(extension.shortcodes(), [("ext".to_string(), 19)]);
     assert_eq!(
         extension.blocks(),
@@ -860,24 +877,52 @@ fn serves_shortcodes_blocks_and_routes() -> Result<(), Fault> {
         request.block(1, 0, [Value::Null, Value::Null, Value::Null]),
         None
     );
-    let asking = |what: &str| Value::Array(vec![(Key::String("ask".into()), text(what))]);
-    let got = Value::Array(vec![(Key::String("got".into()), asking("allow"))]);
-    assert_eq!(request.rest(0, 0, asking("allow")), Rest::Answered(got));
-    let forbidden = Value::Array(vec![(Key::String("code".into()), text("rest_forbidden"))]);
+    // Its REST routes, each callback by number within its own route.
+    let routes = request.routes();
+    assert_eq!(routes.len(), 9);
+    assert_eq!(routes[3].0, (0, 3));
+    let asking = Value::Array(vec![(Key::String("ask".into()), text("x"))]);
+    let got = Value::Array(vec![(Key::String("got".into()), asking.clone())]);
+    let ask = std::slice::from_ref(&asking);
+    assert_eq!(request.route((0, 0), 20, ask), Some(got));
+    assert_eq!(request.route((0, 0), 21, ask), Some(Value::Bool(true)));
+    assert_eq!(request.route((0, 2), 45, ask), Some(Value::Bool(true)));
+    assert_eq!(request.route((0, 4), 46, ask), Some(Value::Bool(false)));
+    let named = [text("hi"), asking.clone(), text("title")];
+    assert_eq!(request.route((0, 3), 49, &named), Some(text("HI")));
+    let code = |given: &str| [text(given), asking.clone(), text("code")];
     assert_eq!(
-        request.rest(0, 0, asking("deny")),
-        Rest::Forbidden(forbidden)
+        request.route((0, 3), 50, &code("no")),
+        Some(Value::Bool(false))
     );
-    assert_eq!(request.rest(0, 0, asking("error")), Rest::Failed);
-    assert_eq!(request.rest(0, 1, Value::Null), Rest::Failed);
-    assert_eq!(request.rest(1, 0, Value::Null), Rest::Failed);
-    let refused = Report {
-        extension: "ext".into(),
-        hook: "ext/v1/items".into(),
-        callback: Some(21),
-        fault: Fault::Guest("permission failed".into()),
-    };
-    assert_eq!(request.reports(), [refused]);
+    let error = request.route((0, 3), 50, &code("x"));
+    assert_eq!(
+        error.as_ref().and_then(|e| e.get_str("code")),
+        Some(&text("ext_code"))
+    );
+    let status =
+        |error: Option<Value>| error.and_then(|e| e.get_path(&["data", "status"]).cloned());
+    assert_eq!(
+        status(request.route((0, 5), 47, ask)),
+        Some(Value::Int(403))
+    );
+    assert_eq!(
+        status(request.route((0, 6), 48, ask)),
+        Some(Value::Int(409))
+    );
+    // Another route's callback, a route or an extension it does not have.
+    assert_eq!(request.route((0, 0), 49, &named), None);
+    assert_eq!(request.route((0, 9), 20, ask), None);
+    assert_eq!(request.route((1, 0), 20, ask), None);
+    assert_eq!(request.reports(), []);
+    // A trap stops the extension for the request.
+    assert_eq!(request.route((0, 8), 1, ask), None);
+    assert_eq!(request.route((0, 0), 21, ask), None);
+    let reports = request.reports();
+    assert!(
+        matches!(reports.as_slice(), [Report { hook, callback: Some(1), fault: Fault::Trap(_), .. }] if hook == "/ext/v1/trap"),
+        "{reports:?}"
+    );
     Ok(())
 }
 
@@ -970,10 +1015,11 @@ fn three_faults_in_ten_minutes_disable() -> Result<(), Fault> {
     assert_eq!(request.filter("the_content", text("x"), &[]), text("x"));
     assert_eq!(request.reports(), Vec::new());
     assert_eq!(request.activate(0), Err(Fault::Disabled));
+    assert!(request.routes().is_empty());
     let folder = loaded.folders.first().ok_or(Fault::Disabled)?.path();
     let again = Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.4",
+        sdk: "0.5",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -984,7 +1030,7 @@ fn three_faults_in_ten_minutes_disable() -> Result<(), Fault> {
     faults::clear(folder).map_err(|e| Fault::Refused(e.to_string()))?;
     let cleared = Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.4",
+        sdk: "0.5",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -1119,7 +1165,7 @@ fn a_fault_record_that_cannot_be_written_is_reported() -> Result<(), Fault> {
     let gone = folder.path().join("gone");
     let package = Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.4",
+        sdk: "0.5",
         slug: "ext",
         wasm: guest::component(),
         grants: grants(),
@@ -1158,7 +1204,7 @@ fn grants_nothing_by_default() -> Result<(), Fault> {
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let package = |grants| Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.4",
+        sdk: "0.5",
         slug: "ext",
         wasm: guest::component(),
         grants,
@@ -1192,7 +1238,7 @@ fn refuses_what_is_not_an_extension() -> Result<(), Fault> {
     let folder = tempfile::tempdir().map_err(|e| Fault::Refused(e.to_string()))?;
     let package = |wasm, limits| Package {
         kind: manifest::Kind::Plugin,
-        sdk: "0.4",
+        sdk: "0.5",
         slug: "ext",
         wasm,
         grants: grants(),
@@ -1206,7 +1252,7 @@ fn refuses_what_is_not_an_extension() -> Result<(), Fault> {
     let empty = [0, b'a', b's', b'm', 0x0d, 0, 1, 0];
     assert_eq!(
         host.load(package(&empty, Limits::default())).err(),
-        Some(Fault::Refused("no hyscribe:sdk/guest@0.4.0".into()))
+        Some(Fault::Refused("no hyscribe:sdk/guest@0.5.0".into()))
     );
     // A deadline of no ticks interrupts `init` at its first check.
     let hurried = Limits {
@@ -1249,11 +1295,11 @@ fn links_the_sdk_its_manifest_names() -> Result<(), Fault> {
         folder: folder.path(),
     };
     let Err(Fault::Refused(why)) = host.load(package) else {
-        panic!("a 0.4 component loaded as 0.1");
+        panic!("a 0.5 component loaded as 0.1");
     };
     assert!(why.starts_with("hyscribe:sdk/"), "{why}");
     assert!(
-        why.ends_with("@0.4.0 is not of SDK 0.1, which its manifest names"),
+        why.ends_with("@0.5.0 is not of SDK 0.1, which its manifest names"),
         "{why}"
     );
     assert!(extension::of_sdk("hyscribe:sdk/hooks@0.2.1", "0.2"));

@@ -44,26 +44,31 @@ pub(crate) fn endpoints(regex: &str) -> Option<Vec<Endpoint>> {
 /// `get_namespace_index()`: the routes of the namespace its argument names,
 /// described as `get_data_for_routes()` describes them, with their schemas
 /// in the `help` context only.
-fn namespace_index(context: &Context, params: &Params) -> Result<Response, RestError> {
+pub(crate) fn namespace_index(context: &Context, params: &Params) -> Result<Response, RestError> {
     // A namespace that is not a string is an offset PHP fails on.
     let Some(Value::String(namespace)) = params.get("namespace") else {
         return Err(RestError::not_ported());
     };
-    let Some(regexes) = routes::namespace_routes(namespace) else {
+    let help = params.get("context") == Some(&text("help"));
+    let core = routes::namespace_routes(namespace).map(|regexes| {
+        let routes = regexes.into_iter().map(|regex| {
+            let mut description = describe(context, regex);
+            if let (false, Value::Array(entries)) = (help, &mut description) {
+                entries.retain(|(key, _)| *key != Key::String(b"schema".to_vec()));
+            }
+            (Key::String(regex.as_bytes().to_vec()), description)
+        });
+        routes.collect()
+    });
+    // An extension's namespace (ADR 0022), whose routes have no schema.
+    let routes = core.or_else(|| crate::plugins::namespace_routes(context, namespace));
+    let Some(routes) = routes else {
         let message = "The specified namespace could not be found.";
         return Err(RestError::status("rest_invalid_namespace", message, 404));
     };
-    let help = params.get("context") == Some(&text("help"));
-    let routes = regexes.into_iter().map(|regex| {
-        let mut description = describe(context, regex);
-        if let (false, Value::Array(entries)) = (help, &mut description) {
-            entries.retain(|(key, _)| *key != Key::String(b"schema".to_vec()));
-        }
-        (Key::String(regex.as_bytes().to_vec()), description)
-    });
     let data = object([
         ("namespace", Value::String(namespace.clone())),
-        ("routes", Value::Array(routes.collect())),
+        ("routes", Value::Array(routes)),
     ]);
     let mut response = Response::new(data, 200);
     response.add_link("up", context.rest_url("/"));

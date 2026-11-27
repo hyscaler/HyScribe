@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The SDK's host functions (`hyscribe:sdk@0.4.0`, ADR 0022 and 0023). Each checks
+//! The SDK's host functions (`hyscribe:sdk@0.5.0`, ADR 0022 and 0023). Each checks
 //! its grant in the store's state before it touches anything, and answers
 //! `sdk-error.denied` otherwise; registrations are taken in `init` only,
 //! and everything else in a request only.
@@ -708,24 +708,80 @@ fn get_post(state: &State, id: u64) -> Result<Option<Post>, SdkError> {
 
 fn register_route(state: &mut State, route: RouteIn) -> Result<(), SdkError> {
     state.grants.rest(&route.namespace).map_err(denied)?;
+    let invalid = |why: &str| Err(SdkError::Invalid(why.into()));
+    let namespace = &route.namespace;
+    if namespace.is_empty() || namespace.starts_with('/') || namespace.ends_with('/') {
+        return invalid("a namespace neither empty nor starting or ending with /");
+    }
+    if CORE_NAMESPACES.contains(&namespace.as_str()) {
+        return invalid("a namespace of core's");
+    }
     if !route.path.starts_with('/') {
-        return Err(SdkError::Invalid("a route starts with /".into()));
+        return invalid("a route starts with /");
     }
     let known = |method: &String| METHODS.contains(&method.as_str());
     if route.methods.is_empty() || !route.methods.iter().all(known) {
-        return Err(SdkError::Invalid(
-            "methods are GET, POST, PUT, PATCH or DELETE".into(),
-        ));
+        return invalid("methods are GET, POST, PUT, PATCH or DELETE");
     }
     let args = json(&route.args)?;
-    state.registering()?.routes.push(Route {
+    route_args(&args)?;
+    let route = Route {
         namespace: route.namespace,
         path: route.path,
         methods: route.methods,
         callback: route.callback,
         permission: route.permission,
         args,
-    });
+    };
+    // Matched as `@^route$@i` against request paths, with its limits.
+    if hyscribe_phpser::Pattern::caseless(&format!("^{}$", route.full())).is_none() {
+        return invalid("a route is a regex of the syntax REST routes use");
+    }
+    let registered = state.registering()?;
+    if registered.routes.len() >= MAX_ROUTES {
+        return invalid("an extension registers at most 256 routes");
+    }
+    registered.routes.push(route);
+    Ok(())
+}
+
+/// The REST routes an extension may register, each tried against a
+/// request's path within the regex engine's step limit.
+const MAX_ROUTES: usize = 256;
+
+/// The namespaces core registers, which an extension's routes never join.
+const CORE_NAMESPACES: [&str; 6] = [
+    "oembed/1.0",
+    "wp/v2",
+    "wp-site-health/v1",
+    "wp-block-editor/v1",
+    "wp-abilities/v1",
+    "batch/v1",
+];
+
+/// A route's `args`: an object of each argument's schema, an object, by
+/// its name, which is not a number; a `validate_callback` or
+/// `sanitize_callback` is the extension's callback by number, or false or
+/// null for none.
+fn route_args(args: &Value) -> Result<(), SdkError> {
+    let invalid = |why: &str| Err(SdkError::Invalid(why.into()));
+    let Value::Array(entries) = args else {
+        return invalid("args is an object of the arguments' schemas");
+    };
+    for (key, schema) in entries {
+        if !matches!(key, Key::String(_)) || !matches!(schema, Value::Array(_)) {
+            return invalid("each argument is named, and its schema an object");
+        }
+        for kind in ["validate_callback", "sanitize_callback"] {
+            match schema.get_str(kind) {
+                None | Some(Value::Null | Value::Bool(false)) => {}
+                Some(Value::Int(n)) if u32::try_from(*n).is_ok() => {}
+                Some(_) => {
+                    return invalid("an argument's callback is one of the extension's, by number");
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1196,7 +1252,7 @@ macro_rules! timed {
 
 /// The SDK versions linked: each minor version only adds interfaces, so
 /// an interface of 0.1 is linked under both names (ADR 0022).
-const VERSIONS: [&str; 4] = ["0.1.0", "0.2.0", "0.3.0", "0.4.0"];
+const VERSIONS: [&str; 5] = ["0.1.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0"];
 
 /// Defines one interface's functions under each version from `since` on,
 /// each a closure of the store and its arguments, without an error path

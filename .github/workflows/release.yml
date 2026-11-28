@@ -28,13 +28,8 @@ on:
   workflow_call:
   # A manual run builds, tests and packages everything and prepares the
   # release assets, but publishes nothing (no release, upload or
-  # attestation), whatever dry_run says: only a pushed v* tag publishes.
+  # attestation): only a pushed v* tag publishes.
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Build and test only, publish nothing
-        type: boolean
-        default: true
 
 permissions:
   contents: read

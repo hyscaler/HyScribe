@@ -6,6 +6,7 @@ Dated log of project events and decisions, newest first. Add an entry whenever a
 ## 2026-11-28: v0.2.0-rc.2 in place of rc.1
 
 - The `v0.2.0-rc.1` tag's CI stopped at the format check (one line of the registry's version reader), before any build or release; nothing was published from it. The tag is kept and the candidate is tagged again as `v0.2.0-rc.2` from the fixed `main`, with no other change.
+- Published as a pre-release the same day with archives for Linux, macOS and Windows; its container image, the first, went to Docker Hub and GHCR for amd64 and arm64 under `0.2.0-rc.2` only.
 
 ## 2026-11-27: v0.2.0-rc.1, the first release candidate
 
